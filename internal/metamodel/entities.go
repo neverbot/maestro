@@ -16,13 +16,6 @@ import (
 )
 
 // EntityInput is an upsert request, addressed by type key plus entity key.
-//
-// ExpectedVersion carries exactly the meaning EntityTypeInput's does,
-// including the rule that a claim against a row that is not there is a
-// RemovedError rather than a creation. See EntityTypeInput.ExpectedVersion
-// for the argument; this is the table it costs the most, because an
-// entity's id is what every edge touching it and every view position
-// placing it names.
 type EntityInput struct {
 	TypeKey         string
 	Key             string
@@ -34,19 +27,6 @@ type EntityInput struct {
 
 // entityEvent is the payload of the entity.* events: the identity of
 // what changed and nothing else.
-//
-// A payload never carries a value a client could treat as current —
-// Service.publish's doc comment argues why — so this holds ids and keys
-// and not the name that just changed. It is also a struct and not a
-// hand-built JSON string: interpolating caller-supplied keys into
-// `{"type":"…"}` would put unescaped text on the SSE wire, which is a
-// frame injection the Core already closed once.
-//
-// Both keys are the *stored* spellings, not the submitted ones. Keys are
-// matched without regard to case, so a caller may address type "Quest" as
-// "quest"; an event repeating that spelling would name an identity no
-// other reader of the game sees, and a subscriber's only use for the
-// payload is to go and re-read the row it names.
 type entityEvent struct {
 	ID      uuid.UUID `json:"id"`
 	TypeKey string    `json:"type_key"`
@@ -68,26 +48,6 @@ func (u upsertedEntity) event() entityEvent {
 }
 
 // BulkWrite is one row a batch landed, in the shape a caller reads.
-//
-// It carries exactly what an agent cannot work out from the batch it
-// sent, plus the address that says which of its own items this is:
-//
-//   - ID, because every removal in this package is addressed by id
-//     (RemoveEntity), and a caller that has only ever spoken in keys has
-//     no other way to get one but a second read.
-//   - Version, because that is the value ExpectedVersion takes on the
-//     next edit of this row. Nothing else reports it, and re-reading a
-//     row to learn the version of a write you just made is a round trip
-//     the write already knew the answer to.
-//   - TypeKey and Key, the row's own address, so a partial batch's
-//     report can be matched item by item against what was sent. Both are
-//     the *stored* spellings, not the caller's, for the reason
-//     upsertedEntity exists: keys are matched without regard to case, so
-//     the two can differ and the stored one is the one that is true.
-//
-// It deliberately does not carry the row's fields. A caller that sent
-// them has them, and a four-hundred-row seed would otherwise get its own
-// payload back.
 type BulkWrite struct {
 	TypeKey string    `json:"type_key"`
 	Key     string    `json:"key"`
@@ -96,25 +56,6 @@ type BulkWrite struct {
 }
 
 // BulkResult reports what a batch did.
-//
-// Succeeded is `json:"-"` because a dbq.Entity is a database row and not
-// a wire shape — it carries the audit columns and the raw jsonb, and
-// serialising it here would publish a shape no design decision has been
-// made about. It stays, unchanged, for the callers inside this repository
-// that want the whole row.
-//
-// **Written is what a successful batch tells an agent**, and it is Task
-// 7's answer to the question this comment used to pose. Until it existed
-// a marshalled BulkResult reported failures and nothing else, so a
-// perfect four-hundred-row batch answered with nothing at all — and the
-// obvious alternative, a count, is the one answer that cannot be acted
-// on: an agent already knows how many items it sent, and subtracting the
-// failures gives it the same number. See BulkWrite for what each entry
-// carries and why.
-//
-// Written and Succeeded are built from the same slice in the same loop
-// and are always the same length in the same order, so they cannot
-// disagree about what landed.
 type BulkResult struct {
 	Succeeded []dbq.Entity  `json:"-"`
 	Written   []BulkWrite   `json:"written"`
@@ -137,32 +78,6 @@ func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in Enti
 }
 
 // UpsertEntities writes a batch in the requested mode.
-//
-// The batch machinery itself — the two modes and what each promises, the
-// per-item loop, the cancellation contract, the up-front duplicate check
-// and the mapping to a wire code — is bulk.go's, shared with every other
-// bulk write in this package. What is entity-shaped and stays here is
-// entityBulkSpec: what identifies an entity, what to say when a batch
-// names one twice, how one is written, and what is announced once it
-// lands.
-//
-// **A key repeated inside one batch** is refused before it can be
-// misdiagnosed, and the two modes answer it differently for the reason
-// each mode exists: in partial the later occurrence is a per-item
-// invalid_input failure and the rest of the batch is undisturbed, and in
-// atomic the whole batch is refused before anything is written. Both
-// arguments are at their call sites in bulk.go.
-//
-// In partial mode the later occurrence is refused **whether or not the
-// first one lands**: `[{key x, min_level: "not a number"}, {key x,
-// valid}]` reports index 0 as schema_violation and index 1 as
-// invalid_input, so x does not exist afterwards and the caller needs a
-// second call. Deliberate — the batch as submitted names one row twice
-// and nothing in it says which of the two was meant, so falling back to
-// "whichever survived validation" would make the result depend on the
-// other item's mistakes. Recorded in the core design's "Bulk writes"
-// too, because it costs an agent a round trip it can avoid by folding
-// repeated keys before it sends.
 func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items []EntityInput, mode BulkMode) (BulkResult, error) {
 	written, failed, err := BulkUpsert(ctx, s.withTx, items, mode, s.entityBulkSpec(projectID))
 	// The rows travel through the batch paired with their type key —
@@ -185,15 +100,6 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 
 // entityBulkSpec is the entity half of a bulk write: everything bulk.go
 // deliberately does not know.
-//
-// Identity is (type key, key), both folded, because that is what the
-// unique index folds: one key under two types is two rows. FoldedIdentity
-// does the folding and the length-prefixed join, and records why both are
-// what they are.
-//
-// The message names both indices and the case-folding rule, because the
-// caller cannot see either from what it sent: a batch built from a file
-// repeats a key by accident, and the two spellings need not match.
 func (s *Service) entityBulkSpec(projectID uuid.UUID) BulkSpec[EntityInput, upsertedEntity] {
 	return BulkSpec[EntityInput, upsertedEntity]{
 		Identity: func(in EntityInput) string {
@@ -357,12 +263,6 @@ func conflictOnEntityKey(ctx context.Context, q *dbq.Queries, projectID, typeID 
 }
 
 // EntityByKey loads one entity by type key and entity key.
-//
-// Both misses are named, and for the reason endpointEntity gives about
-// an edge's parents: this call takes two keys, either of them can be the
-// wrong one, and a caller told only "not_found" cannot tell whether the
-// type does not exist or the entity within it does not. The type's own
-// message comes from EntityTypeByKey.
 func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey, key string) (dbq.Entity, error) {
 	typ, err := s.EntityTypeByKey(ctx, projectID, typeKey)
 	if err != nil {
@@ -386,22 +286,6 @@ func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey,
 // its own caller keys: a page of relations names its endpoints by id
 // (that is what the row holds), and Task 7 shipped `relations.list`
 // answering in ids for want of exactly this statement.
-//
-// It is deliberately a map and not a slice: every caller so far joins it
-// back onto rows it already has, and handing back a slice would make
-// each of them build the same index. An id with no row is simply absent
-// — a leaked id from another game (the project filter is in SQL, where
-// every other statement here puts it), a removal that raced the listing
-// that produced it, or a caller's typo all produce the same gap, and
-// none of the three is a failure of this read. A caller that needs to
-// distinguish them compares the map's size against what it asked for.
-//
-// Duplicate ids are fine and cost nothing: `= ANY` does not care, and a
-// dense node named on both ends of many edges is the ordinary case. The
-// caller is expected to ask for at most a page's worth; nothing here
-// bounds the list, because nothing here is reachable from a
-// caller-supplied array — every call site builds the ids from rows it
-// just read under its own limit.
 func (s *Service) EntitiesByIDs(ctx context.Context, projectID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]dbq.Entity, error) {
 	byID := make(map[uuid.UUID]dbq.Entity, len(ids))
 	if len(ids) == 0 {
@@ -421,17 +305,6 @@ func (s *Service) EntitiesByIDs(ctx context.Context, projectID uuid.UUID, ids []
 
 // RemoveEntity deletes one entity by the address it was written under:
 // its type's key and its own key. Its edges go with it, by cascade.
-//
-// **It took a uuid until Metamodel 14.** Every other tool on this
-// surface addresses a row the way a designer names it, so an agent
-// holding the (type key, key) it had just written paid a resolving read
-// before every removal — measured by Task 9's seeding run and recorded
-// as a limitation there. The resolution has not gone away; it has moved
-// inside this transaction, where it costs no round trip and cannot race
-// the delete it precedes.
-//
-// The id is still returned by every reader and by the removal event, so
-// nothing that had one has lost it. What it is no longer is the address.
 func (s *Service) RemoveEntity(ctx context.Context, projectID uuid.UUID, typeKey, key string) error {
 	var problems []FieldError
 	problems = append(problems, rowKeyProblems("type_key", typeKey)...)
@@ -490,46 +363,12 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID uuid.UUID, typeKey
 }
 
 // searchTextLimit bounds, in bytes, what one row hands to to_tsvector.
-//
-// Postgres refuses to build a tsvector larger than 1,048,575 bytes
-// (SQLSTATE 54000), and nothing bounds a text or longtext value: a
-// designer pasting a lore document of a megabyte or two had the row
-// refused outright, which is the wrong trade in both directions. The
-// content is the product — a game's own writing, stored in `fields`
-// untouched — and the index is a convenience, so the index is what
-// gives way.
-//
-// 128 KiB, not something nearer the cap, because the vector is bigger
-// than the text it is built from and by how much depends on the words:
-// 1.5 MB of sixteen-byte distinct words measured 1.79 MB, and short
-// distinct words are worse still, since every entry pays its own
-// per-lexeme and position overhead. Eight times' headroom holds under
-// any of that while still indexing on the order of twenty thousand
-// words, which is more of one row than any search over this domain
-// reaches for.
-//
-// The bound is over the row's whole flattened text, not per field, since
-// the vector is built from the concatenation. A row longer than this is
-// searchable by the words in its first 128 KiB and not by the ones after
-// them; nothing about the stored values changes, and a re-read returns
-// exactly what was written. searchLimitExceeded is the backstop for a
-// value that reaches the cap by some other path.
 const searchTextLimit = 128 << 10
 
 // searchTextOf flattens the text values of a row so search can index
 // them. The keys are sorted so the same values always produce the same
 // tsvector input: map iteration order is randomised, and a search column
 // that differs between two identical writes is a diff nobody can explain.
-//
-// What is collected is every word a text search over this domain can
-// use: the strings — text, longtext and the chosen option of an enum,
-// which Validate leaves as a plain string — and the elements of a
-// list<text>, which are the tags and aliases a designer searches for
-// more often than anything else. What is left out is the two types that
-// carry no words at all, number and bool: those are found by filtering on
-// the jsonb, and putting them here would only fill the tsvector with
-// digits that match nothing anyone types. (There is no date type in this
-// package; if one is ever added it belongs with the filters, not here.)
 func searchTextOf(values map[string]any) string {
 	keys := make([]string, 0, len(values))
 	for k := range values {

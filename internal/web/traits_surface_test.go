@@ -17,24 +17,6 @@ import (
 
 // This file is the "both surfaces, one commit" half of the analysis
 // sub-project's only change to an existing tool.
-//
-// **A trait is asserted arriving through the real tool and the real
-// route**, not only through the domain function. The interface
-// sub-project closed on ten instances of one shape — correct in the
-// module, asserted by a harness that called the module directly, dead at
-// the call site — and `relation_types.upsert` has a REST mirror, so a
-// field wired into the MCP input struct and forgotten in the served
-// schema, or read back by the domain and never put in the answer, is
-// exactly the hole that shape describes.
-
-// TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool is the MCP
-// half: a real token, a real MCP client, the SDK's own input-schema
-// validation on the way in and its output-schema validation on the way
-// back.
-//
-// It asserts the documented spelling `analysis_traits` off the wire
-// rather than a Go field name, because a struct tag is the one part of
-// this that no domain test can see.
 func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -157,14 +139,6 @@ func TestATraitDeclaredOverTheRESTMirrorComesBackOverIt(t *testing.T) {
 
 // TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed
 // is the bidirectional guard over the generated tool description.
-//
-// Generating agent-facing text from the structure it describes and
-// parsing it back is the first thing the views sub-project named as
-// worth copying, and it is what caught `views.run` shipping without its
-// operator table at all. Forwards: every trait in the vocabulary is
-// offered. Backwards: every quoted word the description offers as a
-// trait is in the vocabulary, so a hand-written eighth word cannot be
-// promised to an agent that the column would then refuse.
 func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t *testing.T) {
 	t.Parallel()
 	description := servedToolDescription(t, "relation_types.upsert")
@@ -187,13 +161,6 @@ func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t 
 
 // TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination is
 // the second half, over the coherence rules rather than the vocabulary.
-//
-// A refusal an agent is never told about is a refusal it discovers by
-// failing a call, and this description is the only place it is
-// documented. Both directions again: every row of
-// metamodel.AnalysisTraitConflicts appears, and the text is the
-// generated rendering of that table rather than a prose paraphrase that
-// can drift from it.
 func TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination(t *testing.T) {
 	t.Parallel()
 	description := servedToolDescription(t, "relation_types.upsert")

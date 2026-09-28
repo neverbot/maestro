@@ -16,31 +16,6 @@ import (
 )
 
 // The arithmetic half of the interface's identity.
-//
-// The design spec (.superpowers/specs/2026-09-06-interface-design.md
-// §2) commits to one mechanical rule — the chrome is achromatic and
-// every hue on screen belongs to the game — and to a categorical palette
-// of eight hues that has to survive being read at 11px, on two grounds,
-// by a reader with the common form of colour blindness. Almost none of
-// that is a matter of judgement:
-//
-//   - whether a token exists in both themes is a set comparison;
-//   - whether a token that exists is ever read is a grep in two
-//     directions, which is the bidirectional data-table guard the views
-//     sub-project named as the thing that kept working;
-//   - whether text is legible on its ground is WCAG's own ratio;
-//   - whether eight hues stay apart under deuteranopia and protanopia is
-//     a colour-space simulation and a distance.
-//
-// So all of it is a test, and a palette that fails is a palette that
-// fails a build rather than a palette somebody squints at.
-//
-// **What this file cannot answer, said plainly.** Whether eight hues
-// that are provably far apart in CIELAB actually *separate* for a human
-// reading a five-pixel node label over a busy canvas, and whether the
-// serif/sans/mono split reads as editorial rather than accidental. Those
-// are the hand check named in the plan's Task 1 and they are not
-// automatable; this file is the floor, not the ceiling.
 
 const stylesheetPath = "static/styles.css"
 
@@ -177,12 +152,6 @@ func staticAssets(t *testing.T) map[string]string {
 // and keep an orphan alive forever, and a comment that spells a token
 // name in an example would fail the "declared" half for a name no
 // stylesheet was ever asked to have.
-//
-// Block comments (/* … */, both CSS and JS) and HTML comments are
-// removed wherever they occur. A // comment is removed to end of line
-// only when it is not preceded by a colon, which is the one common
-// spelling — a URL's scheme — that would otherwise eat the rest of a
-// line of real code.
 func stripComments(src string) string {
 	var out strings.Builder
 	for i := 0; i < len(src); {
@@ -229,10 +198,6 @@ func references(t *testing.T) map[string][]string {
 // that catches a token layer drifting ahead of the interface: a token
 // nothing reads is a lie, and this repository has said so twice in two
 // sub-projects.
-//
-// There is no exception list, deliberately. A token whose consumer lands
-// in a later task lands with that task; an exemption here would be the
-// hiding place every unread token in the future would use.
 func TestEveryDeclaredTokenIsUsed(t *testing.T) {
 	t.Parallel()
 	light, _ := themeTokens(t)
@@ -386,11 +351,6 @@ func deltaE76(a, b rgb) float64 {
 // then replace the missing cone's response with the plane the remaining
 // two span, then back. `protan` picks which cone is missing —
 // protanopia (long) or deuteranopia (medium), the common pair.
-//
-// This is a simulation of the dichromacies and not of the far commoner
-// anomalous trichromacies, which see less separation than a trichromat
-// and more than this. Passing here is therefore the harder half of the
-// claim, not a weaker one.
 func simulate(c rgb, protan bool) rgb {
 	r, g, b := c.linear()
 	l := 17.8824*r + 43.5161*g + 4.11935*b
@@ -458,23 +418,6 @@ func TestTextContrastMeetsWCAG(t *testing.T) {
 }
 
 // **The label is printed on the node, not on the ground.**
-//
-// The palette was searched and re-validated against three properties —
-// each hue at 3:1 against the ground, 28 degrees apart on the wheel, and
-// separable under both dichromacies — and none of them is the contrast a
-// reader of a diagram actually performs, which is the node's name
-// against the node's fill. Measured when this test was written: with the
-// label hard-wired to --ink, 8 of 8 hues failed in the dark theme, the
-// worst at 1.30:1, and 4 of 8 in the light one. Three labels on the
-// seeded palette view were coloured blanks.
-//
-// render/palette.js's labelOn answers --paper for every hue in both
-// themes, so this is the pair that has to hold. Four light hues were
-// darkened to make it hold by 4.5:1 rather than by 3:1: a node's name is
-// small text.
-//
-// Mutation: lighten any light hue back toward its old value, or point
-// labelOn at --ink, and this fails naming the hue and the ratio.
 func TestANodesNameIsLegibleOnItsOwnFill(t *testing.T) {
 	t.Parallel()
 	for _, th := range themes(t) {
@@ -508,14 +451,6 @@ func TestTheLabelOnAHueIsTheTokenTheGuardMeasures(t *testing.T) {
 // the signal*: the eight data hues a node wears, and --line-strong, which
 // draws the dashed outline that is the only thing distinguishing a node
 // whose colour_by slot found nothing.
-//
-// --line is deliberately not in this list. It is the decorative hairline
-// — a table rule, a panel edge — and WCAG exempts decoration for the
-// same reason the identity wants it: a rule at 3:1 against its own
-// surface is not a hairline, it is a box, and the design spec's
-// "hairline rules instead of boxes and shadows" is the sentence that
-// would be lost. Any stroke that carries meaning uses --line-strong and
-// is guarded here.
 func TestMeaningfulOutlinesMeetThreeToOne(t *testing.T) {
 	t.Parallel()
 	for _, th := range themes(t) {
@@ -537,14 +472,6 @@ const dataSlots = 8
 
 // minSeparation is the stated threshold: 20 units of CIE 1976 ΔE*ab,
 // pairwise, in normal vision and in both simulated dichromacies.
-//
-// Where the number comes from: ~2.3 is the just-noticeable difference
-// for two large patches side by side, and the marks here are small,
-// scattered across a canvas, never adjacent, and read from memory
-// against a legend. An order of magnitude above the JND is the margin
-// that buys; the palette that ships clears it by four in the light set
-// and by six in the dark. It is a floor, not a target — the palette was
-// chosen by maximising this quantity, not by satisfying it.
 const minSeparation = 20.0
 
 // TestTheDataHuesSeparateUnderDeuteranopiaAndProtanopia is the reason
@@ -625,21 +552,6 @@ var diffRuleRE = regexp.MustCompile(`(?s)(\.diff[a-z-]*)\s*\{([^}]*)\}`)
 
 // TestNoRuleSpellsAColourLiterally is the guard that would have caught
 // the diff and now catches whatever comes next.
-//
-// The token layer's whole claim is that every colour on screen is
-// declared twice, contrast-checked against both grounds and separated
-// under both dichromacies. A rule that writes `#14532d` instead of
-// naming a token opts out of all three silently: nothing fails, nothing
-// warns, and the value is simply never looked at again — which is
-// exactly what happened to the diff's two greens, chosen for a light
-// ground and left at 1.91:1 on the dark one for as long as the dark
-// theme has existed.
-//
-// So: outside the two token blocks, no rule in this stylesheet spells a
-// colour. The declarations themselves are where literals belong and are
-// skipped by name; every other rule paints with `var(--…)` or does not
-// paint. `transparent` and `currentColor` are keywords rather than
-// values and are not colours this test has anything to check.
 func TestNoRuleSpellsAColourLiterally(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
@@ -669,14 +581,6 @@ func TestNoRuleSpellsAColourLiterally(t *testing.T) {
 
 // TestTheDiffReadsNoChromaticToken is the second half, and it is the one
 // that holds the *decision* rather than the spelling.
-//
-// A diff is the strongest case this product has for a third chromatic
-// exception — added and removed are opposites a reader must separate at
-// a glance — and it was argued and refused (styles.css says why, at
-// length, beside the rules). The refusal is only worth anything if it is
-// held: this asserts the comparison paints with the achromatic tokens
-// and never with --danger, --focus or one of the eight data hues, so
-// re-admitting a hue there means re-arguing it and not editing a line.
 func TestTheDiffReadsNoChromaticToken(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
@@ -702,20 +606,6 @@ func TestTheDiffReadsNoChromaticToken(t *testing.T) {
 
 // TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies is the palette's
 // own arithmetic, turned on the chrome.
-//
-// Added and removed are told apart four times over — the `+`/`-` the
-// unified format writes into the line's text, a solid rule against a
-// dashed one, a filled ground against an unfilled one, and full ink
-// against muted — and only the last of those is a colour. This asserts
-// the colour half to the same floor and in the same three vision models
-// as the eight data hues, which is what makes "this spends no hue" a
-// measurement rather than a claim: an achromatic pair separates by the
-// same distance whichever cone is missing, and the numbers here move by
-// less than a tenth of a unit between the three models.
-//
-// What the two greens scored, for the record and for whoever proposes a
-// hue here next: 81.4 in normal vision, 23.0 under deuteranopia and 7.4
-// under protanopia, against this floor of 20.
 func TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies(t *testing.T) {
 	t.Parallel()
 	vision := []struct {
@@ -743,11 +633,6 @@ func TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies(t *testing.T) {
 // 8.59:1 on the light paper and 1.91:1 on the dark one — the same rule,
 // legible in one theme and not in the other, because only one theme was
 // ever looked at.
-//
-// The five pairs below are every text-on-ground the comparison puts on
-// screen plus the gutter rule, which is a stroke that carries meaning
-// and is therefore held to WCAG 1.4.11's 3:1 rather than exempted as
-// decoration: it is one of the four things telling added from removed.
 func TestTheDiffsGroundsAndItsGutterAreLegible(t *testing.T) {
 	t.Parallel()
 	text := [][2]string{
@@ -774,20 +659,6 @@ func TestTheDiffsGroundsAndItsGutterAreLegible(t *testing.T) {
 // cascade, which is the one thing every other check in this file is
 // blind to: a token can be right, declared in both themes, contrast-
 // checked and colour-blind-checked, and still never reach the pixel.
-//
-// The comparison draws a transparent 3px rule on **every** line, so that
-// the monospace columns of lines that show a gutter and lines that do
-// not stay aligned. That default is `.diff > div`, which outranks a bare
-// `.diff-added`. Written the obvious way, `.diff-added`'s
-// `border-left-color` therefore lost to it: both gutters computed to
-// `rgba(0, 0, 0, 0)`, added and removed differed only in their text, and
-// **nothing here failed** — the tokens above were all correct. It was
-// found by opening the page and reading the computed style, which is
-// this sub-project's own recurring lesson arriving one more time.
-//
-// So the two overriding rules must carry the container in their
-// selector. It is a weak check over a property with no runtime
-// signature, and that is exactly when this repository writes one.
 func TestTheDiffsGutterOutranksItsOwnDefault(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
@@ -862,21 +733,6 @@ func statedDarkColours(t *testing.T) map[string]string {
 
 // TestTheDesignDocumentAndTheStylesheetAgreeOnEveryColour is the guard
 // that was missing, and it was missing for the whole build.
-//
-// `docs/design.md` said the primary button's hover was `#1d1611`. The
-// product has never used that value: it ships `--ink-hover`, `#1b130d`
-// on paper and `#faf6ef` on the dark ground, because "pressed harder" is
-// a different direction in each theme and a computed darkening has no
-// theme. The document said one thing, the stylesheet did another, and
-// the generated design-system page drew the document's version — which
-// on the dark ground is the dark theme's own `paper` text on a near-ink
-// fill, 1.0:1, a button whose label is invisible. Nothing was red.
-//
-// That is this repository's most expensive defect class ("prose about
-// code is code, and rots the same way") landing on the one document that
-// claims to be normative. Every other claim in design.md is prose a
-// reader has to check by hand; the colour table is machine-checkable, so
-// it is checked.
 func TestTheDesignDocumentAndTheStylesheetAgreeOnEveryColour(t *testing.T) {
 	t.Parallel()
 	light, dark := themeTokens(t)

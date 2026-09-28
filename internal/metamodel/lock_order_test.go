@@ -21,13 +21,6 @@ import (
 // holdEntityTypeRow opens a transaction on a connection of the test's own
 // and takes the named row lock on one entity_types row, holding it until
 // the returned function is called.
-//
-// It stands in for the *first* lock of whichever writer the test is not
-// running: FOR KEY SHARE is what UpsertEntity takes on the type it is
-// writing into, FOR UPDATE is what RemoveEntityType takes on the type it
-// is about to delete. Staging one side as a plain SQL lock is what makes
-// these tests deterministic — the writer under test parks against a lock
-// that is already held, instead of two goroutines being raced and hoping.
 func holdEntityTypeRow(t *testing.T, conn *pgx.Conn, id uuid.UUID, mode string) (release func()) {
 	t.Helper()
 	ctx := context.Background()
@@ -53,14 +46,6 @@ func holdEntityTypeRow(t *testing.T, conn *pgx.Conn, id uuid.UUID, mode string) 
 
 // entityRowIsUnlocked reports whether one entity row can be locked right
 // now, from a connection of the test's own.
-//
-// This is the assertion both staged tests turn on, and it is the only
-// thing that tells a *correct* lock order from a merely blocked writer:
-// a writer parked on the entity type's row has taken no entity lock yet,
-// so this succeeds; a writer that locked its entity row first and then
-// went to the type is holding exactly what a cascading removal needs,
-// which is the cycle. NOWAIT rather than a timeout so the answer is
-// immediate and cannot itself join the wait graph.
 func entityRowIsUnlocked(t *testing.T, conn *pgx.Conn, id uuid.UUID) bool {
 	t.Helper()
 	ctx := context.Background()
@@ -101,17 +86,6 @@ func seedTypeAndEntity(t *testing.T, svc *metamodel.Service, project uuid.UUID) 
 // TestAnEntityWriteTakesTheTypeRowBeforeItsOwnRow pins one half of the
 // lock order that keeps UpsertEntity out of a cycle with
 // RemoveEntityType(cascade).
-//
-// UpsertEntity ends in an INSERT ... ON CONFLICT whose foreign key takes
-// FOR KEY SHARE on the entity type's row no matter what. The question is
-// only *when*: taken after GetEntityByKeyForUpdate, the write holds an
-// entity row while it waits for the type, which is the other side of the
-// removal's own wait — measured at 15 deadlocks in 15 seconds across 8
-// workers. GetEntityTypeByKeyForKeyShare moves it in front.
-//
-// The staging holds the type row FOR UPDATE, which is what a removal
-// holds, and then asks whether the parked write is sitting on its entity
-// row. Under the correct order it is not: it never got that far.
 func TestAnEntityWriteTakesTheTypeRowBeforeItsOwnRow(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
@@ -151,12 +125,6 @@ func TestAnEntityWriteTakesTheTypeRowBeforeItsOwnRow(t *testing.T) {
 // half. Both writers have to take entity_types first or the order is
 // still inverted, and reverting only this half puts the deadlocks back
 // (measured: 16 in 15 seconds with the entity write already fixed).
-//
-// The staging holds the type row FOR KEY SHARE, which is what an entity
-// write holds, and then asks whether the parked removal has already
-// locked the entities it is going to delete. Under the correct order it
-// has not: GetEntityTypeByIDForUpdate parks it before DeleteEntitiesOfType
-// runs at all.
 func TestACascadingRemovalTakesTheTypeRowBeforeAnyEntity(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
@@ -191,28 +159,6 @@ func TestACascadingRemovalTakesTheTypeRowBeforeAnyEntity(t *testing.T) {
 
 // TestUpsertEntityAndACascadingRemovalDoNotDeadlock is the harness the
 // defect was filed with, kept and shortened.
-//
-// The two staged tests above pin the *rule*; this one measures the
-// symptom, because a rule can be stated correctly and still leave a
-// third statement crossing it. Eight workers alternate entity writes
-// over a small shared key space against repeated
-// RemoveEntityType(cascade), which is the operation pair the original
-// bisection isolated (entity+entityType 0, entityType+removal 0,
-// entity+removal 8 in 15 seconds).
-//
-// **It is a stress test and it runs by default, deliberately.** Three
-// seconds is enough to be red every time the order is wrong — reverting
-// either half of the fix produced 3, 3, 3, 5 and 7 deadlocks over five
-// runs of exactly this shape — and cheap enough that no gate is needed
-// to keep it out of an ordinary `go test ./...`. A gated test is a test
-// that stops running, and this repository has no gate to hang it on
-// anyway. What it cannot claim is a *proof* of absence, which is what
-// the two staged tests are for.
-//
-// It asserts on the traffic as well as on the failures: a race that
-// silently stopped racing — a type that never came back, an upsert that
-// refused every time — would otherwise report zero deadlocks and pass
-// for the wrong reason.
 func TestUpsertEntityAndACascadingRemovalDoNotDeadlock(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)

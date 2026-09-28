@@ -71,17 +71,6 @@ func TestLastVisitedRedirectIsCorroboratedBeforeItFires(t *testing.T) {
 // the slug is actually reachable, never unconditionally from the URL the
 // moment a page loads — a stray or stale /g/{slug} link must not be able
 // to overwrite a good remembered value with one that cannot be reached.
-//
-// **The call site moved in Task 15 and this test moved with it**, which
-// is this repository's standing failure pattern caught in the act: the
-// game page became `static/pages/home.js` and the slug corroboration
-// became `openGame` in `static/pages/page.js`, so a test that kept
-// reading app.js would have passed for ever on a file that no longer
-// contains the behaviour. It now asserts the call is where the
-// corroboration is, and — the half that could not be asserted while the
-// two lived in one file — that the whole front end holds exactly **one**
-// call site, so a second page cannot start remembering a slug it never
-// checked.
 func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
 	t.Parallel()
 	const callSite = "rememberGame(slug);"
@@ -127,23 +116,6 @@ func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
 
 // TestEveryPageInsideAGameGivesItsHeaderTheGameList pins the wiring the
 // switcher is, at the two call sites that have to do it.
-//
-// renderHeader draws a switcher only when it is handed the caller's game
-// list, and it is handed one only by a page that already fetched it. A
-// page that calls renderHeader() bare still renders — the wordmark, the
-// sign-out button, everything a reviewer would look at — and is simply a
-// page with no way off it, which is this repository's standing failure
-// pattern: correct in the module, dead at the call site. The check is a
-// source shape rather than a rendered assertion because the two modules
-// are driven by two different harnesses and this is the one property
-// both must have; what the switcher *renders* is asserted for real
-// against pages/home.js in jstest/game_switcher_test.mjs.
-// handsOverTheGameList matches the property and not the formatting. It
-// was `strings.Contains(raw, "renderHeader({ games:")`, which failed the
-// day the call grew a fourth argument and wrapped onto several lines: a
-// guard that pins where the newlines go is a guard that fires on an
-// edit that changed nothing it cares about. It still fails, as it must,
-// on a `renderHeader()` with no list in it.
 var handsOverTheGameList = regexp.MustCompile(`renderHeader\(\{[^}]*\bgames:`)
 
 func TestEveryPageInsideAGameGivesItsHeaderTheGameList(t *testing.T) {

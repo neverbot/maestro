@@ -19,25 +19,6 @@ import (
 // either because the two of them answer file-specific questions
 // ("app.js has none", "doc.js has exactly one, inside setRenderedHTML")
 // that are worth keeping as they are.
-//
-// **What was wrong with the perimeter.** Those two tests name `app.js`
-// and `doc.js` literally, so a third script dropped into
-// internal/web/static/ was scanned by neither, and the four HTML shells
-// were never scanned at all — a shell may carry an inline <script>, and
-// nothing said it did not. Their shared expression also matched only
-// four spellings of a sink: it missed `+=`, `setHTMLUnsafe`,
-// `Range.createContextualFragment`, `document.writeln` and a property
-// reached by a computed name (`el["innerHTML"]`).
-//
-// **What this test does not catch, stated so the comment above does not
-// read as more than it is.** A sink whose property name is assembled at
-// runtime from fragments (`el["inner" + "HTML"]`) or from a variable
-// (`el[prop]`) is invisible to any grep, this one included; catching
-// that needs a parser and a dataflow, which is a different tool. Nor
-// does it read anything outside internal/web/static — the Go templates
-// and handlers are covered by their own tests. What it does hold is
-// that every literal spelling of a DOM markup write, in every asset
-// this server ships to a browser, is either absent or named below.
 var htmlSinkNames = regexp.MustCompile(
 	`\binnerHTML\b|\bouterHTML\b|\binsertAdjacentHTML\b|\bsetHTMLUnsafe\b|` +
 		`\bcreateContextualFragment\b|\bdocument\s*\.\s*write\b|\bdocument\s*\.\s*writeln\b`)
@@ -48,11 +29,6 @@ var htmlSinkNames = regexp.MustCompile(
 // than a line number keeps the exception stable under edits above it,
 // and keeps it specific enough that a *second* sink on the same file
 // fails here even if it uses the same spelling.
-//
-// There is exactly one entry, and it is doc.js's one sink — the
-// reading view's, whose two companion tests pin that it lives inside
-// setRenderedHTML and is only ever fed a rendered view's own `html`
-// field.
 var allowedHTMLSinks = map[string]map[string]bool{
 	"doc.js": {
 		`el.innerHTML = typeof html === "string" ? html : "";`: true,
@@ -205,12 +181,6 @@ type sinkHit struct {
 
 // sinkOccurrences returns every line of src naming a DOM markup sink,
 // with comments removed first by codeLines.
-//
-// **Comments are stripped rather than excluded by the pattern**, which
-// is what lets this scan for the bare identifier and so catch `+=` and
-// a computed property name — the shared expression in the two older
-// tests had to insist on `.innerHTML =` precisely because app.js's own
-// comments say "never innerHTML" four times and would otherwise fail it.
 func sinkOccurrences(src string) []sinkHit {
 	var out []sinkHit
 	for _, line := range codeLines(src) {
@@ -235,16 +205,6 @@ type codeLine struct {
 // static_vendor_test.go's outbound-URL scan, because both need the same
 // distinction and a second implementation of it would be a second place
 // for the distinction to be wrong.
-//
-// Only whole-line comments are dropped (a line whose first non-space
-// characters are `//`, `/*`, `*` or `<!--`, and everything up to the
-// matching `-->` or `*/` for the last two): a partial-line strip would
-// have to know a `//` inside a string literal from a real comment, and a
-// sink or a URL placed after code on a line that also carries a trailing
-// comment is still on that line's code half, which survives. The error
-// this makes is therefore always in the loud direction — a comment
-// sharing a line with code is read as code — which is the right way
-// round for a guard.
 func codeLines(src string) []codeLine {
 	var out []codeLine
 	inBlock := false

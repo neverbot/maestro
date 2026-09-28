@@ -15,24 +15,6 @@ import (
 
 // The orders an entity listing can be read in, and the whole vocabulary
 // a caller may spell.
-//
-// A descending order is the ascending one with a leading minus, which is
-// the spelling every listing API that has ever had to grow a second
-// direction converges on and which keeps one parameter where two would
-// otherwise be — an `order` and a `direction` that can disagree, and a
-// cursor that then has to carry both.
-//
-// The three columns every entity has, plus a fourth form: `field:<key>`
-// orders by one declared field, and `-field:<key>` reverses it.
-//
-// **A field order is offered only inside one entity type**, and asking
-// for one without a type filter is refused rather than answered. A field
-// belongs to a type's schema: across a game, `level` is several
-// different fields that happen to share a name, and ordering a mixed
-// listing by one of them would be a sentence with no meaning. It also
-// has no index and cannot have one — see the SQL — so keeping it inside
-// a type is what keeps its cost bounded by the type rather than by the
-// game.
 const (
 	OrderByName    = "name"
 	OrderByKey     = "key"
@@ -75,12 +57,6 @@ func (o entityOrder) String() string {
 }
 
 // parseEntityOrder reads the caller's spelling.
-//
-// **An unrecognised order is refused, not defaulted**, for the reason
-// listRelated refuses an unrecognised direction: a listing that quietly
-// ordered by name when asked for `-lvl` would answer a question nobody
-// asked and look like it worked. The message names every spelling there
-// is, because the caller cannot see this table.
 func parseEntityOrder(spelling string) (entityOrder, error) {
 	if spelling == "" {
 		return entityOrder{By: OrderByName}, nil
@@ -148,16 +124,6 @@ func (o entityOrder) sortValue(row dbq.Entity) string {
 }
 
 // listEntitiesPage runs the statement this order is served by.
-//
-// One statement per order, chosen here, rather than one statement taking
-// the order as a parameter: the SQL file's own comment says why, and it
-// is not style — an order chosen at run time inside the statement is an
-// order Postgres cannot serve from an index, and the whole point of
-// these indexes is that a page is sought to rather than sorted for.
-//
-// The switch is exhaustive over a vocabulary parseEntityOrder has
-// already bounded, so the default arm is the ascending name listing
-// every caller that never asks for an order gets.
 func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base listingParams, after cursor) ([]dbq.Entity, error) {
 	switch {
 	case o.byField():
@@ -258,11 +224,6 @@ type listingParams struct {
 }
 
 // sortTime reads a recency cursor's position back.
-//
-// Only a hand-edited cursor reaches the refusal: the fingerprint has
-// already agreed, and this package writes the format it reads. It is
-// still the caller's own argument, so it is answered as one — the same
-// arm, and the same sentence, ListRelations has.
 func sortTime(after cursor) (pgtype.Timestamptz, error) {
 	if after.ID == uuid.Nil {
 		return pgtype.Timestamptz{}, nil
@@ -276,11 +237,6 @@ func sortTime(after cursor) (pgtype.Timestamptz, error) {
 
 // fieldValueText is the stored jsonb of one field, as text, or "" when
 // the row does not carry that field at all.
-//
-// It reads the row's own bytes rather than decoding into a map and
-// re-encoding: what the cursor must carry is the value Postgres will
-// compare against, and a round trip through Go's JSON would renormalise
-// a number and put the position beside the row rather than on it.
 func fieldValueText(raw []byte, key string) string {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {

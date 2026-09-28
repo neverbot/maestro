@@ -29,13 +29,6 @@ import (
 // their exact arguments — what an agent would have typed, written down.
 // There is no importer and no server code reads one; the only thing that
 // ever executes a transcript is this file.
-//
-// **Over the wire, not through the Go functions.** A transcript is a
-// list of JSON arguments an agent sends, so it is sent: a real MCP
-// client session against a real HTTP server. Calling the exported
-// MCP* handlers directly would skip every input schema, which is the
-// layer that made three tools uncallable by any real client in the views
-// sub-project while the whole repository was green.
 type transcript struct {
 	Genre string           `json:"genre"`
 	Note  string           `json:"note"`
@@ -49,11 +42,6 @@ type transcriptCall struct {
 
 // declaredTypeKeys is every entity type key the transcript declares with
 // types.upsert, in the order it declares them.
-//
-// It is read off the calls rather than kept in a second list beside
-// them, because a second list is the thing that goes stale: a transcript
-// that adds a type and forgets the list would be a transcript nothing
-// checked the new type against.
 func (t transcript) declaredTypeKeys() []string {
 	return t.declaredKeys("types.upsert")
 }
@@ -128,12 +116,6 @@ func readTranscript(t *testing.T, name string) transcript {
 
 // transcriptFixture is one server, one user, one game per transcript and
 // one witness game that no transcript ever touches.
-//
-// **A game per transcript, not one shared game.** Three transcripts
-// applied to one game would pass while a cross-game leak existed, and
-// the witness is the other half of that: a game whose counts stay empty
-// while three others are filled is the only evidence that scoping did
-// the work rather than the assertions.
 type transcriptFixture struct {
 	srv     *web.Server
 	baseURL string
@@ -187,11 +169,6 @@ func newTranscriptFixture(t *testing.T, paths []string) transcriptFixture {
 
 // applyTranscript sends every call of one transcript over one MCP client
 // session and answers with the game's shape afterwards.
-//
-// Every failure names the transcript, the index of the call, the tool
-// and the server's own message: "call 12 of genres/racing.json:
-// relation_types.upsert: invalid_input at source_type_keys[0]" is
-// repairable and "transcript failed" is not.
 func applyTranscript(t *testing.T, f transcriptFixture, name string, script transcript) web.GameCountsOutput {
 	t.Helper()
 	session := connectMCP(t, f.baseURL, f.tokens[name])
@@ -260,12 +237,6 @@ func transcriptFailure(result *mcp.CallToolResult) string {
 // TestGenreTranscriptsApply applies every genre transcript against a
 // fresh game, over a real MCP client session, and asserts nothing was
 // refused.
-//
-// The call-by-call half only. The shape of the game each transcript
-// produces is TestEveryDeclaredTypeInATranscriptIsPopulated's, and the
-// two are separate tests because they catch different faults: every call
-// can succeed while a declared type is never seeded, which is a worked
-// example with a dead branch.
 func TestGenreTranscriptsApply(t *testing.T) {
 	t.Parallel()
 	paths := transcriptPaths(t)
@@ -281,11 +252,6 @@ func TestGenreTranscriptsApply(t *testing.T) {
 // the transcripts more than a smoke test: every declared entity type
 // holds at least one row, every declared relation type at least one
 // edge, and nothing anywhere is flagged invalid.
-//
-// A transcript that declares `faction` and never seeds one passes every
-// call and teaches a vocabulary with a dead branch. A transcript that
-// leaves flagged rows behind teaches a game shape the product itself
-// considers broken.
 func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 	t.Parallel()
 	paths := transcriptPaths(t)
@@ -346,12 +312,6 @@ func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 }
 
 // TestATranscriptWritesOnlyToItsOwnGame is the isolation half.
-//
-// It applies every transcript and then reads a game no transcript was
-// ever pointed at. Without it, three transcripts could be writing into
-// one shared game — or a scope check could be broken — and every
-// assertion above would still pass, because every assertion above only
-// ever looks at games that were meant to be full.
 func TestATranscriptWritesOnlyToItsOwnGame(t *testing.T) {
 	t.Parallel()
 	paths := transcriptPaths(t)
@@ -380,13 +340,6 @@ func TestATranscriptWritesOnlyToItsOwnGame(t *testing.T) {
 
 // TestTheTranscriptRunnerReportsAFailedCall is the precision fixture for
 // the runner itself.
-//
-// Every assertion in this file is of the form "nothing was refused", and
-// a runner that quietly skipped calls — an empty Calls slice, a tool
-// name it did not recognise, a result whose IsError it never read —
-// would satisfy all of them. So a deliberately broken call is sent
-// through the same path and its refusal is read, in a sub-test that is
-// expected to fail and is run with its own recovery.
 func TestTheTranscriptRunnerReportsAFailedCall(t *testing.T) {
 	t.Parallel()
 	paths := transcriptPaths(t)

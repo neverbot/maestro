@@ -20,67 +20,6 @@ import (
 // agent uses to declare a game's vocabulary (entity types and relation
 // types) and to fill it (entities, relations), plus the two ways of
 // getting rows back out (listing with a cursor, and search).
-//
-// **Every exported MCP* function here starts with requireScope, and
-// every one of them delegates to an unexported core of the same name.**
-// The check is not belt and braces over addScopedTool's own: these
-// functions are exported and tested directly, without the wire wrapper,
-// precisely so the isolation invariant is pinned here too — and the
-// query layer underneath takes the project id as a parameter and filters
-// on it in SQL, which is where the invariant is actually enforced (see
-// the metamodel plan's Task 7 requirement). A handler that forgot to
-// pass a project id would not compile; a handler that merely forgot to
-// *check* one would.
-//
-// The unexported cores exist for Task 8's REST mirror
-// (api_metamodel.go), and the split is exactly where the two surfaces
-// differ and nowhere else. requireScope asks one question — "is this
-// *token* bound to this game" — and a session caller has no binding to
-// check, so it refuses every human by construction. What stands in its
-// place on the REST side is requireProject, which resolves the game from
-// the URL and the caller's membership in it before a handler runs, and
-// registerProjectRoute plus TestEveryGameScopedRouteGoesThroughRequireProject
-// are what make that unskippable. So: one implementation of every tool,
-// two admission checks, each asking the question its own credential can
-// answer. A core must never be called from anywhere that has not already
-// resolved a scope, which is why none of the sixteen is exported.
-//
-// **No *input* type here is a domain type.** Every input is a struct
-// declared in this file, converted into the domain's own input by hand.
-// The one shape this rules out is the important one: metamodel's
-// EntityInput and RelationInput carry an Actor, and an Actor is the
-// audit record of *who wrote this row*. Accepting the domain type
-// straight off the wire would let an agent name any user or token it
-// liked as the author of its writes. actorOf builds it from the
-// authenticated caller and nothing else.
-//
-// **The outputs are a different claim, and a weaker one — review
-// finding L1.** This comment used to say "no wire type here is a domain
-// type", unqualified, and that was false in the output direction:
-// TypeDetailOutput.Schema and RelationTypeDetailOutput.Schema are
-// metamodel.Schema, and the two bulk outputs carry []metamodel.
-// BulkWrite, []metamodel.RelationWrite and []metamodel.BulkFailure. The
-// hand-written output schemas do not shut the gap either — a field
-// added to metamodel.BulkWrite reached the wire through them. So the
-// four are re-exported deliberately (their field lists are the wire
-// contract, and a shadow struct would be a copy to keep in step), and
-// what holds the line is a *test* rather than the type system:
-// TestTheDomainTypesOnTheWireCarryExactlyTheseKeys marshals each of the
-// four and pins its key set, so a field added to any of them fails here
-// and its author decides whether an agent should see it.
-//
-// **Ids cross the wire as strings.** The SDK infers a tool's input
-// schema from its Go input type by reflection, and uuid.UUID is a
-// [16]byte, which reflects to an array of integers and not to the string
-// it actually marshals as. Outputs keep uuid.UUID because their schemas
-// are hand-written (see mcp.go's own note on this), but inputs cannot,
-// so every id an agent sends is a string this file parses — and a
-// malformed one is invalid_input at that argument's own path, never a
-// 500.
-
-// --- Inputs ---
-
-// TypesUpsertInput is the argument shape of types.upsert.
 type TypesUpsertInput struct {
 	ScopedArgs
 	Key             string       `json:"key"`
@@ -95,19 +34,6 @@ type TypesUpsertInput struct {
 
 // FieldInput is one declared field of a type's schema, in the shape an
 // agent writes it.
-//
-// It mirrors metamodel.Field's *wire* form rather than its Go form, and
-// the difference is Default. On metamodel.Field, Default is `json:"-"`
-// and paired with a HasDefault flag, because "declared as false" and
-// "not declared" are different declarations and a bare `any` cannot tell
-// them apart; the wire form has just the one key, present or absent.
-// Converting through JSON (schemaOf, below) hands that distinction to
-// metamodel's own decoder instead of re-deriving it here, so there is
-// one rule about what a default means and it lives in the domain.
-//
-// Default is `any` rather than json.RawMessage for the reflection reason
-// this file's header gives: json.RawMessage is []byte and would reflect
-// to a string schema, refusing every non-string default an agent sends.
 type FieldInput struct {
 	Key      string   `json:"key"`
 	Label    string   `json:"label,omitempty"`
@@ -144,12 +70,6 @@ type TypesGetInput struct {
 // type that still has entities is refused (in_use) or taken down with
 // them.
 // TypesRemoveInput removes one entity type by key.
-//
-// **It took a uuid until Metamodel 14.** See EntitiesRemoveInput for the
-// argument; this tool was not among the three Task 9's seeding run
-// named, which is exactly why it is here — a rule applied to the tools a
-// finding happened to list, and not to the one it missed, is this
-// repository's most repeated defect.
 type TypesRemoveInput struct {
 	ScopedArgs
 	Key     string `json:"key"`
@@ -158,17 +78,6 @@ type TypesRemoveInput struct {
 
 // TypesRenameInput changes one entity type's key, and
 // RelationTypesRenameInput does the same for a relation type.
-//
-// **Addressed by the old key, not by an id**, which is the same
-// addressing decision Metamodel 14 made for every removal on this
-// surface: keys replace ids here rather than sitting beside them, and
-// `from` plus `to` says the whole operation in its own arguments.
-//
-// ExpectedVersion is required and is a plain requirement rather than an
-// optional guard: a rename advances the version, so an unguarded one
-// would land on top of an edit the caller never read. It is a pointer
-// because absent and zero are different things to say, and absent is
-// invalid_input at its own path rather than a guess.
 type TypesRenameInput struct {
 	ScopedArgs
 	From            string `json:"from"`
@@ -191,39 +100,6 @@ type RelationTypesRenameInput struct {
 
 // RelationTypesUpsertInput is the argument shape of
 // relation_types.upsert.
-//
-// **The two endpoint lists are entity type keys**, and they were entity
-// type *ids* until Metamodel 14. Task 9's seeding run found what that
-// cost: a second session — one that did not itself declare the types and
-// so never saw their ids — had to call types.list and build a
-// key-to-id map by hand before it could declare or edit a single
-// relation type. The ids were in the database the whole time; the wire
-// is where the translation belongs, and UpsertRelationType now does it
-// inside the same transaction and under the same lock the endpoint check
-// already needed.
-//
-// **Keys replace ids here rather than being accepted beside them.** The
-// argument is in the tool description and in the plan; the short of it
-// is that a key is not a nickname for an id in this game — it is unique
-// per game and the address every other tool on this surface speaks — so
-// a second spelling would buy a caller nothing and cost every reader of
-// this struct a decision.
-//
-// **The argument used to say "immutable" and no longer can**:
-// relation_types.rename moves a type's key. It survives the loss, and
-// this is where to say why. The stored column is uuid[], so a renamed
-// endpoint type keeps satisfying every rule that names it; what a
-// rename changes is the *spelling* a caller reads back here, which is
-// the same spelling it would read from relation_types.get. A key is
-// still a total replacement for an id on this surface — there is
-// nothing an id can address that a key cannot — and it is now a
-// spelling that can move, which is exactly why the answer states the
-// endpoint rules as keys rather than expecting a caller to have cached
-// them.
-//
-// The stored column is still uuid[], which does not change and should
-// not: an id is what the entity type removal's prune can remove from an
-// endpoint list, and nothing but a deletion can invalidate it.
 type RelationTypesUpsertInput struct {
 	ScopedArgs
 	Key             string       `json:"key"`
@@ -272,12 +148,6 @@ type EntityItemInput struct {
 }
 
 // EntitiesListInput is the argument shape of entities.list.
-//
-// Verbose is off by default, and that is the decision this listing turns
-// on: a page of five hundred entities with their fields is the whole
-// game back in one answer, and an agent walking a catalogue almost
-// always wants keys and names. It asks for fields when it means to read
-// them.
 type EntitiesListInput struct {
 	ScopedArgs
 	TypeKey string `json:"type_key,omitempty"`
@@ -294,9 +164,6 @@ type EntitiesListInput struct {
 	// `order` naming every spelling there is, rather than a listing
 	// quietly ordered by name; a field order needs type_key, and a field
 	// the type does not declare is refused by name.
-	//
-	// It is part of what a cursor belongs to: a position in one order
-	// means nothing in another, and a cursor carried across is refused.
 	Order     string          `json:"order,omitempty"`
 	RelatedTo *RelatedToInput `json:"related_to,omitempty"`
 	Cursor    string          `json:"cursor,omitempty"`
@@ -307,18 +174,6 @@ type EntitiesListInput struct {
 // RelatedToInput is the one-hop traversal an entity listing can be
 // anchored to: the entities reachable from (or reaching) one entity over
 // one relation type.
-//
-// **Direction carries no `omitempty`, and that is the whole point.** The
-// SDK infers this tool's input schema by reflection and puts exactly the
-// fields without `omitempty` in `required`, so the tag is the wire
-// contract. `listRelated` (internal/metamodel/list.go) refuses an absent
-// or unrecognised direction outright, arguing that answering half a
-// neighbourhood is a wrong answer rather than a refusal — and it is
-// right. Until review finding H2 this struct and the tool description
-// both told an agent the field was optional and defaulted to
-// "outgoing", so the only way to discover the domain's rule was to trip
-// over it. The three agree now: required in the schema, required in the
-// prose, refused by the domain.
 type RelatedToInput struct {
 	RelationTypeKey string `json:"relation_type_key"`
 	EntityTypeKey   string `json:"entity_type_key"`
@@ -335,34 +190,6 @@ type EntitiesGetInput struct {
 
 // EntitiesRemoveInput removes one entity by the address it was written
 // under. Its edges go with it, by cascade.
-//
-// **It took a uuid until Metamodel 14, and keys *replace* ids here
-// rather than being accepted beside them.** Task 9's seeding run
-// measured the cost of the old shape: an agent thinks in keys — they are
-// what the game's own vocabulary is written in, what every other tool
-// speaks and what every refusal quotes back — so removing a row it had
-// just written cost it a resolving read first.
-//
-// Accepting both was considered and rejected. A key here is not a
-// nickname for an id: it is stable (the first spelling stored stands, a
-// respelling is refused, and only an explicit types.rename moves it),
-// unique per game and type, and therefore a *total* replacement rather
-// than a convenience —
-// there is nothing an id can address that a key cannot. What a second
-// spelling would cost is real and paid at every call site: an
-// "exactly one of" refusal path, two branches in every description, and
-// a caller decision at each call. This repository already pays that
-// where the two spellings are two genuinely different questions —
-// views.run takes a saved key *or* an inline query and refuses both, and
-// docs.links.list reads the join from either side and refuses neither
-// and both — and neither of those is two names for one row. It also has
-// one open inconsistency of exactly this shape already, routes
-// addressing a game by uuid while the page addresses it by slug, and
-// adding a second would make that worse rather than better.
-//
-// The ids have not gone anywhere: every reader still returns them and
-// every removal event still carries them. They are simply no longer the
-// address.
 type EntitiesRemoveInput struct {
 	ScopedArgs
 	TypeKey string `json:"type_key"`
@@ -378,13 +205,6 @@ type RelationsUpsertInput struct {
 
 // RelationItemInput is one edge of a relations.upsert batch. It carries
 // no actor: see this file's header.
-//
-// **expected_version is here for the reason EntityItemInput's is**, and
-// it did not exist until 0009 gave edges a version column: updating an
-// existing edge means claiming the revision being updated, so a blind
-// rewrite of a row somebody else has edited is refused instead of losing
-// their work. The written entries of a previous call carry the number to
-// send next.
 type RelationItemInput struct {
 	TypeKey         string         `json:"type_key"`
 	Source          RefInput       `json:"source"`
@@ -400,17 +220,6 @@ type RefInput struct {
 }
 
 // RelationsListInput is the argument shape of relations.list.
-//
-// Verbose is off by default, the same rule EntitiesListInput states and
-// for a stronger version of the same reason: a graph has more edges than
-// nodes, so a page of five hundred edges carrying their fields is more
-// of the game back in one answer than the listing that rule was written
-// for. An agent walking a game's graph wants what each edge joins; it
-// asks for the values when it means to read them, and when it wants one
-// edge's values it has relations.get, which never needs the flag.
-// Invalid is EntitiesListInput.Invalid for edges, and it is spelled the
-// same because it is the same question: an agent that has just edited a
-// relation type's field_schema asks which of its edges that broke.
 type RelationsListInput struct {
 	ScopedArgs
 	TypeKey string    `json:"type_key,omitempty"`
@@ -424,14 +233,6 @@ type RelationsListInput struct {
 
 // RelationsGetInput reads one edge by the address it was written under:
 // the relation type's key and both endpoints as (type_key, key) refs.
-//
-// It is deliberately the same address relations.upsert takes, and not
-// the endpoint *ids* relations.list filters on. An agent that has just
-// written an edge holds the three strings, not the ids; the rest of this
-// surface addresses a row the way a designer names it (entities.get,
-// relation_types.get), and Task 9 recorded the resolving read a
-// by-id-only address costs. The ids remain in the answer, where a
-// removal still needs them.
 type RelationsGetInput struct {
 	ScopedArgs
 	TypeKey string   `json:"type_key"`
@@ -524,12 +325,6 @@ type RelationTypesListOutput struct {
 }
 
 // EntityOutput is one entity.
-//
-// TypeKey is resolved from the row's entity_type_id, because an id an
-// agent cannot interpret is not an answer: a listing that spans types —
-// which the unfiltered one does — would otherwise say nothing about what
-// each row is. Fields is present only when the caller asked to be
-// verbose.
 type EntityOutput struct {
 	ID      uuid.UUID      `json:"id"`
 	TypeKey string         `json:"type_key"`
@@ -541,10 +336,6 @@ type EntityOutput struct {
 }
 
 // EntitiesListOutput is one page of entities.
-//
-// NextCursor is the position to resume from, and Truncated says the same
-// thing in a boolean so a client can branch without a null check. They
-// are set together, from one condition, so they cannot disagree.
 type EntitiesListOutput struct {
 	Items      []EntityOutput `json:"items"`
 	NextCursor *string        `json:"next_cursor,omitempty"`
@@ -553,11 +344,6 @@ type EntitiesListOutput struct {
 
 // RefOutput is one endpoint of an edge, in the terms it was written
 // with: the entity's type key, its own key, and its name.
-//
-// Name is here as well as the two keys because every caller that
-// resolves an endpoint is about to show or log it, and the entity read
-// that produced the keys already carried the name — omitting it would
-// buy nothing and cost a round trip per endpoint.
 type RefOutput struct {
 	TypeKey string `json:"type_key"`
 	Key     string `json:"key"`
@@ -565,44 +351,6 @@ type RefOutput struct {
 }
 
 // RelationOutput is one edge.
-//
-// It carries its endpoints twice, and both are load-bearing: the ids are
-// what the row holds and what relations.remove and the two endpoint
-// filters address entities by, and Source/Target are the (type key, key)
-// refs the edge was actually written with. Task 7 shipped this answer
-// with the ids alone, honestly documented, because resolving a page of
-// edges needed a bulk entity-by-ids read that did not exist;
-// metamodel.EntitiesByIDs is that read, and one query per page is what
-// it costs.
-//
-// Source and Target are pointers, and a nil one is not an error: the
-// endpoint read happens after the page was listed, so an entity removed
-// in between (which takes its edges with it, by cascade) leaves an edge
-// in hand whose endpoint no longer exists. The id is still reported;
-// the ref is simply absent, which is the honest answer rather than a
-// ref with empty strings in it that a client would render as a row
-// named "".
-//
-// **Fields is the edge's own declared values**, and its absence was the
-// defect Metamodel 12 closed. A relation type may declare a field
-// schema, relations.upsert validates an edge's values against it and
-// stores them, and until this task nothing on either surface returned
-// them: a whole declared feature was write-only, and the readme's own
-// example of why typed edges exist — a door declaring which ability
-// opens it — could be written and never shown. relation_types.get is
-// where the schema those values answer to is published.
-//
-// It is present only when the caller asked to be verbose, exactly as
-// EntityOutput.Fields is; relations.get always fills it, because a
-// caller naming one edge is asking for its content. `omitempty` is
-// load-bearing on both: a client must be able to tell "not asked for"
-// from "asked for and empty".
-// **Version and Invalid are here because EntityOutput carries them**, and
-// they are not optional on either: an agent cannot send an
-// expected_version it was never told, and a flag it cannot see is a flag
-// it cannot act on. Both are unconditional, listing and get alike, and
-// neither is behind verbose — verbose gates the edge's own content, not
-// its identity or its state.
 type RelationOutput struct {
 	ID       uuid.UUID      `json:"id"`
 	TypeKey  string         `json:"type_key"`
@@ -623,13 +371,6 @@ type RelationsListOutput struct {
 }
 
 // EntitiesUpsertOutput reports what a batch of entities did.
-//
-// Written is the metamodel's own success report (metamodel.BulkWrite,
-// which argues what it carries and why), and Failed the per-item
-// failures. Count is len(Written), built at the one place both are
-// assembled so the two cannot disagree; it is here because "did all four
-// hundred land" is the first question and it should not need a client to
-// walk an array.
 type EntitiesUpsertOutput struct {
 	Count   int                     `json:"count"`
 	Written []metamodel.BulkWrite   `json:"written"`
@@ -646,19 +387,6 @@ type RelationsUpsertOutput struct {
 
 // EntitiesRepairInput is the argument shape of entities.repair, and
 // RelationsRepairInput is the same shape for edges.
-//
-// **A repair is not an editor**, and the arguments are what make that
-// true rather than a promise in prose. There is no per-row list: one
-// `set` and one `drop_unknown` cover every row the type's current schema
-// rejects, because a repair is one decision about what a newly required
-// field means. There is no key, no name, no endpoint and no
-// expected_version, because a repair writes the row it read with its
-// values changed and nothing else. Per-row values, with the version
-// claim that belongs to editing content, are entities.upsert.
-//
-// metamodel/repair.go's header carries the whole of what a repair may
-// and may not do, and why each restriction is enforced by a mechanism
-// rather than by intention.
 type EntitiesRepairInput struct {
 	ScopedArgs
 	TypeKey     string         `json:"type_key"`
@@ -680,13 +408,6 @@ type RelationsRepairInput struct {
 }
 
 // EntitiesRepairOutput reports one repair pass.
-//
-// Scanned is how many flagged rows the pass read, and is what tells a
-// caller whether the limit was the binding constraint — the same job
-// search's `truncated` does, stated as a number because a repair loop
-// wants one. Repaired and Failed are the batch's own report, so a row
-// that still does not fit comes back with the code entities.upsert
-// would have given it.
 type EntitiesRepairOutput struct {
 	Scanned  int                     `json:"scanned"`
 	Repaired []metamodel.BulkWrite   `json:"repaired"`
@@ -711,11 +432,6 @@ type RemovedOutput struct {
 
 // BrokenViewOutput is one saved view a type removal broke, at the
 // pointer in its own query document that names the type.
-//
-// **One row per reference and not per view**: a view naming a type at
-// three positions comes back three times, because the pointers are the
-// repair and a designer holding the name three times has learned
-// nothing. A caller counting rows is counting positions, not views.
 type BrokenViewOutput struct {
 	ViewKey string `json:"view_key"`
 	Name    string `json:"name"`
@@ -726,19 +442,6 @@ type BrokenViewOutput struct {
 // TypeRemovedOutput is what removing an entity type or a relation type
 // answers with: the fact of the removal, and the saved views that
 // referenced the type.
-//
-// **Deleting a type views depend on is allowed and the report is the
-// courtesy that makes it survivable.** The design spec is explicit that
-// refusing with in_use is the wrong call — a view is derived and can be
-// rewritten in one call, while making a type undeletable because a
-// six-month-old diagram mentions it pushes designers into deleting views
-// in order to delete types. What they are owed instead is the list, with
-// the pointer into each document, so the repair is a known amount of
-// work rather than a surprise the next time a view is opened.
-//
-// broke_views is `[]` and never null, the rule this surface applies to
-// every list it hands back: a client reading "nothing broke" must not
-// have two spellings of it to handle.
 type TypeRemovedOutput struct {
 	Removed    bool               `json:"removed"`
 	BrokeViews []BrokenViewOutput `json:"broke_views"`
@@ -746,20 +449,6 @@ type TypeRemovedOutput struct {
 
 // removeTypeReportingViews is the one place a type is removed on this
 // surface, for either kind.
-//
-// The list has to be read *before* the removal and inside its
-// transaction: view_refs' foreign key is ON DELETE SET NULL, so the same
-// deletion that lets a ref row outlive its type empties the column the
-// lookup matches on, and asking afterwards finds nothing and reports
-// that nothing broke — a wrong answer rather than an error. That
-// ordering lives in views.RemoveTypeReportingViews, which is why this
-// goes through it rather than reading the list here and then calling the
-// metamodel.
-//
-// **The nil-Views branch is a build without a views service, not a
-// shortcut.** MCPDeps.Views is optional — a server built without one
-// registers no views tools at all — and there a removal can break no
-// view, so the report is empty by construction rather than by omission.
 func removeTypeReportingViews(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	kind string, id uuid.UUID, cascade bool) (TypeRemovedOutput, error) {
 	out := TypeRemovedOutput{BrokeViews: []BrokenViewOutput{}}
@@ -1065,12 +754,6 @@ func relationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, proje
 }
 
 // MCPEntitiesUpsert implements entities.upsert.
-//
-// The mode string is passed through as the agent wrote it rather than
-// being folded onto the default when it is not recognised: bulkUpsert
-// refuses an unknown mode as invalid_input at path `mode`, deliberately,
-// because reading a typo as "partial" would silently land rows a caller
-// asked to have rolled back.
 func MCPEntitiesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesUpsertInput) (EntitiesUpsertOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
 		return EntitiesUpsertOutput{}, err
@@ -1470,13 +1153,6 @@ func invalidInput(path, message string) error {
 
 // schemaOf converts a wire schema into the domain's, through the
 // domain's own JSON decoder.
-//
-// The round trip is deliberate and is the whole point: metamodel.Field's
-// UnmarshalJSON is what decides that a `default` key present with the
-// value false is a declared default and an absent one is not, and it
-// refuses any key it does not know. Building a metamodel.Field field by
-// field here would put a second copy of that rule in this package, to
-// drift the first time the schema format grows anything.
 func schemaOf(fields []FieldInput) (metamodel.Schema, error) {
 	if len(fields) == 0 {
 		return nil, nil
@@ -1526,15 +1202,6 @@ func relationTypeOf(row dbq.RelationType) RelationTypeOutput {
 // it is what turns the stored endpoint ids back into the keys the input
 // speaks — the read half of Metamodel 14's endpoint change, without
 // which the tool would take keys and answer with ids.
-//
-// **An endpoint id missing from names is dropped, not rendered as an
-// empty key.** It is reachable: RemoveEntityType prunes a deleted type's
-// id out of every endpoint list in the same transaction, so the window
-// is small, but a page read against a replica or an id that outlived its
-// prune would otherwise produce `""` in a list of keys — a name no type
-// has, in a list a caller may send straight back to the writer. Dropping
-// it is the same judgement RelationOutput makes about an endpoint whose
-// entity is gone: absent, rather than named "".
 func relationTypeDetailOf(row dbq.RelationType, names map[uuid.UUID]string) (RelationTypeDetailOutput, error) {
 	schema, err := metamodel.ParseSchema(row.FieldSchema)
 	if err != nil {
@@ -1606,17 +1273,6 @@ func entityOf(row dbq.Entity, names map[uuid.UUID]string, verbose bool) (EntityO
 // relationOf builds one edge's answer: its identity, both endpoints in
 // both addressings, and — when the caller asked for them — the values
 // the edge itself carries.
-//
-// It is entityOf's counterpart and exists for the same reason: both
-// relations.list and relations.get answer with a RelationOutput, and two
-// hand-built copies are two chances for one of them to leave the fields
-// out again, which is the whole of Metamodel 12.
-//
-// An edge whose relation type is missing from names is impossible (the
-// row's relation_type_id is a foreign key into the same game's types)
-// and answers with an empty type key rather than a panic if it happens.
-// A missing endpoint ref is not impossible, and is left nil; see
-// RelationOutput.
 func relationOf(row dbq.Relation, names map[uuid.UUID]string, refs map[uuid.UUID]*RefOutput, verbose bool) (RelationOutput, error) {
 	out := RelationOutput{
 		ID:       row.ID,
@@ -1643,13 +1299,6 @@ func relationOf(row dbq.Relation, names map[uuid.UUID]string, refs map[uuid.UUID
 
 // entityTypeKeys and relationTypeKeys map a game's type ids onto the
 // keys an agent addresses them by.
-//
-// One extra query per listing, and it is worth it: without it every row
-// of a mixed listing comes back carrying a uuid an agent has no way to
-// interpret, and the recovery is the same query with an extra round
-// trip. A game's type vocabulary is a handful of rows written by hand,
-// not a table that grows with content, so this is a small, bounded read
-// and not a second listing hiding inside the first.
 func entityTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (map[uuid.UUID]string, error) {
 	rows, err := deps.Metamodel.ListEntityTypes(ctx, projectID)
 	if err != nil {
@@ -1667,10 +1316,6 @@ func entityTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (map
 // game's type vocabulary, and one bulk entity read — never one per
 // endpoint: this is the fix Task 7 recorded as owed and named this task
 // as the place for.
-//
-// An id that resolves to nothing is left out of the map rather than
-// mapped to an empty ref; see RelationOutput for why a caller reads a
-// missing endpoint as absent and not as a row named "".
 func endpointRefs(ctx context.Context, deps MCPDeps, projectID uuid.UUID, rows []dbq.Relation) (map[uuid.UUID]*RefOutput, error) {
 	refs := make(map[uuid.UUID]*RefOutput, 2*len(rows))
 	if len(rows) == 0 {
@@ -1709,29 +1354,6 @@ func relationTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (m
 // --- Registration ---
 
 // addMetamodelTools registers the game-content tools on srv.
-//
-// Every one goes through addScopedTool, which is what makes the caller's
-// game binding the only scope any of them can act in — see that
-// function's own doc comment and
-// TestEveryMCPToolGoesThroughAddScopedTool, which fails the build if a
-// tool ever reaches the served list any other way.
-//
-// **The descriptions are built with the domain's own constants
-// interpolated, never with the numbers typed out.** A bound an agent
-// reads in a description and a bound the server enforces have to be the
-// same number, and the only way to guarantee that is for there to be one
-// of them: metamodel exports MaxSearchQuery, MaxIndexedText and the page
-// bounds precisely so this file can quote them rather than repeat them.
-// versionClaimDoc is one sentence of contract, on every tool that takes
-// an expected_version, written once because it is one rule: a version
-// claim is a claim about a row that exists.
-//
-// It is on the wire rather than left to be discovered, because the
-// behaviour it replaced was the discoverable one — a claim against a
-// missing row used to create it, and an agent that had learned to
-// re-send a whole seed with the versions it last read would now meet
-// not_found on exactly the rows a designer had removed and needs to be
-// told what that means and what to do.
 var versionClaimDoc = "**A version claim is a claim about a row that exists.** Stating " +
 	"expected_version for one this game does not have is not_found saying it was removed, " +
 	"never a quiet re-creation: the row that would come back carries a new id, and every " +
@@ -2267,14 +1889,6 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 // traitRefusalDoc renders the incoherent trait combinations
 // relation_types.upsert refuses, one clause each, **from the table the
 // coherence check itself runs on** (metamodel.AnalysisTraitConflicts).
-//
-// Generating the agent-facing text from the structure it describes, and
-// asserting it back in both directions, is the first thing the views
-// sub-project named as worth copying: it is what caught `views.run`
-// shipping without its operator table at all. A rule added to that table
-// is offered to agents here with no second edit, and a rule this text
-// promises that the table does not carry fails
-// TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination.
 func traitRefusalDoc() string {
 	return strings.Join(metamodel.TraitConflictLines(), "; ")
 }
@@ -2282,16 +1896,6 @@ func traitRefusalDoc() string {
 // retryAdvice is what every *read* tool says about the `retryable`
 // code, and it exists because "resend the same call" is not always the
 // whole recovery on a read.
-//
-// `metamodel.IsRetryable` admits 57014, `query_canceled`, which a lock
-// wait cancelled by `statement_timeout` raises — contention, and
-// resendable — but which an operator's `statement_timeout` also raises
-// on a query that is simply too expensive, every single time it is run.
-// The code is still right, because it names the recovery the four
-// SQLSTATEs share; what a read tool has to add is what to do when that
-// recovery keeps failing, which on a read is always available: ask for
-// less. `entities.upsert` already carries the write side of the same
-// advice (send fewer rows), and this is its read counterpart.
 const retryAdvice = "A `retryable` error means the database refused the call and the same call, " +
 	"resent unchanged, may succeed. If it keeps coming back, the call is too expensive as " +
 	"written rather than unlucky: ask for less — a smaller limit, a narrower filter or query — " +
@@ -2315,13 +1919,6 @@ func quotedList(values []string) string {
 func boolPtr(v bool) *bool { return &v }
 
 // --- Hand-written output schemas ---
-//
-// Written by hand for the reason mcp.go's own schema block gives: the
-// SDK validates a tool's output against its marshalled JSON, and its
-// reflection-based inference gets that JSON wrong for any type whose
-// marshalling comes from a method — uuid.UUID here, and metamodel.Field,
-// whose MarshalJSON emits a `default` key its Go struct tags say is
-// absent.
 
 func numberSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "number"} }
 func objectSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "object"} }
@@ -2443,11 +2040,6 @@ var entitiesListOutputSchema = listEnvelopeSchema(entityOutputSchema)
 // schemas the SDK is handed, while the Go types they describe live in
 // mcp_search.go beside the core that fills them; splitting them the
 // other way would put a schema in a file that registers no tool.
-//
-// Every field of every one of these is Required except the two that are
-// genuinely optional: a hit's `entity` and `document`, of which exactly
-// one is present and which one is what `kind` says, and a link's `role`,
-// which a document may be attached without.
 var linkedRefOutputSchema = &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"entity_type_key", "entity_key", "name"},
@@ -2501,11 +2093,6 @@ var searchOutputSchema = &jsonschema.Schema{
 // the edge that carries it: an endpoint whose entity was removed
 // between the listing and the resolution is reported by id alone (see
 // RelationOutput).
-//
-// A function rather than a var, unlike its neighbours, because the two
-// endpoints of an edge would otherwise share one *jsonschema.Schema
-// pointer, and the SDK refuses a schema whose nodes do not form a tree
-// — it panics at AddTool, which is how this was found.
 func refOutputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:     "object",
@@ -2522,11 +2109,6 @@ func refOutputSchema() *jsonschema.Schema {
 // refOutputSchema is: relations.list embeds it in a page envelope while
 // relations.get answers with it whole, and the SDK refuses a schema
 // whose nodes do not form a tree.
-//
-// `fields` is not in Required, because it is absent from a listing that
-// was not asked to be verbose. `version` and `invalid` are, for the
-// reason entityOutputSchema requires them: every edge carries both,
-// always.
 func relationOutputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:     "object",

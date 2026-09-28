@@ -14,23 +14,6 @@ import (
 
 // The seam between a renderer module and the server's renderer
 // catalogue.
-//
-// internal/web/jstest/render_graph_test.mjs reads the module and asserts
-// what it draws; internal/views/renderers_test.go reads the catalogue
-// and asserts what it refuses. Neither can see the other, and the
-// mistake that lives in between them is silent in both: a control naming
-// a parameter the catalogue does not have composes a document
-// views.upsert refuses with a pointer nobody expected, and a parameter
-// the catalogue has and the module has no control for is a knob a
-// designer can never reach and an agent can — a view saved by an agent
-// that the interface then draws as if the knob were off.
-//
-// So this file joins them, in both directions, over the *generated*
-// catalogue description rather than over a list retyped here: that text is
-// produced from the table and from nothing else, and internal/views' own
-// TestRenderersArea's "every renderer declares its parameters and the
-// description is generated from them" case holds it against the table in
-// both directions. Reading it is reading the catalogue.
 
 var (
 	// A renderer's section opens with "- name (consumes …)" and its
@@ -57,12 +40,6 @@ var (
 
 // rendererSectionOf is one renderer's block of the generated
 // description, from its own heading to the next renderer's.
-//
-// Every reader below is scoped through this, because the mistake an
-// unscoped read makes is silent: two renderers declare a parameter of
-// the same name — `graph` and `nested` both take a slot, `layered` and
-// `timeline` both take an enum — and a scan that ran over the whole text
-// would answer one renderer's question with another's declaration.
 func rendererSectionOf(description, renderer string) (string, bool) {
 	sections := rendererSection.FindAllStringSubmatchIndex(description, -1)
 	for i, section := range sections {
@@ -110,13 +87,6 @@ func catalogueEnumValues(description, renderer, param string) ([]string, bool) {
 
 // moduleParamValues is every enum control a renderer module declares,
 // resolved from the constants the module spells them with.
-//
-// It resolves rather than matching literals because the module names its
-// admitted spellings once — `export const DIRECTIONS = [DIRECTION_TB,
-// DIRECTION_LR]` — and its own harness asserts the control offers that
-// list. Reading the constants is reading what the module actually
-// offers; reading a literal retyped in a control call would be a third
-// spelling for this test to drift from.
 func moduleParamValues(source string) map[string][]string {
 	strConst := map[string]string{}
 	for _, match := range moduleStringConst.FindAllStringSubmatch(source, -1) {
@@ -178,13 +148,6 @@ func renderModule(t *testing.T, name string) string {
 // them claims. It is a table and not one test per renderer because the
 // join is one rule: six copies of it would be five places for it to be
 // weakened, which is the same argument render/marks.js is built on.
-//
-// **The six are all here now**, and TestEveryRendererInTheCatalogueHasA
-// Module holds it: a renderer the catalogue offers and this interface
-// cannot draw is a view an agent can save and a designer can only meet
-// as a blank canvas. While the modules were being written a missing row
-// was simply a task not yet done; now that they are all written, the
-// table's completeness is itself the contract.
 var rendererModules = []struct {
 	module   string
 	renderer string
@@ -198,13 +161,6 @@ var rendererModules = []struct {
 }
 
 // TestEveryRendererInTheCatalogueHasAModule closes the table above.
-//
-// The join in this file runs over the modules that exist, so a renderer
-// with no module is a renderer nothing here checks — and, worse, one an
-// agent can name in views.upsert and a designer can only meet as a blank
-// canvas. Both directions, because a module for a renderer the catalogue
-// does not have is the other half of the same mistake and would be a
-// picture nobody can save.
 func TestEveryRendererInTheCatalogueHasAModule(t *testing.T) {
 	t.Parallel()
 	withModule := map[string]bool{}
@@ -225,10 +181,6 @@ func TestEveryRendererInTheCatalogueHasAModule(t *testing.T) {
 }
 
 // TestARenderersControlsAreTheCataloguesParameters is the join.
-//
-// Both directions, because the two failures are different accidents: a
-// control with no parameter is a document the server will refuse, and a
-// parameter with no control is a knob the interface silently ignores.
 func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
 	t.Parallel()
 	for _, entry := range rendererModules {
@@ -285,13 +237,6 @@ func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
 // TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits is the second
 // half of the same seam, and it arrived with `layered`, the first
 // renderer to have an enum at all.
-//
-// A name join alone lets a control offer "LTR" for a parameter whose
-// only admitted spellings are "TB" and "LR". The module would be
-// internally consistent, its own harness would assert its own constants,
-// and the picture a designer composed would be refused by views.upsert
-// with a message about a value the interface itself put there. The
-// admitted spellings are as much a part of the contract as the key is.
 func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
 	t.Parallel()
 	description := views.RendererDescription()
@@ -317,18 +262,6 @@ func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
 // TestAControlDeclaresTheKindTheCatalogueDeclares is the third arm of
 // the same seam, and it arrived with `map`, the first renderer whose
 // parameters are neither values nor slots.
-//
-// A name join and a values join still admit a control that offers the
-// wrong *editor*: `x_field` takes the key of a declared number field and
-// `snap` takes a number, and a dialog that drew a number spinner for the
-// first would compose a document views.upsert refuses — while a module
-// whose kinds were all internally consistent would pass every other
-// check in this file. The kind is as much of the contract as the name.
-//
-// It joins over views.RendererParamKind rather than over the generated
-// description, because the description prints a *phrase* written for an
-// agent and never the kind; retyping the phrases here would be a third
-// spelling of the same table.
 func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 	t.Parallel()
 	kinds := controlKinds(t)

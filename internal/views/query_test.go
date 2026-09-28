@@ -307,9 +307,6 @@ func TestAParamCapIsRefusedAtParseTime(t *testing.T) {
 // costs Task 4 a nil FieldRef in exactly the branch a two-branch query
 // needs; nothing pinned either the calls or what they fill, so the fix
 // could be deleted and the package would stay green.
-//
-// It also pins the nesting: normalise recurses through `all`, `any` and
-// `not`, so a leaf three levels down carries its reference too.
 func TestEveryPredicateInAParsedQueryIsNormalised(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,
 	  "from":[{"type":"quest","as":"q",

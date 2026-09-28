@@ -28,38 +28,6 @@ var ErrUserNotFound = errors.New("user not found")
 // per-project (see Caller.ScopedProject's own doc comment,
 // internal/web/auth.go, for the project-scoped equivalent this
 // deliberately does not touch).
-//
-// The stakes are higher here than for a project's last owner. A project
-// with zero owners can still be reasoned about — it is merely stuck
-// until an operator intervenes some other way — but an instance with
-// zero admins can never recover through any REST call, MCP tool or
-// scheduled job while the process keeps running: POST /api/invites,
-// GET/DELETE /api/invites and this surface itself are all gated on
-// Caller.IsAdmin, and nothing else sets it. The one recovery path this
-// codebase does provide is a restart, and it recovers both halves of
-// being locked out, not just the flag:
-//
-//   - BootstrapFirstAdmin (users.go) re-promotes the account named by
-//     FIRST_ADMIN_EMAIL when it already exists without the flag, not
-//     only when the instance is empty. This half needs no configuration
-//     beyond FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD and happens on any
-//     restart.
-//   - The same boot also resets that account's password to
-//     FIRST_ADMIN_PASSWORD — the recovery for the other way an admin
-//     becomes unreachable, a forgotten or rotated-away password, which
-//     restoring a flag does nothing for. Task 22 found the flag-only
-//     version was not a working recovery at all for that case. This
-//     half is gated behind its own one-shot opt-in,
-//     FIRST_ADMIN_PASSWORD_RESET, so the standing configuration carries
-//     the credential without the permission to apply it; see
-//     repromoteConfiguredAdmin's own doc comment (users.go) for why.
-//
-// Both still require an operator with access to the process
-// environment, which is already equivalent to database access, so this
-// guard is not defeated by either; together they only turn a
-// break-glass `psql` session into a documented restart, which is why the
-// guard below stays unconditional rather than a default an operator can
-// talk their way past inside a running process.
 var ErrLastAdmin = errors.New("instance must keep at least one admin")
 
 // SetAdminByEmail resolves email to a user id and applies SetAdmin. This
@@ -71,10 +39,6 @@ var ErrLastAdmin = errors.New("instance must keep at least one admin")
 // method reuses it rather than requiring a user-listing endpoint whose
 // only consumer would be this one call site — see this task's own plan
 // section (Decision 2) for the tradeoff against a listing endpoint.
-//
-// An unknown email reports ErrUserNotFound, the same sentinel SetAdmin
-// itself returns for an unknown id — there is only one "no such user"
-// outcome from this surface, however the caller identified the target.
 func (s *Service) SetAdminByEmail(ctx context.Context, email string, isAdmin bool) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 	dbUser, err := s.q.GetUserByEmail(ctx, email)
@@ -88,29 +52,6 @@ func (s *Service) SetAdminByEmail(ctx context.Context, email string, isAdmin boo
 }
 
 // SetAdmin promotes or demotes targetUserID's instance-admin flag.
-// Authorization is the HTTP layer's job (requireAdminCaller,
-// internal/web/api_admin.go) — this method trusts its caller completely,
-// the same way projects.SetRole trusts its own HTTP layer to have
-// already decided the call is allowed (that method's own doc comment
-// explains why authorization does not belong in a domain service: it
-// would need to know who is asking and on whose behalf, which this
-// package has no business knowing).
-//
-// The last-admin guard (ErrLastAdmin) only ever fires when the target is
-// already an admin being demoted (isAdmin false) — promoting someone, or
-// setting an already-non-admin's flag to false again, can never reduce
-// the admin count, mirroring SetRole's identical short-circuit for
-// ErrLastOwner. It applies unconditionally to every demotion, including
-// a caller demoting themselves: an admin who is not the last one may
-// step down freely (the same "leaving is always your own choice" logic
-// handleRemoveMember applies to project membership), but the instance
-// itself may never be left with zero.
-//
-// See CountAdminsForUpdate's own doc comment (identity.sql) for why the
-// FOR UPDATE lock taken here is the sole thing enforcing this invariant
-// under concurrent demotions, not defence in depth for a second,
-// independent mechanism the way CountOwnersForUpdate's identical shape
-// is for a project's last owner.
 func (s *Service) SetAdmin(ctx context.Context, targetUserID uuid.UUID, isAdmin bool) error {
 	return s.withTx(ctx, func(q *dbq.Queries) error {
 		target, err := q.GetUserByID(ctx, targetUserID)
@@ -145,11 +86,6 @@ func (s *Service) SetAdmin(ctx context.Context, targetUserID uuid.UUID, isAdmin 
 
 // UserPage is one page of the accounts on this instance, plus the cursor
 // that asks for the next.
-//
-// It is `Users` and a cursor rather than a slice and a bool, because
-// every listing in this product pages the same way and a screen that had
-// to learn a second shape for one of them would be a screen with two
-// pagers in it.
 type UserPage struct {
 	Users      []User
 	NextCursor string
@@ -157,17 +93,6 @@ type UserPage struct {
 
 // ListUsers answers the question the administration screen could not ask
 // at all: **who is on this instance**.
-//
-// The screen used to say so in its own prose — "Maestro cannot say who
-// they are: the server has no endpoint that answers it" — and offered a
-// field to type an address into instead. Administering an instance by
-// typing a string from memory is how somebody grants the flag to an
-// address that belongs to nobody, and never finds out.
-//
-// The cursor is opaque to the caller and is the last row's ordering pair
-// (created_at, id). Both halves are needed: two accounts made in the
-// same millisecond would otherwise page over each other, one repeated
-// and one lost.
 func (s *Service) ListUsers(ctx context.Context, after string, pageSize int32) (UserPage, error) {
 	if pageSize <= 0 || pageSize > maxUserPageSize {
 		pageSize = defaultUserPageSize
@@ -212,20 +137,6 @@ type UpdateIdentityRequest struct {
 }
 
 // UpdateIdentity changes an account's address and display name.
-//
-// **The address is how somebody signs in**, so it is validated exactly
-// as registration validates one — trimmed, lower-cased, bounded in runes
-// — and the unique index refuses a second account on it. The domain
-// allow-list is deliberately *not* consulted: it governs who may create
-// an account on this instance, and an administrator moving an existing
-// colleague to a new address is not that. `prepareUserForInvite` makes
-// the same distinction for the same reason.
-//
-// **Sessions are left alone, and that is a decision.** Changing an
-// address does not change who the person is, and signing somebody out of
-// three machines because an administrator fixed a typo in their name
-// would be a surprise with no security behind it: a stolen session is
-// revoked by the session routes, which is where that belongs.
 func (s *Service) UpdateIdentity(ctx context.Context, req UpdateIdentityRequest) (User, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	displayName := strings.TrimSpace(req.DisplayName)

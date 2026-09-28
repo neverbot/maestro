@@ -136,10 +136,6 @@ func TestSearchArea(t *testing.T) {
 	// TestSearchArea's "a search with no word in it is refused" case pins the
 	// difference between "this game has nothing like that" and "you did not
 	// ask for anything".
-	//
-	// plainto_tsquery turns a query with no words into an empty tsquery,
-	// which matches no row, so without this check every one of these returns
-	// a clean empty answer indistinguishable from a real miss.
 	t.Run("a search with no word in it is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -171,26 +167,6 @@ func TestSearchArea(t *testing.T) {
 	// ranking Task 7 settled: a row whose **name** is the query outranks a row
 	// that merely mentions the words in a field, however often it mentions
 	// them.
-	//
-	// This is the test Task 6 said would have to change, renamed from its
-	// previous name. It used to assert the opposite order — "mentioned"
-	// first, because the vector was unweighted and the row carrying the
-	// word three times simply matched more often.
-	//
-	// **It covered only the single-word case, and the promise was false for
-	// every other one — review finding M1.** Weights alone do not deliver
-	// it: `ts_rank` saturates towards 1.0 as a lexeme repeats, so one word
-	// under the A weight wins comfortably, but a multi-word query is a
-	// weighted sum of several saturating terms and the frequency side
-	// overtakes the name side. Four repetitions of a two-word phrase in a
-	// lore field were enough to rank that row above the entity actually
-	// named the phrase. SearchEntities now leads its ORDER BY with a
-	// name-match predicate over the A-weighted half of the vector, which
-	// makes the promise a guarantee instead of a tendency, and rank still
-	// orders within each group. The SQL comment argues the choice.
-	//
-	// The mentioned row carries the query far more often than the named row
-	// does in every case below, so no assertion here can pass on frequency.
 	t.Run("search ranks the name match first", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -298,11 +274,6 @@ func TestSearchArea(t *testing.T) {
 	// the default in the game, folding an over-large limit onto the default
 	// and clamping it to the cap return the same answer, and a test built that
 	// way passes either way.
-	//
-	// So there are sixty rows here, above the default of fifty and below the
-	// cap of two hundred. Asking for nothing gets fifty; asking for far too
-	// much gets all sixty, which is what clamping means and what folding
-	// onto the default could not produce.
 	t.Run("search answers an over large limit with more than the default", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -333,14 +304,6 @@ func TestSearchArea(t *testing.T) {
 	// case pins the one thing a caller of Search has to know that the stored
 	// row does not show: a value longer than searchTextLimit is stored and
 	// re-read whole, and findable only by the words in its first 128 KiB.
-	//
-	// **The bound is pinned from both sides, not just the "too far" one** —
-	// the same gap markdown.MaxIndexedChars' own test had (Task 9's review):
-	// a word at offset zero and one past the bound proves the constant is
-	// not too large, but says nothing about whether it is smaller than the
-	// code that enforces it claims. `boundary`'s last byte sits at index
-	// searchTextLimit-1, the tightest position "just inside the bound" can
-	// mean, and it must still be findable.
 	t.Run("only the indexed head of a long field is searchable", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -394,31 +357,6 @@ func TestSearchArea(t *testing.T) {
 	// own argument" case pins the three ways an unbounded or malformed query
 	// reached Postgres and came back as something an agent reads as "the
 	// server is broken".
-	//
-	// Measured on this project's own Postgres before the bound went in,
-	// through Search:
-	//
-	//   - a NUL inside a word — six characters of JSON escape, which an agent
-	//     produces by accident — reached plainto_tsquery and returned
-	//     `ERROR: invalid byte sequence for encoding "UTF8"`, untyped, so it
-	//     surfaced as internal_error. An unpaired surrogate or a lone
-	//     continuation byte — not a control character, but also not valid
-	//     UTF-8 — took the identical path to the identical error.
-	//   - a query of *one word repeated* cost 2.1s of database CPU at
-	//     146 KiB, then failed with `stack depth limit exceeded`, also
-	//     untyped; 292 KiB took 8.5s and 585 KiB took 33.5s. This is a
-	//     separate measurement from MaxSearchQuery's doc comment, which
-	//     timed *distinct* words and found a shorter query and a smaller
-	//     multiplier (126 KiB / 0.36s, 263 KiB / 1.4s, 536 KiB / 5.5s) — the
-	//     two are not the same run and are not meant to be compared word for
-	//     word; see MaxSearchQuery for why a repeated word is not obviously
-	//     the cheaper case for `plainto_tsquery` to parse. Either shape
-	//     alone already makes the point: the growth is quadratic, so a
-	//     handful of concurrent calls is a self-inflicted denial of service.
-	//
-	// All three are the caller's own argument at path `query`, so by this
-	// package's own rule they are invalid_input, and all three are now
-	// refused before a byte of them reaches the database.
 	t.Run("a search query is bounded and reported as the callers own argument", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -466,17 +404,6 @@ func TestSearchArea(t *testing.T) {
 	// TestSearchArea's "search finds a row by its key" case pins what
 	// 0010_entity_key_search.sql added: the handle every other tool on this
 	// surface addresses a row by is a handle search can find.
-	//
-	// Task 9's seeding run measured the hole this closes — `search
-	// ("circuit-000")` answered with nothing, so a designer typing the string
-	// they see in every error message and every listing had to know to reach
-	// for entities.get instead — and pinned it as a passing limitation to be
-	// deleted when it was fixed.
-	//
-	// **The fixture is chosen so the key is the only thing that can match.**
-	// The row is named "Silverpine Straight" and its summary talks about
-	// kerbs; nothing but the key carries the lexeme `circuit-000`. A vector
-	// that had merely grown a copy of the name would leave this red.
 	t.Run("search finds a row by its key", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -521,15 +448,6 @@ func TestSearchArea(t *testing.T) {
 	// TestSearchArea's "a key match does not claim to be a name match" case is
 	// the other half of 0010, and the one that pins *where* in the vector the
 	// key went.
-	//
-	// `name_match` is `ts_filter(search, '{a}') @@ query`, and SearchEntities
-	// leads its ORDER BY with it so that a row the query names outranks a row
-	// that merely mentions the words, however often. 0010 put the key under
-	// label C rather than A precisely so that predicate keeps asking about
-	// the name alone. Without that decision, two hundred rows keyed
-	// `race-000`…`race-199` would every one of them answer the word "race" as
-	// a name match, ahead of the row actually named Race — which is this
-	// fixture, in miniature and with the inversion made visible.
 	t.Run("a key match does not claim to be a name match", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -572,13 +490,6 @@ func TestSearchArea(t *testing.T) {
 	// left the rest unreachable by any path: the cap was a wall. It is a
 	// door now, and this is the assertion that it opens onto the whole set
 	// rather than onto a second copy of the first page.
-	//
-	// The seed is deliberately built so the ranking has ties in both of its
-	// leading columns: twenty rows that carry the word in their *name* and
-	// twenty that carry it only in a field, all with the same shape, so the
-	// walk crosses a page boundary inside a run of equal `name_match` and
-	// equal `rank`. That is the case a keyset that dropped `name` or `id`
-	// from its comparison answers with repeats.
 	t.Run("a paged search reaches every match exactly once", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

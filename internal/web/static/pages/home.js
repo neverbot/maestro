@@ -1,25 +1,5 @@
 // The game home: three lanes, **Views · Catalogue · Prose**, in that
 // order.
-//
-// The metamodel has four primitives and the product has three surfaces
-// over them — the pictures a designer reads, the vocabulary the game
-// declared, and the prose beside it — so this page is the map of the
-// tool and not a dashboard. A designer who has seen it once knows where
-// everything in Maestro lives.
-//
-// **The catalogue lane costs one call.** GET /summary answers with one
-// row per declared type and never a row of content, so a game holding
-// four hundred thousand entities renders exactly as fast, and as small,
-// as one holding four. `theHomeMakesOneSummaryCall` is what stops the
-// obvious future edit — a count per type, fetched per type — from
-// arriving unnoticed.
-//
-// **A game with no views gets a sentence and a link, and no button.**
-// Nothing in this interface writes a view; a saved query is an agent's
-// job over MCP. A *New view* control here would lead nowhere, which is
-// the plan's O1 and the one piece of onboarding this product ships.
-//
-// It fetches nothing itself: every call goes through client.js.
 
 import {
   REREAD,
@@ -63,10 +43,6 @@ export const WRITES_DOCUMENTS = "writes them";
 // here rather than keeping a second wording of the same state: the
 // catalogue destination shows the same two catalogues this lane does,
 // and two wordings of one state is one of them going stale.
-//
-// The first and the third end with whoWrites at the call site, because
-// their last sentence depends on who is reading and a viewer must not be
-// told to do what the server will refuse.
 export const NO_TYPES_HEADING = "No types yet";
 export const NO_TYPES_SENTENCE =
   "A game declares its own — Quest, Zone and Class for one game, Driver, Car and Circuit for " +
@@ -192,11 +168,6 @@ export async function home(opened) {
   // The stream, last: the page has just read everything, so the first
   // connection schedules nothing and only a later event asks for a
   // re-read.
-  //
-  // **A moved document is followed and not cached.** `document.moved`
-  // carries both spellings of the path and the client answers it with a
-  // re-read of the prose surface; a lane that kept the old path would
-  // link a designer at a document that is no longer there.
   const onEvent = (verdict) => {
     if (verdict.decision === REREAD && verdict.target === TARGET_PROSE) {
       return prose.load(summary.role);
@@ -292,20 +263,6 @@ async function catalogueLane(doc, slug, client, summaryEl) {
 }
 
 // SETTINGS_LABEL is the link, and every member of the game gets it.
-//
-// **"Game settings", not "Settings".** The link sits in a game's page
-// head, one word from the game's own name, and a designer reading it
-// there took it for the application's settings — the account, the
-// instance, the theme. What it opens is this game's own screen, and
-// nothing else in the product is called settings, so the word is free to
-// say which.
-//
-// **It was the owner's alone until that screen gained a second tab.**
-// The name and the address still are; the tokens beside them are any
-// member's to see and to revoke, and an editor's to mint. A link shown
-// only to owners would have hidden a credential an editor is allowed to
-// create, which is the server's rule contradicted by the one thing that
-// decides whether anybody ever finds it.
 export const SETTINGS_LABEL = "Game settings";
 const OWNER = "owner";
 const EDITOR = "editor";

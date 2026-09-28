@@ -50,17 +50,6 @@ func TestCycles(t *testing.T) {
 
 	// TestAnAcyclicGameReportsNoCyclesAndSaysHowManyEdgesItWalked is the
 	// negative half, and it is the load-bearing test of this file.
-	//
-	// **The assertion is not that the list is empty.** An empty findings
-	// list is what a walk that followed no edge at all returns too, and
-	// those two are the same JSON. So: empty *and* a non-zero
-	// `edges_walked` *and* a seed total that says the walk started
-	// somewhere.
-	//
-	// **Mutation:** filter the walk down to no relation types at all
-	// (`walk.RelationTypeIDs = nil` in cycleWalk). graph.Walk documents that
-	// an empty list follows no edge, so the findings stay empty, and this
-	// test goes red on edges_walked.
 	t.Run("an acyclic game reports no cycles and says how many edges it walked", func(t *testing.T) {
 		g := a.gated(t)
 		for _, key := range []string{"a", "b", "c", "d"} {
@@ -84,10 +73,6 @@ func TestCycles(t *testing.T) {
 
 	// TestASelfLoopIsReportedAsALengthOneCycle, including its single edge
 	// and its relation type key.
-	//
-	// A self-loop is the shape the earlier walk could not show at all -- it
-	// suppressed the closing row, so a self-loop came back with none of its
-	// edges -- which is why it is checked first.
 	t.Run("a self loop is reported as a length one cycle", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "ouroboros")
@@ -142,14 +127,6 @@ func TestCycles(t *testing.T) {
 	// reads the edges **out of the database** rather than out of the walk's
 	// own row, so a canonicalisation that moved the nodes and left the edges
 	// where they were is red.
-	//
-	// The invariant: edge i joins entity i to entity (i+1) mod n.
-	//
-	// **Mutation:** rotate only the node slice in `rotate` (leave `edges`
-	// as it was). This test goes red on the four-cycle -- edge 0 then joins
-	// the wrong pair -- and TestASelfLoopIsReportedAsALengthOneCycle stays
-	// green, which is the discrimination that proves this tests rotation
-	// rather than existence.
 	t.Run("a cycle and its edges rotate together", func(t *testing.T) {
 		g := a.gated(t)
 		keys := []string{"w", "x", "y", "z"}
@@ -177,16 +154,6 @@ func TestCycles(t *testing.T) {
 
 	// TestTheCycleReportReadsTheWalksClosingHopRatherThanReconstructingIt is
 	// the reliance, asserted.
-	//
-	// This file's whole premise is that graph.WalkCTE returns the
-	// cycle-closing hop exactly once, carrying the relation ids along the
-	// path -- a correction made to that package precisely because the
-	// earlier shape made the one thing this engine exists to find the one
-	// thing the walk could not show. The fixture is the case where
-	// reconstructing edges from consecutive node pairs is ambiguous: **two
-	// gating relation types between the same pair of entities**. The
-	// finding's edge ids must be the ones the walk's own rel_path carried,
-	// not one of the two edges that happen to join the pair.
 	t.Run("the cycle report reads the walks closing hop rather than reconstructing it", func(t *testing.T) {
 		g := a.gated(t)
 		g.declareRelationType(t, "also_unlocks", "", []string{"unlocks"})
@@ -392,12 +359,6 @@ func TestCycles(t *testing.T) {
 
 	// TestAMutuallyExclusivePairIsReportedWithItsRelationTypeSoItCanBeReclassified
 	// is the false positive this report is designed to survive.
-	//
-	// "Choosing the Horde locks the Alliance" is two `requires_not` edges: a
-	// legitimate two-cycle in a type that reads like a prerequisite, whose
-	// fix is a trait declaration and not a change to the content. The
-	// finding therefore has to name `requires_not` on both edges, or the
-	// designer has no way to tell this loop from a real one.
 	t.Run("a mutually exclusive pair is reported with its relation type so it can be reclassified", func(t *testing.T) {
 		g := a.game(t)
 		g.declareEntityType(t, "faction")
@@ -415,11 +376,6 @@ func TestCycles(t *testing.T) {
 	})
 
 	// TestATruncatedCycleReportKeepsTheShortestCycles.
-	//
-	// Findings are ordered shortest first because graph.WalkCTE truncates
-	// with ORDER BY depth: a truncated answer is a connected prefix of the
-	// nearest hops, so the shortest cycles are the ones a truncated report
-	// can actually name -- and they are the most fixable.
 	t.Run("a truncated cycle report keeps the shortest cycles", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "short-a")
@@ -456,10 +412,6 @@ func TestCycles(t *testing.T) {
 	})
 
 	// TestCyclesOverAGameWithNoTraitsRefusesRatherThanReportingHealth.
-	//
-	// A clean bill of health from an engine that had nothing to read is the
-	// worst output this package can produce, and cycles is the analysis
-	// where believing it costs the most.
 	t.Run("cycles over a game with no traits refuses rather than reporting health", func(t *testing.T) {
 		g := a.game(t)
 		g.declareEntityType(t, "quest")
@@ -470,10 +422,6 @@ func TestCycles(t *testing.T) {
 	})
 
 	// TestCyclesOverAnotherGamesTokenIsScopeViolation -- the isolation half.
-	//
-	// The two games live in **one** database, which is what makes this an
-	// assertion: testutil.NewPool builds a throwaway database per call, so
-	// two separately built fixtures could never leak into each other.
 	t.Run("cycles over another games token is scope violation", func(t *testing.T) {
 		mine := a.gated(t)
 		mine.entity(t, "quest", "loop-a")
@@ -498,16 +446,6 @@ func TestCycles(t *testing.T) {
 	})
 
 	// TestATimedOutAnalysisIsRetryableAndSaysWhichBoundToLower.
-	//
-	// **No `analysis_timeout` code**, which errors.go argues at length and
-	// TestNoTimeoutCodeShips pins from the vocabulary side. This is the
-	// behavioural half: a run that exhausts its budget answers `retryable`
-	// -- SQLSTATE 57014 is already in metamodel's retryableSQLStates -- with
-	// a message naming the budget it spent and the four arguments that
-	// narrow a run.
-	//
-	// The budget is set through the package-private knob, which is settable
-	// from nowhere but this package's own tests.
 	t.Run("a timed out analysis is retryable and says which bound to lower", func(t *testing.T) {
 		g := a.gated(t)
 		keys := make([]string, 0, 60)

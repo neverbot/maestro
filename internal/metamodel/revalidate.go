@@ -19,11 +19,6 @@ type storedFields struct {
 // sweep is one re-validation pass, in the terms the rule needs and no
 // others: the schema to judge against, where the rows come from, where
 // the verdicts go, and what to call the rows when something fails.
-//
-// It is a struct of closures rather than an interface because the two
-// implementations are two generated query methods bound to one
-// transaction handle, and an interface would need a type per call site to
-// carry that handle.
 type sweep struct {
 	// fieldSchema is the type's raw declaration, parsed here rather than
 	// by the caller so that a malformed one is refused before either
@@ -37,49 +32,6 @@ type sweep struct {
 }
 
 // revalidate is the schema-evolution rule, written once.
-//
-// **The rule.** A type's field schema may be edited at any time, and the
-// rows already stored against it are neither rejected nor back-filled:
-// they are re-checked, and the ones that no longer fit are flagged. The
-// designer decides what a newly required field should hold, and a
-// validation pass is not an edit of their content. The core design states
-// it for entities; since 0009 it is true of relations too, and the reason
-// this function exists rather than a second copy of the loop is that this
-// repository's most repeated defect is a rule written once, copied, and
-// then fixed in one copy.
-//
-// **CheckValues, never Validate — an intent, not a behaviour.** CheckValues
-// *is* Validate with the map discarded (validate.go), so the two return the
-// same verdict on every input and no test can tell this sweep's call from
-// the write path's. What the narrower call earns is that there is no
-// normalised map in scope to write back: Validate hands one back with
-// declared defaults injected, and a later edit that stored it would
-// back-fill every row the sweep touched, silently, with values no designer
-// chose. TestTypesArea's "schema change does not back fill declared
-// defaults" case and TestRelationsArea's "an edge schema change does not
-// back fill declared defaults" case pin the outcome on each table; this
-// line is what keeps the temptation out of reach.
-//
-// **A row whose stored jsonb will not decode at all is flagged, not
-// returned as an error.** It is content in the database that does not fit
-// what the type says, which is exactly what the flag means, and a sweep
-// that failed on it would refuse the schema edit — the one outcome this
-// rule exists to avoid.
-//
-// **Both verdicts are written, not only the failures.** A schema edit
-// that *widens* a type has to clear the flag on rows it has just made
-// legal again, or a designer's list of things to fix never empties. The
-// two batches are one loop over a table of (ids, flag) so that neither
-// arm can be added to without the other; the statements behind mark carry
-// an `invalid <> flag` guard, so a row whose verdict has not changed is
-// not rewritten and its updated_at does not move.
-//
-// **There is no bound on how many rows a sweep reads**, on either table,
-// and that is stated rather than hidden: the listings carry no LIMIT, so
-// a type with a hundred thousand instances is swept in one pass inside
-// the schema edit's own transaction. It is the same shape the entity
-// sweep has had since it shipped, and whoever bounds one bounds both —
-// which is the point of there being one function to bound.
 func revalidate(ctx context.Context, sw sweep) error {
 	schema, err := ParseSchema(sw.fieldSchema)
 	if err != nil {

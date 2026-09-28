@@ -123,26 +123,6 @@ func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
 // is what stops a game-content route being registered through
 // registerProjectRoute instead, which would compile, serve, and let a
 // viewer write.
-//
-// The rule is inverted from the one this test used to apply, and the
-// inversion is the point. It used to hold a hand-written list of the
-// segments that name game content and check only those, so a route
-// registered through the wrong function under a segment nobody had
-// added to the list — `views`, which api_metamodel.go's own header and
-// app.js both already name as the next thing built on this surface —
-// passed both convention tests and let a viewer write. A review proved
-// exactly that. The `checked == 0` guard below catches a list gone
-// wholly stale, never a single missing entry.
-//
-// So the allowlist is the other set, and that one is closed: under
-// /api/games/{game}/ the product has four standing sub-resources of its
-// own — members, tokens, invites, events — gated by owner/admin checks
-// of their own rather than by requireEditor, plus the bare game itself,
-// which carries no trailing segment and so never reaches the check.
-// Everything else under that prefix is game content by default and must
-// go through registerContentRoute. A new sub-resource that genuinely is
-// not game content is added to notContent here, deliberately, in the
-// same commit that registers it.
 func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 	t.Parallel()
 	s := NewServer(stubOptions("test"))
@@ -179,23 +159,6 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 
 // TestOnlyRouteTouchesTheMux closes the last way a route can reach this
 // server without either convention test above ever seeing it.
-//
-// Both of those tests walk s.registeredPatterns, and only route()
-// appends to it. A handler registered straight on s.mux — one line,
-// compiles, serves — is invisible to both, so the guarantee that a
-// game-content write cannot forget requireEditor held only for routes
-// that went through the front door. This test is the front door's lock:
-// in this package's own source, s.mux.Handle and s.mux.HandleFunc may
-// appear exactly once, inside route().
-//
-// A source-grep test is a blunt instrument and this one is deliberately
-// the narrowest form of it: it does not parse Go, it does not know what
-// a route is, and it will fire if route() is ever renamed or the mux
-// field is. That is the whole cost, and it is paid in a test that fails
-// loudly with an explanation rather than in a surface that lets a viewer
-// write. The alternative — an exported accessor, or a mux type that
-// refuses direct registration — buys the same property at the price of
-// indirection in the thing this file is trying to keep readable.
 func TestOnlyRouteTouchesTheMux(t *testing.T) {
 	t.Parallel()
 	entries, err := os.ReadDir(".")

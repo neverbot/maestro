@@ -1,70 +1,5 @@
 // The `map` renderer: the one picture with a ground under it, and the
 // one whose coordinates are *required* rather than computed.
-//
-// A renderer is a **pure function from an envelope to a scene** — the
-// rule render/graph.js's header sets out, and everything in it applies
-// here: no DOM, no fetch, no colour decision, no SVG. What is new is
-// where the geometry comes from.
-//
-// **It asks the layout engine for nothing**, and the spec is explicit
-// about it: §5.1 says "map's unplaced nodes go to the shelf, not through
-// the engine". A map's coordinates are either two declared number
-// fields — the game's own statement of where a thing is — or the
-// positions designers dragged and saved. Running a graph layout for
-// either would be inventing an arrangement over one somebody already
-// stated. That is why the composed arrangement arrives in `options` and
-// not as a positional `layout` argument: a signature that looked like
-// `graph`'s would read as a renderer that lays out.
-//
-// **The two coordinate modes, and what each one's absence looks like.**
-//
-//   "fields" — `x_field` and `y_field` name declared number fields, and
-//     `project.fields` has to carry them. A node whose x *or* y is
-//     missing cannot be placed at all: it goes to the **shelf**, never
-//     to the origin. `(0,0)` is a place a designer may deliberately have
-//     used, and internal/views/execute.go refuses to return "unplaced"
-//     as a coordinate for exactly that reason; the shelf is the visual
-//     form of the same refusal. The values are used **as they stand** —
-//     no normalisation, no fitting to the viewport — because the game's
-//     numbers are the map's coordinate space, and a renderer that
-//     rescaled them would move everything on the day one node's
-//     coordinate changed.
-//   "manual" — the coordinates designers dragged. A node with no saved
-//     row is on the shelf too, with one exception that is the whole of
-//     §4.2's second bullet: when the view *has* a saved arrangement,
-//     a node new to it is placed by the client, drawn with a **hollow**
-//     anchor, and counted — *"12 new nodes were placed automatically"* —
-//     which is what tells a `manual`-mode designer there is arranging to
-//     do.
-//
-// **The first run, which is this product's most impressive feature
-// meeting a designer for the first time.** A `manual` map where *no*
-// node has a saved position is not the empty state and must not use it:
-// the answer is full, the query matched, and the only thing missing is
-// the designer's own work. So the background is drawn, every node is on
-// the shelf, and the frame says *"Nothing has been placed yet. Drag a
-// node from the shelf onto the map."* Routing that through the generic
-// *"This view matched nothing"* would tell a designer their query is
-// broken at the exact moment it is not.
-//
-// **Where the sentence goes.** `firstRun` comes back in the scene and is
-// not a mark. A sentence drawn into the picture would have a coordinate,
-// and a coordinate pans away from the reader on the first drag; the
-// frame owns prose (Task 4) and this is prose.
-//
-// **What it draws when the answer is not a clean one:**
-//
-//   a node with no coordinate — a labelled chip on the shelf, dashed
-//     (render/marks.js's one spelling for "something this box needs is
-//     not here"), counted in a band, and **no mark anywhere at (0,0)**.
-//   a background that is gone — the plain ground, every coordinate
-//     untouched, and one line in the frame. `background_asset_id` is
-//     ON DELETE SET NULL, so this is an ordinary transition between two
-//     runs rather than a fault.
-//   an edge that leaves the picture — a stub, exactly as `graph` draws
-//     one, counted in the footer.
-//   a relation from an entity to itself — counted, not drawn.
-//   a truncated answer — what an untruncated one draws.
 
 import { addressOf } from "../address.js";
 import { labelFor } from "../palette.js";
@@ -129,11 +64,6 @@ export function shelfCaption(count) {
 // The controls. Each tooltip says what the knob does to the **picture**,
 // which is the half internal/views/renderers.go deliberately does not
 // carry (render/controls.js's header has the argument).
-//
-// `coordinate_source`'s is the one that matters most here, because the
-// two modes are two different products: one reads what the *game*
-// declares and cannot be dragged, the other reads what a *designer*
-// dragged and is the reason this renderer has a shelf at all.
 export const CONTROLS = [
   control(
     PARAM_COORDINATE_SOURCE,
@@ -171,49 +101,6 @@ export const CONTROLS = [
 // --- The scene -------------------------------------------------------
 
 // mapScene is the picture.
-//
-// `options`:
-//   layout     — a composition from layout/compose.js, when the page
-//                made one: `{placements: [{key, x, y, pinned, source}]}`.
-//                Only `manual` mode reads it, and only for the nodes a
-//                saved arrangement does not cover. Absent, the saved
-//                arrangement is read straight off the envelope's
-//                `positions[]`, which is the whole of what this renderer
-//                needs and costs no engine.
-//   background — the ground this view names: `{href, scale, offset,
-//                width, height}`. **Its presence is the caller's
-//                statement that the view names a ground**; an href that
-//                cannot be drawn is then a background that is gone, and
-//                is banded. Only the caller can tell those two apart:
-//                internal/views' RemoveAsset resets the scale and the
-//                offset along with the id, precisely so that no knob is
-//                left placing an image that does not exist, which leaves
-//                a removed background and one that was never set
-//                identical in the database.
-//   zoom       — the canvas's current scale, read only to decide whether
-//                the grid is drawn.
-//
-// Returns:
-//   marks     — the scene.
-//   legend    — null, always: this renderer paints no data. See
-//               render/marks.js's POINT_FILL for the argument.
-//   placed    — the addresses that got a pin.
-//   shelf     — `{key, label}` per node with no coordinate, in address
-//               order, which is also the order the chips are drawn in.
-//   automatic — how many pins are at a coordinate this client chose
-//               because the arrangement had no row for the node, for the
-//               frame's *"n new nodes were placed automatically"*. It is
-//               **not** the number of hollow anchors: a stored row that
-//               nobody is holding draws hollow and is not new.
-//   firstRun  — the sentence, or null. Not a mark; see the header.
-//   background — `{drawn, missing}`.
-//   grid      — `{spacing, drawn}`, so a test and the canvas read one
-//               answer about a thing that is sometimes not there.
-//   stubs, loops — as every renderer reports them, for the footer.
-//   offMap    — edges the answer has whose two ends are both in it and
-//               at least one of which is on the shelf. Drawn as nothing
-//               and counted, so that lines + loops + offMap + stubs is
-//               exactly the answer's edge count.
 export function mapScene(envelope, params = {}, options = {}) {
   const nodes = nodesOf(envelope);
   const config = readParams(params);
@@ -347,11 +234,6 @@ export function mapScene(envelope, params = {}, options = {}) {
 
 // coordinatesFor is the whole of `coordinate_source`, and it is the one
 // place a node either has a place on this map or does not.
-//
-// Returns a Map from address to `{x, y, placed}`, where `placed` says a
-// *person or the game* chose this coordinate — a solid pin — as against
-// a coordinate this client computed for a node new to a saved
-// arrangement, which is drawn hollow and counted.
 function coordinatesFor(nodes, envelope, config, options) {
   const out = new Map();
   if (config.mode === COORDINATES_FIELDS) {
@@ -387,14 +269,6 @@ function coordinatesFor(nodes, envelope, config, options) {
   // mixed layout mode is entirely about, *which nodes did I place and
   // which did the engine*, was written, stored, returned in `positions[]`
   // and never drawn.
-  //
-  // It collapses into the hollow ring rather than inventing a third
-  // mark, because the two facts are one fact from a designer's side: a
-  // coordinate the client computed and a stored coordinate nobody is
-  // holding are both *nobody put this here*. Unpinning already promises
-  // to change no pixel until the position is cleared
-  // (mst-canvas.js's NOTE_UNPIN_NEEDS_CLEAR) — it changes the ring, and
-  // that is the promise made visible rather than broken.
   for (const [key, row] of saved) {
     // `automatic: false` whatever the pin looks like: this node has a
     // row, so it is not one of the *new* ones the band counts. The ring
@@ -441,10 +315,6 @@ function coordinatesFor(nodes, envelope, config, options) {
 
 // shelfMarks is the strip along the bottom: a rule with the count on it,
 // and one dashed chip per node that has nowhere to go.
-//
-// The chips are laid out with the same `chipWidth` that draws them, so
-// the strip cannot overlap its own plates — boxFor's argument about two
-// measurements, one step along.
 function shelfMarks(shelf, bounds) {
   if (shelf.length === 0) return [];
   const left = bounds ? bounds.minX : 0;
@@ -483,10 +353,6 @@ function shelfMarks(shelf, bounds) {
 
 // groundFor is the background rectangle, or null when there is nothing
 // drawable to draw.
-//
-// The scale multiplies the asset's own pixel size and the offset places
-// its top-left corner, which is what `views.set_background` writes and
-// what internal/views/assets.go defaults to 1 and (0,0).
 function groundFor(background) {
   if (!background || typeof background !== "object") return null;
   const scale = Number.isFinite(background.scale) && background.scale > 0 ? background.scale : 1;
@@ -515,11 +381,6 @@ function groundFor(background) {
 }
 
 // backgroundMissing is "this view names a ground and there is none".
-//
-// A view that names no background says nothing — render/scene.js's own
-// first rule, that there is no band for the absence of a thing — so an
-// absent descriptor is silence and a descriptor that cannot be drawn is
-// the band.
 function backgroundMissing(background) {
   if (!background || typeof background !== "object") return false;
   return groundFor(background) === null;
@@ -528,13 +389,6 @@ function backgroundMissing(background) {
 // --- Reading the parameters ------------------------------------------
 
 // readParams is the one reader of renderer_params.
-//
-// `snap` is read in `manual` mode only, which is the catalogue's own
-// rule: internal/views/renderers.go refuses the parameter in `fields`
-// mode outright, saying that a node's coordinates come off its declared
-// fields there, nothing is dragged, and a grid size changes no picture.
-// A client that drew the grid anyway would be drawing a knob the server
-// would not have stored.
 function readParams(params) {
   const p = params && typeof params === "object" ? params : {};
   const snap = p[PARAM_SNAP];
@@ -584,16 +438,6 @@ function labelOf(node) {
 }
 
 // numberOf is a node's value for a declared number field, or null.
-//
-// It reads `fields` as well as `attrs`, and that is not a convenience:
-// `x_field` names a **declared field key**, which reaches the envelope
-// through `project.fields` (internal/views/renderers.go's kindNumberField
-// requires exactly that), and a run with `include_fields` carries it in
-// `fields` instead. Both are the game's own number for this node.
-//
-// `hasOwnProperty` and a finiteness test rather than `|| 0`: a field
-// absent and a field carrying 0 are two answers, and the second is a
-// coordinate the game means.
 function numberOf(node, key) {
   if (key === null) return null;
   for (const bag of [node.attrs, node.fields]) {

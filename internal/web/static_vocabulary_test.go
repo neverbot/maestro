@@ -13,15 +13,6 @@ import (
 
 // The guards that keep the design pass from decaying one screen at a
 // time.
-//
-// The token guards already refuse a colour declared in one theme and not
-// the other, and a token nothing reads. These are their equivalent for
-// the *vocabulary*: a screen that hand-rolls something the product has a
-// shared shape for should fail something, rather than looking slightly
-// wrong to whoever notices next.
-//
-// Both of them exist because a review found the fault they now guard,
-// twice each, on different screens.
 
 func shellSources(t *testing.T) map[string]string {
 	t.Helper()
@@ -45,25 +36,6 @@ var emptyStateHole = regexp.MustCompile(`<(\w+)([^>]*\bid="[\w-]*(?:-empty|-miss
 
 // TestEveryEmptyStateIsAHoleAndNotAShape holds the one negative state
 // this product has.
-//
-// The 2026-09-09 audit counted four different shapes for "there is
-// nothing here" on a single screen: a filled box with a coloured left
-// stripe, two bare grey sentences, and a nine-line paragraph explaining
-// the MCP API in a 200px lane. Three said the same thing in a different
-// voice and the fourth wore a treatment the identity bans by name.
-//
-// The first fix gave them all `class="state"` and left each shell
-// writing its own heading and sentence inside it, which is the shared
-// *class* and not the shared component: ten copies of one shape, each
-// free to drift, and one of them — the entity page's — never rendered at
-// all, because that page replaces its content wholesale and nobody
-// noticed the markup was dead.
-//
-// So a shell declares the hole and nothing else. The shape arrives from
-// pages/page.js's negativeState, through fillState, at the call site that
-// knows what the words are — including the half that depends on who is
-// reading. A hole that is empty on screen is visible; markup that is
-// present and wrong is not.
 func TestEveryEmptyStateIsAHoleAndNotAShape(t *testing.T) {
 	t.Parallel()
 	var offences []string
@@ -98,13 +70,6 @@ var holeID = regexp.MustCompile(`\bid="([\w-]*(?:-empty|-miss))"`)
 
 // TestEveryNegativeStateHoleIsFilledBySomething is the other half of the
 // guard above, and it is the half that matters.
-//
-// A hole is only better than markup if something puts a state in it. The
-// shell no longer says anything, so a page that forgets its fillState
-// call renders a blank gap where "there is nothing here" should be, and
-// nothing anywhere is red: an empty div is exactly what an empty div
-// looks like. This is the project's "a mechanism nothing reads is a lie"
-// rule pointed at its own fix.
 func TestEveryNegativeStateHoleIsFilledBySomething(t *testing.T) {
 	t.Parallel()
 	modules, err := filepath.Glob("static/**/*.js")
@@ -147,26 +112,10 @@ func TestEveryNegativeStateHoleIsFilledBySomething(t *testing.T) {
 // controlsTheStylesheetMustDress is every control a shell actually puts
 // in the light DOM. components/control-styles.js dresses the ones inside
 // shadow roots and has its own guard; this is the other half.
-//
-// `textarea` is deliberately absent: no shell has one, and a rule for a
-// control nothing renders is the "mechanism nothing reads" this project
-// deletes rather than keeps. The day a shell gains one, this list gains
-// it in the same change — which is a line of this test, which is a
-// conversation.
 var controlsTheStylesheetMustDress = []string{"button", "input", "select"}
 
 // TestTheStylesheetDressesEveryLightDomControl is the light-DOM half of
 // the shadow-boundary guard.
-//
-// `select` was never written in styles.css. The design pass that found
-// five of six controls rendering as browser defaults fixed them inside
-// the shadow roots, added a guard for exactly that, and did not carry
-// the rule to the page — so the prose page's two version pickers shipped
-// as `2px inset` browser defaults filled `#e9e9ed`, a cold blue-grey
-// that exists nowhere in this palette, beside a serif page title.
-//
-// It asserts a rule exists, not that it is right: what a control looks
-// like is a design decision and this is a check that one was made.
 func TestTheStylesheetDressesEveryLightDomControl(t *testing.T) {
 	t.Parallel()
 	// **The page's controls are dressed by static/controls.css**, which

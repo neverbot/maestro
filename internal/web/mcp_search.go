@@ -12,68 +12,12 @@ import (
 
 // This file is the one search surface the markdown spec's §8 asks for:
 // two indexes, one ranked list, every hit labelled with what it is.
-//
-// **The union is here and not in SQL.** A single UNION ALL query would
-// have to carry a second copy of SearchEntities' ranking expression —
-// the most measured statement in this repository, with an EXPLAIN and
-// 200 timed runs in its comment — and a copy is a thing that drifts.
-// Two queries, each the authority for its own index, merged by the same
-// (name_match, rank) key both of them order by.
-//
-// **The merge is complete for a top-N.** Each side returns its own top
-// `limit` under the identical sort key, so a hit that would have placed
-// in the overall top `limit` cannot have been cut from its own side's
-// top `limit`. Nothing that would have been shown is lost.
-//
-// **The two ranks are comparable**, and this is the assumption that has
-// to be stated rather than assumed: both are ts_rank over a `simple`
-// configuration with the default weight array ({D:0.1, C:0.2, B:0.4,
-// A:1.0}; neither query passes one), over a vector whose A half is the
-// row's subject — an entity's name, a document's title — and whose lower
-// weights are the rest. They would not be comparable if the two indexes
-// used different configurations, which is one of the three reasons the
-// markdown plan settled on `simple` for both.
-
-// The two things a game holds, and the two values `kind` narrows to. The
-// empty value is "both", which is the point of the surface.
 const (
 	searchKindEntity   = "entity"
 	searchKindDocument = "document"
 )
 
 // SearchInput is the argument shape of the search tool.
-//
-// **Kind is the filter the spec asks for**, and an unrecognised value is
-// refused rather than defaulted: reading "quest" as "both" would answer
-// a question the caller did not ask with a full page, which is the
-// failure mode this read surface is most exposed to
-// (TestAnUnrecognisedSearchKindIsRefused). TypeKey narrows the entity
-// half only and DocKind the document half, so passing either against
-// the other kind is invalid_input rather than a silently ignored
-// argument.
-//
-// DocKind's empty value is "no filter", and it has no spelling for
-// "documents carrying no kind at all" — the same limitation
-// markdown.ListFilter.Kind records, since a document's kind is optional
-// and "" is also a real stored value.
-//
-// **Verbose is off by default, and it is the listing's rule rather than
-// a second one.** EntitiesListInput states it: a page of five hundred
-// entities with their fields is the whole game back in one answer, and
-// an agent walking a catalogue almost always wants keys and names. A
-// search is the *stronger* case, not a weaker one — it is what an agent
-// reaches for when it does not yet know what it is looking for, so the
-// payload it swallows is by definition the payload of rows it has not
-// decided it wants. Task 9 measured that: against a game whose rows
-// carry 25 KB of lore each, one sixty-hit search answered with 1.6 MB of
-// JSON, and there was no argument that turned it off. There is now, it
-// is spelled the same as the listing's, and it defaults the same way.
-//
-// It gates the entity half only. A document hit has never carried a body —
-// DocumentHitOutput's comment argues why, and TestSearchArea's "a search
-// hit carries no body at all" case pins it over every field — so there is
-// nothing on that side for this flag to withhold, and a flag that silently
-// meant less on one of two kinds would be worse than no flag.
 type SearchInput struct {
 	ScopedArgs
 	Query   string `json:"query"`
@@ -91,26 +35,6 @@ type SearchInput struct {
 }
 
 // SearchHit is one result, labelled.
-//
-// **This shape replaces the entity-only one that shipped**, and the
-// replacement is deliberate rather than additive. The alternative was to
-// keep the entity fields at the top level and add optional document
-// ones, which would have meant a schema whose `Required` list was a lie
-// for half the hits: `type_key`, `key`, `name`, `invalid` are not
-// properties a document has. Nesting each kind under its own key keeps
-// every field honest and keeps one ranked list.
-//
-// Kind, NameMatch and Rank are at the top level because they are the
-// three things that are true of both, and because Kind is what a client
-// branches on before it looks at anything else.
-//
-// NameMatch is on the wire, not only in the sort, for the reason it was
-// put there for entities: the order is `(name_match, rank)`, and a
-// caller that re-sorts by rank alone reconstructs the wrong order,
-// because a hit with name_match false can carry a higher rank than one
-// with it true and still sort after it.
-// TestSearchRanksANamedHitAboveAMentionAcrossKinds asserts that
-// inversion across the two indexes.
 type SearchHit struct {
 	Kind      string             `json:"kind"`
 	NameMatch bool               `json:"name_match"`
@@ -147,12 +71,6 @@ type LinkedRef struct {
 }
 
 // SearchOutput is one ranked list of labelled hits.
-//
-// Truncated says the answer filled the limit, which a caller cannot
-// otherwise tell: this is a top-N and not a page, and there is no cursor
-// to be absent. It is the weaker thing this envelope can honestly check
-// — an answer exactly as long as the limit allowed may or may not have
-// had more behind it — and the recovery either way is a narrower query.
 type SearchOutput struct {
 	Items     []SearchHit `json:"items"`
 	Truncated bool        `json:"truncated"`
@@ -164,13 +82,6 @@ type SearchOutput struct {
 }
 
 // MCPSearch implements search over both of a game's indexes.
-//
-// An entity hit carries its fields only when the caller asked to be
-// verbose, which is entities.list's rule applied here; SearchInput
-// carries the argument. Without it a hit is identity — kind, key, name,
-// type, invalid, version — which is what a caller narrowing down what it
-// is looking for needs, and entities.get or a verbose repeat is the
-// second call that reads the one it chose.
 func MCPSearch(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
 		return SearchOutput{}, err
@@ -182,10 +93,6 @@ func MCPSearch(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See mcp_metamodel.go's
 // header.
-//
-// The caller is unused today and named `_` rather than dropped: every
-// core on this surface takes one, and a signature that differs only
-// where nothing needs it is a thing to re-derive at each call site.
 func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
 	switch in.Kind {
 	case "", searchKindEntity, searchKindDocument:
@@ -289,28 +196,6 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 	// The merge. sort.SliceStable, so the two sides' own tie-breaks —
 	// name then id for entities, title then id for documents — survive
 	// into the merged order and two identical calls answer identically.
-	//
-	// **This is load-bearing, not a defensive choice with nothing to
-	// pin.** An earlier version of this comment claimed sort.Slice was
-	// equally safe, on the theory that each side arrives already ordered
-	// by the key this comparator uses, so the concatenation is always
-	// non-decreasing and pdqsort has nothing to reorder. That holds only
-	// when the entity block happens to rank above the document block. It
-	// does not have to:
-	// TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks builds
-	// twenty entities and twenty documents that only *mention* the query
-	// (name_match false on both sides), scored by the two differently
-	// built vectors at 0.396 and 0.649 respectively — so the entity
-	// block, appended first, ranks *below* the document block appended
-	// after it. The concatenation is then descending-out-of-order across
-	// its full length, sort.Slice really does partition, and it destroys
-	// both queries' own title-then-id and name-then-id tie-breaks — the
-	// same fixture is red against sort.Slice, proved by hand, and green
-	// against sort.SliceStable, which is what ships.
-	// TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls records the
-	// narrower case — same-kind ties only — where sort.Slice does still
-	// pass, and says why that fixture alone cannot tell the two sorts
-	// apart.
 	sort.SliceStable(out.Items, func(i, j int) bool {
 		a, b := out.Items[i], out.Items[j]
 		if a.NameMatch != b.NameMatch {
@@ -334,14 +219,6 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 // searchEntities runs the entity half of a search, paged or not, and
 // returns the rows in one shape so the caller above builds a hit exactly
 // once.
-//
-// **Two calls into the domain and one shape out of this function.** The
-// unpaged Search is what an agent asking for the best matches gets, and
-// it is what the merged answer is built from; SearchPage is what a
-// screen walking a whole matching set uses. They are separate in the
-// domain because they make different promises (see metamodel.Search's
-// own comment on what a top-N answer is), and folding them together here
-// would put that distinction in this file instead.
 func searchEntities(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in SearchInput, limit int32) (
 	[]searchedEntity, string, error,
 ) {

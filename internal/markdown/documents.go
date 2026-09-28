@@ -15,33 +15,6 @@ import (
 )
 
 // WriteInput is one document write.
-//
-// **ExpectedVersion is required and 0 spells a create** (spec §7). It is
-// a pointer so that "absent" is distinguishable from "zero", and absent
-// is invalid_input at its own path rather than a guess: the metamodel
-// reads an absent version as "I am creating", and inheriting that here
-// would throw away the whole value of 0 — a typo'd path would silently
-// become a second document and the caller would be told it succeeded.
-//
-// IncludeCurrent asks for the current body back on a conflict. It
-// defaults to false in Go, and the *tool* defaults it to true (Task 10):
-// the default belongs on the wire, where an agent that does not know
-// about the argument gets the useful behaviour, and the Go zero value
-// stays honest.
-//
-// **Kind is a pointer for the same reason ExpectedVersion is: "absent"
-// and "empty" are different instructions, and a plain string cannot
-// distinguish them.** `kind` is a property of the document, not of any one
-// edit — it says what shelf a document sits on, and nothing in a body-only
-// fix to a typo means "move the shelf." A nil Kind leaves whatever is
-// stored alone; a Kind pointing at "" clears it, same as pointing at any
-// other value sets it. TestDocumentsArea's "an edit that omits kind leaves
-// it unchanged" case pins both directions. Revert and Task 10's
-// `docs.write` both read from this: Revert never sets it at all
-// (TestVersionsArea's "reverting leaves the documents kind alone" case),
-// and the tool leaves the argument optional and omits it from the request
-// when the caller does not pass one, rather than defaulting it to the empty
-// string on the wire the way IncludeCurrent defaults the other way.
 type WriteInput struct {
 	Path            string
 	Content         string
@@ -53,52 +26,10 @@ type WriteInput struct {
 
 	// Links replaces the document's whole attachment set when it is
 	// non-nil, and leaves it untouched when it is nil.
-	//
-	// **The pointer is the distinction and it is load-bearing.** A plain
-	// slice cannot tell "attach nothing" from "do not touch the links", and
-	// reading an omitted array as empty would silently detach every attachment
-	// on every ordinary edit — the single most destructive thing this tool
-	// could do quietly. `Links: &[]LinkTarget{}` is the one way to say "detach
-	// everything", and it has to be said. TestLinksArea's "a links array on a
-	// write replaces the set and omitting it preserves it" case pins all four
-	// cases (create with, omit, replace, empty).
-	//
-	// The same distinction has to survive JSON, which is where Kind's version
-	// of this rule was found broken after the fact: `omitempty` on a plain
-	// slice omits an empty one, so the wire would collapse "detach everything"
-	// back into "say nothing". A pointer plus omitempty does not, in either
-	// direction, and TestLinksArea's "omitting links and sending an empty
-	// array are different on the wire" case pins that here rather than leaving
-	// it to the surface that will carry it (Task 10's DocsWriteInput.Links,
-	// which must stay `*[]DocsLinkInput` for exactly this reason).
-	//
-	// **`"links": null` is decided, not just observed.** encoding/json
-	// leaves a `*[]T` field nil for both an omitted key and an explicit
-	// `null`, so the two already collapse into one Go value with no choice
-	// made here. What this comment states is that the collapse is the intended
-	// answer: `null` preserves, the same as omitting the field, and not the
-	// same as `[]`, which detaches everything. The safe side, since a caller
-	// silent about links keeps them — but a caller who sent `null` meaning
-	// "detach" gets the opposite with nothing to notice by, so Task 10's tool
-	// description must say this in words an agent reads before it guesses.
-	// TestLinksArea's "omitting links and sending an empty array are different
-	// on the wire" case pins `null` alongside omitted and empty.
 	Links *[]LinkTarget
 }
 
 // Write creates or updates one document and records the snapshot.
-//
-// The whole compare-and-set happens in SQL: UpsertDocument's DO UPDATE is
-// guarded by the caller's expected version, so two writers cannot both read
-// version 1 and both succeed. The test that actually pins that guard is
-// TestViewsArea's "the guarded upsert is what refuses a creation that raced
-// another" case, which stages the overlap rather than hoping two goroutines
-// produce one: unstaged, the locked read below finds the committed row
-// first and refuses in Go, leaving the SQL guard untouched — `=` widened to
-// `>=` and the guard deleted outright both left the suite green until that
-// test existed. The FOR UPDATE read does not buy the refusal; what it buys,
-// and what no test here distinguishes, is stated at
-// GetDocumentByPathForUpdate.
 func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput) (dbq.Document, error) {
 	content, err := checkWrite(in)
 	if err != nil {
@@ -120,14 +51,6 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 
 // writtenDocument is one landed write travelling from the transaction
 // that wrote it to the announcement that follows the commit.
-//
-// **The links flag travels with the row rather than being re-read from
-// the caller's input**, for the reason metamodel.upsertedEntity carries
-// its type key: a batch publishes after its transaction, over a slice,
-// and pairing a row with the wrong item's answer to "did this write say
-// anything about links" is one index slip away. eventDocumentLinked's
-// own comment argues why a write silent about links must not announce a
-// link change; this is what keeps that true for an item of a batch.
 type writtenDocument struct {
 	row   dbq.Document
 	links bool
@@ -135,12 +58,6 @@ type writtenDocument struct {
 
 // publishWrite announces one landed write: the document, and — only when
 // the caller said something about the links — the attachment set too.
-//
-// **Called after the transaction has committed and never from inside
-// it**, which is Service.publish's standing rule. Both callers obey it:
-// Write publishes after withTx returns, and WriteMany hands this to
-// BulkSpec.Publish, which metamodel.BulkUpsert calls only once the
-// transaction that wrote the row has committed.
 func (s *Service) publishWrite(projectID uuid.UUID, written writtenDocument) {
 	row := written.row
 	s.publish(projectID, eventDocumentWritten, documentEventMinRole, documentEventHumanOnly,
@@ -158,14 +75,6 @@ func (s *Service) publishWrite(projectID uuid.UUID, written writtenDocument) {
 // writeOneWith is one whole write against a queries handle that is
 // already inside a transaction: the document, its version row, and the
 // attachments when the caller named any. It publishes nothing.
-//
-// **This is the unit a batch item is**, which is why it exists at all:
-// bulk.go hands one of these to metamodel.BulkSpec.Write, and Write
-// calls it through its own withTx. One implementation, so a batched
-// write and a single one cannot drift into meaning different things —
-// the links replacement inside the same transaction as the body most of
-// all, since a link naming an entity that does not exist has to take the
-// body down with it either way.
 func (s *Service) writeOneWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	in WriteInput, content Content,
 ) (writtenDocument, error) {
@@ -187,16 +96,6 @@ func (s *Service) writeOneWith(ctx context.Context, q *dbq.Queries, projectID uu
 // checkWrite judges everything about one write that can be judged before
 // the database is touched, and returns the split content the write will
 // store.
-//
-// It is separate from Write for one reason: a batch has to run it per item,
-// *inside* the item's own attempt, so that an item with a bad path is
-// reported at its own index and the rest of the batch still lands. Left in
-// Write's body it would have been copied into the batch — the defect this
-// repository has shipped most often — and the copy would have been the one
-// to drift, since only one of the two has a test for every refusal.
-// TestDocumentsArea's "every problem with one write is reported in one
-// pass" case pins the single-write pass and TestBulkArea's "a batch lands
-// the good documents and reports the rest" case the batch's.
 func checkWrite(in WriteInput) (Content, error) {
 	// Every problem in one pass: a caller whose path and whose kind are
 	// both wrong hears about both, rather than fixing one, calling again
@@ -282,29 +181,6 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		// and for a saved view, reached here first and by the same
 		// reasoning — a version claim is a claim about a row that
 		// exists.
-		//
-		// **Where this domain is deliberately different is the row that
-		// *was* deleted, and it must not be harmonised with the
-		// metamodel.** The read above carries no deleted_at filter, so a write to
-		// a tombstoned path never reaches this branch at all: it finds the row,
-		// compares versions and continues the document — same id, same links,
-		// version numbering unbroken (TestDeleteArea's "writing to a deleted path
-		// resurrects it and continues the numbering" case, and TestDeleteArea's
-		// "a stale version cannot silently resurrect a document" case for the
-		// guard on it). A path is resurrectable *by design* here: deletion is
-		// soft, the tombstone keeps the whole history, and bringing a document
-		// back is the same call as writing it, so nothing a caller would mourn is
-		// lost and refusing would leave it no route back to its own document.
-		//
-		// The metamodel's resurrection loses the association instead —
-		// its removals are hard, so the row that comes back carries a new
-		// id and every relation, position, saved-view reference and
-		// attachment that named the old one names nothing. So the two
-		// rules differ because the two deletions differ, not because two
-		// domains disagree about concurrency, and this branch and
-		// metamodel.RemovedError agree exactly where they can: a claim
-		// against a row that is *not there in any form* is refused in
-		// both.
 		if expected != 0 {
 			return dbq.Document{}, missingDocument(in.Path)
 		}
@@ -394,16 +270,6 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		// — a version is authored once and never edited — under the same
 		// composite key shape, which is the prefix actorColumns was
 		// missing.
-		//
-		// **Unreachable today, and kept for the reason the row-count
-		// arms in internal/views are.** A version is never inserted outside the
-		// transaction that wrote its document, and documents' own composite key
-		// is checked first, so a foreign token is always refused one statement
-		// earlier: deleting these three lines leaves TestDocumentsArea's "a
-		// document written with another games token is refused as such" case
-		// green. What it costs to keep is nothing, and what it buys is that a
-		// future snapshot-writing path — a restore, a squash — does not inherit a
-		// raw SQLSTATE by being written somewhere this arm was never added.
 		if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 			return dbq.Document{}, mapped
 		}
@@ -457,16 +323,6 @@ func (s *Service) conflictAfterFailedUpsert(ctx context.Context, q *dbq.Queries,
 // conflictOn builds the conflict a caller must merge onto, carrying the
 // current document when the caller asked for it and *who wrote it*
 // whether or not it did.
-//
-// Deleted is read off the row rather than passed in, so no call site can
-// forget it: every path that reaches here has already re-read the document,
-// and whether that document is a tombstone is a property of what was read
-// and not of who is asking. It is the difference between telling a caller
-// to merge and re-read — which for a deleted document answers not_found —
-// and telling it that writing brings the document back. Both directions are
-// pinned: TestDeleteArea's "a stale version cannot silently resurrect a
-// document" case and TestDeleteArea's "an ordinary conflict does not claim
-// the document was deleted" case.
 func (s *Service) conflictOn(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	row dbq.Document, include bool,
 ) error {
@@ -500,16 +356,6 @@ func (s *Service) conflictOn(ctx context.Context, q *dbq.Queries, projectID uuid
 }
 
 // Read returns one document in full, by path.
-//
-// A soft-deleted document is not found. Deletion is soft so that nothing is
-// lost and a mistaken removal is recoverable (spec §3), not so that every
-// reader has to filter — a caller that wants the deleted row asks the
-// listing for it (Task 8) or reads a version (ReadVersion, whose document
-// resolution deliberately includes deleted rows). TestDeleteArea's
-// "deleting a document hides it from reads and keeps its history" case pins
-// the hiding, and TestDeleteArea's "writing to a deleted path resurrects it
-// and continues the numbering" case pins that the same path reads again
-// once it is written to.
 func (s *Service) Read(ctx context.Context, projectID uuid.UUID, path string) (dbq.Document, error) {
 	if err := CheckPath(path); err != nil {
 		return dbq.Document{}, err
@@ -524,16 +370,6 @@ func (s *Service) Read(ctx context.Context, projectID uuid.UUID, path string) (d
 }
 
 // DeleteInput is one soft deletion.
-//
-// Message is recorded on the tombstone version, so "why was this cut"
-// is answerable from the history rather than from someone's memory.
-//
-// ExpectedVersion is required for the same reason it is on a write, and
-// there is no value with a special meaning here: 0 spells "create" on a
-// write, and on a delete it can match no stored current_version at all
-// — the column starts at 1 and only climbs — so a caller passing it is
-// simply refused, as not_found if the path is free and as a conflict if
-// it is not.
 type DeleteInput struct {
 	Path            string
 	Message         string
@@ -543,32 +379,6 @@ type DeleteInput struct {
 
 // Delete soft-deletes one document: the row keeps its path and its whole
 // history, and a later write to the same path resurrects it.
-//
-// **It appends a tombstone version and advances current_version**, and
-// the plan's Task 4 argues why at length; in short, so that current_version
-// never disagrees with the newest version row, and so that a caller holding
-// a version from before the delete conflicts instead of resurrecting the
-// document without noticing (TestDeleteArea's "a stale version cannot
-// silently resurrect a document" case).
-//
-// **It returns the tombstoned row**, which the plan's signature did not.
-// The version number the deletion landed on is the one a caller must pass
-// as expected_version to bring the document back, and it is the one number
-// Read cannot supply, because Read is precisely what stops answering.
-// Returning nothing would leave "delete, then undo" to a caller inferring
-// current + 1 from what it happened to hold. TestDeleteArea's "deleting a
-// document hides it from reads and keeps its history" case reads it back.
-//
-// Hard deletion is deliberately not offered. Losing a designer's writing
-// to an agent's mistaken tool call is not a risk this product takes; an
-// instance admin who genuinely must purge a row does it in the database.
-// That is also what keeps GetDocumentByPathForUpdate's third argument
-// for FOR UPDATE hypothetical rather than load-bearing, and what keeps
-// conflictAfterFailedUpsert's re-read from ever missing its row: with no
-// hard delete anywhere in this package, a row that failed the guarded
-// upsert is still there to be re-read a statement later, so that
-// function's error arm cannot turn a caller's own conflict into an
-// internal_error.
 func (s *Service) Delete(ctx context.Context, projectID uuid.UUID, in DeleteInput) (dbq.Document, error) {
 	// One pass over every argument, as Write does: a caller whose path and
 	// whose message are both wrong hears about both. TestDeleteArea's "every
@@ -685,15 +495,5 @@ func (s *Service) deleteRefusal(ctx context.Context, q *dbq.Queries,
 	// largest payload in the system attached to the one call that wanted none
 	// of it. TestDeleteArea's "deleting with a stale version is a conflict"
 	// case asserts the conflict carries the version and no body.
-	//
-	// The path is not re-checked for a respelling here, unlike
-	// conflictAfterFailedUpsert. It cannot differ in a way that matters:
-	// SoftDeleteDocument matches on lower(path), so a delete addressed under
-	// another casing reaches the same row and succeeds, and the stored
-	// spelling comes back on it (TestDeleteArea's "a path is matched without
-	// regard to case on delete" case). A write refuses a respelling because it
-	// would otherwise overwrite content under a handle the caller did not
-	// mean; a delete overwrites nothing and removes exactly the document the
-	// caller named.
 	return s.conflictOn(ctx, q, projectID, row, false)
 }

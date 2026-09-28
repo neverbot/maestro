@@ -18,57 +18,6 @@ import (
 // in how a refusal is spelled: an MCP tool answers a code inside a tool
 // result, this file answers the same code and the same details object
 // under an HTTP status, through writeDomainError.
-//
-// Two routes have no MCP twin, deliberately: /docs/rendered and
-// /docs/comparison. **MCP always gets the raw body** (spec §7) — an
-// agent asked to rewrite a script needs the markdown it will edit, and
-// handing it HTML would mean it rewrote the rendering — so rendering is
-// a REST-only affordance for the browser.
-// TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets reads one document
-// through both surfaces and pins that split.
-//
-// **A document path travels as a query parameter and never as a URL
-// segment.** This breaks the metamodel's own convention
-// (/types/by-key/{key}, api_metamodel.go's header) and the reason is
-// Go's router, not taste. A document path contains slashes, so the
-// equivalent shape would be /docs/by-path/{path...}, and ServeMux
-// requires a {...} wildcard to be the *final* segment — which forecloses
-// every sub-resource this domain has: /history, /version, /diff, /links.
-// Percent-encoding the slashes into one segment does not work either:
-// net/http decodes %2F before matching, so `lore%2Fduskwood` arrives as
-// two segments and matches nothing. Moving the path into the query
-// string keeps the convention's actual guarantee — a row's key never
-// shares a namespace with a literal — in a *stronger* form than the
-// metamodel has it: a document path occupies no URL segment at all, so
-// it can collide with no literal ever, and /docs/history can never be
-// shadowed by a document called `history`.
-// TestADocumentPathIsNeverAURLSegment writes a document at each of the
-// six sub-resource literals and reads every one of them back.
-//
-// **Every route here is registered through registerContentRoute**
-// (server.go), which is what applies requireEditor to every non-GET. A
-// viewer may read a game's prose and may not change it, and the check is
-// decided by the pattern's own method rather than by each handler
-// remembering — see registerContentRoute's doc comment for what that
-// cost when it was each handler's job.
-
-// requireProseService refuses a prose route on an instance built without
-// a markdown service. That shape is supported deliberately
-// (Options.Markdown), and every core below would panic on a nil service,
-// so the guard is here rather than in each of them.
-//
-// **The routes themselves are registered unconditionally**, exactly as
-// the game-content routes are, and that is load-bearing rather than
-// incidental: TestEveryGameScopedRouteGoesThroughRequireProject and
-// TestEveryContentRouteIsRegisteredAsContent both build their server
-// from stubOptions, which passes no Markdown, so a registration gated on
-// `opts.Markdown != nil` would make every route in this file invisible
-// to both — which is precisely what happened to
-// TestEveryMCPToolGoesThroughAddScopedTool, blind to all twelve docs
-// tools until Task 10's review handed its server a markdown service.
-// TestTheProseRoutesAreVisibleToTheConventionTests pins the visibility
-// itself, from a stubOptions server, so re-introducing the gate fails a
-// test that names this comment rather than silently blinding two others.
 func (s *Server) requireProseService(w http.ResponseWriter) bool {
 	if s.opts.Markdown == nil {
 		writeError(w, http.StatusNotFound, errCodeNotFound, "this instance serves no prose")
@@ -81,20 +30,6 @@ func (s *Server) requireProseService(w http.ResponseWriter) bool {
 
 // DocRenderedOutput is the reading view: one document's identity and its
 // body rendered to HTML.
-//
-// It carries no `body`, on purpose. A caller that wants the markdown
-// asks /docs/one (or docs.read), and answering both from one route would
-// put a document's whole body on the wire twice for a page that renders
-// only one of them.
-//
-// HTML is safe to insert as markup and that is the only reason this
-// route exists: internal/markdown's renderer emits no raw HTML at all
-// (goldmark without html.WithUnsafe) and rewrites every link and image
-// destination whose scheme is not http, https or mailto. See
-// internal/markdown/render.go's header for the full argument, and
-// TestRawHTMLInABodyIsNotRendered, TestAnInlineHTMLSpanIsNotRendered,
-// TestADangerousLinkSchemeIsNeutralised and
-// TestAnEntityEncodedSchemeIsResolvedBeforeItIsJudged for what pins it.
 type DocRenderedOutput struct {
 	Path    string      `json:"path"`
 	Kind    string      `json:"kind,omitempty"`
@@ -113,33 +48,12 @@ type DocRenderedOutput struct {
 	// UpdatedAt and UpdatedBy say when the document last changed and who
 	// changed it, which is what the page's meta line prints beside the
 	// version.
-	//
-	// **Only the "last changed" half, not the "created" pair**, and that
-	// is the one place this view narrows DocumentOutput rather than
-	// mirroring it. The meta line is one line under a title and it is
-	// read at a glance; "created by Ana on Tuesday and last changed by
-	// the lore agent this morning" is two facts where the page has room
-	// for the one a reader acts on. The other half is a call away
-	// (/docs/one, docs.read), which is where a client that wants it
-	// looks — and doc.js's meta line is what reads these two, so they
-	// are not a third pair of fields nobody looks at.
 	UpdatedAt time.Time     `json:"updated_at"`
 	UpdatedBy *AuthorOutput `json:"updated_by,omitempty"`
 }
 
 // DocComparisonOutput is the comparison view: the diff docs.diff would
 // answer with, plus that diff rendered as classed lines.
-//
-// Unified travels beside HTML rather than being replaced by it: a
-// designer copying a diff out of the page wants the text, and a client
-// that wants to count changed lines should not have to parse the markup
-// back apart. Coarse means the two versions were too large to compare
-// line by line — see DocsDiffOutput.
-//
-// FromDeleted and ToDeleted are the pair DocsDiffOutput carries and for
-// the same reason: a comparison that spans a deletion has an empty
-// unified diff, and the page said "These two versions are identical"
-// about it until this run. doc.js's describeComparison reads them.
 type DocComparisonOutput struct {
 	Path        string `json:"path"`
 	FromVersion int32  `json:"from_version"`
@@ -505,10 +419,6 @@ func (s *Server) handleRemoveDocLink(w http.ResponseWriter, r *http.Request, _ C
 // the same core docs.read uses and renders the body it answers with, so
 // there is no second read path and no second definition of "this
 // document's current body".
-//
-// head_only is deliberately not accepted: a reading view of a preview is
-// a page showing a designer two thirds of a scene with nothing saying
-// so.
 func (s *Server) handleRenderDoc(w http.ResponseWriter, r *http.Request, _ Caller, scope ProjectScope) {
 	if !s.requireProseService(w) {
 		return
@@ -591,16 +501,6 @@ func (s *Server) diffArguments(w http.ResponseWriter, r *http.Request) (DocsDiff
 // requiredVersion reads a version-shaped query parameter that the MCP
 // twin's schema marks `required`, and refuses its absence at its own
 // path.
-//
-// The refusal is this surface's own, and it has to be: DocsReadVersionInput.
-// Version and DocsDiffInput's two are plain int32 with no omitempty, so
-// the SDK's schema validator refuses an absent one on MCP before the core
-// is ever called, naming the property. Reading absent as zero here
-// instead would reach the domain and answer `not_found: the document at
-// "x" has no version 0` — a different code, for a caller that gave no
-// version at all rather than a wrong one. That is exactly the drift
-// queryRelatedTo exists to prevent one surface along.
-// TestTheRESTMirrorAnswersTheSameCodesAsTheTools drives all three.
 func (s *Server) requiredVersion(w http.ResponseWriter, r *http.Request, name string) (int32, bool) {
 	value, ok := queryVersion(w, r, name)
 	if !ok {

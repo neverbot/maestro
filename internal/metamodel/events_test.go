@@ -48,13 +48,6 @@ func TestEventsArea(t *testing.T) {
 	// TestEventsArea's "type events reach every member of the game including
 	// agents" case pins the gating decision events.go records for
 	// type.upserted and type.removed: MinRole empty, HumanOnly false.
-	//
-	// Every test in this package but these ones builds the service with a nil
-	// hub, so before this file no event was ever observed at all — the gating
-	// fields could have held any value, or (as they did) not existed. The two
-	// subscribers here are the ones a wrong decision would have silently cut
-	// out: a viewer, who is excluded by any MinRole above viewer, and a token
-	// caller, who is excluded by HumanOnly regardless of role.
 	t.Run("type events reach every member of the game including agents", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -140,12 +133,6 @@ func TestEventsArea(t *testing.T) {
 	// TestEventsArea's "no event is published when the write is rolled back"
 	// case is the half of the publish-after-commit invariant that a rollback
 	// makes observable.
-	//
-	// The respelling refusal fires *after* the upsert statement has already
-	// written the row, inside the transaction, so this is a case where the
-	// database has seen the change and the caller still gets nothing. A
-	// publish moved inside the transaction, next to the write it announces,
-	// would announce a row that is about to vanish.
 	t.Run("no event is published when the write is rolled back", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -173,22 +160,6 @@ func TestEventsArea(t *testing.T) {
 	// TestEventsArea's "nothing is announced while the transaction is still
 	// open" case is the other half, and the one that needs the transaction
 	// held open on purpose.
-	//
-	// A rival transaction takes a row lock on one of the type's entities.
-	// The schema edit under test writes its type row, then sweeps — and the
-	// sweep's UPDATE blocks on that lock, so the whole transaction sits open,
-	// past its own write, for as long as the test wants. Nothing may be on
-	// the wire in that window: a subscriber told now would re-read a database
-	// that still holds the old schema and cache that as the new one.
-	//
-	// What this test cannot pin is a publish placed as the very last
-	// statement inside withTx's callback, which differs from the correct
-	// placement only by the commit that immediately follows it: only a
-	// failing commit tells those two apart. That is not out of reach —
-	// TestNoEventIsPublishedWhenTheCommitFails makes the commit fail on
-	// demand with a deferred constraint — and this test covers every
-	// earlier placement, which is where a publish actually tends to drift
-	// to: next to the write it announces.
 	t.Run("nothing is announced while the transaction is still open", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -254,19 +225,6 @@ func TestEventsArea(t *testing.T) {
 
 	// TestEventsArea's "a pruned endpoint list is announced to the rows own
 	// subscribers" case pins the fourth thing a removal changes.
-	//
-	// `RemoveEntityType` prunes the removed id out of every relation type's
-	// endpoint lists, which is a write to rows the caller never named. It is
-	// not covered by the cascade note events.go makes about edges: nothing
-	// is deleted here, the relation type is still there, and what changed is
-	// the rule it states. Announcing it as `relation_type.upserted` — the
-	// event a caller-visible edit of the same columns publishes — is what
-	// keeps Task 8's rendering of an endpoint rule from showing a list the
-	// database no longer holds. Nothing bumps `version`, so a subscriber
-	// diffing versions would not see it either.
-	//
-	// The relation type that names no removed type is the control: it is not
-	// touched, so it must not be announced.
 	t.Run("a pruned endpoint list is announced to the rows own subscribers", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -324,26 +282,6 @@ func TestEventsArea(t *testing.T) {
 	// PruneEntityTypeFromEndpointLists' actual plan today is an index scan on
 	// relation_types_key_key, which already returns rows in the order that
 	// index stores them.
-	//
-	// That index order is not this sort's order, either, which is the
-	// second half of the finding: the index orders by `lower(key)`, and this
-	// sort compares raw `Key` in byte order. Both are deterministic, so
-	// nothing here is a bug, but they disagree whenever a folded-lowercase
-	// and a byte-order comparison would put two keys in different places —
-	// exactly what an uppercase-led key next to a lowercase one guarantees.
-	// "AppleQuest" and "zone_rule" fold to "applequest" < "zone_rule" but
-	// compare raw as "AppleQuest" < "zone_rule" is also true — deliberately
-	// not the pair used here. This test instead uses "Zone_rel" and
-	// "apple_rel": raw byte order puts capital "Z" (0x5A) before lowercase
-	// "a" (0x61), so sort.Slice orders them [Zone_rel, apple_rel]; folded
-	// order reverses them, [apple_rel, Zone_rel], and a probe against this
-	// suite's own database confirmed the index scan's RETURNING arrives in
-	// exactly that folded order. The two are opposite sequences, so this
-	// test fails the moment either the sort is removed (the database's own
-	// order, folded, comes through instead) or the sort is changed to fold
-	// case (it would then agree with the database and stop proving the sort
-	// does anything). Removing `sort.Slice(pruned, …)` from RemoveEntityType
-	// was verified to turn this test red.
 	t.Run("pruned endpoint lists are published in sort order not database order", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -412,19 +350,6 @@ func assertIdentityPayload(t *testing.T, who string, e realtime.Event, wantID uu
 // the two tests above cannot reach: a publish sitting as the very last
 // statement inside withTx's callback, which differs from the correct
 // placement only by the commit that immediately follows it.
-//
-// It is reachable because testutil.NewPool hands every test its own
-// throwaway database, so this test may install a constraint in it that
-// no other test sees. A deferred foreign key from entity_types.id to
-// projects.id is satisfied by nothing — an entity type's id is not a
-// project id — but being DEFERRABLE INITIALLY DEFERRED it is checked at
-// COMMIT and not before, so every statement inside the transaction
-// succeeds and only the commit fails, with SQLSTATE 23503. That is
-// exactly the window a last-statement publish would announce into: the
-// database has accepted every write, and then thrown all of them away.
-//
-// The constraint is added while entity_types is empty, because ADD
-// CONSTRAINT validates the rows already stored.
 func TestNoEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	pool := testutil.NewPool(t)
 	hub := realtime.NewHub()

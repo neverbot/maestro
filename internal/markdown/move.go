@@ -15,17 +15,6 @@ import (
 )
 
 // MoveInput is one change of address.
-//
-// From and To are both required and both judged as paths, in one pass,
-// so a caller that mistyped each of them hears about both rather than
-// fixing one, calling again and learning about the other — the rule
-// checkWrite and Delete already obey.
-//
-// Message is recorded on the version the move appends, so "why did this
-// end up here" is answerable from the history. ExpectedVersion is
-// required for the reason it is required on a write and on a delete: a
-// move advances the version, so an unguarded one would silently land on
-// top of an edit the caller never read.
 type MoveInput struct {
 	From            string
 	To              string
@@ -35,56 +24,6 @@ type MoveInput struct {
 }
 
 // Move changes a document's path, keeping the document.
-//
-// **This is the whole point of the call and it is worth stating as a
-// contract rather than as an implementation note.** Before it existed, a
-// document written to the wrong path could only be re-written at the right
-// one and deleted at the old one, which forked its history in two: the new
-// path started at version one holding none of what came before, and the old
-// path kept everything under a tombstone nobody would think to look at.
-// Everything in this domain that is not the path hangs off documents.id —
-// every version row, every link row — so a move is one UPDATE and none of
-// them has to be touched. What survives a move, and is pinned by name: the
-// version numbering continues rather than restarting (TestMoveArea's "a
-// moved document keeps its history and its numbering" case), every
-// attachment stays attached (TestMoveArea's "a moved document keeps its
-// links" case), and the document's id, kind and creator are unchanged.
-//
-// **A case-only move is refused, and that is a decision rather than an
-// oversight.** documents_path_key is UNIQUE (project_id, lower(path)), so
-// `lore/Duskwood` and `lore/duskwood` are not two addresses — they are one
-// address spelled two ways, and every reader in this package already finds
-// the document under either. A "move" between them would therefore change
-// no address at all; it would rewrite a stored display string, and this
-// repository has already decided what happens when a caller asks for that.
-// metamodel.keyRespellingError refuses a case-only respelling of a row key
-// rather than silently updating the stored one, and pathRespellingError
-// refuses it for a document path on the write path, for the reason both
-// comments give: the stored spelling is the handle other things refer to,
-// and a typo'd capital must not be able to move it under them. A move is a
-// *stronger* case for the same answer, not a weaker one — it is the call
-// that would make the rewrite explicit and durable, appending a version row
-// and an event announcing a change of address that no reader can observe.
-// So the first spelling stored stands here too, and the refusal names both
-// spellings and says what a caller who genuinely wants a different subtree
-// should do instead. TestMoveArea's "a case only move is refused as a
-// respelling" case pins it.
-//
-// **Only a live document moves.** A deleted path keeps its tombstone and
-// its history exactly where they are; the recovery is to write to the path
-// and bring the document back, and then move it. Moving a tombstone would
-// have to answer what happens to the resurrection rule at two paths at
-// once, and there is no question anyone is asking that it answers.
-// TestMoveArea's "moving a deleted document says to bring it back first"
-// case pins the refusal and its wording.
-//
-// **An occupied destination is refused, live or tombstoned.** The unique
-// index covers soft-deleted rows, so a path someone deleted is still taken;
-// merging two histories onto one path is not something this call does
-// quietly. Both refusals name the destination and its remedy
-// (TestMoveArea's "moving onto a live document is refused at the
-// destination" case, TestMoveArea's "moving onto a deleted path says its
-// history is still there" case).
 func (s *Service) Move(ctx context.Context, projectID uuid.UUID, in MoveInput) (dbq.Document, error) {
 	// One pass over every argument, as Write and Delete do.
 	problems := pathProblemsAt("from", in.From)
@@ -184,23 +123,6 @@ func (s *Service) Move(ctx context.Context, projectID uuid.UUID, in MoveInput) (
 
 // lockBothEnds takes the row lock on whichever of the two paths exist and
 // judges them.
-//
-// **The two locks are taken in folded-path order, not source-then-
-// destination order, and that is what keeps two opposite moves from
-// deadlocking.** Moving `a` to `b` while another caller moves `b` to `a`
-// would otherwise have each transaction holding the lock the other
-// needs; Postgres would break it with SQLSTATE 40P01 and one caller
-// would meet a deadlock over a pair of writes that have a perfectly good
-// serial order. Ordering by a value both transactions compute the same
-// way removes the cycle. This is the same rule the metamodel applies to
-// an entity write, which locks the entity type before the entity row in
-// both of its writers, and the reason it is stated again here is that
-// the ordering key is different: there, a fixed order of two *tables*;
-// here, a data-dependent order of two rows in one table.
-// TestMoveArea's "two opposite moves do not deadlock" case pins it.
-//
-// Move has already refused From and To folding together, so the order is
-// total: no two calls can disagree about which end goes first.
 func (s *Service) lockBothEnds(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	in MoveInput,
 ) error {
@@ -310,12 +232,6 @@ func sameAddressError(from, to string) error {
 // destinationOccupiedError is the refusal for a move onto a path that is
 // already taken, with a different remedy for each of the two ways it can
 // be taken.
-//
-// It reports at "to" and as invalid_input rather than as a conflict, and
-// the distinction is the one ConflictError exists for: a conflict tells
-// a caller to merge onto a version and write again, and no amount of
-// retrying frees an occupied path. What the caller has to do is pick a
-// different destination, or deal with what is already there.
 func destinationOccupiedError(requested, stored string, deleted bool) error {
 	spelling := ""
 	if stored != requested {
@@ -336,10 +252,6 @@ func destinationOccupiedError(requested, stored string, deleted bool) error {
 // reports it as the caller's own destination rather than as a server
 // fault. It returns nil for every other error, so the caller keeps its
 // own arms.
-//
-// The stored spelling is unavailable here — the losing transaction never
-// saw the winner's row — so the message names only what the caller sent,
-// which is the honest thing to name.
 func destinationTaken(err error, to string) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23505" ||

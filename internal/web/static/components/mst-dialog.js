@@ -1,46 +1,4 @@
 // The one dialog in this product, and the only one there will be.
-//
-// **A modal is not this product's first answer and this component does
-// not make it one.** `docs/product.md` bans reaching for a modal, and
-// that ban stands: a confirmation that can be armed in the row is armed
-// in the row (the sign-out in the header and the token revoke both do
-// it), and a form that belongs on a screen stays on the screen. What a
-// modal is for is the two cases nothing else covers:
-//
-//   - **a secret shown once.** A token is rendered, copied and then has
-//     to *go*. Left on the page it sits there while somebody walks away
-//     from their desk, and it pushes the screen it was opened from
-//     halfway down the window. The reader closing it is the point.
-//   - **a question whose answer cannot wait and cannot be undone**, with
-//     nowhere in the page to ask it.
-//   - **a form that belongs to one row of a list**, not to the screen:
-//     the administration page edits an account from its own row, and an
-//     inline editor there would push twenty rows down the page to change
-//     one, while a form per row would be a screen made of forms.
-//
-// Everything else is a screen, a panel or an armed control.
-//
-// **It is a plain custom element**, like mst-hint and mst-canvas: every
-// string it shows is either a caller's own node or a caller's own text,
-// built with `createElement` and `textContent`, so nothing on this path
-// parses markup. Content arrives as **nodes**, never as a string of
-// HTML, which is what makes that guarantee the caller's too.
-//
-// **What it owns is the behaviour**, because that is the part each
-// hand-rolled panel gets wrong differently: Escape closes it, a press on
-// the ground outside closes it, focus moves into it when it opens and
-// goes back where it came from when it closes, Tab stays inside it while
-// it is open, and it says `aria-modal` so a screen reader stops reading
-// the page behind it.
-//
-// Usage:
-//
-//     const dialog = openDialog(doc, {
-//       title: "Token created",
-//       content: [note, value, command],
-//       dismissLabel: "Done",
-//     });
-//     await dialog.closed;   // if the caller cares
 
 import { adoptControlStyles } from "./control-styles.js";
 
@@ -232,9 +190,6 @@ export class MstDialog extends HTMLElement {
   }
 
   // open renders one dialog's worth of content and shows it.
-  //
-  // The content is nodes the caller built. A caller handing text builds
-  // a paragraph; this element never turns a string into elements.
   open(spec = {}) {
     if (!this.shadowRoot) this.connectedCallback();
     const doc = this.ownerDocument ?? document;
@@ -303,11 +258,6 @@ export class MstDialog extends HTMLElement {
   }
 
   // focusable lists what a reader can reach inside the panel, in order.
-  //
-  // It walks the tree rather than asking for a selector: this product's
-  // own DOM stub speaks `.class` and nothing else, deliberately, and a
-  // focus trap that only works where a full selector engine exists is a
-  // focus trap no harness can assert.
   focusable() {
     const stops = [];
     const visit = (node) => {

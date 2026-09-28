@@ -1,11 +1,4 @@
 // One route: the claim it makes, and what the last check found.
-//
-// **Two columns because they are two things.** The steps this route
-// asserts, in order, and the verdict at each — and a verdict about a
-// game that has since moved says so above the claim, in the route's own
-// numbers, because a reader who scrolls past it has already believed it.
-//
-// The one write in the whole of Analysis is here: "Check this route".
 
 import {
   DESTINATION_ANALYSIS,
@@ -99,13 +92,6 @@ export function paintVerdict(doc, slug, route) {
   // The negative half: five `ok`s from a check that walked nothing and
   // five from one that walked four hundred edges are the same answer
   // without this line.
-  //
-  // **And what the walk did not reach.** `truncated` and `depth_limited`
-  // have always been in this payload and this page read neither, so
-  // "Every step held." could stand over a walk that stopped early — on
-  // the one analysis screen with no truncation component, while its
-  // sibling has one. Two of eleven fields were read; these are the two
-  // that change what the verdict means.
   const parts = [];
   if (Number.isFinite(check.edges_walked)) parts.push("followed " + countLabel(check.edges_walked, "edge", "edges"));
   if (Number.isFinite(check.steps_checked)) parts.push("over " + countLabel(check.steps_checked, "step", "steps"));
@@ -121,12 +107,6 @@ export function paintVerdict(doc, slug, route) {
 
 // paintSteps draws **one table**: the ordered claim and the verdict at
 // each step, in one row per step.
-//
-// It was two tables, 220px apart, with the same four keys in the same
-// order in both — so the one question a reader has, "did step three
-// hold?", was answered by matching a key across two lists by eye. The
-// position is the first column, because the order is what makes this a
-// claim rather than a set.
 export function paintSteps(doc, slug, route) {
   fillState(doc, "route-steps-empty", {
     heading: NO_STEPS_HEADING,

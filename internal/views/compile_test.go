@@ -151,26 +151,6 @@ func TestCompileArea(t *testing.T) {
 	// TestCompileArea's "every table reference is project filtered" case walks
 	// the emitted SQL rather than one query's behaviour, so a clause added by
 	// a later task cannot quietly drop the filter.
-	//
-	// **It asserts per table reference, not per block.** Asking whether
-	// `project_id = $1` appears *somewhere* in a block passes with a filter
-	// deleted, because another table in the same block still carries one: the
-	// entity-type join's filter can be removed from nodeUnion and a
-	// block-level check stays green. So each reference's own alias has to
-	// appear filtered, and all four project-scoped tables have to be
-	// exercised by the query below — the earlier vacuity check named two of
-	// them, which left entity_types and relation_types outside the test
-	// entirely.
-	//
-	// **Why this text test is the only real guard.** Every project filter
-	// this compiler emits is, in the current build, redundant: the selector
-	// filters on an entity_type_id resolved in *this* game, the step on a
-	// relation_type_id and a to_type resolved the same way, the between arm on
-	// its own relation_type_id, and the join-backs join to rows those filters
-	// already isolated. So `TestExecuteArea's "a run from another game sees
-	// nothing" case` cannot fail on a lost project filter under any shape the
-	// compiler emits today — the filters are defence in depth against the
-	// shapes Tasks 7, 8 and 9 add, and this test is what defends them.
 	t.Run("every table reference is project filtered", func(t *testing.T) {
 		g, _ := a.games(t)
 		// The query carries a **multi-hop** step as well as a one-hop one,
@@ -223,17 +203,6 @@ func TestCompileArea(t *testing.T) {
 	// emitter a diff a reviewer reads rather than a behaviour they infer — and
 	// the ids are already $n by construction, because every value the compiler
 	// handles is a bind parameter.
-	//
-	// **These files are load-bearing, not a convenience, and -update is not
-	// how a failure is resolved.** Three invariants used to be red here and in
-	// no other test — the selector's project filter, a step's invalid-row
-	// exclusion and its destination-type filter — so regenerating rather than
-	// reading the diff erased three guarantees in one keystroke. Each now has
-	// a test of its own (TestCompileArea's "every table reference is project
-	// filtered" case and TestExecuteArea's "a step draws only its destination
-	// type and only valid rows" case), but the next clause a task adds arrives
-	// here first and unaccompanied, which is why the failure message says read
-	// the diff before it names the flag.
 	t.Run("the worked examples compile to these statements", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, example := range workedExamples {
@@ -262,35 +231,6 @@ func TestCompileArea(t *testing.T) {
 	// TestCompileArea's "the only string to fragment conversions are the ones
 	// named here" case is the construction half of the injection answer, and
 	// the half a behavioural test cannot give.
-	//
-	// TestCompileArea's "no caller value ever reaches the statement text" case
-	// proves that the queries it compiles put nothing in the text; it cannot
-	// prove that a query nobody wrote will not. What can is the type: a
-	// `string` variable does not convert to frag implicitly, so the only way
-	// to spell a caller's value into a statement is an explicit `frag(...)`.
-	// This test reads the whole package's syntax tree and refuses that
-	// conversion outside the four helpers that build placeholders, names and
-	// formats from things a caller cannot reach, plus the one that adopts
-	// internal/graph's own statement.
-	//
-	// **It reads every non-test file in the package, not compile.go alone**,
-	// and it closes the four routes a one-file walk over function bodies
-	// left open, each of which compiled and left the suite green:
-	//
-	//  1. a conversion in another file of this package — frag is unexported
-	//     but package-scoped, so predicate.go could spell one;
-	//  2. no conversion at all — the builder's buffer used to be a bare
-	//     strings.Builder, so `b.sql.WriteString(v)` needed no frag; the
-	//     sqlText wrapper is what closes this one by construction, and the
-	//     `.raw` check below is what keeps the wrapper honest;
-	//  3. a parenthesised conversion, `(frag)(v)`, whose call function is not
-	//     an *ast.Ident;
-	//  4. a local type alias, `type t = frag`, whose conversions do not
-	//     mention frag at all.
-	//
-	// The walk is over each declaration rather than over function bodies, so
-	// a package-level variable's initialiser — or a function literal assigned
-	// to one — is scanned too.
 	t.Run("the only string to fragment conversions are the ones named here", func(t *testing.T) {
 		allowed := map[string]bool{
 			"bind":      true, // "$3" from an argument count
@@ -375,17 +315,6 @@ var projectScopedTables = []string{"entity_types", "relation_types", "entities",
 // captures the alias it was given, **or no alias at all**. The longer
 // names come first in the alternation because Go's regexp is
 // leftmost-first, not leftmost-longest.
-//
-// The alias group is optional and the table name may be quoted, because
-// three shapes of reference used to match nothing at all and were
-// therefore asserted by nothing: `FROM relations)` with no alias,
-// `FROM entities, relations r` — a comma-joined list, which hid every
-// table after the comma — and `FROM "relations" q`. A reference this
-// regexp cannot see is a filter this test cannot miss, which is the
-// worst thing a guard can be, so a reference that yields no alias is now
-// an error rather than a non-match, and projectFilterProblems refuses a
-// comma-joined list outright. Task 9 adds LEFT JOIN LATERAL, whose inner
-// FROM is an ordinary reference and is matched here like any other.
 var tableReference = regexp.MustCompile(
 	`(?i)\b(?:FROM|JOIN)\s+"?(entity_types|relation_types|entities|relations)"?` +
 		`(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?`)
@@ -411,22 +340,6 @@ var aliasKeywords = map[string]bool{
 // filter — the first project filter in this package that is not
 // redundant, and the one that lets a walk leave the game through another
 // game's edge — left this test green.
-//
-// **The placeholder is closed on the right for the same reason the alias
-// is closed on the left**: `\$1` is a prefix of `$18`, so a statement
-// carrying ten binds before its walk satisfied this regexp with
-// `r.project_id = $18` — an arbitrary argument, which is a silent wrong
-// game the moment the value at that position happens to be a uuid. That
-// was the third time this one guard was broken by review, and the two
-// ends are now closed the same way, by a character class rather than by
-// a lookahead Go's regexp does not have.
-//
-// **What it still cannot see** is that the text it matched is live SQL:
-// `-- r.project_id = $1` in a comment, or the same inside a string
-// literal, satisfies it. Nothing this compiler emits contains either —
-// it emits no comments and no string literals holding SQL — so this is
-// recorded as the next step along rather than fixed with a tokeniser
-// this package has no other use for.
 func filteredOn(alias string) *regexp.Regexp {
 	return regexp.MustCompile(`(?:^|[^a-z0-9_])` + regexp.QuoteMeta(alias) +
 		`\.project_id = \$1(?:[^0-9]|$)`)
@@ -448,34 +361,6 @@ var selectWord = regexp.MustCompile(`(?i)\bSELECT\b`)
 // flatLateralProblems is the enforcement half of "no nested SELECT in a
 // lateral", which until now lived only in a comment on
 // compiler.relatedHop.
-//
-// **What the nesting actually costs, measured rather than assumed.** The
-// requirement was reviewed as a silent hole — a filter written after a
-// nested SELECT passing both guards and reaching production unfiltered.
-// It is not: the split puts such a filter in the *next* block, so the
-// reference is left looking unfiltered and is **reported**. Every nesting
-// shape was tried — the outer filter after a nested SELECT, a nested
-// SELECT ahead of the reference, a nested SELECT over a scoped table with
-// and without its own filter, and an outer alias's filter appearing
-// inside the nested block — and every incorrect one was caught while the
-// two correct ones passed. The direction of the error is over-strictness,
-// which is the side of the trade a guard belongs on, and it is why the
-// guard's own table asserts `want: true` for that shape rather than
-// false.
-//
-// **So what this adds is the reason, not the detection.** Over-strictness
-// that reports `relations is read as "FROM relations rel" without
-// rel.project_id = $1 in the same block` about a query whose filter is
-// visibly right there is a failure a later task debugs as a bug in its
-// own SQL. Task 13 adds a lateral for positions; when it nests, it should
-// be told that the guard cannot see past a nested SELECT and that the fix
-// is to keep the lateral flat — not left to rediscover the split. A
-// mechanism a later task trips over is worth more than a sentence it must
-// have read.
-//
-// So: the body of every JOIN LATERAL must hold exactly one SELECT. A
-// lateral that genuinely needs a nested one is not forbidden — it is
-// forbidden *until this guard can parse*, and the message says so.
 func flatLateralProblems(sql string) []string {
 	var problems []string
 	for _, loc := range lateralOpen.FindAllStringIndex(sql, -1) {
@@ -566,16 +451,6 @@ func projectFilterProblems(sql string) ([]string, map[string]int) {
 
 // workedExamples are the spec's §3 examples, as far as this game's
 // vocabulary can express them.
-//
-// §3.1 is verbatim: the fixture is that example's own game. The other two
-// are the *shapes* of §3.2 and §3.3 mapped onto the same vocabulary,
-// because their own types — licence, championship, room, ability — are
-// not declared here. What each keeps is the structure the golden file
-// exists to freeze: a query with only between-edges and no traversal at
-// all, and a query whose steps branch from one seed into three sets with
-// three edge entries, one of them §3.2's own `depth: {min:1,max:4}` —
-// which is the only golden file holding a recursion, its edge predicate
-// and the renumbering that splices both into the statement around them.
 var workedExamples = []struct {
 	name  string
 	query string

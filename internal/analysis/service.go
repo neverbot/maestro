@@ -32,16 +32,6 @@ type Actor = metamodel.Actor
 type dbqRelationType = dbq.RelationType
 
 // Service is the analysis domain.
-//
-// It holds a metamodel service rather than its own catalogue reads, and
-// that is this package's isolation decision made once: ListRelationTypes
-// and RelationTypeByKey already take a project id and already filter on
-// it in SQL, so reading through them is one implementation of the rule
-// instead of a fourth copy of it. It holds the pool as well, because the
-// three read-only analyses run SQL that internal/graph emits at run time
-// and therefore cannot go through sqlc — exactly as internal/views does
-// for its compiler — and it holds a dbq handle for the route CRUD, every
-// statement of which is generated.
 type Service struct {
 	pool *pgxpool.Pool
 	q    *dbq.Queries
@@ -67,26 +57,11 @@ type Service struct {
 	// the game's design version and the first walk. It is written only
 	// by this package's own check tests and nothing in production sets
 	// it.
-	//
-	// It is not decoration either. The one thing a refusal test cannot
-	// observe is *when* a value was read: a check that read
-	// design_version after its walk instead of before it stores a
-	// version the walk never saw and marks a route freshly green against
-	// content it did not look at, and from outside that is
-	// indistinguishable from a correct check on a quiet game. This hook
-	// is what lets a write land in the middle of a check on purpose, so
-	// TestAWriteDuringACheckLeavesTheRouteStaleRatherThanFreshlyGreen
-	// asserts the ordering rather than believing it.
 	beforeWalk func()
 }
 
 // New builds the service. The hub may be nil, in which case nothing is
 // published; this package's own tests run that way.
-//
-// The metamodel handle it builds gets the same hub, for the reason
-// internal/views/service.go records: a composed metamodel write must
-// still announce itself, and a nil hub there buys silence rather than a
-// boundary.
 func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 	return &Service{pool: pool, q: dbq.New(pool), meta: metamodel.New(pool, hub), hub: hub}
 }
@@ -112,17 +87,6 @@ func (s *Service) withTx(ctx context.Context, fn func(*dbq.Queries) error) error
 }
 
 // publish emits a change event, if a hub is attached.
-//
-// minRole and humanOnly are passed explicitly rather than inferred from
-// kind, exactly as internal/metamodel's and internal/views' own publish
-// do, so each call site shows the gating it chose instead of inheriting
-// one from a table three files away.
-//
-// **Every caller must call this after withTx has returned, never from
-// inside fn.** An event published inside the transaction announces a
-// change that may still roll back, and a subscriber that re-reads on
-// hearing it — the only thing this hub's payloads let it do — would read
-// the state before the change and cache it as the state after.
 func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role,
 	humanOnly bool, payload any,
 ) {
@@ -139,15 +103,6 @@ func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role,
 }
 
 // statementBudget is the timeout one analysis gets.
-//
-// It is DefaultStatementTimeout unless a test set the package-private
-// knob, and it is clamped to HardStatementTimeout either way — so a knob
-// set past the ceiling cannot buy a longer run than the documentation
-// promises. **This is the package's only clamp, and it is not a
-// caller's argument**: nothing on any surface can set it, so there is no
-// caller to mislead about what bound their answer was computed under.
-// Every bound a caller *can* state is refused rather than clamped; see
-// bounds.go.
 func (s *Service) statementBudget() time.Duration {
 	budget := s.statementTimeout
 	if budget <= 0 {
@@ -162,26 +117,6 @@ func (s *Service) statementBudget() time.Duration {
 // runInTx executes one statement under the two settings that make an
 // analysis an analysis: a statement timeout, and a transaction that
 // cannot write.
-//
-// **`SET LOCAL default_transaction_read_only` does not make its own
-// transaction read-only.** That is a measurement internal/views made and
-// this package inherits rather than re-derives: the setting is consulted
-// when a transaction *starts*, so setting it inside one changes nothing
-// about that one. What works is `transaction_read_only`, set with
-// set_config, on a transaction already begun in read-only mode —
-// belt and braces, because the BeginTx option alone would be silently
-// lost by any future refactor that reached for a plain Begin.
-// TestAnAnalysisTransactionIsActuallyReadOnly asserts the refusal
-// (SQLSTATE 25006) rather than the settings, because the question is not
-// whether two lines ran but whether a write that reached this path would
-// be stopped.
-//
-// **The settings are read back rather than assumed.** set_config returns
-// the value that landed, and the value that landed is the only thing
-// that bounds the statement: `statement_timeout = 0` is Postgres's
-// spelling of *no timeout*, so a budget that arrived as zero would buy
-// an unbounded run while every table in the documentation says five
-// seconds.
 func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement string,
 	args []any, scan func(pgx.Rows) error,
 ) error {
@@ -234,27 +169,6 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 
 // timedOut is the one place a statement that exhausted its budget
 // becomes the answer errors.go argues for.
-//
-// **No `analysis_timeout` code.** SQLSTATE 57014 is already in
-// metamodel's retryableSQLStates and metamodel.IsRetryable already
-// answers for it, so the error that comes back is already `retryable`,
-// whose recovery is "change nothing and resend" -- and what this adds is
-// the half a bare cancellation does not carry: the budget it exhausted
-// and the four arguments that narrow a run. internal/views extended a
-// message rather than adding a code four days before this package
-// existed; adding one here would be the standing defect in its purest
-// form. errors.go carries the argument at length.
-//
-// It wraps rather than replaces, so metamodel.IsRetryable -- which reads
-// the *pgconn.PgError through errors.As -- still answers true however
-// many layers of fmt.Errorf a path adds above it. A test that only
-// asserted the sentence would pass over an error that had stopped being
-// retryable, so TestATimedOutAnalysisIsRetryableAndSaysWhichBoundToLower
-// asserts both.
-//
-// **It sits in runInTx and not in one analysis**, because every analysis
-// in this package reads through that one function and a per-analysis
-// wrap is the shape this repository forgets on the fourth call site.
 func timedOut(err error, budget time.Duration) error {
 	if err == nil || !metamodel.IsRetryable(err) {
 		return err
@@ -281,18 +195,6 @@ const statementTimeoutSQLState = "57014"
 
 // DecodeArgs decodes one analysis call's arguments and **refuses any
 // member it does not know**.
-//
-// This is O5's reservation. Views reserved its own extension point by
-// making the query decoder refuse unknown top-level keys, so a `source`
-// key can later be added as an additive change to a document that would
-// previously have been refused; this package's inputs are flat structs
-// with no such document, and this is the equivalent.
-//
-// It is also the more immediate defence: `{"seed_entites": ["a"]}` is
-// the typo an agent will actually make, and silently ignoring it would
-// answer "your entire game is unreachable" to a caller who did supply
-// seeds. That is a wrong answer in the right shape, which is the worst
-// thing this engine can produce.
 func DecodeArgs(raw []byte, dst any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()

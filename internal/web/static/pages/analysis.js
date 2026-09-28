@@ -1,20 +1,4 @@
 // The three read-only analyses, on one page.
-//
-// **The rule that outranks every layout here**
-// (.superpowers/specs/2026-09-11-analysis-screens-design.md §1): an
-// empty findings list is not a verdict. The engine is built around it —
-// every result carries what it walked, because an empty list means
-// either "the game is clean" or "the walk followed nothing" and the two
-// are otherwise the same JSON. So each report has three parts, always: a
-// verdict line, the findings, and a muted line saying what the run
-// looked at, present whether the list is empty or full.
-//
-// A run that was cut short says so **above** its findings. A reader who
-// has scrolled past them has already believed them.
-//
-// Nothing here fetches. Every call goes through client.js, and every
-// sentence a designer reads is either the server's own or one of the
-// constants below, which is what makes them checkable in one place.
 
 import {
   DESTINATION_ANALYSIS,
@@ -31,9 +15,6 @@ import {
 import { headerRow, row } from "../rows.js";
 
 // --- The words -------------------------------------------------------
-//
-// Grouped so a reader of this file can see the whole voice of the screen
-// at once, and so the vocabulary test has one place to look.
 
 export const NOTE_ON_DEMAND =
   "The three checks below walk the game when you ask them to. Nothing below has been checked yet.";
@@ -88,24 +69,6 @@ export const REASON_DEPTH = "depth_limited";
 // screen first shipped: the server answered
 // `mode: is "both"; the three are "isolated", "sink", "source"`, which is
 // a refusal doing the job a picker should have done.
-//
-// `isolated` is the engine's default and is disjoint from the other two;
-// `sink` and `source` partition the entities with exactly one direction
-// of edge.
-// Each mode with the chip's label **and the two sentences its answer
-// needs**, because the answer is a different claim in each.
-//
-// **The verdict was one sentence for all three and it was false in two
-// of them.** With `sink` selected the page read "11 entities stand
-// alone" over a row with two incoming edges; with `source`, "2 stand
-// alone" over one with three outgoing. A verdict that contradicts the
-// control directly above it is worse than no verdict: a reader goes
-// looking for an edge that is already there.
-// verb agrees with the count, which `countLabel` cannot do for the
-// caller: it gets the noun right ("1 entity") and then every one of
-// these sentences went on to say "are". A game with exactly one isolated
-// entity — which is the ordinary case, because a designer fixes them as
-// they appear — read "1 entity are connected to nothing."
 export function verb(n, singular, plural) {
   return n === 1 ? singular : plural;
 }
@@ -155,11 +118,6 @@ export const RUNNING_LABEL = "Checking…";
 // routesVerdict is what the Routes section says about a game, in one
 // sentence: how many claims there are, and how many of them are about a
 // game that has since moved.
-//
-// **Stale is the number worth leading with.** A route nobody has checked
-// is a claim nobody has tested; a route that was checked and has gone
-// stale is a claim the game itself has contradicted, and it is the only
-// one of the three states that asks the reader to do something.
 export function routesVerdict(rows) {
   const routes = Array.isArray(rows) ? rows : [];
   if (routes.length === 0) return ROUTES_NONE;
@@ -207,18 +165,6 @@ function el(doc, id) {
 
 // walkedLine is the negative half: what the run looked at, so an empty
 // findings list can be told from a walk that followed nothing.
-//
-// **It reads every count the engine sends, and it did not.** The first
-// version took four of eleven and carried a comment claiming it took
-// whatever the result had — so "reached 27 entities" had no denominator,
-// the seed count and the gate set were dropped, and
-// `invalid_edges_followed` never reached a screen although it exists
-// precisely because an empty list means two things. The comment was
-// prose contradicting the code directly beneath it, which is the defect
-// this repository names.
-//
-// Totals are paired where the engine sends both halves: "reached 27 of
-// 42" is a fact and "reached 27" is a number.
 export function walkedLine(result) {
   const parts = [];
   if (Number.isFinite(result.seed_total)) {
@@ -259,13 +205,6 @@ export function walkedLine(result) {
 }
 
 // perTypeLine is where the unreachable answer stops being one number.
-//
-// The engine has always sent a per-type breakdown and no screen drew it,
-// so a designer was told "4 entities cannot be reached" over a game
-// where every one of them is a quest and every zone is fine — which is
-// the difference between a modelling mistake and a missing edge. Only
-// the types with something unreachable are named: a list that also said
-// "zone: 0" would bury the answer in the types that are healthy.
 export function perTypeLine(result) {
   const rows = Array.isArray(result && result.per_type) ? result.per_type : [];
   const hit = rows
@@ -405,11 +344,6 @@ function unreachableSection(doc, slug, reason, findings) {
 // this reason.
 // adviceForDesigner keeps the words a designer would set and drops the
 // call an agent would make.
-//
-// The engine's advice quotes every admitted trait and every admitted
-// role, so the quoted terms are the vocabulary itself, generated from
-// the same columns that validate a write. Everything around them is
-// about a tool this reader does not have.
 export function adviceForDesigner(advice) {
   const quoted = String(advice ?? "").match(/"[^"]+"/g) || [];
   const words = [...new Set(quoted.map((term) => term.slice(1, -1)).filter((term) => term !== ""))];
@@ -726,12 +660,6 @@ export async function analysisPage(opened) {
   // choice is not symmetric: a section nobody pressed is silently absent
   // from a reader's picture of their game, and "no loops were reported"
   // and "nobody asked about loops" look identical on this page.
-  //
-  // So the three keep their buttons, for a reader who wants one answer,
-  // and the page head carries the one that asks for the whole picture.
-  // In order rather than at once: three walks of a large game in
-  // parallel is the one way this screen could make an instance feel
-  // broken.
   const actions = doc.getElementById("page-actions");
   if (actions) {
     const all = doc.createElement("button");

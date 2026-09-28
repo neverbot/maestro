@@ -16,20 +16,6 @@ import (
 // a decision about who gets to hold or grant standing in the product, not
 // a token's own "this game's content") and, on top of that, any human
 // caller whose Caller.IsAdmin is false.
-//
-// This is the first place anywhere in this codebase that IsAdmin actually
-// gates an action — every other reader of it (handleMe, mcp.go's whoami,
-// api_auth.go's login/register responses) only ever reports it, never
-// enforces on it; RoleOf and requireProject never consult it at all (see
-// ProjectScope's own doc comment in api_projects.go). That is deliberate,
-// not an oversight this task is quietly fixing: BootstrapFirstAdmin is the
-// only mechanism in this plan that ever sets IsAdmin, so gating an
-// endpoint on it is gating on "the one operator this instance was stood
-// up by (or a colleague they've since promoted, once such a path exists)"
-// — the same authority that would otherwise be reaching for psql. See
-// api_invites.go's own package doc comment above handleCreateInstanceInvite
-// for why account-only invite administration is scoped to that authority
-// specifically, rather than to any project's own owner.
 func requireAdminCaller(w http.ResponseWriter, caller Caller) bool {
 	if !requireHumanCaller(w, caller) {
 		return false
@@ -52,28 +38,6 @@ func requireAdminCaller(w http.ResponseWriter, caller Caller) bool {
 // type exists to prevent, arriving inside a single file. See
 // writeCreatedInvite below for how creation now reuses this type instead
 // of re-declaring its fields.
-//
-// It carries what InviteSummary carries, including CreatedBy — never a
-// token or a hash: unlike api_tokens.go's apiTokenResponse, an invite has
-// no hint field at all (identity.InviteSummary's own doc comment says
-// so), so once the clear value in a creation response is gone, it is
-// gone; the only remedy for a lost link is to revoke this row (findable
-// by CreatedBy, on a game with several owners) and mint a new one.
-//
-// Revoked mirrors CreatedBy in why it exists: RevokeInvite and
-// RevokeProjectInvite both revoke by setting expires_at to now() rather
-// than deleting the row (their own doc comments explain why — the audit
-// trail), which means a revoked invite keeps appearing in this listing,
-// indistinguishable from a still-live one by eye, until
-// PruneExpiredInvites next runs. Revoked is computed here, not stored: it
-// is true exactly when ExpiresAt is no longer in the future, which is
-// also true of an invite that simply ran out its own TTL rather than
-// being revoked — RevokeInvite's own mechanism makes those two states
-// identical at the data level (see that method's doc comment), so this
-// field answers "is this row still redeemable", not "did an admin
-// deliberately pull it", the same question RedeemInvite itself answers
-// with ErrInviteExpired for both cases (see this task's plan corrections
-// for why that response is left undifferentiated on purpose).
 type inviteResponse struct {
 	ID        uuid.UUID  `json:"id"`
 	Email     *string    `json:"email,omitempty"`

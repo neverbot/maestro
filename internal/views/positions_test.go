@@ -55,19 +55,6 @@ func TestPositionsArea(t *testing.T) {
 
 	// TestPositionsArea's "a position survives a reload" case is this task's
 	// read-back, and `pinned` is the column it exists for.
-	//
-	// The plan names it as this task's write-only candidate: a column was
-	// write-only for a whole sub-project because every test asserted that the
-	// call succeeded and none read the row back, and Task 11's review then
-	// found the audit columns write-only in the very test written to prevent
-	// that. So the assertion is on all three values — x, y **and pinned** —
-	// off a second read rather than off the write, and one of the two nodes
-	// is written pinned:false so that a GetPositions hard-wiring
-	// DefaultPinned is red rather than green.
-	//
-	// The second half moves a node that is already placed, which is the
-	// common call: a drag is an ON CONFLICT, not an insert, and a second
-	// SetPositions must move the node rather than fail or add a row.
 	t.Run("a position survives a reload", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -117,11 +104,6 @@ func TestPositionsArea(t *testing.T) {
 
 	// TestPositionsArea's "a position is pinned unless the caller says
 	// otherwise" case pins the default at the level a caller meets it.
-	//
-	// PositionInput.Pinned is a *bool because false is a value a caller may
-	// deliberately mean, so a plain bool would store the opposite of
-	// 0008_views.sql's column default for every caller that said nothing,
-	// and no test that only ever writes the flag explicitly could see it.
 	t.Run("a position is pinned unless the caller says otherwise", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -142,12 +124,6 @@ func TestPositionsArea(t *testing.T) {
 	// view" case is the foreign key's deliberate action, observed through the
 	// service rather than through the schema test that pins the constraint
 	// itself.
-	//
-	// Both halves matter and neither implies the other: positions are a
-	// cache of a human's arrangement and never a claim that anything exists,
-	// so an entity that goes takes its coordinates with it — and takes
-	// nothing else, because a view that vanished when a designer deleted one
-	// quest would be the opposite of a saved artefact.
 	t.Run("deleting an entity drops its position and keeps the view", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -173,10 +149,6 @@ func TestPositionsArea(t *testing.T) {
 	// the core spec's own requirement: the same zone sits at its real map
 	// coordinates in a World map view and wherever the algorithm put it in a
 	// Mage route view.
-	//
-	// Two views, one entity, two coordinates, neither disturbing the other —
-	// a table keyed on the entity alone would answer the second write to
-	// both.
 	t.Run("positions are per view and not per entity", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -208,13 +180,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "a non finite position is refused with its index"
 	// case refuses the three doubles a coordinate cannot be, at the caller's
 	// own path.
-	//
-	// Ahead of 0008_views.sql's CHECK, which is the backstop for a write
-	// path that does not come through here: the constraint answers with an
-	// untyped SQLSTATE 23514 over a value the caller itself supplied, and
-	// this package's standing rule is that nothing a caller can fix reports
-	// internal_error. All three are reported in one pass, at the member each
-	// belongs to, and nothing is stored.
 	t.Run("a non finite position is refused with its index", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -245,17 +210,6 @@ func TestPositionsArea(t *testing.T) {
 
 	// TestPositionsArea's "an empty or oversize positions call is refused"
 	// case holds the two bounds on the list itself.
-	//
-	// **Empty is refused rather than answered with success**, which is the
-	// silent no-op this package refuses everywhere else: a caller that set no
-	// position changed nothing and must not be told it did.
-	//
-	// **The cap is the node cap**, HardMaxNodes, because a call positioning
-	// more nodes than a run of the view can return is positioning something
-	// no run has shown the caller. The oversize list here names entities
-	// that do not exist, which is what proves the bound is answered *before*
-	// five thousand lookups are made: a call refused with not_found would
-	// mean the order is the other way round.
 	t.Run("an empty or oversize positions call is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -281,14 +235,6 @@ func TestPositionsArea(t *testing.T) {
 
 	// TestPositionsArea's "the same entity twice in one call is refused" case
 	// refuses two coordinates for one node.
-	//
-	// Silently keeping the last would let the array's order decide where a
-	// node lands, which is a picture a caller cannot predict from its own
-	// call. The second spelling here differs only in case: keys are matched
-	// without regard to case, so the two entries address one entity, and the
-	// check is keyed on the **resolved id** rather than on the text — the
-	// fold that decides whether two keys are one entity is Postgres's, not a
-	// second rule written in Go that could disagree with it.
 	t.Run("the same entity twice in one call is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -312,10 +258,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "a position for an entity this game does not have is
 	// refused" case names the position that is wrong, and tells a wrong type
 	// key from a wrong entity key apart.
-	//
-	// Both messages are metamodel.EntityByKey's, which is the point: the
-	// judgement that decides whether an address names anything already
-	// exists, is project-filtered in SQL, and is not restated here.
 	t.Run("a position for an entity this game does not have is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -348,12 +290,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "running a view never rewrites positions" case is
 	// what lets a query be edited, and a game grown, without losing an
 	// afternoon of map work.
-	//
-	// The run is executed twice with content added in between, and the
-	// stored rows are compared **including updated_at**: the coordinates
-	// alone would be equal even if every run rewrote each row to the value it
-	// already held, and the trigger on view_positions is what makes the
-	// timestamp the thing that would move.
 	t.Run("running a view never rewrites positions", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -388,15 +324,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "the layout mode changes nothing the server answers"
 	// case is the assertion behind positions.go's headline claim: no server
 	// code reads layout_mode beyond validating and returning it.
-	//
-	// A comment claiming the server honours a mode it never sees is this
-	// project's first defect in its purest form, and the inverse — a comment
-	// saying it is ignored while something quietly reads it — is the same
-	// defect with the sign flipped. Only a test can tell the two apart, so
-	// one view is saved under each of the three modes with one arrangement
-	// under it, and every mode must answer with the same positions,
-	// unpinned rows included. The stored mode is read back in the same loop,
-	// so the test cannot pass because the mode never actually changed.
 	t.Run("the layout mode changes nothing the server answers", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -432,12 +359,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "clearing positions" case holds the three shapes of
 	// a clear: every position of a view, the ones a caller names, and the
 	// empty list that is refused rather than read as either.
-	//
-	// **A nil list clears the view and an empty one is refused.** Said
-	// nothing is not the same as said none — markdown's WriteInput.Links
-	// draws the same distinction — and here that is what stands between a
-	// caller whose list of dirty nodes came out empty and a wiped
-	// arrangement.
 	t.Run("clearing positions", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -509,20 +430,6 @@ func TestPositionsArea(t *testing.T) {
 
 	// TestPositionsArea's "positions of another game are not reachable" case,
 	// with its positive control.
-	//
-	// Both games seed the same keys, so nothing here discriminates by
-	// spelling: azeroth and outland each hold a view called "route" and a
-	// quest called "hogger", and only the project filters keep the two
-	// arrangements apart.
-	//
-	// The four statements are driven **directly** as well as through the
-	// service, because the service resolves the view by key inside the game
-	// first, which masks every filter under it — the only way to observe a
-	// filter a service path has already made redundant, exactly as
-	// TestViewsArea's "the view queries addressing a row by id are scoped to
-	// the project" case does for the view queries. UpsertViewPosition has no
-	// filter to drive: it is an INSERT, and its isolation is 0008_views.sql's
-	// two composite foreign keys, so it is asserted as the refusal they raise.
 	t.Run("positions of another game are not reachable", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
@@ -568,9 +475,6 @@ func TestPositionsArea(t *testing.T) {
 		// statement's guard is for, and it is why the control below compares
 		// coordinates rather than counting rows — the count was two either
 		// way, which is how the first version of this test passed.
-		//
-		// cook has no stored position, so it takes the insert path and the
-		// keys refuse it.
 		cook, err := azeroth.meta.EntityByKey(ctx, azeroth.projectID, "quest", "cook")
 		assert.Must(t, err == nil, "read cook: %v", err)
 		_, err = outland.views.q.UpsertViewPosition(ctx, dbq.UpsertViewPositionParams{
@@ -625,21 +529,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "clearing one view leaves another views arrangement
 	// standing" case is the clear path's half of the core spec's per-view
 	// requirement, and it was the missing half.
-	//
-	// TestPositionsArea's "positions are per view and not per entity" case
-	// asserts it for the *write*: two views, one entity, two coordinates,
-	// neither disturbing the other. Nothing asserted it for the clear, and the
-	// comments on DeleteViewPositions and DeleteViewPosition call the view
-	// filter load-bearing — a claim about behaviour, so worth what the test
-	// behind it is worth. There was no test behind it: with the view_id filter
-	// deleted from either statement the whole package stayed green, while
-	// clearing "route" took "map" down with it.
-	//
-	//	unmutated:  ClearPositions(route, nil) removed=2 ; route now=0 ; map now=2
-	//	mutated:    ClearPositions(route, nil) removed=4 ; route now=0 ; map now=0
-	//
-	// Both clears are covered, because they are two statements: the
-	// whole-view clear and the single-entity one.
 	t.Run("clearing one view leaves another views arrangement standing", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -683,17 +572,6 @@ func TestPositionsArea(t *testing.T) {
 	// twin of TestPositionsArea's "an empty or oversize positions call is
 	// refused" case, and the cap half of it was a bound stated in prose and
 	// absent from the code.
-	//
-	// ClearPositions' own comment said the list was "bounded by the same cap
-	// a write is". Nothing bounded it — the cap lived in the write's
-	// argument check, which the clear never called — and the call is one
-	// lookup plus one delete per address on a single pooled connection:
-	//
-	//	ClearPositions with 50000 addresses: removed=0 err=<nil> elapsed=24.604468167s
-	//
-	// The oversize list here names entities that **do not exist**, exactly
-	// as the write's test does, so a not_found answer would mean the cap is
-	// applied after five thousand lookups rather than before the first.
 	t.Run("an empty or oversize clear is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -718,17 +596,6 @@ func TestPositionsArea(t *testing.T) {
 	// TestPositionsArea's "a position call refuses its arguments in the same
 	// order" case pins the one thing the two calls' doc comments both claim
 	// and only one of them did.
-	//
-	// Both say: the arguments this call carries, then the addresses they
-	// name, then the write. ClearPositions resolved the view first, so one
-	// call answered a missing view where the other answered a malformed
-	// address, from the same pair of bad arguments:
-	//
-	//	Set   -> invalid_input: /positions/0/entity_key: is required
-	//	Clear -> not_found: no view "nosuchview" in this game
-	//
-	// A rule two calls state and one follows is worth less than no rule, so
-	// the assertion is that they agree rather than that either is right.
 	t.Run("a position call refuses its arguments in the same order", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -750,18 +617,6 @@ func TestPositionsArea(t *testing.T) {
 	// is Task 15's decision, asserted rather than described: a drag reaches
 	// every subscriber a query edit reaches, because a browser holding a
 	// picture has no other way to learn the arrangement moved under it.
-	//
-	// The two subscribers are the two a wrong gating would silently cut out —
-	// a viewer, excluded by any MinRole above viewer, and a token caller,
-	// excluded by HumanOnly regardless of role. They are the same pair
-	// TestViewsArea's "view events reach every member of the game including
-	// agents" case uses for view.upserted, which is the claim: the gating of
-	// this kind *is* that one's, not a second decision that happens to agree
-	// today.
-	//
-	// All three write paths publish. A test that only drove SetPositions
-	// would leave both clears free to go quiet, and a wiped arrangement is
-	// the invalidation that matters most.
 	t.Run("a position write publishes its invalidation", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -809,9 +664,6 @@ func TestPositionsArea(t *testing.T) {
 	// placed before the write, or outside the transaction's error check,
 	// announces an arrangement that never landed, and every subscriber's
 	// reaction is to re-read a picture that did not change.
-	//
-	// Three refusals, one per pass SetPositions and ClearPositions make: the
-	// call's own arguments, the addresses they name, and the view itself.
 	t.Run("no position event is published when the write is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -861,20 +713,6 @@ func TestPositionsArea(t *testing.T) {
 	// hoc one does not" case is the positions member of the run envelope,
 	// which Task 13 deferred to Task 15 on the ground that nothing read one
 	// before Task 16.
-	//
-	// Three claims, and the second and third are the ones a naive
-	// implementation would get wrong:
-	//
-	//   - a saved run carries the arrangement, addressed by the same two
-	//     keys GetPositions answers with, so a client matches a position to
-	//     a node without ever reading an id;
-	//   - a node nobody dragged is **absent**, not returned at the origin —
-	//     (0, 0) is a place a designer may deliberately have chosen, and the
-	//     fixture drags one node there on purpose so the two cannot be
-	//     confused;
-	//   - an ad-hoc run carries none at all, because an inline query has no
-	//     saved view for a position to belong to, exactly as it has no
-	//     staleness.
 	t.Run("a saved views run carries its arrangement and an ad hoc one does not", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -931,16 +769,6 @@ func TestPositionsArea(t *testing.T) {
 
 // TestNothingIsStoredWhenOneWriteOfManyFails is where the transaction
 // around the writes is observed.
-//
-// Every refusal the product itself can produce happens *before* the
-// transaction opens — the arguments, then the addresses — so no call a
-// caller can make leaves a write to roll back, and moving the loop out of
-// withTx onto the pool turns no test red. That is the shape Task 11's
-// refs finding had, and it is closed the same way: a constraint the
-// second write violates, added to this test's own throwaway database, so
-// the first write has something to be rolled back from. Without the
-// transaction the first node stays placed and this test is red with one
-// stored position.
 func TestNothingIsStoredWhenOneWriteOfManyFails(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()
@@ -986,21 +814,6 @@ func assertPositionsPayload(t *testing.T, who string, e realtime.Event,
 // TestNoPositionEventIsPublishedWhenTheCommitFails is the one placement
 // the refusal test above cannot catch, and it is the reason this file
 // pays for a throwaway constraint.
-//
-// Every refusal SetPositions can produce happens *before* its
-// transaction opens — the arguments, then the addresses, then the view —
-// so a publish written as the last statement inside the transaction's
-// callback, or above the error check that follows it, differs from the
-// correct one by nothing a refusal can reach. A rolled-back write and a
-// refused write look identical from outside, and the difference is a
-// subscriber told to re-read an arrangement the database threw away.
-//
-// A deferred foreign key from view_positions.view_id to projects.id is
-// satisfied by nothing — a view's id is not a project id — and being
-// DEFERRABLE INITIALLY DEFERRED it is checked at COMMIT, so every
-// statement inside the transaction succeeds and only the commit fails.
-// views_test.go's TestNoViewEventIsPublishedWhenTheCommitFails is the
-// model, and testutil.NewPool's per-test database is what makes it safe.
 func TestNoPositionEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()

@@ -11,30 +11,11 @@ import (
 
 // The source-shape guards over
 // internal/web/static/components/mst-ground.js — the upload picker.
-//
-// The property they hold has no runtime signature any harness can see.
-// The picker states the refusal *before* a file is chosen, which means it
-// states it from constants of its own rather than from anything the
-// server said on this request: a picker cannot ask what will be refused
-// without uploading something first. So the three facts are a second copy
-// of a rule that lives in internal/views, and a second copy of a rule is
-// exactly what this repository's standing failure list calls drift.
-//
-// internal/web/jstest/writes_test.mjs asserts the three facts reach the
-// DOM with no file selected. These assert that what they say is what the
-// server will actually do.
 
 const groundModule = "static/components/mst-ground.js"
 
 // TestTheUploadPickerStatesTheServersOwnBounds pins the picker's promises
 // to the values the domain enforces.
-//
-// The byte count is internal/views.MaxAssetBytes and the three formats
-// are its MimePNG, MimeJPEG and MimeWebP — the same constants
-// readBounded and sniffedMime are written against. Raising the cap on the
-// server without touching the picker leaves a designer reading a bound
-// that is no longer true, which is a worse failure than no bound at all:
-// the sentence looks authoritative.
 func TestTheUploadPickerStatesTheServersOwnBounds(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(groundModule)

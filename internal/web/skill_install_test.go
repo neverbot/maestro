@@ -27,16 +27,6 @@ import (
 
 // The delivery half of the skill bundle: a signed, short-lived
 // /skill.zip and the descriptor that points at it.
-//
-// Every test below except the last builds its server over a nil pool.
-// None of them executes a query — signing a URL, packing an embedded
-// tree and marshalling a descriptor all touch the binary and nothing
-// else — so they run without a database and stay in the fast loop this
-// sub-project is written in.
-
-// newSkillServer builds a server that can sign and serve the bundle and
-// nothing else. Identity and Projects are required by NewServer and are
-// never called.
 func newSkillServer(t *testing.T) *web.Server {
 	t.Helper()
 	return web.NewServer(web.Options{
@@ -92,10 +82,6 @@ func TestASkillURLWithoutASignatureIsRefused(t *testing.T) {
 
 // TestASkillURLSignedForAnotherPathIsRefused presents a signature that
 // is perfectly valid — for a different path.
-//
-// The signature covers the path for a reason, and this is that reason: a
-// MAC over the expiry alone would be a MAC that any second signed route
-// this server ever grows would also accept.
 func TestASkillURLSignedForAnotherPathIsRefused(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
@@ -117,11 +103,6 @@ func TestAnExpiredSkillURLIsRefused(t *testing.T) {
 
 // TestASkillURLFromAnotherProcessIsRefused signs with a second server's
 // key and presents it to the first.
-//
-// This is the assertion that the key is per-process rather than a
-// constant somebody hardcoded "temporarily", and it is the one test in
-// this file that a fixed key would fail while every other test in it
-// stayed green.
 func TestASkillURLFromAnotherProcessIsRefused(t *testing.T) {
 	t.Parallel()
 	first, second := newSkillServer(t), newSkillServer(t)
@@ -144,12 +125,6 @@ func TestASkillURLFromAnotherProcessIsRefused(t *testing.T) {
 
 // TestTheSkillZipIsTheEmbeddedBundle reads the served bytes back and
 // compares them, entry by entry, against skill.Files().
-//
-// **Mutation, run while writing this test:** drop the genres/ prefix
-// from bundlePaths, so the zip builder packs everything else. This test
-// fails naming the six missing paths; nothing else in this file notices,
-// because a descriptor pointing at an archive is a descriptor that
-// cannot tell what is in it.
 func TestTheSkillZipIsTheEmbeddedBundle(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
@@ -197,11 +172,6 @@ func TestTheSkillZipIsTheEmbeddedBundle(t *testing.T) {
 
 // TestTheInstallDescriptorCarriesNoBundleBytes is the whole reason this
 // mechanism exists, and the one property of it nothing else asserts.
-//
-// A descriptor that quietly grew an `files` member holding the archive
-// would pass every other test in this file: the URL would still be
-// signed, the zip would still be the bundle, and the agent would pay
-// twenty thousand tokens on every call.
 func TestTheInstallDescriptorCarriesNoBundleBytes(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
@@ -223,10 +193,6 @@ func TestTheInstallDescriptorCarriesNoBundleBytes(t *testing.T) {
 // TestTheInstallDescriptorURLIsFetchable closes the loop between the two
 // halves of this file: the URL the descriptor hands out is one the
 // handler admits.
-//
-// Without it, the descriptor could sign one path while the route checked
-// another and every test above would still be green — each half correct
-// about itself and the pair useless.
 func TestTheInstallDescriptorURLIsFetchable(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
@@ -241,14 +207,6 @@ func TestTheInstallDescriptorURLIsFetchable(t *testing.T) {
 
 // TestWhoamiReportsTheVersionSkillInstallServes is the version
 // handshake, read through one session over the real transport.
-//
-// **Mutation, run while writing this test:** hardcode
-// WhoamiOutput.SkillBundleVersion to "sha256:0". This test fails naming
-// both values; nothing else in the repository does, because each half is
-// internally consistent and only the comparison between them is the
-// handshake. Two fields carrying one fact from one source is the whole
-// mechanism; two fields carrying one fact from two sources is the defect
-// this repository spent a sub-project removing.
 func TestWhoamiReportsTheVersionSkillInstallServes(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)

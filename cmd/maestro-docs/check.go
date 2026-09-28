@@ -15,18 +15,6 @@ var linkRE = regexp.MustCompile(`(?:href|src)="([^"]+)"`)
 
 // checkLinks reports every internal link in the built site that points
 // at a file the site does not contain.
-//
-// **This check is why this task exists.** The product's one piece of
-// onboarding pointed at `neverbot.github.io/maestro/agents/views` for
-// the whole build and answered 404 the whole time, because nothing
-// anywhere joined a link to a page. A site generated from the repository
-// and never checked would reproduce that defect with more steps: the
-// bundle's pages link to each other by relative path, and a page renamed
-// in the bundle silently breaks every link into it.
-//
-// External links are not fetched. A build that reached out to the
-// network would fail on somebody's flaky Wi-Fi and pass on a stale
-// cache, which is a check that reports the weather.
 func checkLinks(out string) ([]string, error) {
 	var pages []string
 	err := filepath.WalkDir(out, func(p string, d os.DirEntry, err error) error {

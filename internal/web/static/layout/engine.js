@@ -1,51 +1,10 @@
 // The layout engine: the vendored dagre, wrapped, and nothing else.
-//
-// Pure by construction — nodes with measured sizes and edges in,
-// coordinates out. No DOM, no fetch, no state, no time. That is what
-// lets the whole of it run under `node internal/web/jstest/layout_test.mjs`
-// while the browser runs the identical bytes inside a module worker.
-//
-// **The two imports are relative, and that is not a style choice.**
-// Every other module of ours writes `import … from "lit"` and lets the
-// shells' import map resolve it. An import map is a property of a
-// *document*: a module worker has its own module map and no map at all,
-// so a bare specifier inside anything the worker imports fails to
-// resolve, in the worker, at load, with an error the page sees only as a
-// dead worker. engine.js is imported by worker.js, so it names the
-// vendored files by path. internal/web/static_layout_test.go pins this
-// in both directions, because "it works today" is how it stops working.
-//
-// **The determinism this module owes the rest of the product, and what
-// it actually rests on.** Spec §5.3 lets `manual` mode lay out unplaced
-// nodes and never write the result back, and §5.6 removes the views
-// table's seed column (migration 0012),
-// on one shared premise: the same graph lands in the same place on every
-// load. dagre is deterministic — but only *given an insertion order*.
-// Reversing the order the nodes are added in moves every node; so does
-// reversing the edges. Measured, on the vendored 3.1.1, on an
-// eight-node graph: both shuffles produce a different drawing.
-//
-// So this module **sorts**, by the entity's address, before it inserts
-// anything, and that is where the guarantee comes from. It does not come
-// from the envelope's node order being stable — which it happens to be,
-// `ORDER BY capped.rank, capped.id` in internal/views/compile.go, but
-// that is an order by *uuid*, so it is stable across loads and not
-// across a re-seed, and nothing anywhere had written that dependency
-// down. Sorting here removes it: the arrangement is a function of the
-// entity addresses and the sizes, and of nothing else.
 
 import { Graph } from "../vendor/graphlib.mjs";
 import { layout } from "../vendor/dagre.mjs";
 
 // addressOf is an entity's identity, everywhere in this front end: the
 // `(type, key)` pair, never the id.
-//
-// It moved to ../address.js when the first renderer needed it, and this
-// re-export is why every caller in this directory still has one import
-// for the whole layer. The reason for the move is in that file: a
-// renderer looks a placement up by address, and reaching this module for
-// the function would put the vendored dagre on the main thread to build
-// a string.
 import { addressOf } from "../address.js";
 export { addressOf };
 
@@ -73,31 +32,6 @@ export const DEFAULT_NODE_WIDTH = 120;
 export const DEFAULT_NODE_HEIGHT = 32;
 
 // layoutGraph runs one layout.
-//
-// `nodes` are `{type, key, width, height}` and `edges` are
-// `{source, target}` with each endpoint a `{type, key}` pair — the
-// entity address, which is the vocabulary every other surface in this
-// product uses (internal/web/static/client.js writes positions by it,
-// render/twin.js addresses its rows by it) and never an id.
-//
-// A node may also carry a `cluster`: the value of the renderer's
-// `cluster_by` slot, as text. **Clustering draws nothing** — no
-// enclosure, no heading, no legend row — and its whole effect is here,
-// as a dagre parent, which keeps the nodes sharing a value near each
-// other. That is exactly the difference between it and `group_by`,
-// which draws an enclosure and never reaches this function, and it is
-// the difference a designer is most likely to trip over.
-//
-// A cluster parent is a graph vertex like any other, so it takes part in
-// the sort for the reason everything else does; and it is **not** in
-// `placements`, because the picture has no such node and a renderer
-// handed one would draw a box for a value.
-//
-// Returns `{placements, width, height}`. `placements` are
-// `{key, x, y, width, height}` where `key` is the address string, sorted
-// by it, and `x`/`y` are the box's **centre**, which is what dagre
-// reports and what an SVG `<rect>` is positioned from once by the
-// emitter rather than once per renderer.
 export function layoutGraph(nodes, edges, options = {}) {
   const boxes = normaliseNodes(nodes);
   const clustered = boxes.some((box) => box.cluster !== null);
@@ -150,11 +84,6 @@ export function layoutGraph(nodes, edges, options = {}) {
 }
 
 // normaliseNodes drops what cannot be laid out and orders what is left.
-//
-// A duplicate address keeps the **first** occurrence rather than the
-// last, so that a caller that concatenated two overlapping node lists
-// gets a stable answer instead of one that depends on which list it put
-// second.
 function normaliseNodes(nodes) {
   const seen = new Set();
   const boxes = [];
@@ -180,16 +109,6 @@ function normaliseNodes(nodes) {
 
 // normaliseEdges drops every edge with an endpoint outside `boxes`, and
 // this is load-bearing rather than defensive.
-//
-// Spec §4.2: an edge whose endpoint is not in `nodes` is **normal** —
-// the node and edge caps are independent, and an `edges: [{between: …}]`
-// entry legitimately draws relations between sets the query chose not to
-// draw. dagre's `setEdge` creates a node for an unknown endpoint, so
-// passing those through would invent an empty box for every entity
-// outside the picture, give it a rank, and push the real drawing around
-// to make room for entities the designer asked not to see. They are
-// drawn as stubs by the renderer (Task 7's `joinEdges`), which is a
-// decoration on a known endpoint and not a node the engine ever sees.
 function normaliseEdges(edges, boxes) {
   const known = new Set(boxes.map((box) => box.key));
   const links = [];
@@ -210,15 +129,6 @@ function normaliseEdges(edges, boxes) {
 
 // edgeName is the name a relation gets as a dagre edge, and it is never
 // the empty string.
-//
-// The name is what keeps two relations between one pair from
-// overwriting each other. An untyped edge used to take `""`, which reads
-// as a name in a multigraph and **throws inside dagre's compound
-// layout** — "Cannot set properties of undefined (setting 'points')" —
-// so the day `cluster_by` arrived every untyped edge would have taken
-// the whole picture down with it. The sentinel carries a colon, which
-// internal/metamodel refuses in a relation type key, so it cannot
-// collide with a real type.
 const UNTYPED_EDGE = ":untyped";
 
 function edgeName(type) {

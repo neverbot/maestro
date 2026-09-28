@@ -25,28 +25,6 @@ import (
 // declared and seeded the way a real agent would do it — over the MCP
 // tool surface, never through the Go domain API — and then read back
 // through the same surface plus the REST one the page uses.
-//
-// **Why it drives the tools rather than metamodel.Service.** Every other
-// test in this repository proves one call behaves; none of them proves
-// the calls *compose*. An agent seeding a game has to get the ids of the
-// entity types it just declared in order to state a relation type's
-// endpoints, has to keep the versions a bulk write reported in order to
-// edit those same rows a minute later, and has to page a traversal to
-// see a hub's whole neighbourhood. Those are properties of the surface
-// as a whole, and they are only visible from a test that uses it as a
-// whole.
-//
-// **The genre is the racing career the plan names** (Task 9's own
-// skeleton calls the game `le-mans`), and it was chosen over the MMORPG
-// for one reason worth recording: a career game needs a self-referencing
-// relation type that is not a toy — a licence tier superseding the one
-// below it — and it needs an entity type that is genuinely outside the
-// graph, which a sponsor is and a zone never is.
-//
-// The shape is in the constants below: 511 entities across seven types
-// and 1,044 edges across eight relation types, with one deliberately
-// dense hub (the circuit 120 of the 200 races are run at) so that a
-// traversal has something to page.
 
 const (
 	seedCircuits      = 60
@@ -576,13 +554,6 @@ func (s *seeded) rewriteRaces(t *testing.T, extra map[string]any) {
 
 // repairRaces runs the repair loop the tool description teaches: call,
 // and call again while it is still repairing rows.
-//
-// There is no cursor and none is needed — a repaired row leaves the
-// selection — so the loop's termination is the property under test, and
-// the pass count is returned so a caller can assert it did not take one
-// call per row after all. The default limit is deliberately not
-// overridden: two hundred races over a hundred-row pass is three calls,
-// which is the shape a real repair has.
 func (s *seeded) repairRaces(t *testing.T, in web.EntitiesRepairInput) (passes, repaired int) {
 	t.Helper()
 	ctx := context.Background()
@@ -1114,14 +1085,6 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 	// game costs, so the gaps it found were pinned here rather than only
 	// written up: each one passed, described something an agent had to
 	// work around, and was to be deleted when it was closed.
-	//
-	// **They are all closed.** Metamodel 13 indexed row keys and made
-	// search slim; Metamodel 14 put counting on the agent surface and
-	// moved the last four uuid-addressed tools, the relation listing's
-	// endpoint filters and a relation type's endpoint rules onto keys.
-	// What is here now is the positive form of each: the call an agent
-	// actually makes, over the same two-hundred-row game that measured
-	// the cost of not having it.
 	t.Run("what the surface used to make an agent do the long way", func(t *testing.T) {
 		// 1. **Counting was a full paged walk** — five calls to add up
 		// the races, while the game home page had the number the whole
@@ -1278,12 +1241,6 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 }
 
 // search is one search.* call, unwrapped.
-//
-// This game holds no documents, so every hit must be an entity hit and
-// must say so: the label is checked here rather than in each case, so
-// that a merge which stopped labelling its hits — or which answered a
-// game with no prose in it with something other than entities — fails
-// in every case below instead of dereferencing a nil Entity.
 func (s *seeded) search(t *testing.T, query, typeKey string) []web.SearchHit {
 	t.Helper()
 	out, err := web.MCPSearch(context.Background(), s.deps, s.caller, s.game,
@@ -1310,12 +1267,6 @@ func versionOf(t *testing.T, rows []metamodel.BulkWrite, key string) int32 {
 
 // renderSummaryInBrowserStub drives internal/web/static/app.js over the
 // summary this game actually produced.
-//
-// The existing harness (jstest/game_summary_test.mjs) proves the page
-// renders *a* summary; it invents one. This proves it renders *this*
-// one, which is the only way the two halves of the claim — the server
-// counted the game correctly and the page shows what the server counted
-// — are ever checked against the same numbers.
 func renderSummaryInBrowserStub(t *testing.T, summary []byte) {
 	t.Helper()
 	nodeOrSkip(t)

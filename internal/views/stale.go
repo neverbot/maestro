@@ -16,44 +16,6 @@ import (
 
 // This file is staleness: what happens to a saved view when the game it
 // was written against moves on.
-//
-// **Stale views are the normal case, not the exception.** A game's
-// vocabulary keeps moving for as long as the game is being designed, so a
-// view written in one month references types renamed in another. Nothing
-// here treats that as a fault; it is the working condition of the
-// product, and the design question is only what a run does about it.
-//
-// Resolution at execution time goes, per reference:
-//
-//  1. **By id.** A renamed type still resolves, because a rename does not
-//     change its id. The reference is live and the picture is right; what
-//     is stale is the spelling in the document.
-//  2. **By key**, when the id is null. ON DELETE SET NULL empties the id
-//     column and leaves the key text standing, so a type deleted and
-//     re-created under the same key resolves — the common shape of a
-//     designer fixing a mistake, and one that would otherwise report a
-//     working view as broken.
-//  3. Neither: the reference is dead.
-//
-// That order is implemented **once**, in staleness.entityTypeAt and
-// staleness.relationTypeAt, and every position in the query that names a
-// type goes through it: the closures resolveInto hands to itself, the
-// projection's own scope, and the relation types an edges[] entry
-// inherits from the step it draws. A position that resolved by key alone
-// would be a position where a rename silently loses the type.
-//
-// **A rename does not rewrite the stored query.** Resolution succeeds by
-// id, the key text is left exactly as the author wrote it, and the run
-// reports `*_renamed`. Rewriting the stored key would edit an author's
-// document underneath them without a version bump, which makes optimistic
-// concurrency lie: the next expected_version check would pass against a
-// document nobody wrote. Repair is an explicit views.upsert.
-
-// The eight diagnostic codes, which are eight promises. Each one is
-// reachable, each one is read, and each one is produced by the same pass
-// that makes the judgement it reports — a second walk over the document
-// would be a second implementation of every rule, and the first thing it
-// would drift on is which of them counts as staleness.
 const (
 	// DiagEntityTypeMissing: the query names an entity type that resolved
 	// neither by id nor by key.
@@ -82,15 +44,6 @@ const (
 )
 
 // The two on_stale policies.
-//
-// **fail is the default**, and it is the decision to defend: a diagram
-// that silently dropped its level filter looks exactly like a correct
-// diagram, and a designer will believe it. A wrong picture is worse than
-// no picture.
-//
-// best_effort exists because sometimes seeing most of the graph is what
-// you need. It is the designer's explicit choice, and what it dropped
-// comes back in Result.Stale for the UI to band across the top.
 const (
 	OnStaleFail       = "fail"
 	OnStaleBestEffort = "best_effort"
@@ -98,18 +51,6 @@ const (
 
 // Diagnostic is one thing a query says that this game no longer has, or
 // no longer spells that way.
-//
-// Pointer is the JSON pointer into the stored query document, the same
-// address every refusal in this package carries: an agent told
-// `/traverse/0/via/0` knows which of five steps to rewrite, and no amount
-// of prose gets it there as reliably.
-//
-// Was and Now are read one way throughout: **Was is what the document
-// says, Now is what the game says today**, and Now is empty when the game
-// says nothing. So a rename carries the old key and the new one, a
-// missing type carries the key and nothing, a changed field carries the
-// key and the type it is declared as now, and a vanished enum option
-// carries the option and nothing.
 type Diagnostic struct {
 	Code    string `json:"code"`
 	Pointer string `json:"pointer"`
@@ -183,12 +124,6 @@ func diagnosticCodes() []string {
 
 // staleness is the stored dependency index of one saved view, plus the
 // report the resolution pass builds as it walks that view's query.
-//
-// **A nil *staleness is the ad-hoc case and every method here is nil-safe
-// for it.** An inline query has no recorded past: nothing to resolve by
-// id, and nothing that can have moved. Making the zero case nil rather
-// than an empty struct is what keeps resolveInto one pass instead of two,
-// with the ordinary path taking exactly the branches it took before.
 type staleness struct {
 	// stored is view_refs keyed by pointer, which view_refs_key makes
 	// unique per view — one reference per position, so a pointer is the
@@ -201,33 +136,6 @@ type staleness struct {
 // type, or nil: no such reference, a reference of the other kind, a
 // reference that does not describe this document, or a reference whose
 // type has since been deleted (ON DELETE SET NULL).
-//
-// **The key comparison is what makes the id safe to follow.** RunView
-// reads the document and the index in two separate statements, with no
-// transaction and no version check pairing them; Task 11 writes them in
-// one transaction, but a read does not. An upsert committing between the
-// two hands a run document version N beside refs version N+1, and every
-// ref whose pointer survived the edit would then redirect by id to the
-// type the *new* document names — the wrong picture, returned green, and
-// described as a rename. Requiring the ref's own key to be the key the
-// document spells here closes that: the two are written from the same
-// document, so a disagreement means the index is not this document's.
-//
-// It costs the rename path nothing, which is the reason it can be
-// unconditional. **Neither the document nor the ref row is rewritten by a
-// rename** — that is this file's header decision — so after one they still
-// agree with each other on the old spelling and only the catalogue has
-// moved. A mismatch is never a rename; it is an index describing a
-// document this run is not holding, and falling through to the by-key
-// lookup answers from the document alone.
-//
-// **It is therefore a constraint on the rename operation this package was
-// built before.** Such an operation may move a type's key freely; what it
-// may not do is tidy `view_refs.ref_key` to the new spelling while
-// leaving the stored documents alone, because that is precisely the
-// disagreement this check reads as a torn index — and every renamed view
-// would fall to the by-key lookup and report its type missing. The two
-// spellings move together or neither moves.
 func (st *staleness) storedID(kind, ptr, key string) *uuid.UUID {
 	if st == nil {
 		return nil
@@ -243,12 +151,6 @@ func (st *staleness) storedID(kind, ptr, key string) *uuid.UUID {
 }
 
 // entityTypeAt resolves one entity type reference: by id, then by key.
-//
-// note says whether this position is the one that *reports* a rename. It
-// is true exactly at the positions that also record a TypeRef, and false
-// where the same pointer is resolved a second time to build a scope —
-// a diagnostic reported twice is a designer told to repair one thing
-// twice.
 func (st *staleness) entityTypeAt(cat *Catalogue, ptr, key string, note bool) (dbq.EntityType, bool) {
 	if id := st.storedID(KindEntityType, ptr, key); id != nil {
 		if row, ok := cat.entityTypesByID[*id]; ok {
@@ -318,15 +220,6 @@ func (st *staleness) noteOperand(typ metamodel.FieldType, raw any, ptr, key stri
 
 // noteUnboundParams reports every leaf whose parameter this run has no
 // value for.
-//
-// It is here rather than left to the compiler's own refusal because a
-// stale run has to *report* what it cannot do before deciding whether to
-// refuse: the compiler's version raises the first one it meets and stops,
-// which is a whole-document pass giving a one-problem answer, and under
-// best_effort it would abort a picture that could still be drawn without
-// that leaf's set. The compiler's refusal stays where it is, unchanged,
-// for every ad-hoc run — the two agree on which leaves are unbound
-// because both ask the same question of the same bound map.
 func (st *staleness) noteUnboundParams(r *Resolved, bound map[string]any) []string {
 	if st == nil {
 		return nil
@@ -370,16 +263,6 @@ func (st *staleness) noteUnboundParams(r *Resolved, bound map[string]any) []stri
 
 // scopeError is a refusal from a field scope that also carries the
 // staleness diagnostic it *is*.
-//
-// The code travels on the error rather than being inferred from the
-// pointer or matched out of the message, because both of those are a
-// second copy of a judgement this package already makes: fieldScope.field
-// is the one place that knows the difference between "no type in scope
-// declares this key" and "two of them declare it differently", and a
-// reader of its sentence would have to work that out again. A code of ""
-// is a refusal that is not staleness — an open scope, or a scope built
-// from types that themselves failed to resolve, whose missing type is
-// already reported at its own pointer.
 type scopeError struct {
 	code string
 	now  string
@@ -397,19 +280,6 @@ func staleScope(code, now, format string, args ...any) error {
 // resolveCtx is what a predicate needs beyond its own scope: the
 // staleness sink, and the two closures that turn a type key into a row
 // and record the dependency.
-//
-// **It is what makes an @type operand a dependency**, which is the
-// decision Task 4 deferred to the compiler and Task 6 deferred to here.
-// `@type eq "quest"` holds the entity type `quest` up exactly as
-// `from[0].type` does — the compiler refuses the view outright when that
-// key names nothing — so leaving it out of view_refs meant deleting the
-// type reported that nothing broke, and renaming it broke a view that
-// every other reference in this file would have carried through. The
-// operand is resolved by the same three steps as every other reference
-// and is **rewritten in the resolved leaf to the type's current key**, so
-// the compiler's own lookup finds it after a rename. The stored document
-// is untouched: rewriting happens in the *Resolved a run holds, not in
-// the jsonb column.
 type resolveCtx struct {
 	st           *staleness
 	entityType   func(ptr, key string) *dbq.EntityType
@@ -418,41 +288,6 @@ type resolveCtx struct {
 
 // typeOperand resolves an @type operand and hands back the key to
 // compile against; every other leaf's value passes through untouched.
-//
-// Only eq, neq and in take this road. The pattern operators ask about the
-// *spelling* of a key rather than about a type, compile to a subquery
-// over the key text, and would be a dependency on a string rather than on
-// a declared thing — Task 6's review recorded that split, and it stands.
-//
-// **The three operators are treated alike, and neq is the one where that
-// costs something.** Deleting the type an `eq` or an `in` names really
-// does change the picture: those narrow to it, and once it is gone they
-// select nothing. A negation does not — nothing is of a type this game no
-// longer has, so "type is not X" selects exactly what it selected before
-// — and reporting the view broken there is a delete a designer is asked
-// to reconsider for a picture that would not have moved. That asymmetry
-// is real, it was measured, and the reference is still a hard dependency
-// on purpose:
-//
-//   - **The no-op is an accident of today's rows, not a property of the
-//     document.** Resolution's own step 2 exists because deleting a type
-//     and re-declaring it under the same key is the common shape of a
-//     designer fixing a mistake — and the moment that happens the
-//     negation narrows again, with no version bump and nothing said. A
-//     reference that is dead now and live again on Tuesday is exactly
-//     what a stale report is for.
-//   - **The alternative puts a second rule in this function.** What makes
-//     an operand a reference would then depend on the operator twice, on
-//     two different axes — spelling versus thing, and narrowing versus
-//     widening — and the second axis is where the first drift would be.
-//   - **The deletion report would have to promise something harder.**
-//     Today it lists the views that *name* the type, which view_refs can
-//     answer exactly; exempting negations makes it "the views whose
-//     picture changes", which no index can answer.
-//
-// TestStaleArea's "a negated type comparison is a dependency like any
-// other" case pins it, so the asymmetry is a decision on the record rather
-// than something nobody noticed.
 func (rc *resolveCtx) typeOperand(scope fieldScope, leaf *ResolvedLeaf, ptr string,
 	value any,
 ) (any, bool) {
@@ -487,14 +322,6 @@ func (rc *resolveCtx) typeOperand(scope fieldScope, leaf *ResolvedLeaf, ptr stri
 
 // staleQuery is the refusal a stale view answers with under on_stale
 // fail.
-//
-// It carries the diagnostics **and** the pointer-addressed sentences, not
-// one or the other: internal/web publishes Fields as
-// details.fields[].path and a client that reads only those still learns
-// where to look, while a UI banding a warning across the top of a picture
-// wants the codes. Any resolution problem not already addressed by a
-// diagnostic is carried too, so a stale view that is also wrong for some
-// other reason does not lose the other reason.
 func staleQuery(diags []Diagnostic, problems []metamodel.FieldError) error {
 	fields := make([]metamodel.FieldError, 0, len(diags)+len(problems))
 	covered := make(map[string]bool, len(diags))
@@ -511,15 +338,6 @@ func staleQuery(diags []Diagnostic, problems []metamodel.FieldError) error {
 }
 
 // RunView runs a saved view, by key, against the game as it stands now.
-//
-// This is the entry point staleness exists for. It reads the stored
-// document and the dependency index that was written beside it in the
-// same transaction (Task 11), resolves the one against the other, and
-// then does one of three things: runs the view, runs what is left of it,
-// or refuses.
-//
-// It never writes. A repaired spelling is an explicit views.upsert, for
-// the reason this file's header gives.
 func (s *Service) RunView(ctx context.Context, projectID uuid.UUID, key string,
 	req RunRequest,
 ) (Result, error) {
@@ -568,17 +386,6 @@ func (s *Service) RunView(ctx context.Context, projectID uuid.UUID, key string,
 	// has no staleness. Read after the run rather than before it because
 	// a run that refuses answers with no envelope at all, and a read that
 	// only ever feeds a refused answer is a read nothing needs.
-	//
-	// It is read outside the run's own transaction, which is deliberate
-	// rather than overlooked: that transaction is read-only and bounded
-	// by a statement timeout the picture's cost is measured against, and
-	// a drag committing between the two is a picture one drag old — which
-	// is what view.positions exists to tell the reader about, and what a
-	// client re-reads on. Nothing here is compared against the nodes, so
-	// a position for a node this run did not draw comes back too: it is
-	// the same arrangement the next run of a widened query will use, and
-	// dropping it would make an edit to the query look like a lost
-	// afternoon of map work.
 	positions, err := s.positionsOf(ctx, projectID, view.ID)
 	if err != nil {
 		return Result{}, err
@@ -640,28 +447,6 @@ func (s *Service) runStored(ctx context.Context, projectID uuid.UUID, q *Query,
 		// Best effort refuses for two reasons and answers the same way
 		// for both, because they are the same answer: there is no picture
 		// this run can honestly draw.
-		//
-		// **Every seed set is gone**, so best effort is no effort — and
-		// an empty picture with a warning beside it reads as "this game
-		// has nothing", which is the lie the whole switch exists to
-		// avoid.
-		//
-		// That guard is about the *query*, not about the result, and the
-		// difference is worth stating because the sentence above invites
-		// the wrong reading. It cannot promise a non-empty picture and
-		// does not try to: a run whose seed sets all survive can still
-		// come back with nothing — a narrowing schema invalidates the
-		// rows that held a value for the field it dropped, and pruning
-		// cannot see that, so best effort answers zero nodes, no error
-		// and a warning attached. Refusing empty results is not the fix
-		// either; a legitimately empty query is a thing a designer asks
-		// for. What this arm covers is the one case pruning *made* empty,
-		// where the emptiness is this function's own doing.
-		//
-		// **Or a problem was raised at a position pruning cannot act
-		// on**, in which case dropping nothing and running the document
-		// whole would execute it with that problem standing, which is the
-		// silently widened picture by another road.
 		return Result{}, staleQuery(st.diags, problems)
 	}
 	return s.execute(ctx, projectID, pruned, params, req, st.diags)
@@ -672,32 +457,6 @@ func (s *Service) runStored(ctx context.Context, projectID uuid.UUID, q *Query,
 // seed set went, and false when a problem was raised at a position this
 // function cannot act on, since running the document whole would then
 // execute it with that problem standing.
-//
-// **The unit it drops is the smallest whole thing that can still be
-// drawn, and it never weakens a condition.** That is the rule the whole
-// file rests on, and it is the difference between best effort and a lie:
-//
-//   - a seed selector, a traversal step or an edges[] entry whose own
-//     type reference died is dropped entire;
-//   - a step whose `where` or `edge_where` cannot be resolved is dropped
-//     entire, rather than run without that condition — dropping the
-//     condition is exactly the silently-widened picture on_stale defaults
-//     to fail over;
-//   - a projection slot or a `project.fields` key is dropped, which costs
-//     a colour and never adds a node;
-//   - a step reading from a dropped set goes with it, transitively, and
-//     an edges[] entry naming a dropped step or a dropped set goes too,
-//     because an edge between things the picture no longer holds is not
-//     an edge.
-//
-// It prunes the *Resolved and the shallow copy of the document beside it
-// together, because the compiler reads both and reads them by index —
-// `nodes` names sets by name and `edges` is walked over Query.Edges while
-// indexing Resolved.Edges. Pruning one of the two is how those two lists
-// come apart.
-//
-// The pointers in the diagnostics still address the **stored** document,
-// which is the one a designer will open to repair it. Nothing renumbers.
 func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 	dropSet := map[int]bool{}
 	dropStep := map[int]bool{}
@@ -745,11 +504,6 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 		// a picture — which is what a mechanism nothing reads looks like from the
 		// inside. TestStaleArea's "best effort keeps the projected fields it can
 		// still read" case is what observes the surviving keys.
-		//
-		// It counts as acted on for that reason and not by omission: the
-		// pruning happened, one pass earlier, and the guard above is
-		// asking whether anything acted on the problem rather than
-		// whether this function did.
 		if len(parts) >= 2 && parts[1] == "project" {
 			handled = true
 		}
@@ -845,27 +599,6 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 
 // RemoveTypeReportingViews removes an entity type or a relation type and
 // answers with the saved views it broke.
-//
-// **Deleting a type that views depend on is allowed.** Refusing with
-// in_use — the way the metamodel refuses deleting a type that still has
-// entities — is rejected here because the cases are not alike: an entity
-// is content and losing it loses work, while a view is derived and can be
-// rewritten in one call. Making a type undeletable because a six-month-old
-// diagram mentions it would push designers into deleting views in order
-// to delete types, which is worse than either.
-//
-// The report is a courtesy and not a lock. It is read before the removal,
-// in its own statement, because the removal is what empties the column it
-// matches on; a view saved in the gap between the two is missing from the
-// list and loses nothing by it — its ref row still survives the deletion
-// with the key text intact, so the next run of that view reports the
-// reference dead at its own pointer. The list saves a designer a search,
-// and view_refs is what makes the answer true.
-//
-// It is composed here rather than inside internal/metamodel because the
-// dependency runs one way: views knows about types and nothing in the
-// metamodel mentions views. A removal that reported its views from in
-// there would be that dependency pointing both ways.
 func (s *Service) RemoveTypeReportingViews(ctx context.Context, projectID uuid.UUID,
 	kind string, typeID uuid.UUID, cascade bool,
 ) ([]ViewDependency, error) {

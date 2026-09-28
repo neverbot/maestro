@@ -1,36 +1,4 @@
 // The way out of a game.
-//
-// **The bug this file was written against.** Signing in landed a
-// designer in the game this browser last visited and there was no way to
-// reach another one. The account was a member of three games and the
-// server said so on every page; nothing in the product listed them. Two
-// halves closed the loop: the picker (app.js) redirected straight to the
-// remembered game the moment it had one, and the only link out of a game
-// was the wordmark, which pointed at "/" — the picker, which redirected
-// straight back in. The picker's list worked perfectly and was
-// unreachable.
-//
-// What is asserted here is the exit, and it is asserted **from inside a
-// game**: a check that only proved the picker renders a list when
-// nothing is remembered would have passed on the broken product, because
-// that was already true. So the first check below loads the real game
-// home at /g/{slug}, with a remembered game in localStorage, and reads
-// the addresses a person could actually click off the rendered chrome.
-//
-// The remembered-game shortcut is *kept*, and the last two checks are
-// what keeps it honest: it still fires at "/" (a designer with one game
-// must not meet a one-row picker every morning) and it never fires at
-// /games (which is why /games exists). Both properties in one file,
-// because either one alone is satisfiable by deleting the other.
-//
-// Run directly: `node internal/web/jstest/game_switcher_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
-
-
-// pages/page.js defines the read-only notice's hint component when it
-// loads, and a custom element's class needs these two globals to exist
-// before it is declared. Neither is what this file checks; they are here
-// so importing a page does not fail on the platform being absent.
 globalThis.HTMLElement ??= class {};
 globalThis.customElements ??= { define() {}, get: () => undefined };
 
@@ -59,11 +27,6 @@ function assertEqual(actual, expected, message) {
 }
 
 // --- The DOM stub -----------------------------------------------------
-//
-// The same stub the page harness uses, cut to what these three modules
-// touch. **Nothing in it can interpret a string as markup**: an element
-// with an innerHTML setter would let a page render a game's name as
-// markup and still pass here.
 function fakeElement(tag = "div") {
   const el = {
     tagName: tag,

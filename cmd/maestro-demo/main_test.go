@@ -16,18 +16,6 @@ import (
 
 // TestTheDemoSeedsTheCasesTheScreensNeed runs the demo against a
 // throwaway database and asserts the three findings it exists to produce.
-//
-// **The fixture is the point, not the count.** Three defects in this
-// product were found the first time a screen was ever rendered with
-// data: rows the wrong height, a verdict that disagreed with its own
-// number, and a whole grouping that had never drawn. What stops that
-// happening again is a demo that *contains* those cases — so this test
-// asks the analysis engine the three questions those screens ask, and
-// fails if the demo has stopped answering any of them.
-//
-// It also makes the header's claim checkable: every write goes through
-// the domain, so a schema change that breaks the demo breaks this test
-// rather than the next person's afternoon.
 func TestTheDemoSeedsTheCasesTheScreensNeed(t *testing.T) {
 	pool := testutil.NewPool(t)
 	ctx := context.Background()

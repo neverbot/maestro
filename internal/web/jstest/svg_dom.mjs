@@ -1,38 +1,5 @@
 // The DOM stub the SVG emitter is driven in, and the mutation log the
 // drag budget is measured with.
-//
-// The four harnesses that came before this one each carry their own
-// inline stub, because each needed three or four members of `document`
-// and no more. This one is a module rather than another copy for a
-// reason that is not tidiness: the assertions it serves are assertions
-// *about the DOM* — which attribute carries which value, in what order
-// elements were appended, and how many elements a drag touched — so the
-// stub is no longer scaffolding around the thing under test. It is part
-// of the instrument, and an instrument gets its own guard.
-//
-// **The failure mode this file is written against.** A stub that starts
-// a flag where the assertion wants it makes a test pass on its own; this
-// repository has shipped that shape twice. So nothing here has a
-// helpful default:
-//
-//   - `getAttribute` answers **null** for an attribute nobody set, never
-//     the empty string, so "the emitter wrote this" and "the emitter
-//     wrote nothing" are two different answers.
-//   - `setAttribute` refuses a non-string value. A DOM attribute is a
-//     string; accepting a number would let an emitter that never called
-//     String() pass a comparison the browser would fail.
-//   - `createElementNS` refuses a missing namespace and records the one
-//     it was given, so an assertion that a mark landed in the SVG
-//     namespace cannot be satisfied by a default.
-//   - `textContent` starts empty and is only ever a string.
-//   - `innerHTML` throws on read *and* write, in both directions, so the
-//     one sink this whole component is built to avoid cannot be reached
-//     quietly.
-//   - the mutation log starts empty, records only writes, and records
-//     nothing for a read.
-//
-// theDOMStubStartsWhereTheAssertionsBegin, in canvas_test.mjs, asserts
-// every one of those against the stub itself.
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
 export const HTML_NS = "http://www.w3.org/1999/xhtml";

@@ -38,16 +38,6 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // structured output round-trips correctly, and games.get on a foreign
 // project comes back as a structured, machine-readable scope_violation
 // error — with no fabricated structured payload riding along with it.
-//
-// That last assertion is the one a quality review found this test
-// originally missed: it only ever read Content[0], never
-// StructuredContent, so it could not have caught the SDK marshalling the
-// zero-value Out on every error path regardless of IsError (a real
-// defect — see this task's plan corrections). addScopedTool registers
-// every tool with Out=any and returns a literal nil on every error path
-// specifically so StructuredContent stays absent here; this test pins
-// that this actually holds through the real transport, not merely in
-// the Go source.
 func TestMCPEndToEndOverHTTP(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)

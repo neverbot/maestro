@@ -1,55 +1,4 @@
 // "Save as": the only view a human alone can make.
-//
-// **A human cannot write a query in this product, and that is a
-// decision.** The view query language was written for agents, it has no
-// builder, and building one is its own sub-project rather than something
-// smuggled into an interface task. So this dialog is the one exception,
-// and it is exactly as narrow as the exception it was granted: it copies
-// the open view's query document **unchanged** under a new key and lets
-// a designer change the renderer it is drawn with, that renderer's
-// knobs, and the values the copy opens with. No stage of the query is
-// editable here — not the seed sets, not the traversal, not the
-// projection, not the limits — because the moment this dialog edits a
-// query it *is* a query builder, with none of a query builder's design.
-//
-// The query therefore crosses the wire by reference and is never
-// rebuilt: client.js's saveViewAs hands `source.query` straight to
-// JSON.stringify, and save_as_test.mjs asserts the bytes on the wire are
-// the source's own. Nothing in this file so much as reads a stage of it.
-//
-// **What it must be honest about.** A duplicate that is also wrong is a
-// duplicate, not a repair. A designer who opens this dialog because a
-// view answers the wrong question will get a second view answering the
-// same wrong question in a different shape, so the dialog says the query
-// is copied unchanged, and says where a query is changed: by asking an
-// agent, over views.upsert.
-//
-// **The "defaults" are a binding, not a rewrite of the declarations, and
-// this is a correction to the plan.** A query's declared parameters —
-// their keys, their types and their defaults — live *inside the query
-// document*. Editing a default is editing the document, and the same
-// task requires the document be copied byte for byte; both cannot hold.
-// What a designer can be given without touching the document is the
-// binding the copy **opens with**, which this product already carries in
-// the address (`?p.x=…`, client.js's PARAM_PREFIX): the dialog hands
-// back a link to the new view with those values bound. So the dialog
-// says that too, rather than letting a designer believe they have
-// changed what the view will do for the next person who opens it bare.
-//
-// **The renderer list is the server's.** It is read over
-// client.renderers() from internal/views' own catalogue — names, knobs,
-// kinds and, for an enum, the admitted spellings — because a list
-// spelled here would be a copy of that table with a date on it, in a
-// language no Go test reads. The one thing the catalogue cannot supply
-// is what a knob does to the *picture*: its `Doc` describes a contract
-// for an agent (internal/views/renderers.go says so in its own header),
-// and the sentence a designer needs beside a control is render/*.js's
-// CONTROLS tooltip. Both are shown, and neither restates the other.
-//
-// It is not a LitElement, for mst-ground.js's reason: every string on
-// this panel is either a game string, a designer's own typing or the
-// server's sentence, and building with `createElement` and `textContent`
-// means nothing on this path ever parses markup.
 
 import { PARAM_PREFIX, writeParams } from "../client.js";
 import { controlNamed } from "../render/controls.js";
@@ -75,17 +24,6 @@ export const TOOLTIPS = new Map([
 ]);
 
 // The key rule, in internal/metamodel's own words.
-//
-// A key this dialog sends is a row key like every other in this product,
-// and rowKeyProblems is what will judge it. It is checked here as well
-// because a designer who typed a space should not spend a round trip to
-// find out, and because the *copy* is the expensive half: a refusal on
-// the key is the one refusal this dialog can prevent entirely.
-//
-// It is a second copy of a rule, which is what this repository calls
-// drift, so internal/web/static_save_as_test.go pins all three sentences
-// and the pattern to internal/metamodel/keys.go and fails if either
-// side moves.
 export const KEY_MAX = 64;
 export const KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const KEY_REQUIRED = "is required";
@@ -262,20 +200,6 @@ export class MstSaveAs extends HTMLElement {
   }
 
   // show opens the dialog, reading the catalogue first.
-  //
-  // **It is a real dialog now, and it was one all along.** This panel
-  // expanded in place, and its own stylesheet records what that cost: it
-  // is about a thousand pixels tall, so it capped itself at 70vh, made
-  // itself scroll, and pinned its own footer — an inline panel with a
-  // viewport cap and a sticky exit *is* a dialog, minus the behaviour.
-  // A reader could not close it with Escape, could not press away from
-  // it, and could Tab straight out into a page it was covering, which
-  // nothing announced as blocked.
-  //
-  // What moves is where the panel is drawn. The element stays in the
-  // page, the state machine is untouched, and `root` — the node every
-  // gesture is delegated from — is the same node, handed to the dialog
-  // as its content.
   async show() {
     this.open = true;
     this.reflectOpen();
@@ -420,12 +344,6 @@ export class MstSaveAs extends HTMLElement {
   // --- The write -------------------------------------------------------
 
   // save is one views.upsert, and the only one this dialog makes.
-  //
-  // An illegal key never leaves the browser, which is the point of
-  // keyProblem: the whole request would be spent to be told something
-  // this file already knows. Everything else is the server's, verbatim —
-  // a key already taken comes back as its own refusal and is shown
-  // exactly as it arrived.
   async save() {
     const problem = this.keyProblem();
     if (problem !== null) {
@@ -641,11 +559,6 @@ function copyParams(row) {
 // says the value is. An empty string is *unset* and never a value —
 // deleting the key is what "this knob is off" means to views.upsert,
 // and sending "" would be sending a value of the wrong type.
-//
-// The kinds are internal/views' own spellings, mirrored in
-// render/controls.js. Everything that is not a boolean, a number or a
-// list is text on the wire, which is what those kinds are: a slot name,
-// a field key, a relation type key, a column reference.
 export function valueOf(kind, text) {
   const raw = typeof text === "string" ? text : "";
   if (kind === "bool") return raw === "true" || raw === "on" ? true : raw === "false" ? false : null;

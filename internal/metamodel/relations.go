@@ -18,57 +18,12 @@ import (
 
 // Ref addresses an entity the way an agent thinks of it: type key plus
 // key.
-//
-// On the *write* path neither half is validated as a key: both address a
-// row UpsertRelation only reads, so a malformed one has one honest
-// answer, "there is no such thing", and it gets it from the lookup.
-// RelationByEdge bounds them, because a by-key lookup matches on
-// `lower(key)` and `lower()` on a string carrying a NUL byte is SQLSTATE
-// 22021 — a caller's bad argument leaving the domain as a server fault.
-// It is the same guard ListRelations already runs on its own type key
-// filter, and rowKeyProblems is what every upsert checks a key against
-// before it can become a row, so nothing storable is refused by it.
-//
-// **The write path still has that hole**, and this comment says so
-// rather than implying otherwise: `UpsertRelation` with a NUL byte in
-// the type key or in either endpoint key answers `lookup relation type:
-// ERROR: invalid byte sequence for encoding "UTF8" (SQLSTATE 22021)`,
-// measured, not reasoned about. Closing it is a change to the write path
-// and its per-item bulk failure codes, which Metamodel 12 — a read
-// defect — is not the place for; it is recorded in that task's
-// corrections block.
 type Ref struct {
 	TypeKey string
 	Key     string
 }
 
 // RelationInput is an upsert request for one edge.
-//
-// **ExpectedVersion carries exactly the meaning EntityInput's does**,
-// including the rule that a claim against an edge that is not there is a
-// RemovedError rather than a creation. See
-// EntityTypeInput.ExpectedVersion for the argument.
-//
-// **It did not exist until 0009, and this is what changed.** `relations`
-// carried no version column, so an edge was last-writer-wins: two
-// designers editing one edge's fields at once both succeeded and the
-// second overwrote the first, silently, with nothing — not the caller,
-// not a subscriber, not the row — recording that a write had been lost.
-// That was documented rather than hidden, and it was documented as one
-// half of a pair with UpsertRelation's refusal of parallel edges:
-// forbidding two edges of one type between one ordered pair *pushes
-// multiplicity into an edge's fields* — `passages: ["door", "vent"]` on a
-// single `connects_to` — and the old decision then left exactly those
-// fields with no concurrency protection at all. A list two designers
-// extend at the same time is the textbook lost update.
-//
-// **The pair is now resolved on this side**: edges get the same
-// compare-and-set every other write in this repository has, so the escape
-// hatch the parallel-edge refusal offers costs what it was always assumed
-// to cost. The other half stands unchanged and needs no revisiting for
-// this reason — an edge is still identified by (type, source, target), a
-// re-seed still updates rather than duplicating, and relaxing that index
-// is a separate question about modelling rather than about concurrency.
 type RelationInput struct {
 	TypeKey         string
 	Source          Ref
@@ -80,29 +35,11 @@ type RelationInput struct {
 
 // RelationFilter narrows a relation listing. Every field is optional;
 // the zero value lists the game's edges.
-//
-// Invalid is EntityFilter.Invalid for edges, and it is what makes 0009's
-// flag findable: nil lists both, true lists only the edges a relation
-// type's schema edit stopped fitting, false only the ones that still fit.
-// A flag nothing can query for is a flag nobody can act on, which is why
-// this field and the column landed in the same change.
-//
-// Cursor is the NextCursor of a previous call, and belongs to the game
-// and the filter it was issued for. EntityPage carries the whole
-// contract — every cursor in this package obeys it — including why one
-// cannot be forged into another game's rows.
 type RelationFilter struct {
 	TypeKey string
 	Invalid *bool
 	// Source and Target narrow to the edges at one endpoint, addressed
 	// the way every other tool on this surface addresses an entity.
-	//
-	// **They were entity uuids until Metamodel 14.** An agent that has
-	// just written an edge holds the two refs and not the two ids, so
-	// filtering by endpoint cost it a resolving read — Task 9's seeding
-	// run measured exactly that round trip. The resolution now happens
-	// here, and the ids the listing filters on are still what the answer
-	// carries, because an edge's row holds them.
 	Source *Ref
 	Target *Ref
 	Cursor string
@@ -114,13 +51,6 @@ type RelationFilter struct {
 // EntityPage documents. The one difference is in its favour: this
 // listing sorts on created_at, which nothing edits, so the "a renamed
 // row moves behind the reader" clause cannot bite here.
-//
-// Cursor.Sort, for this listing, is the row's created_at rendered in RFC
-// 3339 (time.RFC3339Nano, so two edges created within the same second
-// still divide on the id tiebreak) — paging.Cursor generalises Sort away
-// from any one listing's sort key, and this is the fact that
-// generalisation abstracts over for ListRelations. ListEntities' is the
-// row's name; see EntityPage.
 type RelationPage struct {
 	Relations  []dbq.Relation
 	NextCursor string
@@ -129,20 +59,6 @@ type RelationPage struct {
 // RelationWrite is one edge a batch landed, in the shape a caller reads.
 // It is BulkWrite's edge counterpart; see that type for the argument
 // about what a success report should and should not carry.
-//
-// **Version is here for the reason BulkWrite.Version is**: it is the
-// value ExpectedVersion takes on the next edit of this edge, nothing else
-// reports it, and re-reading a row to learn the version of a write you
-// just made is a round trip the write already knew the answer to. This
-// comment used to record its absence as a decision — edges had no version
-// column — and 0009 is what changed that.
-//
-// The rest a caller cannot derive from what it sent is the edge's own id,
-// which is what RemoveRelation takes, and the two endpoint ids its refs
-// resolved to.
-//
-// TypeKey is the *stored* spelling, for the reason upsertedRelation
-// exists.
 type RelationWrite struct {
 	TypeKey  string    `json:"type_key"`
 	ID       uuid.UUID `json:"id"`
@@ -152,18 +68,6 @@ type RelationWrite struct {
 }
 
 // RelationBulkResult reports what a batch of edges did.
-//
-// It is a second type rather than BulkResult because BulkResult carries
-// `Succeeded []dbq.Entity`; making that generic would have changed a
-// public type every existing caller and test names. Succeeded is
-// `json:"-"` for the same reason it is there — a dbq.Relation is a
-// database row and not a wire shape.
-//
-// **Written is what a successful batch tells an agent**, Task 7's answer
-// to the question this comment used to pose, and the edge half of the
-// one BulkResult gives; see BulkResult.Written for the argument. Written
-// and Succeeded are built from the same slice in the same loop, so they
-// cannot disagree about what landed.
 type RelationBulkResult struct {
 	Succeeded []dbq.Relation  `json:"-"`
 	Written   []RelationWrite `json:"written"`
@@ -201,30 +105,6 @@ func (u upsertedRelation) event() relationEvent {
 // UpsertRelation creates or updates one edge, resolving all three of its
 // parents inside the game, checking both endpoints against the relation
 // type's allowed lists and its fields against the type's schema.
-//
-// **An edge is idempotent by (type, source, target)**, which is what
-// makes a re-seed update the edge rather than lay a second copy beside
-// it, and what the ON CONFLICT target needs to exist. The cost is that a
-// game cannot hold two edges of one relation type between one ordered
-// pair of entities. A game that genuinely needs two has two ways to say
-// so, and both are better records than a nameless duplicate: declare the
-// second meaning as its own relation type (`connects_to` and
-// `connects_to_secretly`, or `unlocks` and `unlocks_at_max_rank`), or
-// put the multiplicity in the edge's own fields, which is what edge
-// fields are for — one `connects_to` from room A to room B carrying
-// `passages: ["door", "vent"]` rather than two identical edges nothing
-// tells apart. **That second escape hatch used to be qualified by the
-// absence of a version on edges** — the list it handed the problem to was
-// unprotected against a concurrent extension, and the loss was silent.
-// 0009 closed that half: an edge carries `version` and this upsert is a
-// compare-and-set, so two designers extending one `passages` list are
-// answered with a conflict rather than one of them being dropped. See
-// RelationInput. **Self-loops are allowed**: source and target may be the
-// same entity, and the index permits it. A championship that counts
-// towards itself is a modelling mistake a designer should be able to
-// make and then see; Maestro is not the arbiter of a game's graph, and
-// the analysis sub-project is where cycles and self-references are
-// reported.
 func (s *Service) UpsertRelation(ctx context.Context, projectID uuid.UUID, in RelationInput) (dbq.Relation, error) {
 	var written upsertedRelation
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
@@ -246,14 +126,6 @@ func (s *Service) UpsertRelation(ctx context.Context, projectID uuid.UUID, in Re
 // agent seeding entities and the edges between them in one call needs to
 // see rows the same transaction has just written. Nothing in here
 // publishes.
-//
-// **No public caller reaches that yet.** UpsertRelations writes edges and
-// nothing else, so an atomic batch's endpoints are always already
-// committed and every lookup here could be routed through the pool
-// without a single external test noticing; Task 9's seeding of a whole
-// game in one call is where the claim gets a public path. Until then it
-// is pinned at the only level where it is true, by the package's own
-// TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction.
 func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, in RelationInput) (upsertedRelation, error) {
 	relType, err := q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{
 		ProjectID: projectID, Key: in.TypeKey,
@@ -274,14 +146,6 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 	// holding two bad ends fixes the one it was told about, resends, and
 	// is told about the other. Failing on the source cost a round trip
 	// per bad end and made the two halves of one decision disagree.
-	//
-	// Stopping at resolution would have left the worse half of it in
-	// place: a caller with one missing end and one wrongly-typed end
-	// heard only the not_found, and the mismatch waited for the next
-	// attempt. The price is the two lookups the target end costs on an
-	// item that was going to fail anyway; the success path always paid
-	// them. bothEndpoints says which code wins when the two halves
-	// disagree.
 	source, sourceErr := endpointEntity(ctx, q, projectID, "source", in.Source)
 	target, targetErr := endpointEntity(ctx, q, projectID, "target", in.Target)
 
@@ -393,11 +257,6 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 
 // conflictOnRelationEdge re-reads an edge whose guarded upsert matched no
 // row and reports the version that actually stands in the way.
-//
-// It is conflictOnEntityKey for edges, minus its respelling arm: an edge
-// has no key of its own, so a stale version is the only thing a failed
-// guard can mean. The re-read is what makes the reported number the one
-// the caller has to merge onto, rather than the one it was holding.
 func conflictOnRelationEdge(ctx context.Context, q *dbq.Queries,
 	projectID, relationTypeID, sourceID, targetID uuid.UUID,
 ) error {
@@ -416,36 +275,6 @@ func conflictOnRelationEdge(ctx context.Context, q *dbq.Queries,
 // edgeParentViolation recognises a write refused because one of an edge's
 // three parents was no longer there when the insert ran, and names which
 // one; every other error passes through unchanged.
-//
-// The lookups above this are the ordinary answer, and they cannot be the
-// only one: they read under READ COMMITTED, so a rival transaction that
-// deletes a parent after the lookup and commits before the insert leaves
-// this call holding an id the composite foreign keys then refuse. Left
-// unmapped that arrives as `internal_error` — the code that means "give
-// up" — carrying "violates foreign key constraint
-// relations_target_id_project_id_fkey", which names neither which of the
-// three parents is gone nor that anything is missing at all. In atomic
-// mode one raced endpoint aborts a whole batch with it. The right answer
-// is the one the lookup would have given a moment earlier, `not_found`
-// naming the parent, because the recovery is the same: go and create the
-// row, then retry.
-//
-// The mapping is on the constraint's column, as actorConstraintViolation
-// is, and the three columns are distinct; RemoveEntityType and
-// RemoveRelationType already catch the same SQLSTATE for the same class
-// of race. The names in the message are the caller's own spellings —
-// there is nothing stored left to read them from, which is precisely the
-// condition being reported.
-//
-// **One parent per answer, unlike the two ends above.** Postgres reports
-// the first constraint a statement violates and stops, so a race that
-// deletes two of an edge's three parents at once is answered with one of
-// them and the caller meets the second on its retry. It is the same
-// class of hidden second hop bothEndpoints exists to close, and it is
-// left open here deliberately: closing it would mean re-reading all
-// three parents after a failed write to find out which are still gone —
-// work on a path only a race reaches, to save a round trip only a rarer
-// race costs.
 func edgeParentViolation(err error, in RelationInput) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
@@ -466,21 +295,6 @@ func edgeParentViolation(err error, in RelationInput) error {
 
 // bothEndpoints folds the two endpoint verdicts into the one answer
 // their caller returns.
-//
-// Two failures are joined with "; " rather than through errors.Join,
-// whose newline would put a batch report's Message on two lines, and each
-// half keeps its own sentinel: both are wrapped, so errors.Is matches
-// whichever of the two the caller asks about.
-//
-// **Which code the joined error carries when the halves disagree.** The
-// two ends can now fail for different reasons — one missing, one wrongly
-// typed — and failureFor picks by asking errors.Is in its own order,
-// which puts ErrNotFound above ErrEndpointTypeMismatch. That is the
-// answer a caller can act on, and it is the right way round rather than
-// an accident of the switch: an end that does not exist cannot be judged
-// against the endpoint rule at all, and creating it is what decides which
-// type it will have. The mismatch travels in the message, so the retry
-// already knows about it.
 func bothEndpoints(sourceErr, targetErr error) error {
 	switch {
 	case sourceErr != nil && targetErr != nil:
@@ -529,11 +343,6 @@ type endpoint struct {
 // endpointEntity resolves a Ref against a transaction's handle and names
 // what is missing when it cannot: which end of the edge, and which of
 // the two rows.
-//
-// Both lookups are scoped to the project, so an entity of another game
-// reads as absent rather than as somebody else's row. The composite
-// foreign keys on relations.source_id and .target_id are the backstop
-// underneath that, not the mechanism.
 func endpointEntity(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, role string, ref Ref) (endpoint, error) {
 	typ, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: ref.TypeKey})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -557,11 +366,6 @@ func endpointEntity(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, ro
 }
 
 // UpsertRelations writes a batch of edges in the requested mode.
-//
-// The batch machinery — the two modes and what each promises, the
-// per-item loop, the cancellation contract, the up-front duplicate check
-// and the mapping to a wire code — is bulk.go's, shared with entities.
-// What is edge-shaped and stays here is relationBulkSpec.
 func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, items []RelationInput, mode BulkMode) (RelationBulkResult, error) {
 	written, failed, err := BulkUpsert(ctx, s.withTx, items, mode, s.relationBulkSpec(projectID))
 	var (
@@ -581,21 +385,6 @@ func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, item
 
 // relationBulkSpec is the edge half of a bulk write: everything bulk.go
 // deliberately does not know.
-//
-// **Identity is the triple relations_edge_key folds on**, spelled in the
-// terms an item actually carries: the relation type key and both
-// endpoints' (type key, key). All five parts are folded, because every
-// one of them is resolved through a lower(key) lookup, so two items
-// spelling a key differently address one edge. They are joined
-// length-prefixed by FoldedIdentity for the reason it records — the
-// driver folds an item to one string and none of these parts is
-// pattern-validated here.
-//
-// **repeated cannot say what the entity message says.** An edge has no
-// key of its own, so "give one of the two a different key" is advice
-// about a field that does not exist; what a caller needs to hear is that
-// its two items are one edge, and what to do about it. The path is the
-// item rather than a field of it, for the same reason.
 func (s *Service) relationBulkSpec(projectID uuid.UUID) BulkSpec[RelationInput, upsertedRelation] {
 	return BulkSpec[RelationInput, upsertedRelation]{
 		Identity: func(in RelationInput) string {
@@ -631,19 +420,6 @@ func (s *Service) relationBulkSpec(projectID uuid.UUID) BulkSpec[RelationInput, 
 
 // ListRelations returns one page of the edges of a game matching a
 // filter.
-//
-// An unknown TypeKey is a not_found rather than an empty listing: a
-// caller that mistyped a key has to hear about the key, not be told this
-// game has no such edges.
-//
-// **It pages, on (created_at, id).** Until this task it did not: the
-// LIMIT was the whole story, so a game with more edges than the cap
-// simply could not be read past it and nothing in the answer said so.
-// Everything EntityPage documents applies here — a page is a position
-// and not a snapshot, and the cursor belongs to the game and the filter
-// it was issued for — with one difference in its favour: created_at is a
-// value nothing edits, so the boundary cannot move the way a renamed
-// entity moves an entity listing's.
 func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f RelationFilter) (RelationPage, error) {
 	limit := relationPageSize(f.Limit)
 	params := dbq.ListRelationsParams{
@@ -655,14 +431,6 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	// names no entity is not_found rather than an empty page: "this game
 	// holds no edge at that entity" and "this game holds no such entity"
 	// are different answers, and only one of them is worth a second call.
-	//
-	// **Both halves of both refs are pattern-checked first**, the rule the
-	// TypeKey filter below already follows and for the same reason: a key
-	// is caller-supplied text and EntityByKey passes it to Postgres
-	// unbounded, so a NUL byte would come back as SQLSTATE 22021 — an
-	// internal_error over the caller's own argument. Every problem is
-	// collected before any is reported, so a caller with two bad refs
-	// fixes both in one round trip.
 	var endpointProblems []FieldError
 	for _, end := range []struct {
 		path string
@@ -763,31 +531,6 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 
 // RelationByEdge reads one edge by the address it was written under:
 // its relation type's key and both endpoints as (type key, key) refs.
-//
-// **This is the read that did not exist**, and its absence made an
-// edge's own field values write-only: they were validated against the
-// relation type's schema, stored, and returned by nothing. ListRelations
-// could reach an edge but only through a filter on endpoint *ids*, which
-// a caller that wrote the edge does not hold, and no listing carried the
-// fields at all. Entities have EntityByKey for exactly this and edges
-// now have its counterpart, addressed the way relations.upsert addresses
-// an edge, so that writing one and reading it back are the same three
-// strings.
-//
-// Every key is bounded before any lookup runs, the same rule and the
-// same reason as ListRelations' type key filter: rowKeyProblems is what
-// every upsert checks a key against before it can become a row, so a key
-// that fails it cannot name anything stored, and running it here answers
-// a malformed key as the caller's own invalid_input instead of letting a
-// NUL byte reach Postgres as SQLSTATE 22021 and escape as a server
-// fault.
-//
-// The three not_founds are distinct on purpose. An unknown relation type,
-// an unknown endpoint and a real address with no edge on it are three
-// different mistakes, and a caller told only "not found" has to guess which
-// of the three strings it got wrong; TestRelationsArea's "each missing
-// piece of an edge read" case pins all three plus the fourth case, where
-// every piece exists and the edge does not.
 func (s *Service) RelationByEdge(ctx context.Context, projectID uuid.UUID, typeKey string, source, target Ref) (dbq.Relation, error) {
 	var problems []FieldError
 	for _, part := range []struct{ path, key string }{
@@ -854,43 +597,12 @@ const (
 
 // relationPageSize turns a caller's requested limit into the one this
 // listing will use.
-//
-// **Asking for nothing and asking for too much are two different
-// requests, and they now get two different answers.** A zero or negative
-// limit is "no opinion" and gets the default. A limit above the cap is
-// an opinion — a caller that wants as many rows as it is allowed — and
-// gets the cap. Folding both onto the default meant `Limit: 501`
-// silently returned 100 rows while `Limit: 500` returned 500: asking for
-// slightly too much gave strictly less than asking for the maximum,
-// which is the one answer no caller can have meant, and it is silent, so
-// a caller that trusted it under-read the game's graph without ever
-// being told. Clamping is what every other paginated API in reach does
-// and what a caller writing `Limit: math.MaxInt32` to mean "everything"
-// expects.
-//
-// This is the per-page bound and nothing more: the cursor ListRelations
-// now issues is what says how many pages exist. The rule itself is
-// pageSize, in list.go — a delegation to paging.Size, shared with the
-// entity listing and the search limit so that none of them can drift
-// apart, and ready for the markdown domain to share too once Task 8
-// gives it a listing; what stays here is this listing's own two bounds
-// and the argument for the shape.
 func relationPageSize(limit int32) int32 {
 	return pageSize(limit, defaultRelationPage, maxRelationPage)
 }
 
 // RemoveRelation deletes one edge by the address it was written under:
 // its relation type's key and both endpoints as (type key, key) refs.
-//
-// **It took a uuid until Metamodel 14**, and it is now the same address
-// relations.upsert writes an edge with and relations.get reads it by —
-// see RemoveEntity for the argument, which is the same one. The
-// resolution moved inside this transaction rather than disappearing.
-//
-// It reads the edge before deleting so that relation.removed declares
-// the same identity relation.upserted does; a removal announced with an
-// empty type key tells a client an edge of a type it has never seen is
-// gone.
 func (s *Service) RemoveRelation(ctx context.Context, projectID uuid.UUID,
 	typeKey string, source, target Ref,
 ) error {

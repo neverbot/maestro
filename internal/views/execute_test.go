@@ -145,14 +145,6 @@ func TestExecuteArea(t *testing.T) {
 	// TestExecuteArea's "a node in two sets comes back once under the first
 	// set that claimed it" case pins the deduplication, and pins the ordering
 	// **as text**.
-	//
-	// The split matters, and it was found by mutation: deleting the ORDER BY
-	// leaves the behavioural half green, because a UNION of two arms happens
-	// to come back in arm order on this Postgres. So the behavioural half is
-	// only the positive control — it proves the node is deduplicated and that
-	// the set it reports is the first one declared — and the text assertion
-	// is what makes the order a contract rather than an executor detail. It
-	// is the half that is red without the ORDER BY.
 	t.Run("a node in two sets comes back once under the first set that claimed it", func(t *testing.T) {
 		g, _ := a.games(t)
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"first"},
@@ -476,10 +468,6 @@ func TestExecuteArea(t *testing.T) {
 	// the golden files were red for: `to_type` and the invalid exclusion. A
 	// golden file is a diff a reviewer might regenerate; this is an answer
 	// from the database.
-	//
-	// The fixture needs a relation of the walked type reaching a row of
-	// another type, which the seed does not have, and an invalid row on the
-	// far side, which it does not either — so the test makes both.
 	t.Run("a step draws only its destination type and only valid rows", func(t *testing.T) {
 		g, _ := a.games(t)
 		// A zone that is "available_to" the mage: nothing in the metamodel
@@ -532,24 +520,6 @@ func TestExecuteArea(t *testing.T) {
 	// until 0009 an edge could not be flagged at all: a relation type carries
 	// a field schema, an edge's values are validated against it, and nothing
 	// re-judged them when the schema changed.
-	//
-	// **It exercises every arm of the compiler that names the `relations`
-	// table**, in one fixture, because that is the failure this repository
-	// keeps repeating: a rule established in one arm and not carried to the
-	// others. The arms are
-	//
-	//   - `hop`, a one-hop step's own JOIN;
-	//   - `walk`, a multi-hop step, where the exclusion rides in the edge
-	//     predicate and prunes the recursion rather than filtering its output
-	//     — an edge dropped on the way out would leave the node behind it
-	//     drawn with nothing joining it to the picture;
-	//   - `edges[].from_step`, the edges a step walked;
-	//   - `edges[].between`, relations drawn between two sets;
-	//   - `project`'s one-hop related attribute, where an edge nobody drew
-	//     still colours a node.
-	//
-	// Each is asserted with `include_invalid` as its own control, so a green
-	// assertion cannot be a fixture that was empty either way.
 	t.Run("no arm of a picture draws an edge that no longer validates", func(t *testing.T) {
 		g, _ := a.games(t)
 		// hogger -> elwynn is the edge that stops validating. defias ->

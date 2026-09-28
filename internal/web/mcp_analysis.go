@@ -14,39 +14,6 @@ import (
 
 // This file is the analysis surface: the four answers a game cannot get
 // by reading, and the stored artefact that carries one of them.
-//
-// **Every exported MCPAnalysis*/MCPRoutes* function starts with
-// requireScope and delegates to an unexported core of the same name**,
-// which is the split mcp_docs.go's header argues and mcp_views.go
-// inherits: requireScope asks "is this token bound to this game", which
-// a session caller cannot answer, and requireProject asks the equivalent
-// question of a session. One implementation of every tool, two admission
-// checks.
-//
-// **The tool descriptions carry analysis.TraitDescription() rather than
-// restating the vocabulary.** That table is generated from
-// metamodel.AnalysisTraits, metamodel.AnalysisTraitConflicts and the
-// resolver's own derivation mapping, each guarded in both directions by
-// internal/analysis's own tests. A hand-written paragraph naming a trait
-// would be a paragraph that goes false the first time the vocabulary
-// moves, and an agent would find out by being refused.
-// TestEveryAnalysisToolDescriptionCarriesTheGeneratedTraitTable and
-// TestNoAnalysisToolDescriptionNamesATraitOutsideTheTable are the two
-// directions.
-//
-// **The output schemas name what is knowable.** internal/views shipped
-// `positions` as an array of open objects and a wire-spelling defect
-// lived inside that shrug for a whole sub-project, found by a reader
-// rather than by a test. Nothing this surface answers with depends on a
-// caller's document: a finding, a verdict, a semantics_source entry and
-// a route step all have fixed members, so every one of them is spelled
-// out below.
-
-// --- The prose no structure generates ---
-
-// analysisOrphanDoc, analysisGateDoc, analysisFalsePositiveDoc and
-// analysisNoCursorDoc are the four things an agent cannot infer from any
-// table, each of which was a real misreading before it was a paragraph.
 const (
 	// The mid-seed false positive. It is stated rather than
 	// heuristically suppressed, because a heuristic that hid orphans
@@ -109,11 +76,6 @@ type AnalysisSeedInput struct {
 // AnalysisReachArgs is every argument the reachability closure takes,
 // embedded by the two tools that run one and mirrored by a route's
 // stored parameters.
-//
-// It is one struct rather than two lists of fields for the reason
-// analysis.UnreachableInput embeds analysis.Params: a seed argument must
-// not mean one thing on analysis.unreachable and another on
-// routes.upsert.
 type AnalysisReachArgs struct {
 	SeedEntities    []AnalysisSeedInput `json:"seed_entities,omitempty"`
 	SeedEntityTypes []string            `json:"seed_entity_types,omitempty"`
@@ -226,12 +188,6 @@ type RoutesUpsertInput struct {
 }
 
 // RoutesRemoveInput deletes one route.
-//
-// **expected_version is required here and is not on views.remove**, and
-// the difference is the point: a view is derived content that can be
-// re-upserted from a document the caller holds, while a route's ordered
-// steps are authored and its stored verdict cannot be reconstructed from
-// anything.
 type RoutesRemoveInput struct {
 	ScopedArgs
 	Key             string `json:"key"`
@@ -245,22 +201,6 @@ type RoutesCheckInput struct {
 }
 
 // --- Outputs ---
-//
-// The three analyses, routes.get and routes.check answer with the domain
-// package's own result types rather than a projection.
-//
-// That is the opposite of what this file does for a metamodel row, and
-// the reason is that these types are already wire shapes: every member
-// is tagged, every one was designed as the answer to a tool call, and a
-// projection would be a second place that decides what a finding is.
-// wire_tags_test.go's sweep is what makes that safe — the analysis roots
-// are named in wireDomainRoots, so an untagged field added to any of
-// them fails a test rather than reaching an agent under a Go field name.
-
-// RoutesRemovedOutput is what a deletion answers with. A count is not
-// available — the row is gone or it was not there, and "not there" is
-// not_found — so this is the acknowledgement, spelled the way
-// views.remove spells it.
 type RoutesRemovedOutput struct {
 	Removed bool `json:"removed"`
 }
@@ -443,11 +383,6 @@ func routesCheck(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 // --- Registration ---
 
 // addAnalysisTools registers the eight analysis and route tools.
-//
-// Every one goes through addScopedTool, so game isolation is enforced in
-// one place regardless of how many tools this file grows —
-// TestEveryMCPToolGoesThroughAddScopedTool walks the *served* tool list
-// and fails on any tool that reached the server another way.
 func (s *Server) addAnalysisTools(srv *mcp.Server, deps MCPDeps) {
 	traits := analysis.TraitDescription()
 
@@ -682,26 +617,6 @@ func orphanModeNames() []string {
 }
 
 // --- Hand-written output schemas ---
-//
-// Written by hand for the reason mcp.go's own schema block gives: the
-// SDK validates a tool's output against its *marshalled JSON*, and its
-// reflection-based inference gets that shape wrong for any type whose
-// marshalling comes from a method rather than from its literal Go
-// structure — analysis.Verdict is exactly such a type, and a mismatch
-// there surfaces only when the tool is called.
-//
-// **Nothing here is an open object.** Every shape this surface answers
-// with is fixed: it does not depend on a caller's document the way a
-// view's nodes depend on its query, so there is nothing to shrug at.
-//
-// **The shared pieces are functions and not variables**, which is not a
-// style choice: `mcp.AddTool` refuses a schema whose sub-schemas do not
-// form a *tree*, and a `*jsonschema.Schema` reused at two positions —
-// `cycles` and `containment_cycles` hold the same shape — is one node
-// appearing twice. The refusal is a panic at registration, so a server
-// built that way does not start; a function hands each position its own
-// value. TestEveryAnalysisToolIsCallableOverTheRealTransport is what
-// exercises the schemas afterwards.
 
 func analysisStatsSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
@@ -933,12 +848,6 @@ func routesRemovedOutputSchema() *jsonschema.Schema {
 }
 
 // analysisStepCheckSchema is one step's verdict.
-//
-// `verdict` is a string and the four values are named in the tool's own
-// description rather than as an enum here: an enum would be a second
-// copy of analysis.Verdicts, and that list is already enforced by the
-// domain's own encoder, which refuses anything outside it — including
-// the zero value, which is deliberately not `ok`.
 func analysisStepCheckSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:     "object",

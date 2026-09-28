@@ -17,13 +17,6 @@ import (
 
 // The two closed vocabularies this package owns, each pinned in both
 // directions against its *other* copy.
-//
-// A closed vocabulary in this repository is never written once. A field
-// type is a constant and a member of a list; a semantic role is a member
-// of a list and a literal inside a CHECK constraint. Every one of those
-// pairings has drifted somewhere in this repository's history, and the
-// drift is silent in the expensive direction: the copy an agent reads
-// grows a word the copy that enforces does not admit.
 
 func TestSchemaVocabArea(t *testing.T) {
 	t.Parallel()
@@ -34,10 +27,6 @@ func TestSchemaVocabArea(t *testing.T) {
 	// schema.go, parsed out of the source rather than written down again here
 	// — a second hand-written list would be a third copy, and the test would
 	// pass by agreeing with itself.
-	//
-	// Both directions: a constant that is not in the list (a seventh type
-	// declared and never offered), and a member of the list that no constant
-	// declares (a word offered to agents that no writer produces).
 	t.Run("field types lists every declared field type", func(t *testing.T) {
 		declared := fieldTypeConstantsInSource(t)
 
@@ -89,28 +78,6 @@ func TestSchemaVocabArea(t *testing.T) {
 	// internal/analysis established for analysis_traits, applied to the one
 	// other vocabulary in this repository that lives in Go and in a CHECK
 	// constraint at once.
-	//
-	// It is deliberately asymmetric, because the two directions cannot be
-	// asserted the same way:
-	//
-	//   - **Go → database, behaviourally.** Every role in
-	//     metamodel.SemanticRoles is written through the service and lands. A
-	//     word Go offers that the column refuses fails here, as an untyped
-	//     23514 that would reach an agent as internal_error.
-	//     TestRelationsArea's "a relation type semantic role is checked here
-	//     and not only by the database" case in relations_test.go is where
-	//     that half already lives; it is named here so this pairing can be
-	//     read as one rule.
-	//   - **database → Go, textually.** Postgres cannot enumerate what its own
-	//     CHECK admits — there is no "list the values this constraint would
-	//     accept" — so the only way to ask the column what it knows is to read
-	//     pg_get_constraintdef and parse its literals. A word the column
-	//     admits that no Go reader knows about is invisible to every
-	//     behavioural test that could be written, because nothing would ever
-	//     send it.
-	//
-	// That is the direction that matters most: the bundle, the tool
-	// descriptions and every view built on roles all hang off the Go list.
 	t.Run("the semantic role vocabulary is one set in go and in the database", func(t *testing.T) {
 		pool := a.pool
 		ctx := context.Background()

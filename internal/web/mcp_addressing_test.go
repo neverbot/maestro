@@ -63,13 +63,6 @@ type gameRef struct{ ID uuid.UUID }
 
 // TestEveryAddressOnThisSurfaceIsAKey is Metamodel 14's addressing
 // decision, asserted as one property rather than tool by tool.
-//
-// **Keys replace ids; they are not accepted beside them.** The evidence
-// that the replacement is total is here: every tool that used to take a
-// uuid is driven by the address the row was written under, and the rows
-// really go. The evidence that it is a *replacement* is the second half:
-// the ids are still on the wire everywhere they were, so nothing that
-// had one has lost it — they are simply no longer how you address a row.
 func TestEveryAddressOnThisSurfaceIsAKey(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)

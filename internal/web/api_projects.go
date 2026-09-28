@@ -102,49 +102,11 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request, caller
 // handler ever runs: the {game} path value turned into a real project
 // id, the caller's role within it, and whether the caller reached it by
 // token.
-//
-// This is NOT enforced by the type system, and an earlier version of
-// this comment claimed it was — a quality review disproved that
-// directly, by writing a handler in this same package that parsed
-// r.PathValue("game") itself, called s.opts.Projects.ListMembers
-// straight from a non-member caller with no ProjectScope anywhere in
-// its signature, and registered it on the mux. It compiled and it
-// served the data. Every handler in this file lives in package web, and
-// nothing about an unexported struct stops a same-package function from
-// ignoring it entirely — Go has no visibility boundary narrower than the
-// package.
-//
-// What ProjectScope actually buys: it resolves {game} and the caller's
-// role exactly once per request (see requireProject's own doc comment
-// for the time-of-check window a second, per-handler RoleOf lookup used
-// to leave open), and it makes the guarded path the only *ergonomic*
-// one — a handler that wants scope.ProjectID or scope.Role has to take a
-// ProjectScope parameter to get it, and the only routine way to produce
-// one is requireProject. That is a convention with a pit of success, not
-// a guarantee. The actual enforcement is registerProjectRoute
-// (server.go) plus TestEveryGameScopedRouteGoesThroughRequireProject
-// (server_test.go), which records every pattern this server registers
-// and fails the build if a pattern containing "{game}" was wired up any
-// other way — a bypass like the reviewer's now has to dodge a route
-// registration convention *and* a test that inspects the whole routing
-// table, not just this type's shape.
-//
-// Role is always populated, token callers included — see requireProject's
-// own doc comment for why a token's role is always roles.Editor rather
-// than looked up — so a handler that needs a role gate never has to
-// branch on IsToken to decide whether Role even means anything.
 type ProjectScope struct {
 	ProjectID uuid.UUID
 
 	// Slug is the game's stored slug — the address the caller used to
 	// reach this handler, in the spelling the game actually carries.
-	//
-	// It is here because it is now the game's *address*, and a handler
-	// that has to name the game it is working in should not have to ask
-	// the database for the name it was just addressed by. checkStatedProject
-	// is the first caller: the optional `game` confirmation field is
-	// compared against this, which is why that check costs no query on
-	// this surface where its MCP twin costs one.
 	Slug string
 
 	Role    string
@@ -163,30 +125,6 @@ type ProjectScope struct {
 // admitted by whichever check ran first. There is now exactly one
 // RoleOf call per request, and every handler downstream reads the same
 // answer.
-//
-// Built on Caller.ScopedProject and Caller.IsToken rather than the raw
-// TokenID/ProjectID fields — see those methods' own doc comments in
-// auth.go for why: ScopedProject is where "an admin is not exempt from a
-// token's binding" is encoded exactly once, and reading the raw fields
-// here instead would re-derive that per call site.
-//
-// A token caller's Role is always roles.Editor, never looked up from
-// membership. This is Task 12's quality review settling the token role
-// model deliberately: a token outlives the person who minted it, so
-// deriving its access from that person's *current* membership on every
-// request would silently change what an already-issued token can do
-// whenever its minter's own role changes — exactly backwards from "a
-// token outlives the person who made it". Instead, projects.SetRole
-// revokes a member's tokens outright the moment their standing drops
-// below editor (mirroring what RemoveMember already does for a lost
-// membership entirely), so a token that still resolves is guaranteed to
-// belong to someone who was at least an editor as of their last role
-// change — which is exactly the invariant "editor-equivalent, no live
-// lookup needed" depends on.
-//
-// Call this only through registerProjectRoute (server.go), never
-// s.mux.Handle directly — see ProjectScope's own doc comment for why
-// that distinction is checked by a test, not just a naming convention.
 func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Caller, ProjectScope)) func(http.ResponseWriter, *http.Request, Caller) {
 	return func(w http.ResponseWriter, r *http.Request, caller Caller) {
 		ref := r.PathValue("game")
@@ -223,45 +161,6 @@ func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Calle
 }
 
 // resolveGameRef turns the `{game}` path segment into a scope.
-//
-// **A game is addressed by its slug, and by nothing else.** That is a
-// decision, and it is the same one the metamodel took for rows: keys
-// replace ids rather than being accepted beside them, because a second
-// name for one row costs every call site an "exactly one of" branch and
-// buys a caller nothing. The core spec's Addressing section named this
-// surface as the one open inconsistency of that shape still in the
-// repository — the routes took a uuid while /g/{slug} took a slug — and
-// this closes it in the direction the argument points. The uuid has not
-// gone anywhere: every answer still returns it, every event still
-// carries it, ProjectScope is still built around it. It is simply no
-// longer how a caller names a game.
-//
-// A slug is a better key than an entity key is, not a worse one. It is
-// unique per instance under a case-folding index, it is immutable (this
-// package offers no rename), validateSlug refuses anything uuid.Parse
-// accepts so the two spellings can never be confused, and it is already
-// the address a human types into a browser. There is nothing a uuid can
-// address here that a slug cannot.
-//
-// The two caller kinds are resolved differently and the difference is
-// the whole reason this is one function:
-//
-//   - **A token caller is compared against its own binding**, never
-//     looked up. Its game is fixed at the moment the token was minted,
-//     so resolving the slug it typed would answer a question nobody
-//     asked; what matters is whether the slug names the game it is bound
-//     to. Anything else is a scope violation, exactly as any other uuid
-//     was before — and the refusal now names both games, which is honest
-//     precisely because both are the caller's own (its binding, and what
-//     it typed).
-//   - **A session caller is resolved through BySlugForUser**, which
-//     joins membership into the lookup. Both "no such game" and "a real
-//     game you are not in" come back as one answer, on purpose: a slug
-//     is guessable where a uuid is not, so answering them differently
-//     would be an enumeration oracle a stranger could walk. That is why
-//     the old "you are not a member of this game" refusal is gone from
-//     this path — it was safe to say about an unguessable uuid and is
-//     not safe to say about a name.
 func (s *Server) resolveGameRef(ctx context.Context, caller Caller, ref string) (ProjectScope, error) {
 	if bound, ok := caller.ScopedProject(); ok {
 		project, err := s.opts.Projects.ByID(ctx, bound)
@@ -310,19 +209,6 @@ func (e *boundElsewhereError) Error() string {
 }
 
 // noSuchGameMessage says what was tried rather than only that it failed.
-//
-// A bare "no such game" was true of an unparseable uuid and read as
-// though the game did not exist rather than as though the identifier was
-// the wrong kind — the complaint this change exists to answer. So the
-// value is named back, and a value that is a uuid gets the sentence that
-// actually helps: the caller is holding the right game and the wrong
-// name for it. validateSlug refuses any slug that uuid.Parse accepts, so
-// this branch can never misfire on a real game's address.
-//
-// The wording is "available to you" rather than "does not exist",
-// because resolveGameRef cannot tell those apart for a session caller
-// and must not appear to. TestASlugThatNamesNothingAndOneYouAreNotInAre
-// TheSameRefusal pins that they read identically.
 func noSuchGameMessage(ref string) string {
 	if _, err := uuid.Parse(ref); err == nil {
 		return fmt.Sprintf("no game named %q is available to you: a game is addressed by "+
@@ -352,46 +238,6 @@ var (
 // every heartbeat tick, to notice a membership change on an
 // otherwise-idle long-lived connection without re-deriving the
 // token/membership distinction itself.
-//
-// **It takes a whole ProjectScope and answers with one, and that is not
-// a stylistic choice.** It is a re-check of a game already resolved, so
-// it is handed the game rather than an address to look up: the slug the
-// caller was admitted under travels through unchanged, where a function
-// rebuilding a scope from a bare id would silently blank it on every
-// heartbeat and leave a stream holding a game with no address. Admission
-// itself is resolveGameRef's job, above — it is what turns a slug into a
-// game in the first place, and it is deliberately *not* this function,
-// because a re-check has no address to resolve and must not perform a
-// second guessable-name lookup on a stream that is already open.
-//
-// The two do agree about the part that matters, which is the standing:
-// both give a token caller roles.Editor without a lookup and refuse a
-// binding that does not match, and both look a session caller's role up
-// fresh.
-//
-// A token caller's ProjectID must equal projectID exactly (errScopeViolation
-// otherwise) — see Caller.ScopedProject's own doc comment for why an
-// admin is not exempt from a token's binding. A session caller's role is
-// looked up fresh from membership: RoleOf's own ErrNotAMember becomes
-// this function's errNotMember (a real rejection — no membership row
-// exists), and any *other* error RoleOf returns — its own lookup
-// failing, not a verdict about this caller — is wrapped and returned
-// as-is, deliberately not folded into errNotMember. An earlier version
-// of this function did fold every RoleOf error into errNotMember, which
-// meant a database error during a heartbeat re-check (events.go) closed
-// a live stream with a reason claiming the caller had been removed from
-// the game, when nothing about the caller had actually been evaluated —
-// the exact conflation Task 10's authenticate already drew a hard line
-// against once, for the same reason (a database failure must surface as
-// a 500 an operator can act on, not as a 403 or a "revoked" log line
-// that reads as a verdict). errors.Is against errNotMember and
-// errScopeViolation is how a caller of this function tells "refused"
-// from "failed"; neither wraps the other, and a plain `err != nil` check
-// on the return value collapses them back together, which is exactly
-// the mistake this comment exists to prevent a future call site from
-// repeating. A token caller's Role is always roles.Editor, never looked
-// up — see this function's former home in requireProject's own doc
-// comment (still above) for why that is deliberate, not a shortcut.
 func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, game ProjectScope) (ProjectScope, error) {
 	if scoped, ok := caller.ScopedProject(); ok {
 		if scoped != game.ProjectID {
@@ -529,13 +375,6 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 // separately, and must not: doing it here as a second, unrelated call
 // would reintroduce the crash window Task 9 closed by putting the
 // revocation inside RemoveMember's own transaction.
-//
-// Answers 200 with the labels of every token RemoveMember just revoked,
-// not a bare 204: a quality review pointed out that silently killing a
-// removed member's agents and saying nothing left the owner with no way
-// to know which of their agents had just stopped working. A revoked
-// token id means nothing on its own; a label ("nightly export", "seed
-// agent") is what a UI can put in a toast and a person can act on.
 func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !requireHumanCaller(w, caller) {
 		return
@@ -578,12 +417,6 @@ type updateGameRequest struct {
 // projects.Update for why a redirect nobody can put an end date on was
 // the worse answer, and settings.html for the sentence that says so to
 // the person about to do it.
-//
-// A no-op save (the same name and the same address) is not special-cased.
-// It writes the same values back, answers 200 and publishes nothing new
-// that a client could not already see, which is simpler than a
-// comparison that has to decide what "the same" means for a name with
-// different whitespace.
 func (s *Server) handleUpdateGame(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !requireHumanCaller(w, caller) {
 		return
@@ -627,64 +460,6 @@ func (s *Server) handleUpdateGame(w http.ResponseWriter, r *http.Request, caller
 // scoped to it disappears with it — see projects.Delete's own doc
 // comment) is a different order of consequence than one person's own
 // membership row.
-//
-// No projects.ErrLastOwner mapping here, deliberately: nothing on this
-// path can produce it. A project always has at least one owner by
-// construction, and projects.Delete does not call SetRole or
-// RemoveMember — it is a single DELETE that removes the project row
-// itself, which is exactly the case migration 0002's trigger carries an
-// escape hatch for (see that migration's own comment). If that escape
-// hatch ever regressed, the raw pgx constraint-violation error would
-// fall into the generic error branch below as a 500, not this one — a
-// review found an ErrLastOwner branch here before this comment existed,
-// mapping an outcome nothing on this path could produce, which is worse
-// than no branch: it reads as "this is handled" when it is not.
-// TestDeleteProjectCascadesMembershipsAndTokens (projects_test.go) is
-// the actual regression guard for the escape hatch — see its own
-// comment.
-//
-// Requires the caller to echo the game's slug as ?confirm=<slug>,
-// refused with 400 otherwise. Not a confirmation dialog relocated to
-// the API — a client that wants a dialog still builds one — but a real
-// safety property: the request has to name the game twice for the
-// deletion to land. **That used to read as "id in the path, name in the
-// query", and since the routes started taking the slug it reads as the
-// same string twice.** It is kept, and it is kept deliberately: the
-// gesture this gate exists for is a caller having to *type the name of
-// the thing it is destroying*, which is exactly what it still is, and a
-// URL a client assembled from a variable is not a URL a human confirmed.
-// The one thing it stopped protecting against is a mis-pasted id, and
-// that is because a mis-pasted id no longer addresses anything.
-//
-// A 204 with no body, not a report of what was revoked the way
-// handleRemoveMember and handleChangeRole answer: those endpoints leave
-// the caller inside a game that still exists, where "which of my
-// agents just stopped working" is something the owner needs to act on.
-// Here the whole game is gone, tokens included — there is nothing left
-// to point an owner at, and no membership list left to render a toast
-// against. That information is not worthless, though, just aimed
-// elsewhere: this is the one operation with no recovery and no residue,
-// so the success path logs the project id, its slug, the acting user,
-// and — since Task 18's Round 2 corrections — how many tokens and
-// invites the cascade just destroyed with it (counted just before
-// Delete runs; see CountAPITokensForProject/CountInvitesForProject's own
-// doc comments for why they must be counted before, not after) — the
-// same record handleRemoveMember and handleChangeRole already return to
-// their own caller for a single member, extended here to the whole
-// game an operator asked "where did this game go and who did it" would
-// otherwise have nothing to find. An agent still holding a
-// token for this game learns nothing about deletion specifically: its
-// next call fails authentication exactly the way a plain revocation
-// already would (see projects.Delete's cascade), so it cannot
-// distinguish "my token was revoked" from "the whole game is gone" —
-// which is correct, since nothing about a token's own scope entitles
-// its holder to know which happened.
-//
-// Reaching this handler at all already required requireProject to
-// confirm the caller is a member with a resolved role, so nothing here
-// (or in requireProject's own 403/404 mapping) lets a non-member learn
-// whether a given game id exists — the same non-leak requireProject's
-// other callers already rely on.
 func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !requireHumanCaller(w, caller) {
 		return
@@ -768,16 +543,6 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 // picker shell — a user in zero games still needs a page to land on (an
 // empty-state "create your first game" prompt is the SPA's job, not
 // this handler's), not a crash indexing games[0] against an empty slice.
-//
-// This bypasses requireCaller — it needs "no caller" to mean "redirect
-// to /login", not a 401 — so it is responsible for its own
-// setNoStoreHeaders call: it is the most identity-dependent response in
-// the product (a redirect to one game for one caller, to login for
-// another, to the picker shell for a third), and a quality review found
-// it was shipping with neither Cache-Control nor Vary. Its failure path
-// uses http.Error, not writeJSON/writeError: this route only ever serves
-// an HTML navigation (a redirect or the SPA shell), so a JSON error body
-// on the one path that can fail was the odd one out, not a convenience.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	setNoStoreHeaders(w)
 	caller, ok := CallerFrom(r.Context())

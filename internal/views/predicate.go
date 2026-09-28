@@ -43,13 +43,6 @@ const (
 )
 
 // TypeTimestamp is this package's own pseudo field type, for @created_at.
-//
-// It is declared here and not in internal/metamodel because a game cannot
-// declare a timestamp field: the metamodel's six types are text, longtext,
-// number, bool, enum and list<text>, and @created_at is a *column*, not a
-// declared field. Giving it a type of its own rather than folding it onto
-// number is what keeps `@created_at gt 20` from being a legal comparison
-// between a timestamptz and an integer.
 const TypeTimestamp metamodel.FieldType = "timestamp"
 
 // operatorsByType is the spec's §2.3 table, and it is the contract: the
@@ -57,23 +50,6 @@ const TypeTimestamp metamodel.FieldType = "timestamp"
 // addition here is
 // an addition to the language and shows up on the wire in the same
 // commit.
-//
-// **The table is data, and every other structure that has an opinion
-// about an operator is derived from it rather than written beside it.**
-// knownOperators, allOperatorNames and — the one that would fail
-// silently — shapeOf all read this map, so an operator added to a row
-// here and nowhere else is caught by TestAnOperatorCannotBeHalfAdded
-// rather than being judged as a scalar by the zero value of valueShape.
-// A switch over spellings is what this replaces: a switch admits a
-// half-implemented arm, and the arm that is missing is always the one
-// nobody thought of.
-//
-// list<text> is the whole list family, deliberately: the committed
-// validator (internal/metamodel/schema.go) declares exactly six field
-// types and there is no list<number> or list<enum> for these operators to
-// apply to. contains_any over a list of numbers is therefore a string
-// comparison today, and the tool description says so rather than leaving
-// an agent to discover it.
 var operatorsByType = map[metamodel.FieldType][]Operator{
 	metamodel.FieldText:     {OpEq, OpNeq, OpIn, OpContains, OpStartsWith, OpMatches, OpExists},
 	metamodel.FieldLongText: {OpEq, OpNeq, OpIn, OpContains, OpStartsWith, OpMatches, OpExists},
@@ -120,10 +96,6 @@ var knownOperators = func() map[Operator]bool {
 // because a game is free to declare a field literally called `name`, and
 // an ambiguity there would be discovered by a designer looking at a wrong
 // diagram. TestAFieldKeyIsAFieldKeyOrASigil pins both readings of `name`.
-//
-// AttrName is declared in query.go rather than here: Task 2's
-// applyDefaults labels a node with it, and it is one constant with one
-// definition wherever it sits.
 const (
 	AttrKey       = "@key"
 	AttrType      = "@type"
@@ -137,23 +109,6 @@ const (
 // the list a refusal prints is the list a reader learns the vocabulary
 // from: @name first because it is the one an agent reaches for, not @
 // created_at first because the alphabet says so.
-//
-// The two structures below are derived from this slice for the same
-// reason the operator table derives its own: a built-in that is printed
-// but has no type would admit no operator at all, and one that has a type
-// but is not printed is invisible to the agent that mistyped it.
-// TestTheBuiltinVocabularyIsListedInTheOrderItIsDeclared pins both halves.
-//
-// **This list is complete for the row a predicate compares against, and
-// it is not everything an envelope node carries.** Node.Set and Node.Role
-// (execute.go) say which selector or step a node came back through, and
-// they have no sigil here. Nothing depends on that today — a predicate
-// filters entities and a set is not a column of one — but a table drawn
-// over a multi-set query therefore cannot show which set a row came from,
-// because Task 10's `columns` admits exactly the sigils in this table.
-// Recorded here rather than there because this is where a reader comes to
-// learn what the vocabulary holds, and "@set" is the first thing they
-// will look for and not find.
 var builtins = []struct {
 	Name string
 	Type metamodel.FieldType
@@ -200,11 +155,6 @@ func BuiltinType(name string) (metamodel.FieldType, bool) {
 // is lower_snake_case and case-sensitive. Applying the wrong one refuses
 // a legal query or accepts an illegal one, which is why this is spelled
 // out here with the difference named.
-//
-// **If internal/metamodel ever exports its keyPattern, delete this and
-// use it.** Two copies of a grammar is the drift internal/paging exists
-// to prevent; this one is tolerated only because the alternative today is
-// an exported symbol added to another package for one caller.
 var fieldKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 const maxFieldKeyLen = 64
@@ -260,12 +210,6 @@ func paramRefOf(value any) (ParamRef, bool) {
 // nothing about a game: which declared type `min_level` has is Task 4's
 // lookup, and the split is what lets views.validate answer a structural
 // mistake without a database round trip.
-//
-// ptr addresses the predicate itself, and is where the two *tree* bounds
-// report: "this tree is too deep" and "this tree has too many conditions"
-// are statements about the whole predicate, and reporting them at the
-// leaf that happened to trip them would hand an agent a pointer forty
-// segments long that names no mistake it made.
 func checkPredicate(p *Predicate, ptr string) []metamodel.FieldError {
 	if p == nil {
 		return nil
@@ -469,16 +413,6 @@ func checkValueShape(op Operator, value any, ptr string) []metamodel.FieldError 
 // valueDepth measures how deeply a decoded `value` nests. A scalar is 1,
 // a list of scalars or a {"param": …} reference is 2, and anything deeper
 // is a shape this language has no meaning for.
-//
-// It is a *language* bound and not a stack guard, and the difference is
-// worth stating because the two are easy to confuse: encoding/json
-// already refuses nesting past ten thousand, so nothing here overflows.
-// What the decoder's bound does not do is report the caller's own
-// argument — it answers at pointer "" in the decoder's wording, saying
-// nothing about a value — and it does not stop a document with a
-// four-deep object inside `in` from being *stored* as a saved view and
-// re-walked by every later stage. MaxValueDepth is what makes such a
-// document a refusal an agent can act on.
 func valueDepth(value any) int {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -522,15 +456,6 @@ func allOperatorNames() string {
 // in this task that enumerates fields rather than walking them — a
 // projection's references are five *named* members with five different
 // pointers, not a homogeneous collection.
-//
-// Two tests hold this enumeration to the type, because one of them alone
-// cannot. TestEveryProjectionAttributeIsChecked drives all five names
-// through ParseQuery, which proves the five that exist are checked and
-// nothing about a sixth. TestEveryProjectionAttributeReferenceHasALineInTheTable
-// asks Projection itself which of its members are *AttrRef and refuses
-// one this table does not name, so a sixth reference added to Projection
-// without a line here fails a test rather than reaching the compiler
-// unchecked.
 var projectionAttrs = []struct {
 	Name string
 	Of   func(*Projection) *AttrRef
@@ -571,11 +496,6 @@ func checkProjection(p *Projection) []metamodel.FieldError {
 }
 
 // checkAttrRef judges one attribute reference, in either spelling.
-//
-// The scalar spelling reports at the reference's own pointer, because
-// that is where the caller wrote the string: `"color_by": "@nmae"` has no
-// member of its own to blame. The related spelling reports one segment
-// deeper, at `/project/color_by/related/via`, because there it does.
 func checkAttrRef(ref *AttrRef, ptr string) []metamodel.FieldError {
 	if ref == nil {
 		return nil
@@ -635,10 +555,6 @@ func checkAttrRef(ref *AttrRef, ptr string) []metamodel.FieldError {
 // relation or a built-in it has, and there is no related spelling — a
 // label read one hop away is a property of a node, and a node is where
 // the projection puts it.
-//
-// Which built-ins a relation actually has is resolution's judgement
-// (fieldScope.builtin), not this one: the shape of the string is a
-// document question and what a relation carries is a metamodel question.
 func checkLabelFrom(label, ptr string) []metamodel.FieldError {
 	var problems []metamodel.FieldError
 	add := func(message string) {
@@ -674,28 +590,6 @@ const (
 
 // checkLimits refuses a declared limit above its hard cap, with
 // limit_exceeded and the cap, **rather than clamping it down to the cap**.
-//
-// That is the opposite of what the saved-view listing does with a page
-// limit (Task 11 clamps), and the difference is deliberate rather than an
-// inconsistency. A page limit is a caller's opinion about *response
-// size*: clamping it returns the same rows in more calls, so a clamped
-// listing still answers the question that was asked. A query limit is
-// part of the *question* — max_depth 20 asks "what is reachable in twenty
-// hops", and answering with four hops is a different question, returned
-// with no indication that it was substituted. An agent that asked for
-// depth 20 should learn that it cannot have it and decide what to do:
-// lower it, or split the view in two.
-//
-// This is also the one refusal in ParseQuery that is not query_invalid,
-// and that is the point of a separate code — the recovery is "lower this
-// number to at most N", which is different advice from "this document is
-// malformed". TestALimitAboveItsHardCapIsRefusedWithTheCap pins the code,
-// the pointer and the cap in the message; TestEveryLimitIsJudgedAgainstItsOwnCap
-// pins that all three limits are judged and reported in one pass; and
-// TestEveryLimitInTheDocumentIsJudged reads the members off Limits
-// itself, so a fourth limit added there without a line below is a bound
-// the engine promises and never applies, and is caught rather than
-// shipped.
 func checkLimits(l *Limits) error {
 	if l == nil {
 		return nil
@@ -742,11 +636,6 @@ func checkLimits(l *Limits) error {
 // last. A slice rather than a range over the map, because Go randomises
 // map iteration and a tool description that comes back in a different
 // order on every start is a description a client cannot diff.
-//
-// TestTheOperatorDescriptionIsGeneratedFromTheTable requires every key of
-// operatorsByType to appear here and every entry here to be a key of it,
-// so a seventh field type cannot be printed without a row or given a row
-// without being printed.
 var fieldTypeOrder = []metamodel.FieldType{
 	metamodel.FieldText, metamodel.FieldLongText, metamodel.FieldNumber,
 	metamodel.FieldBool, metamodel.FieldEnum, metamodel.FieldListText,
@@ -755,23 +644,6 @@ var fieldTypeOrder = []metamodel.FieldType{
 
 // OperatorDescription is the operator table as prose, **generated from
 // operatorsByType and from the built-in table and from nothing else**.
-//
-// It exists for the reason RendererDescription does, and the risk is the
-// same one: the table *is* the contract — an operator a field type does
-// not admit is a refusal, and one it does admit and nobody documents is
-// an operator no agent will ever send — so a hand-written paragraph
-// beside it is a paragraph that will be wrong the first time a row moves.
-// TestTheOperatorDescriptionIsGeneratedFromTheTable reads this text back
-// and compares it with the table in both directions.
-//
-// The two sentences that are not rows are here because they are
-// properties of the table that no row can state. `list<text>` is the
-// whole list family, because the metamodel declares no list<number> and
-// no list<enum> for these operators to apply to, so `contains_any` over
-// a list of numbers is a string comparison today. And the built-ins are
-// judged as though they were declared fields of the type printed beside
-// them, which is what makes `@created_at gt 20` a comparison between a
-// timestamp and an integer rather than a legal one.
 func OperatorDescription() string {
 	var b strings.Builder
 	b.WriteString("The operator table. Which operators a condition may use is decided by " +

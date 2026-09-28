@@ -14,17 +14,6 @@ import (
 )
 
 // The backup loop's own checks.
-//
-// **Every one of these is a property that cost something to learn**, and
-// they came across for that reason rather than for coverage: the dump
-// lands 0600, an existing directory is tightened, the password never
-// reaches the process arguments, retention matches this package's own
-// filenames and nothing else, and an orphan .tmp from an interrupted
-// dump is swept after a day.
-//
-// dumpOnce is driven against a stand-in pg_dump placed first on PATH
-// (see fakePgDump): what matters here is how the dump file is created
-// and how the command is invoked, not what Postgres puts inside it.
 
 func TestParseClock(t *testing.T) {
 	cases := []struct {

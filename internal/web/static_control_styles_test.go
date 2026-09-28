@@ -13,24 +13,6 @@ import (
 
 // The guard for the defect the 2026-09-09 interface audit measured: the
 // design system stopped at the shadow boundary.
-//
-// `styles.css` states what a button and a field look like with element
-// selectors, and an element selector does not cross into a shadow root.
-// Five of the six controls on the view screen were therefore rendering as
-// browser defaults — `2px outset` bevels, an `#e9e9ed` fill, a text field
-// filled `#ffffff`, which this identity forbids outright — while every
-// token was correct and nothing anywhere was red.
-//
-// **Why this is a source guard and not a browser one.** What the audit
-// found can only be *measured* in a browser, and this repository has no
-// browser harness: the jstest files drive real modules against a DOM stub
-// that computes no styles. A test that stubbed `getComputedStyle` would
-// assert its own stub. So this holds the mechanical precondition instead
-// — every shadow root adopts the shared sheet, and no component states
-// the control vocabulary a second time — and the measurement itself was
-// made by hand in Firefox and recorded in the task. The precondition is
-// what regresses when somebody adds the seventh component; the
-// measurement is what proved the fix.
 
 const componentDir = "static/components"
 
@@ -144,11 +126,6 @@ func TestTheSharedControlSheetSpellsNoColour(t *testing.T) {
 // docs/design.md, implemented nowhere, and invisible to every other
 // test: a document rendered at 14px instead of 0.95rem looks like a
 // document, just the tool's size rather than the game's.
-//
-// **The design system is the authority and the stylesheet answers to
-// it** (see claude.md), so the assertion reads the size out of
-// docs/design.md rather than repeating it — a guard that hard-coded
-// 0.95rem would go on passing the day the system says something else.
 func TestTheProseRoleIsSetAtTheSizeTheSystemStates(t *testing.T) {
 	t.Parallel()
 	system, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))

@@ -1,28 +1,6 @@
 // The drawing vocabulary the six renderers share: how big a node is,
 // what a value's size means, and what a node, an edge, a stub and an
 // enclosure look like as marks.
-//
-// This file exists because `graph` is the **first** of six renderers and
-// almost nothing in it is only `graph`'s. `layered` draws "the same node
-// vocabulary" (spec §4.4), `nested` and `map` draw boxes with labels in
-// them, and every one of the six meets an edge whose endpoint the query
-// did not draw. Six copies of a rounded box would be five places for the
-// corner radius, the padding and the absent-value dash to drift apart,
-// and the dash in particular is a *decision* (Task 1) rather than a
-// number: a renderer that spelled it differently would be telling a
-// designer something different with the same picture.
-//
-// It is a pure function of plain data — no DOM, no state, two pure
-// imports — for the reason render/scene.js and render/twin.js are: a Node harness
-// reads it and a mutation turns it red. The marks it returns are the
-// contract render/scene.js declares and components/mst-canvas.js emits;
-// nothing here knows an SVG element exists.
-//
-// **Colour is not decided here.** The palette (Task 1) decides which hue
-// a value wears and what an absent value looks like; this module is
-// handed a fill and a dash and puts them on a box. The one paint it does
-// name is the *chrome's* — a hairline outline, a muted edge, the ground
-// under an edge label — because those are not data.
 
 import { labelOn } from "../palette.js";
 import {
@@ -47,13 +25,6 @@ export const LABEL_SIZE = 11;
 // width of a string in a proportional face cannot be computed without a
 // text engine, so this is an estimate: an average advance width as a
 // fraction of the type size, for the sans stack in styles.css.
-//
-// **The estimate being slightly wrong is harmless; two estimates would
-// not be.** The same function measures the box handed to the layout
-// engine and the box drawn on the canvas, so a mis-measured label makes
-// one box a few pixels wide of ideal — where a renderer that measured
-// once for the engine and once for the drawing would put a label outside
-// the box the layout reserved for it, at every zoom, forever.
 export const CHAR_ADVANCE = 0.55;
 export const NODE_PADDING_X = 12;
 export const NODE_PADDING_Y = 8;
@@ -77,33 +48,11 @@ export function boxFor(label, options = {}) {
 }
 
 // --- What a value's size means ---------------------------------------
-//
-// `size_by` maps a numeric slot to a node's **area**, over a bounded
-// range, and both halves of that sentence are load-bearing.
-//
-// *Area*, because area is what a reader compares between two boxes. A
-// map that scaled the *width* by the value would make a node with four
-// times the value sixteen times the ink, which reads as a difference of
-// sixteen — and getting this wrong is invisible: the picture looks fine
-// and every number in it is a lie. So the value chooses an area and the
-// length scale is that area's square root.
-//
-// *Bounded*, because an unbounded map makes one node a page. The whole
-// range is 1× to 3× area: the largest value in the answer is three times
-// the ink of the smallest, whatever the values are — 10 and 30, or 1 and
-// 10^6. That is a deliberate loss of information. The alternative is a
-// picture whose scale is set by its outlier, where every other node is a
-// dot; the twin carries the numbers exactly.
 export const SIZE_AREA_MIN = 1;
 export const SIZE_AREA_MAX = 3;
 
 // sizeDomainFor is the numeric range the slot spans across the answer,
 // or null when there is nothing to scale against.
-//
-// Only numbers count. A slot present with a string in it is not a size,
-// and a slot absent is not a size either; both take the range's minimum,
-// which is `anAbsentSizeSlotTakesTheRangeMinimum` and is the smallest
-// box rather than no box.
 export function sizeDomainFor(nodes, slot) {
   if (typeof slot !== "string" || slot === "") return null;
   let min = null;
@@ -119,13 +68,6 @@ export function sizeDomainFor(nodes, slot) {
 }
 
 // areaScaleFor maps one value into [1, 3].
-//
-// Linear in the value across the domain, so the *ordering* of the answer
-// is preserved exactly and the extremes are pinned at the bounds. A
-// domain of one value (every node equal, or one node) is no range at
-// all: everybody takes the minimum rather than everybody taking the
-// maximum, because a picture where every box is the largest it can be
-// says "these are all big" about an answer that said nothing.
 export function areaScaleFor(value, domain) {
   if (!domain || typeof value !== "number" || !Number.isFinite(value)) return SIZE_AREA_MIN;
   const { min, max } = domain;
@@ -155,13 +97,6 @@ export function scaleBox(box, lengthScale) {
 // --- The chrome's own paint ------------------------------------------
 
 // UNFILLED is "this shape has no fill", in one spelling.
-//
-// It is the palette's `--unset` token (`transparent` in both themes) and
-// not the SVG keyword `none`, so that the *one* declaration of "nothing
-// was there to paint" lives in styles.css beside the eight hues, where
-// the token guard in internal/web/static_tokens_test.go can see it. A
-// literal `none` here would be a second spelling of a decision Task 1
-// already took, invisible to that guard and free to drift.
 export const UNFILLED = "var(--unset)";
 
 // The hairline outline every node wears, over its fill.
@@ -176,19 +111,6 @@ export const NODE_STROKE_WIDTH = 1;
 export const NODE_PLAIN_FILL = "var(--paper)";
 
 // The dash of a box that is missing something the picture needed.
-//
-// One spelling, one meaning, across the six: **something this box needs
-// is not here.** In `graph` that is its colour slot; in `layered` it is
-// its numeric rank, so the node goes to the trailing unranked band and
-// is dashed there; in `nested` it is its container, truncated away, so
-// the box sits at the top level dashed rather than looking like a root.
-// A renderer that spelled the dash differently, or that used it for
-// "this is unusual" rather than for "this is missing", would tell a
-// designer something different with the same picture.
-//
-// A second, non-colour carrier for an absence, exactly as the twin's
-// `absent` class is beside its em dash — and never the *only* carrier:
-// each renderer above pairs it with a position, a legend row or a count.
 export const ABSENT_DASH = "4 3";
 
 export const EDGE_STROKE = "var(--muted)";
@@ -236,16 +158,6 @@ export const AMBIGUOUS_FILL = "var(--line-strong)";
 
 // nodeMarks is one node's box, its name, and — when the envelope says
 // the node is ambiguous — one mark at its corner.
-//
-// `placement` is the layout's answer: `{x, y}` is the box's **centre**,
-// which is what engine.js reports and what compose.js composes, so the
-// centring arithmetic happens here once rather than in six renderers.
-//
-// The ambiguity mark is on the **node** and there is exactly one of it,
-// because `Node.Ambiguous` is a flag on the node: execute.go says a node
-// with two related slots, one of them ambiguous, is flagged and which of
-// the two is deliberately not said. A per-slot mark would be this
-// interface inventing a distinction the server declined to carry.
 export function nodeMarks(node) {
   const { key, label, x, y, width, height, fill, dash, ambiguous } = node;
   const marks = [
@@ -294,15 +206,6 @@ export function nodeMarks(node) {
 
 // edgeMarks is one drawn edge: the line, the arrowhead when `arrows` is
 // on, and the label on its plate when `edge_labels` is.
-//
-// The line runs between the two boxes' **borders** rather than their
-// centres, so an arrowhead lands where a reader expects it and a line
-// does not run under the box it points at.
-//
-// Every mark here carries `source` and `target`, which is how
-// mst-canvas.js knows an edge from a decoration and which end of it is
-// moving during a drag — except the two the drag layer cannot honestly
-// reshape, see below.
 export function edgeMarks(edge) {
   const { source, target, label, arrows, edgeLabels } = edge;
   const from = borderPoint(source, target);
@@ -330,23 +233,6 @@ export function edgeMarks(edge) {
 
 // arrowMarks is the head at the target end, and it is a two-line chevron
 // rather than the filled triangle §4.3 describes.
-//
-// **A filled head would need a mark kind the drag layer cannot move.** A
-// triangle is a `polygon` with a `points` list, and mst-canvas.js
-// translates a dragged body by adding a delta to each of a kind's
-// coordinate *pairs* (MARK_ORIGINS) and bakes the offset in on drop; a
-// points list has no pairs to name, so a head that rode a drag would
-// snap back to where it started when the drag ended. Task 7 took the
-// same decision about a curved edge for the same reason and said the
-// renderer that needs the kind adds the kind and the reshaping answer
-// together. A chevron is two lines, which that machinery already moves
-// exactly.
-//
-// Both of the head's endpoint keys are the **target's**, which is not a
-// mistake: a mark whose two ends belong to one node is a mark that rides
-// that node's transform whole, which is exactly right — the head is
-// attached to the box it points at, moves with it, and is baked in with
-// it on drop.
 export function arrowMarks(from, to, targetKey) {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
@@ -380,14 +266,6 @@ function arrowLine(tip, tail, targetKey) {
 
 // edgeLabelMarks is the label on its `--ground` plate at the middle of
 // the edge.
-//
-// It carries **no** endpoint keys, so the drag layer neither carries it
-// nor reshapes it: a plate has one position and an edge whose one end
-// moved has a new middle, which no translation of the plate can produce.
-// It therefore stands still during a drag and is redrawn where it
-// belongs when the picture is (spec §6.1: the drop is the write, and the
-// write re-runs the view). The arrowhead is the exception above because
-// its position is a property of one node and a translation *is* exact.
 export function edgeLabelMarks(at, label) {
   const box = boxFor(label, { size: LABEL_SIZE });
   const width = box.width - NODE_PADDING_X;
@@ -420,17 +298,6 @@ export function edgeLabelMarks(at, label) {
 
 // stubMarks is an edge that leaves the picture: it starts at its known
 // endpoint's border and ends in a small hollow ring, with no label.
-//
-// **The direction is outward from the node's enclosure**, and the
-// terminus is placed beyond that enclosure's edge, which is what makes
-// `stubsLeaveTheirGroupEnclosure` a property of the drawing rather than
-// of a lucky fixture. A stub that stopped inside its group's box would
-// read as a relation to something in the group, which is the one thing
-// it is not. When the node is in no group the enclosure is the picture's
-// own bounds, so a stub still points away from the drawing.
-//
-// It carries the known endpoint's key at **both** ends, for arrowMarks's
-// reason: the whole stub belongs to one node and rides its transform.
 export function stubMarks(stub) {
   const { node, enclosure } = stub;
   const direction = outward(node, enclosure);
@@ -469,10 +336,6 @@ export function stubMarks(stub) {
 }
 
 // enclosureFor is a `group_by` value's hairline box and its heading.
-//
-// The box goes on the **image** layer, under the edges: an enclosure
-// drawn over the picture would cut every edge that crosses it, and the
-// one thing an enclosure must not do is look like a relation.
 export function enclosureFor(members, heading) {
   const bounds = boundsOf(members);
   if (!bounds) return [];
@@ -600,15 +463,6 @@ function number(value, fallback) {
 }
 
 // --- The rank band ---------------------------------------------------
-//
-// `layered` draws a muted rule and a caption per rank when `layer_labels`
-// is on, and `timeline` draws a hairline and a caption per lane (§4.8).
-// They are the same two marks — a rule across the picture and a word at
-// the end of it — so they are one function here rather than two that
-// agree today.
-//
-// The rule is `--muted` and 1px: it is chrome, and a band boundary that
-// competed with an edge would read as a relation.
 export const CLASS_BAND_RULE = "band-rule";
 export const CLASS_BAND_CAPTION = "band-caption";
 export const BAND_RULE_STROKE = "var(--muted)";
@@ -616,15 +470,6 @@ export const BAND_CAPTION_FILL = "var(--muted)";
 export const BAND_CAPTION_GAP = 6;
 
 // bandMarks is one band's rule and its caption.
-//
-// The caption's position and anchor are the caller's, because a band's
-// caption sits above a horizontal rule and beside a vertical one, and a
-// function that guessed which from the geometry would guess wrong the
-// first time a picture was square.
-//
-// A band with no caption draws its rule alone: an empty string is not a
-// caption, and a label with no text is an element a reader cannot see
-// and a test can.
 export function bandMarks(band) {
   const { x1, y1, x2, y2, caption, captionX, captionY, anchor, baseline } = band;
   const marks = [
@@ -657,37 +502,6 @@ export function bandMarks(band) {
 }
 
 // --- The edge the ranking had to break --------------------------------
-//
-// A ranked drawing of a graph with a cycle is only possible because the
-// engine reverses an edge, and §4.4 refuses to let the interface hide
-// that: the arrowhead stays in the relation's **true** direction and the
-// line carries a small double-slash, the map-maker's mark for a break.
-//
-// The double-slash, drawn at the edge's midpoint.
-//
-// **It is a glyph and not a pair of strokes, and that is a correction
-// made in a browser.** It was two 1px lines about nine units long,
-// drawn inside the zoomed world group and scaled with it — so on the
-// picture this mark exists for, a hundred-step progression with one back
-// edge, the drawing fits the window at k = 0.058 and the mark renders at
-// **0.43 × 0.43 CSS pixels**. Measured, not estimated: two
-// `getBoundingClientRect`s in Firefox at the fitted zoom. At the zoom
-// where the progression is legible as a progression the mark is
-// invisible, and finding it means already knowing it is there — which is
-// exactly the defect it was written to prevent, because a ranked drawing
-// that silently reversed an arrow is the wrong picture that looks right.
-//
-// A label is the fix rather than a second scaling mechanism, because the
-// canvas already has one: every MARK_LABEL is re-sized on zoom against
-// mst-canvas.js's label band (LABEL_SCALE_MIN, labelFontSize), so a mark
-// that *is* a label keeps a constant apparent size for free, at every
-// zoom, in the one place that rule is written. Two short strokes at 45°
-// is what the glyph `//` already is, so the vocabulary §4.4 asks for is
-// unchanged — what changes is that a reader can see it.
-//
-// It carries a halo for haloLabelMarks's reason: it sits *on* an edge,
-// among as many other edges as the picture has, and `paint-order: stroke`
-// (styles.css) puts the halo under the glyphs rather than through them.
 export const CLASS_REVERSED = "reversed";
 export const REVERSAL_TEXT = "//";
 // Larger than a name. A mark that means "the drawing had to break a
@@ -700,13 +514,6 @@ export const REVERSAL_SIZE = LABEL_SIZE * 1.6;
 // edge whose one end moved has a new middle, which no translation of a
 // mark at that middle can produce. It stands still during a drag and is
 // redrawn with the picture on the drop that writes.
-//
-// `direction` is taken and not used: the glyph is the same slanted pair
-// of strokes whichever way its edge runs, so there is nothing left to
-// rotate — and rotation is not in the emitter's contract anyway. The
-// argument stays in the signature because every caller has it and the
-// day this mark needs to lean with its edge is the day the contract
-// grows a transform.
 export function reversalMarks(at, _direction) {
   return [
     {
@@ -739,12 +546,6 @@ export function directionOf(source, target) {
   return unit(target.x - source.x, target.y - source.y);
 }
 // --- Boxes that contain boxes ----------------------------------------
-//
-// `nested` draws a container as a `--paper` rectangle with a hairline
-// and its name on the top-left, and tints the **header strip** rather
-// than the box: a nest of four filled levels is four overlapping fills
-// and no legible text (§4.5). So the fill and the tint are two fields
-// here, and the box's is not a caller's choice.
 export const CLASS_CONTAINER = "container";
 export const CLASS_CONTAINER_ABSENT = "container absent";
 export const CLASS_CONTAINER_HEADER = "container-header";
@@ -753,15 +554,6 @@ export const CONTAINER_PADDING = 14;
 export const HEADER_HEIGHT = Math.ceil(LABEL_SIZE * LINE_HEIGHT) + 2 * NODE_PADDING_Y;
 
 // containerMarks is one container: the box, its header strip, its name.
-//
-// `x`/`y` are the box's **centre**, as everywhere else in this module,
-// so a caller never has to remember which of the two conventions this
-// mark uses.
-//
-// `headerFill` is where colour lands. A container with no colour to
-// carry gets the ground under its name, which is a strip a reader can
-// see the shape of; `UNFILLED` would make the header invisible and the
-// tint's absence indistinguishable from a renderer that forgot it.
 export function containerMarks(container) {
   const { key, label, x, y, width, height, headerFill, dash } = container;
   const left = x - width / 2;
@@ -813,21 +605,6 @@ export function containerMarks(container) {
 }
 
 // --- The count chip --------------------------------------------------
-//
-// What a drawing shows when it is deliberately not drawing something it
-// holds: `nested`'s children beyond `max_depth` (§4.5) and `timeline`'s
-// marks past the third in one lane (§4.8) are the same statement — *"and
-// twelve more, already here"* — so they are one mark.
-//
-// It reads `+12` and never `12`: a bare number beside a box reads as a
-// property of the box.
-//
-// **It also carries a name, which is `map`'s shelf.** A shelved node is
-// a labelled plate in a strip along the bottom edge (§4.2), and that is
-// this plate with a word in it instead of a count — same height, same
-// ground, same hairline, so a designer meets one shape rather than two.
-// The two callers differ in exactly one thing, which is what `label`
-// takes: a number is written `+12`, a string is written as it stands.
 export const CLASS_CHIP = "chip";
 export const CLASS_CHIP_ABSENT = "chip absent";
 export const CLASS_CHIP_LABEL = "chip-label";
@@ -844,22 +621,11 @@ export function chipLabel(label) {
 }
 
 // chipWidth is how wide that plate is, **measured once**.
-//
-// A caller that has to lay chips out in a row — `map`'s shelf — needs
-// the width before the marks exist, and boxFor's own argument applies to
-// the second measurement exactly as it applies to a node's: a shelf
-// spaced by one estimate and drawn by another overlaps its own plates.
-// So chipMarks calls this too, and there is one number.
 export function chipWidth(label) {
   return boxFor(chipLabel(label), { size: LABEL_SIZE }).width - NODE_PADDING_X;
 }
 
 // chipMarks is the plate and its text, centred on `at`.
-//
-// `label` is a number — the count of what is not being drawn — or the
-// text of a plate that names something. `options.dash` marks the plate
-// the way ABSENT_DASH marks a box, and means the same thing: something
-// this plate needs is not here. That is what a shelf chip is.
 export function chipMarks(at, label, key, options = {}) {
   const text = chipLabel(label);
   const dash = options.dash === true;
@@ -895,16 +661,6 @@ export function chipMarks(at, label, key, options = {}) {
 }
 
 // --- The repeat ------------------------------------------------------
-//
-// A containment cycle — A contains B contains A — is data the metamodel
-// permits, and a nest that drew it would recurse forever. The recursion
-// stops at the repeat and the repeated box says so, because silently
-// stopping would draw a plausible tree over a graph that is not one
-// (§4.5).
-//
-// A glyph and not only a dash: the dash already means "something this
-// box needs is not in the picture", and a repeat is the opposite — the
-// thing is here, and here again.
 export const CLASS_CYCLE = "cycle";
 export const CYCLE_GLYPH = "↻";
 
@@ -926,29 +682,6 @@ export function cycleGlyphMarks(box, key) {
 }
 
 // --- A ground, and marks on it ---------------------------------------
-//
-// `map` is the one renderer with an image under it (§4.6), and the four
-// marks below are what a map is made of. They live here rather than in
-// render/map.js for this file's own reason: the pin's hollow ring is the
-// stub's ring, the halo's ground is the edge plate's ground, and the
-// grid's hairline is the enclosure's hairline. Three of those are
-// decisions Task 1 took about what a reader is being told, and a
-// renderer that respelled any of them would say something slightly
-// different with the same picture.
-//
-// It is also where the *second* map-shaped renderer would come looking,
-// which is the test render/controls.js's header sets for a shared shape.
-
-// A node on a map is a 7px disc and not a labelled box: a map with two
-// hundred boxes on it is not a map (§4.6). The label sits beside it.
-//
-// **It is a `point` and not a `pin`, because `timeline` draws the same
-// mark.** A node at a place and a node at a value on an axis are both a
-// small disc with its name beside it, and this vocabulary would rather
-// be renamed once than carry two spellings of one shape — which is what
-// a second renderer copying the first out of this file would have
-// produced. The hollow variant stays `map`'s: nothing on a timeline sits
-// at a coordinate the client chose.
 export const CLASS_POINT = "point";
 export const CLASS_POINT_UNPLACED = "point unplaced";
 export const CLASS_POINT_LABEL = "point-label";
@@ -956,16 +689,6 @@ export const POINT_RADIUS = 3.5;
 export const POINT_LABEL_GAP = 5;
 
 // What a pin is painted with, and it is **chrome rather than data**.
-//
-// `map` does not tint its pins, which departs from what a reader coming
-// from `graph` would expect, and the reason is the hollow ring above:
-// §4.2 already spends "an outline with nothing in it" on *this
-// coordinate is one nobody chose*, and Task 1 spends the same treatment
-// — unfilled, dashed — on *this node's colour slot found nothing*. Two
-// facts cannot share one mark. The catalogue gives `map` no colour knob
-// either, so nothing is being withheld: the hue on a map belongs to the
-// designer's own image, which is §2's rule about where colour comes from
-// read in the one picture that has a ground.
 export const POINT_FILL = "var(--ink)";
 
 // The halo that lets an 11px label survive over a designer's own image.
@@ -978,24 +701,6 @@ export const LABEL_HALO_WIDTH = 2;
 
 // pointMarks is one node on the map: its disc, its label up and to the
 // right, and the ambiguity mark when the envelope flagged the node.
-//
-// **A hollow disc is a coordinate nobody chose.** §4.2 asks for a hollow
-// anchor rather than a solid one for a node the client placed
-// automatically, and it is the same hollow the stub's terminus uses for
-// the same reason: an outline with nothing in it is this vocabulary's
-// one spelling of "there is less here than there looks". A designer who
-// has dragged nothing sees a map of rings and knows the arrangement is
-// not theirs yet.
-//
-// **`placed` is "somebody chose this coordinate on purpose", which is
-// narrower than "a row exists".** On a map that means the position is
-// *pinned*: a stored row that nobody is holding — one the engine placed
-// and recorded, or one a designer unpinned — is the engine's coordinate
-// wearing a designer's row, and it gets the ring. render/map.js's
-// pinsFor is where that is read, and its comment carries the finding
-// that made it necessary. On a timeline it means the value the game
-// itself wrote, which is chosen by the content and by no engine, so
-// those points are solid.
 export function pointMarks(pin) {
   const { key, label, x, y, fill, placed, ambiguous } = pin;
   const marks = [
@@ -1032,12 +737,6 @@ export function pointMarks(pin) {
 
 // haloLabelMarks is a label that has to be legible over something this
 // interface did not choose.
-//
-// One mark and not two: a plate behind a name on a map would hide the
-// map, which is the thing the designer uploaded. The halo is the
-// alternative §4.6 names, and it is a property of the label rather than
-// a second mark so that a label and its halo cannot be separated by a
-// caller who forgot one.
 export function haloLabelMarks(at, label, options = {}) {
   return [
     {
@@ -1063,16 +762,6 @@ export function haloLabelMarks(at, label, options = {}) {
 export const CLASS_GRID = "grid";
 
 // gridMarks is the lines of a grid of `spacing` over `bounds`.
-//
-// It draws nothing for a spacing that is not a positive number, which is
-// what `snap: 0` means — the catalogue's own doc says "0 for no grid" —
-// and nothing for bounds it cannot measure. Both are "there is no grid
-// here" rather than a grid of one line at the origin.
-//
-// The lines are on the **image** layer, under everything including the
-// background, which is §4.6's own instruction: a grid over a designer's
-// image competes with it, and a grid under it is visible exactly where
-// the image is not.
 export function gridMarks(bounds, spacing) {
   if (!bounds || !Number.isFinite(spacing) || spacing <= 0) return [];
   const marks = [];
@@ -1109,20 +798,6 @@ export const CLASS_BACKGROUND = "background";
 // and not renderer parameters, which internal/views/renderers.go refuses
 // them as being, because only a foreign key can keep a reference to a
 // stored asset honest.
-//
-// **An href this interface would not fetch draws nothing**, through
-// render/scene.js's own isDrawableHref rather than through a second
-// rule: `<image>` is the one mark field a browser resolves rather than
-// draws, and the whole legitimate set is this instance's own asset
-// paths. A background that does not draw is not silent, either — the
-// renderer bands it, exactly as a removed one is banded, because a
-// ground that is simply missing looks like a ground that was never set.
-//
-// `preserveAspectRatio: "none"` is deliberate and is the only honest
-// answer: `background_scale` is one number, the width and the height are
-// both derived from it, so the image is drawn at its own aspect ratio
-// and the attribute is what says the emitter must not add a second
-// opinion.
 export function backgroundMarks(background) {
   if (!background || !isDrawableHref(background.href)) return [];
   const { href, x, y, width, height } = background;
@@ -1146,11 +821,6 @@ export function backgroundMarks(background) {
 }
 
 // --- A mark that occupies a range ------------------------------------
-//
-// `timeline` draws a node at one value of an axis or across two of them
-// (§4.8). The point is `pointMarks` above, unchanged and shared with
-// `map`; what is new here is the bar, and the caret that says a span
-// this vocabulary cannot draw.
 
 export const CLASS_SPAN = "span";
 export const CLASS_SPAN_LABEL = "span-label";
@@ -1158,10 +828,6 @@ export const SPAN_HEIGHT = 2 * POINT_RADIUS;
 export const SPAN_LABEL_GAP = 5;
 
 // spanMarks is one bar, from `x1` to `x2`, centred on `y`.
-//
-// The label sits to the **right of the bar's end** rather than inside
-// it: a bar is as long as its values say, which for two adjacent levels
-// is a few pixels, and a name inside it would be clipped by the data.
 export function spanMarks(span) {
   const { key, label, x1, x2, y, fill } = span;
   const left = Math.min(x1, x2);
@@ -1187,14 +853,6 @@ export function spanMarks(span) {
 }
 
 // The caret a span whose end is before its start wears.
-//
-// **The two ends are not swapped**, which is the whole of this mark: a
-// quest declared from level 40 to level 10 is a content defect a
-// designer wants to know about, and a renderer that silently sorted the
-// pair would draw a perfectly plausible bar over it (§4.8). So the mark
-// has no length — there is no honest length to draw — and it carries a
-// glyph that says the drawing stopped, exactly as `nested`'s cycle glyph
-// does for the recursion that stopped.
 export const CLASS_CARET = "caret";
 export const CARET_GLYPH = "><";
 

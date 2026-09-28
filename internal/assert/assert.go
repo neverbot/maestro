@@ -1,8 +1,4 @@
 // Package assert states a test's expectations in one line each.
-//
-// Arguments are evaluated whether or not the expectation holds, so a
-// message that is only legal on failure (rows[0] where the claim is that
-// there is one row) keeps its `if` block.
 package assert
 
 import "testing"

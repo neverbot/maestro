@@ -45,16 +45,6 @@ func TestOrphans(t *testing.T) {
 
 	// TestAGameWithNoOrphansStillCountsEveryEntityItConsidered is the
 	// negative half.
-	//
-	// **The assertion is not that the list is empty.** An empty findings
-	// list is what a run that considered nothing returns too, and those are
-	// the same JSON. So: empty *and* considered_total equal to the fixture's
-	// entity count.
-	//
-	// **Mutation:** hand `ListOrphansPage` an empty `entity_types` array
-	// (`considered = nil` before the two statements). The findings stay
-	// empty and considered_total goes to zero, and this test is red on the
-	// count.
 	t.Run("a game with no orphans still counts every entity it considered", func(t *testing.T) {
 		g := a.gated(t)
 		keys := []string{"a", "b", "c", "d", "e"}
@@ -76,10 +66,6 @@ func TestOrphans(t *testing.T) {
 	// TestAnEntityWithOnlyAnAnnotationEdgeIsAnOrphan and its other half, in
 	// **one fixture**, so the only difference between the two entities is
 	// the declaration on the type that joins them.
-	//
-	// This is the `annotation` trait's whole reason for existing: a designer
-	// saying "I looked, and this type is decoration" is what stops
-	// `is_illustrated_by` from keeping a half-finished idea off the list.
 	t.Run("an entity with only an annotation edge is an orphan and one with a real edge is not", func(t *testing.T) {
 		g := a.gated(t)
 		g.declareRelationType(t, "is_illustrated_by", "", []string{"annotation"})
@@ -105,18 +91,6 @@ func TestOrphans(t *testing.T) {
 	})
 
 	// TestOrphansOverAGameWithNoTraitsAnswersRatherThanRefusing.
-	//
-	// This is the asymmetry, and it is the point of the test rather than a
-	// side effect of it: `analysis.cycles`, `analysis.unreachable` and
-	// `routes.check` all refuse a game that declared nothing, because each
-	// would otherwise report a clean bill of health from an engine with no
-	// edge it was allowed to walk. Orphans asks the vocabulary for one thing
-	// -- which types are `annotation` -- and "none of them" is a perfectly
-	// meaningful answer, so it reports rather than refusing.
-	//
-	// The control is in the same test: the same undeclared game **is**
-	// refused by cycles, so a run in which the resolver had quietly stopped
-	// refusing anything at all cannot pass this.
 	t.Run("orphans over a game with no traits answers rather than refusing", func(t *testing.T) {
 		g := a.game(t)
 		g.declareEntityType(t, "quest")
@@ -139,16 +113,6 @@ func TestOrphans(t *testing.T) {
 	// TestAnEntityWhoseOnlyEdgeIsInvalidIsNotAnOrphan is the invalid-edge
 	// decision, at the site the plan named as where it is most likely to be
 	// forgotten.
-	//
-	// `invalid` means a relation's own fields no longer fit its type's
-	// field_schema. It says nothing about the row's endpoints, and endpoints
-	// are the only thing this analysis reads -- so an entity whose only edge
-	// is flagged is **not** an orphan, and calling it one would send a
-	// designer to delete content that has edges.
-	//
-	// **Mutation:** add `AND r.invalid = false` to the two degree counts in
-	// ListOrphansPage. This test goes red, and it is the only test in the
-	// package that catches that particular one-line tidy.
 	t.Run("an entity whose only edge is invalid is not an orphan", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "flagged-source")
@@ -208,11 +172,6 @@ func TestOrphans(t *testing.T) {
 
 	// TestTheDegreesReportedMatchTheEdgesInTheDatabase reads the counts back
 	// against a hand-counted fixture.
-	//
-	// Degrees are the classic "correct and unasserted" field: they are
-	// computed, returned, and nothing would notice if they were always zero.
-	// Every other test in this file would pass against a report that
-	// reported 0/0 for everything.
 	t.Run("the degrees reported match the edges in the database", func(t *testing.T) {
 		g := a.gated(t)
 		for _, key := range []string{"hub", "in-1", "in-2", "in-3", "out-1"} {
@@ -289,12 +248,6 @@ func TestOrphans(t *testing.T) {
 
 	// TestTheOrphanFingerprintIsProjectIdFirstAndCarriesItsMode is the
 	// compositional half.
-	//
-	// The behavioural test above can pass whenever *any* part of the
-	// fingerprint discriminates -- here the considered type keys do -- and
-	// that is exactly how the original paging defect survived its first
-	// test. So the digest is asserted against paging.Fingerprint's own
-	// output over the parts, in order.
 	t.Run("the orphan fingerprint is project id first and carries its mode", func(t *testing.T) {
 		g := a.game(t)
 		want := paging.Fingerprint(g.projectID.String(), "analysis.orphans", "sink", "quest")
@@ -342,10 +295,6 @@ func TestOrphans(t *testing.T) {
 	})
 
 	// TestAnUnknownOrphanModeIsRefusedRatherThanTreatedAsIsolated.
-	//
-	// A mode nobody recognises answered as the default is a run that
-	// silently answered a different question, which is this engine's worst
-	// output shape: a wrong answer in the right form.
 	t.Run("an unknown orphan mode is refused rather than treated as isolated", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "alone")

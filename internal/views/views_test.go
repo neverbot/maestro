@@ -46,25 +46,6 @@ func TestViewsArea(t *testing.T) {
 
 	// TestViewsArea's "a view is read back with every field it was saved with"
 	// case is the read-back that catches a write-only column.
-	//
-	// It is not a formality: `relations.fields` was write-only for a whole
-	// sub-project because every test asserted the call succeeded and none
-	// read the row back, and `renderer_params` is the same shape — a jsonb
-	// column nothing in this package reads afterwards. layout_mode and
-	// description are the other two a caller can set here
-	// and no other test in this file looks at, so all three are asserted
-	// together, off a second read rather than off the returned row: the
-	// returned row is what the INSERT said, and only a read says what was
-	// stored.
-	//
-	// **Review finding: it enumerated four fields and then omitted the very
-	// column it was written to catch.** Actor was the one field of ViewInput
-	// no test in this package set, so updated_by_user_id and
-	// updated_by_token_id were write-only in exactly the sense this comment
-	// describes — measured, replacing both with nil in UpsertView left the
-	// whole module green. They are set and read back here, both of them at
-	// once, because a view is edited by a designer or by that designer's
-	// agent and nothing else in this package distinguishes the two.
 	t.Run("a view is read back with every field it was saved with", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -127,10 +108,6 @@ func TestViewsArea(t *testing.T) {
 	// control for the column migration 0012 dropped: an ordinary
 	// create-then-read, over the upsert statement that no longer names a seed,
 	// still stores and returns everything a view is made of.
-	//
-	// It is the half that TestNoSurfaceAcceptsALayoutSeed (internal/web)
-	// cannot state. That test says the knob is gone from both wires; this one
-	// says the write path did not lose anything else on the way out.
 	t.Run("upsert round trips without a seed", func(t *testing.T) {
 		g, _ := a.games(t)
 		in := saveable("no_seed", questsOnly)
@@ -186,14 +163,6 @@ func TestViewsArea(t *testing.T) {
 
 	// TestViewsArea's "the reported current view version is the one the write
 	// would have met" case pins the FOR UPDATE on GetViewByKeyForUpdate.
-	//
-	// Deleting the lock leaves every other test in this file green: the
-	// guarded DO UPDATE refuses a lost update on its own. What the lock earns
-	// is the *number* the caller is told to merge onto. Without it the read
-	// runs against this transaction's snapshot and reports the version
-	// committed when it started, so a caller racing an in-flight edit
-	// re-issues with a version that is already stale and is refused again —
-	// a loop it cannot leave by doing what the error said.
 	t.Run("the reported current view version is the one the write would have met", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -242,10 +211,6 @@ func TestViewsArea(t *testing.T) {
 	// raced another" case reaches the path the locked read cannot: on a
 	// creation there is nothing to lock, so the guard on the DO UPDATE is the
 	// only thing between the loser of the race and a silent overwrite.
-	//
-	// The overlap is staged rather than hoped for. Unstaged, the locked read
-	// finds the committed row and refuses in Go, and the SQL guard is never
-	// evaluated at all.
 	t.Run("the guarded upsert is what refuses a creation that raced another", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -407,11 +372,6 @@ func TestViewsArea(t *testing.T) {
 	// view that saves and then cannot be drawn is the failure the renderer
 	// catalogue exists to prevent, and save time is the only moment at which
 	// anybody is there to read the refusal.
-	//
-	// The two halves are the catalogue's two codes, which have two different
-	// recoveries: an unknown renderer is "fix this argument", and a renderer
-	// whose requirements this query cannot meet is "pick another renderer, or
-	// change the query".
 	t.Run("a renderer that cannot draw the query is refused at save time", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -522,17 +482,6 @@ func TestViewsArea(t *testing.T) {
 
 	// TestViewsArea's "a views prose is capped in characters not bytes" case
 	// pins the unit of the two caps, which their numbers alone do not.
-	//
-	// The constants match internal/metamodel's deliberately, so that a
-	// designer does not meet two different caps for the same shape of text
-	// in two places of one product. Measured before this test existed, they
-	// did not match: this package counted bytes, so a name of 200 accented
-	// characters was refused ("must be at most 200 bytes, and this one is
-	// 400") where a type label of the same 200 characters saved — a Spanish
-	// view name capped at 100 characters and a Spanish type label at 200.
-	// The cases below are the ones a byte count gets wrong: exactly the cap
-	// in two-byte characters, which must save, and one past it, which must
-	// not.
 	t.Run("a views prose is capped in characters not bytes", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -667,28 +616,6 @@ func TestViewsArea(t *testing.T) {
 	// TestViewsArea's "an ordinary upsert leaves a background standing" case
 	// pins the decision UpsertView's SET list makes by omission, which nothing
 	// else asserts.
-	//
-	// The three background columns are deliberately not in the statement's
-	// SET list: a background belongs to the picture rather than to the
-	// query, is written by its own setter (Task 14), and listing them here
-	// would make every ordinary edit of a name or a renderer parameter
-	// silently detach the world map a designer put behind the view, because
-	// a caller that said nothing about a background would be saying "none".
-	// That argument is written where the statement is; a decision argued and
-	// unasserted is the shape this task already found four of, and it is
-	// testable today by writing the background directly.
-	//
-	// Task 14 inherits this test: the setter it adds is the *other* write
-	// path over these columns, and this one says what the query path must
-	// keep doing once there are two.
-	//
-	// **The view is a `map` here, and it was a `graph` when this test was
-	// written.** A background under a renderer that draws none is a state
-	// the product refuses on both write paths now, so a fixture that wrote
-	// one directly was pinning "an edit leaves a background standing" over a
-	// row that could not exist — and the interesting case is an edit of a
-	// view that legitimately has one. The renderer parameter the edit
-	// changes is map's own `snap`, for the same reason.
 	t.Run("an ordinary upsert leaves a background standing", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -789,15 +716,6 @@ func TestViewsArea(t *testing.T) {
 		// correctly. Measured: with both project filters deleted from
 		// ListViewsBrokenByType the whole package stayed green, and outland
 		// asking about azeroth's quest type got back azeroth's view.
-		//
-		// This is the question that separates them: the *other* game asking
-		// about *this* game's type id, which is exactly what a caller holding
-		// an id from somewhere else does. The composite foreign key does not
-		// defend it — the ref row legitimately holds azeroth's type id under
-		// azeroth's project id, and the caller supplies the type id directly
-		// — so the filter is the only thing standing here, and
-		// ViewsDependingOn takes a bare id, which makes it load-bearing for
-		// this package's own caller rather than defence in depth.
 		crossed, err := outland.views.ViewsDependingOn(ctx, outland.projectID, KindEntityType, zone.ID)
 		assert.Must(t, err == nil, "outland asking about azeroth's zone: %v", err)
 		assert.Must(t, len(crossed) == 0, "got %+v, want nothing: that type id belongs to another game", crossed)
@@ -823,17 +741,6 @@ func TestViewsArea(t *testing.T) {
 	// TestViewsArea's "a view written by another games token is refused" case
 	// covers the database's own backstop over the audit columns, the half of
 	// them a read-back cannot see.
-	//
-	// 0008_views.sql gives views the same composite FOREIGN KEY
-	// (updated_by_token_id, project_id) REFERENCES api_tokens (id, project_id)
-	// that every table in 0004_metamodel.sql carries, so a token scoped to
-	// another game cannot be recorded as the editor of this one's view. The
-	// constraint worked already; what did not was the reporting, which
-	// surfaced "upsert view: ... violates foreign key constraint ... (SQLSTATE
-	// 23503)" into whatever log caught it — nothing in that string says a
-	// token was scoped to the wrong game. metamodel's TestTypesArea's "an
-	// actor from another game is named" case is the same test next door, and
-	// this package shares its judgement rather than copying the scan.
 	t.Run("a view written by another games token is refused", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
@@ -920,20 +827,6 @@ func TestViewsArea(t *testing.T) {
 	// TestViewsArea's "the view queries addressing a row by id are scoped to
 	// the project" case goes at the generated statements directly, because the
 	// service cannot reach the hole they would leave.
-	//
-	// Every one of these is addressed by an id the caller already holds, and
-	// every service path resolves that id inside the game first — RemoveView
-	// reads the view by key before it deletes, UpsertView writes refs for a
-	// row its own transaction just wrote — so each of those reads masks the
-	// filter under it and dropping the filter changes no answer any test in
-	// this file can see. Measured, not assumed: with the filter deleted from
-	// DeleteView the whole package stays green.
-	//
-	// The claim the SQL file makes about them is therefore that they are
-	// defence in depth against a caller that does *not* resolve first, and a
-	// claim like that is worth exactly as much as a test that a caller who
-	// pairs a foreign id with this game's project id gets nothing. This is
-	// that test.
 	t.Run("the view queries addressing a row by id are scoped to the project", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
@@ -979,15 +872,6 @@ func TestViewsArea(t *testing.T) {
 	// TestViewsArea's "a respelling is named even when the version is also
 	// stale" case is what makes the locked read's spelling check load-bearing,
 	// and it is the only thing that does.
-	//
-	// Measured: with only the respelling test above, deleting that check
-	// leaves the package green — the post-write check catches a respelling
-	// whose version matched, and the re-read after a failed guard catches one
-	// whose version did not. What neither of them can do is choose *which*
-	// fault to report when a caller has both, and the order is the whole
-	// point: "current version is 1" over a key that would be refused again at
-	// version 1 sends a caller round a loop it cannot leave by doing what the
-	// error said.
 	t.Run("a respelling is named even when the version is also stale", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -1005,23 +889,6 @@ func TestViewsArea(t *testing.T) {
 	// told the spelling" case stages a creation losing to a creation under
 	// another spelling, and pins that the loser is told the stored spelling
 	// rather than silently overwriting the winner's row.
-	//
-	// **It used to hold an ExpectedVersion and end at the post-write
-	// spelling check.** That was the narrow, real shape the check existed
-	// for: a caller that believes it is *updating* against a key that does
-	// not exist yet, while another writer is creating it. The locked read
-	// found nothing, the winner landed at version 1, the guard — asked for
-	// version 1 — matched, and the call updated a row it never saw.
-	//
-	// That caller is now turned away at the locked read: a version claim
-	// against a row that is not there is a not_found saying the row was
-	// removed, not a creation (metamodel.RemovedError), and TestViewsArea's "a
-	// view update that lost to a committed removal is told the view is gone"
-	// case is where that is asserted. So the post-write check became
-	// unreachable and went; what stays is this race with the claim dropped,
-	// which is the shape a seeding agent actually meets, and which
-	// conflictOnViewKey answers. `expected_version: 0` is how this surface
-	// spells "must not exist yet", so it is a creation and not a claim.
 	t.Run("a creation racing a creator under another spelling is told the spelling", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -1062,21 +929,6 @@ func TestViewsArea(t *testing.T) {
 	// the view is gone" case is this package's half of a rule that lives in
 	// two places at once, and it races the state rather than producing it
 	// sequentially.
-	//
-	// A designer removes a view; an agent that read version 1 a moment
-	// earlier saves an edit to it. The edit's locked read parks on the row
-	// lock the deletion holds, and when the deletion commits that read comes
-	// back empty. This branch used to take the creation path from there —
-	// with the caller's version claim never evaluated — and store the view
-	// again under a **new id**, undoing the removal. That was recorded in
-	// UpsertView as an observed defect and filed as a backlog item; it is
-	// closed here, and in internal/metamodel's four upserts of the same
-	// shape in the same change, because fixing one alone is the second
-	// contract this repository would then be paying for.
-	//
-	// What a *view* loses to the resurrection is its own: view_positions and
-	// view_assets key into views(id), so a new id silently discards every
-	// node a designer dragged and the background image behind them.
 	t.Run("a view update that lost to a committed removal is told the view is gone", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -1124,13 +976,6 @@ func TestViewsArea(t *testing.T) {
 	// TestViewsArea's "zero is a creation claim and not a claim about a row"
 	// case is the exemption the rule above has to carry, and without it every
 	// creation over the MCP and REST surfaces would be refused.
-	//
-	// This package took internal/markdown's wire convention rather than
-	// internal/metamodel's: `expected_version: 0` is how a caller spells
-	// "this view must not exist yet" (ViewInput.ExpectedVersion, and the
-	// views.upsert description), so a 0 reaching the empty read is a
-	// creation claim that has just been proved right — not a claim about a
-	// row that is not there. Every other value is the latter.
 	t.Run("zero is a creation claim and not a claim about a row", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -1150,19 +995,6 @@ func TestViewsArea(t *testing.T) {
 
 	// TestViewsArea's "a removal that lost its race announces nothing" case
 	// pins the arm that reads how many rows the delete actually removed.
-	//
-	// RemoveView resolves the key first and deletes by id, so between those
-	// two statements another remover can take the row. Without this test the
-	// arm is a signal nothing reads: deleting it leaves the package green,
-	// and what ships instead is a `view.removed` announced by a caller that
-	// removed nothing — a second event for one removal, on a hub whose
-	// subscribers re-read on hearing one.
-	//
-	// The race is staged rather than hoped for. A rival transaction deletes
-	// the row and holds its lock; this call's own DELETE blocks on it, and
-	// when the rival commits the row is gone and the statement matches
-	// nothing. Two goroutines racing would not do: they serialise as often as
-	// not, and then the *read* refuses and the arm is never reached.
 	t.Run("a removal that lost its race announces nothing", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -1260,18 +1092,6 @@ func requireNothing(t *testing.T, sub *realtime.Subscription, why string) {
 // inside the transaction's callback differs from the correct one only by
 // the commit that follows, and a rolled-back write and a refused write
 // look identical from outside.
-//
-// It is reachable because testutil.NewPool hands every test its own
-// throwaway database, so this test may install a constraint no other test
-// sees. A deferred foreign key from views.id to projects.id is satisfied
-// by nothing — a view's id is not a project id — but being DEFERRABLE
-// INITIALLY DEFERRED it is checked at COMMIT and not before, so every
-// statement inside the transaction succeeds and only the commit fails,
-// with SQLSTATE 23503. That is exactly the window a last-statement
-// publish would announce into: the database has accepted every write, and
-// then thrown all of them away.
-//
-// internal/metamodel's test of the same name is the model.
 func TestNoViewEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()
@@ -1312,22 +1132,6 @@ func TestNoViewEventIsPublishedWhenTheCommitFails(t *testing.T) {
 // TestAViewAndItsRefsAreOneChange pins the placement of the refs rewrite
 // rather than its result, which is the half every other refs test in
 // this file leaves open.
-//
-// Measured before it was written: moving writeRefs out of the
-// transaction, to run against the pool once the view had committed, left
-// the whole package green — every assertion about refs is about what is
-// stored after a call that succeeded, and both placements store the same
-// rows. What separates them is a failure *between* the two writes, and
-// this test manufactures exactly one. A deferred foreign key from
-// view_refs.view_id to projects.id is satisfied by nothing — a view's id
-// is not a project id — but being DEFERRABLE INITIALLY DEFERRED it is
-// checked at COMMIT, so:
-//
-//   - written inside the transaction, the refs take the view down with
-//     them and nothing is stored, which is what this asserts;
-//   - written after it, the view is already committed and only the refs
-//     fail, leaving a stored view whose dependency index is empty — and
-//     a type deleted afterwards would report that it broke nothing.
 func TestAViewAndItsRefsAreOneChange(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()

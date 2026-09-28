@@ -8,35 +8,6 @@ import (
 // AnalysisTraits is the closed vocabulary of analytical behaviours a
 // relation type may declare, in the order 0013_analysis.sql's
 // relation_types_traits_vocab CHECK lists them.
-//
-// **This slice and that CHECK are one list written twice, and this one is
-// the copy a caller ever sees.** SemanticRoles carries the same pairing for
-// the same reason, and it exists because of review finding H3: a value
-// outside the constraint travelled to Postgres, came back as an untyped
-// check-constraint violation and reached an agent as `internal_error` — a
-// server fault, with no path and no list of what would have been accepted,
-// for something the agent typed. The constraint stays as the backstop for a
-// writer that does not come through this package; TestTraitsArea's "the
-// trait vocabulary is one set in go and in the database" case reads the
-// CHECK's own text back out of pg_get_constraintdef and asserts set
-// equality in **both** directions, so neither list can grow a word the
-// other lacks.
-//
-// **Why the vocabulary lives here and not in internal/analysis, which is
-// the package that reads it.** internal/analysis depends on this package
-// for FieldError, Actor and every reused sentinel, so the reverse edge
-// would be an import cycle. The vocabulary therefore belongs beside the
-// column it constrains and beside the upsert that writes it —
-// relation_types.upsert is where a trait combination arrives — and
-// internal/analysis aliases it rather than redeclaring it. That
-// inversion is stated in both files because it is exactly the sort of
-// thing a later reader reverses "for tidiness", and reversing it does
-// not compile.
-//
-// Exported for the rule correction 24 established for MaxSearchQuery: a
-// bound a caller cannot read is a bound a caller trips over. The MCP
-// tool description for `relation_types.upsert` is built from it, so a
-// trait added here is offered to agents without a second edit.
 var AnalysisTraits = []string{
 	"prerequisite_of", "unlocks", "containment",
 	"ordering", "symmetric", "acyclic", "annotation",
@@ -45,12 +16,6 @@ var AnalysisTraits = []string{
 // TraitConflict is one combination of traits that contradicts itself:
 // Trait may not be declared beside any of With, and Why is the sentence
 // a designer is given instead of "invalid".
-//
-// It is a table rather than three hand-written `if`s because the same
-// structure has three readers — the coherence check, the generated tool
-// description, and internal/analysis's own description — and three
-// hand-written copies of one rule is this repository's most repeated
-// defect. AnalysisTraitConflicts is what all three read.
 type TraitConflict struct {
 	Trait string
 	With  []string
@@ -59,12 +24,6 @@ type TraitConflict struct {
 
 // AnalysisTraitConflicts is every combination of admissible traits that
 // cannot stand together.
-//
-// A **duplicate** and an **unknown word** are refused too and are not in
-// this table: they are faults in the list itself rather than in the
-// combination, they are caught before these rules run, and a rule of the
-// form "X may not be declared beside X" would read as nonsense in the
-// generated description.
 var AnalysisTraitConflicts = []TraitConflict{
 	{
 		Trait: "annotation",
@@ -96,12 +55,6 @@ var AnalysisTraitConflicts = []TraitConflict{
 
 // TraitConflictLines renders AnalysisTraitConflicts as one sentence per
 // rule, for a tool description an agent reads before it types anything.
-//
-// Generated from the table the check runs on, so a rule added to the
-// table is offered to agents and a rule removed from it stops being
-// promised. internal/web's
-// TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination asserts that
-// in both directions.
 func TraitConflictLines() []string {
 	lines := make([]string, 0, len(AnalysisTraitConflicts))
 	for _, conflict := range AnalysisTraitConflicts {
@@ -113,26 +66,6 @@ func TraitConflictLines() []string {
 
 // checkAnalysisTraits refuses a trait list the column would refuse, and
 // every combination of admissible traits that contradicts itself.
-//
-// **These are invalid_schema and not schema_violation**, and errors.go
-// gives those two sentinels a split by who is at fault: invalid_schema is
-// a type *declaration* that cannot stand, schema_violation is a *row of
-// values* that does not fit a declaration that can. A trait combination
-// arrives on relation_types.upsert and is part of the declaration, so it
-// is the first — which is why this returns a *SchemaError and not a
-// *ValidationError.
-//
-// An empty or nil list is not a refusal but the absence of a
-// declaration: the column is nullable precisely because a relation type
-// need not say how it behaves, and the caller stores nil as NULL.
-// **NULL is undeclared and `{annotation}` is deliberately inert**, which
-// is the distinction the whole column carries and the reason the
-// database refuses an empty array rather than storing one.
-//
-// Every message names *what* is wrong — the offending word, or the pair
-// that cannot stand together — rather than reporting that something is,
-// because the refusal is where a designer learns which of the two traits
-// they meant.
 func checkAnalysisTraits(traits []string) error {
 	if len(traits) == 0 {
 		return nil
@@ -232,11 +165,6 @@ func othersInVocabulary(trait string) []string {
 
 // QuotedList renders a list of words as a quoted, comma-separated
 // sentence fragment.
-//
-// Exported because internal/web builds tool descriptions out of this
-// package's own vocabularies and had a private copy of exactly this
-// function; two spellings of one rendering is how a generated
-// description and the list it is generated from stop being comparable.
 func QuotedList(words []string) string {
 	quoted := make([]string, len(words))
 	for i, word := range words {

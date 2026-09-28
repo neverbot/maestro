@@ -425,19 +425,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "a lock timeout on the endpoint check is not
 	// reported as invalid input" case closes the locking verification's
 	// finding 1.
-	//
-	// checkEndpointTypes now takes a FOR SHARE lock on every endpoint id it
-	// finds (correction 22, TestTypesArea's "a relation type created during a
-	// type removal cannot keep the removed ID" case above), and that lock can
-	// be parked behind another transaction's row lock and cancelled by
-	// lock_timeout — SQLSTATE 55P03. Before this fix, any error from the lock
-	// query, cancellation included, was folded into a FieldError and reported
-	// as invalid_input: a caller told its ids were wrong when nothing about
-	// them was ever checked, and told not to resend unchanged when resending
-	// unchanged is exactly the right recovery for contention. This test holds
-	// a real row lock, gives the upsert's connection a real lock_timeout, and
-	// proves the cancellation reaches the caller as an ordinary Go error
-	// carrying the SQLSTATE — not a ValidationError, and not ErrInvalidInput.
 	t.Run("a lock timeout on the endpoint check is not reported as invalid input", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1030,11 +1017,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "an atomic relation batch rolls back whole" case is
 	// the other mode: one bad edge and nothing lands, with the failing item
 	// named.
-	//
-	// It runs with a hub attached, so it also pins the publication
-	// discipline on this path: item 0 is written inside the transaction and
-	// rolled back with it, and an event announcing it would tell every
-	// subscriber to go and re-read an edge that does not exist.
 	t.Run("an atomic relation batch rolls back whole", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -1075,12 +1057,6 @@ func TestRelationsArea(t *testing.T) {
 	// identity and repeated apart. An edge has no key of its own, so "give one
 	// of the two a different key" is advice that means nothing here; what the
 	// caller has to be told is that its two items are one edge.
-	//
-	// The repetition is folded exactly as relations_edge_key folds it: the
-	// two endpoints are resolved through case-insensitive key lookups, so
-	// two items spelling a key differently address one row, and the third
-	// item below is not a repeat because reversing an edge's endpoints is a
-	// different edge.
 	t.Run("a batch that repeats an edge is diagnosed as such", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1131,17 +1107,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "an atomic relation batch lands every edge of the
 	// batch" case pins the ordinary success of atomic mode: every item lands,
 	// and Succeeded reports them all.
-	//
-	// It used to be called …SeesItsOwnEntities and claimed to pin that the
-	// batch resolves its endpoints against its own transaction. It did not:
-	// both entities are seeded here through separate committed calls, and
-	// UpsertRelations has no path that writes an entity, so routing every
-	// lookup in upsertRelationWith through the pool leaves this green. That
-	// claim needs a transaction shared between an entity write and an edge
-	// write, which no public caller has until Task 9 seeds a whole game in
-	// one call — it is pinned in the package's own
-	// TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction, which is the
-	// only level where it is true today.
 	t.Run("an atomic relation batch lands every edge of the batch", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1172,12 +1137,6 @@ func TestRelationsArea(t *testing.T) {
 	// subscribers here are the ones a wrong decision would silently cut out —
 	// a viewer, excluded by any MinRole above viewer, and a token caller,
 	// excluded by HumanOnly regardless of role.
-	//
-	// It also pins that every payload carries the *stored* spelling of the
-	// relation type key, on all three write paths, and that a removal
-	// carries the same identity an upsert does. Keys are matched without
-	// regard to case, so an event repeating the caller's spelling would name
-	// an identity no other reader of the game sees.
 	t.Run("relation events reach every member of the game including agents", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -1290,9 +1249,6 @@ func TestRelationsArea(t *testing.T) {
 	// version to expect and no row to lock, so its own read cannot see the
 	// rival at all. An unguarded DO UPDATE turns that writer into an overwrite
 	// of a type it never read.
-	//
-	// The rival is an open transaction rather than a second goroutine, so
-	// the interleaving is the test's and not the scheduler's.
 	t.Run("a relation type creation that loses the race for its key is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1397,11 +1353,6 @@ func TestRelationsArea(t *testing.T) {
 	// something — a creating caller passes noVersion, so the guarded DO UPDATE
 	// matches nothing and the re-read names both spellings — and withTx rolls
 	// the write back.
-	//
-	// It used to end at the *post-write* spelling check instead, by claiming
-	// the version the winner lands on. That claim is now refused before the
-	// write (metamodel.RemovedError), which is why this test stages the race
-	// without one; the post-write check went with it.
 	t.Run("a relation type creation racing another spelling is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1467,9 +1418,6 @@ func TestRelationsArea(t *testing.T) {
 	// then deletes, so each of the three filters masks the others and only
 	// mutating all three at once is observable through the service. Each is
 	// asserted here over the query itself.
-	//
-	// GetRelationTypeByID is in the list too: RemoveRelationType is reached
-	// by an id and its cascade delete is the widest write in this file.
 	t.Run("the relation queries that address a row by ID are scoped to the project", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1547,16 +1495,6 @@ func TestRelationsArea(t *testing.T) {
 
 	// TestRelationsArea's "removing an entity type prunes it from every
 	// endpoint list" case closes the invariant Task 5 created.
-	//
-	// source_type_ids and target_type_ids are plain uuid[] with no foreign
-	// key, so an id in them survives the entity type it names. All three
-	// consequences are checked here, because they are exactly the failure
-	// correction 6 claims to have fixed: the rule becomes unsatisfiable, the
-	// refusal a designer then meets names the wrong problem — "entity type
-	// \"zone\" cannot be the target" while zone visibly is the declared
-	// target, because the stored id is the *old* zone's — and the relation
-	// type cannot be repaired through its own API, since re-declaring it with
-	// the list it currently holds is refused as invalid_input.
 	t.Run("removing an entity type prunes it from every endpoint list", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1628,25 +1566,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "concurrent edits to one edges fields are refused"
 	// case is the inverse of the test that used to stand here, and the
 	// inversion is the point.
-	//
-	// The test it replaces — named, in Task 7, for the loss it pinned rather
-	// than for the guarantee this one pins — asserted the cost of two linked
-	// decisions: an edge carried no `version`, so there was no
-	// compare-and-set to refuse a stale write, and an edge's uniqueness index
-	// forbids parallel edges, which sends a game's multiplicity into the
-	// edge's own fields — the `passages: ["door", "vent"]` UpsertRelation
-	// offers by name. Together they left the one field a designer was *told*
-	// to use for multiplicity with no protection at all, and the old test
-	// asserted the whole loss: one row, the second write whole, no error, two
-	// events a subscriber could not tell apart. It said in as many words that
-	// adding `version` to `relations` would turn it red and that the correct
-	// response would be to rewrite it. 0009 added the column; this is that
-	// rewrite.
-	//
-	// Two writers extend one list. The second, which never read the first,
-	// is refused with the version it has to merge onto — and the row still
-	// holds the first writer's value, which is the half that says the refusal
-	// happened before the write rather than after it.
 	t.Run("concurrent edits to one edges fields are refused", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()
@@ -1723,24 +1642,6 @@ func TestRelationsArea(t *testing.T) {
 
 	// TestRelationsArea's "both bad ends of an edge are answered in one pass"
 	// case extends the one-pass rule from resolution to the endpoint *rule*.
-	//
-	// Reporting both missing ends together was only half the claim
-	// `upsertRelationWith` made: the two `endpointAllowed` checks still
-	// returned one at a time, so two wrongly-typed ends cost two round trips,
-	// and — worse — a caller with one missing end and one wrongly-typed end
-	// heard only the `not_found`, fixed it, resent, and only then heard the
-	// mismatch. That is the hidden second hop the comment claimed had been
-	// removed, inside the code the comment sits on.
-	//
-	// **Which code wins when the two halves disagree**: `not_found`. A
-	// caller cannot act on the mismatch first — the entity it names does not
-	// exist, and creating it is the step that decides which type the end
-	// will even have — so `not_found` is the code that describes the work to
-	// do next, and the mismatch travels with it in the message so the second
-	// attempt already knows about it. `failureFor` orders `ErrNotFound`
-	// above `ErrEndpointTypeMismatch` and both halves are wrapped, so that
-	// falls out of the existing switch rather than needing a rule of its
-	// own; this test is what pins it there.
 	t.Run("both bad ends of an edge are answered in one pass", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1803,13 +1704,6 @@ func TestRelationsArea(t *testing.T) {
 	// successful batch tell an agent"; see TestEntitiesArea's "a bulk write
 	// reports what landed in a wire shape" case for the entity half and the
 	// argument.
-	//
-	// What an edge reports differs from an entity's in exactly one way, and
-	// it is a decision rather than an omission: **there is no version**.
-	// relations has no version column at all (Task 5's decision, recorded on
-	// RelationInput), so the only things a caller cannot derive from what it
-	// sent are the edge's own id — which is what relations.remove takes —
-	// and the two endpoint ids the refs resolved to.
 	t.Run("a bulk edge write reports what landed in a wire shape", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1859,14 +1753,6 @@ func TestRelationsArea(t *testing.T) {
 
 	// TestRelationsArea's "a relation type semantic role is checked here and
 	// not only by the database" case closes review finding H3.
-	//
-	// `semantic_role` was validated nowhere in Go; the only guard was the
-	// CHECK constraint 0004_metamodel.sql puts on the column, and a value
-	// outside the list reached an agent as `internal_error` with a
-	// check-constraint violation in the operator's log. That is the exact
-	// shape the error vocabulary exists to prevent: something the caller
-	// typed, that the caller can fix, reported as a server fault with no
-	// path and no list of what would have been accepted.
 	t.Run("a relation type semantic role is checked here and not only by the database", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1899,15 +1785,6 @@ func TestRelationsArea(t *testing.T) {
 
 	// TestRelationsArea's "a removal says what it could not find and what
 	// still holds it" case closes review finding L4.
-	//
-	// All four removals answered an unknown id with a bare `ErrNotFound`,
-	// whose message is the string "not_found" — so the wire report was
-	// `{"error":"not_found","message":"not_found"}`, a code repeated as
-	// prose. `types.remove` on a type that still has entities was worse in
-	// the same way: `{"error":"in_use","message":"in_use"}`, with nothing
-	// about how many rows, or that `cascade` is the way through.
-	// `entities.get` and `types.get` have named their misses since Task 4;
-	// these four are now held to the same standard.
 	t.Run("a removal says what it could not find and what still holds it", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2140,17 +2017,6 @@ func TestRelationsArea(t *testing.T) {
 		// entities, so every lookup on the way to the edge succeeds there;
 		// only the edge itself is missing, which is what makes this a real
 		// scoping assertion and not a lookup failing early.
-		//
-		// What it does *not* prove is that GetRelationByEdge's own
-		// `project_id` filter is load-bearing. It is not: deleting that
-		// clause from the statement leaves this case green, measured. The
-		// isolation comes one step earlier — the relation type and both
-		// endpoints are resolved inside the calling game, so the triple
-		// handed to the statement is already this game's, and the two games'
-		// identically-keyed "requires" types have different ids. The filter
-		// stays as the backstop GetRelationByID has for the same reason, and
-		// this comment is here so that nobody later reads a passing test as
-		// evidence for it.
 		if _, err := svc.RelationByEdge(ctx, theirs, "requires",
 			metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 			metamodel.Ref{TypeKey: "quest", Key: "hogger"}); !errors.Is(err, metamodel.ErrNotFound) {
@@ -2180,24 +2046,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "upsert relations conflict path cannot write another
 	// games edge" case drives the statement directly, because no caller of
 	// this package can reach the hole it would leave.
-	//
-	// UpsertRelation writes project_id as a column value and leans on
-	// 0004_metamodel.sql's composite foreign keys for the insert path — but
-	// the conflict target is (relation_type_id, source_id, target_id), which
-	// names no project, and project_id is not in the SET list. So a stored
-	// row keeps its own project id, every key stays satisfied, and the
-	// DO UPDATE is an update of another game's edge that hands the caller
-	// that game's row back. Measured before the guard existed: this game's
-	// project id with another game's three ids overwrote that game's fields
-	// and returned its row, project id included — a cross-game write and a
-	// cross-game read in one statement.
-	//
-	// It is unreachable from Service.UpsertRelation, which resolves the type
-	// and both endpoints by key inside the project first, exactly as
-	// SetPositions does in internal/views — and exactly as there, the guard
-	// stays and is asserted here, because a statement that is safe only
-	// because of how today's caller happens to address it is a trap for
-	// tomorrow's.
 	t.Run("upsert relations conflict path cannot write another games edge", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2225,14 +2073,6 @@ func TestRelationsArea(t *testing.T) {
 
 		// The other game, holding this edge's three ids and its own project
 		// id, meets the guard: no row updated, and therefore no row returned.
-		//
-		// **It sends the edge's real version**, deliberately. Since 0009 the
-		// DO UPDATE carries a second guard — `relations.version =
-		// expected_version` — and a version this caller did not know would
-		// refuse the statement on its own, leaving the project filter
-		// untested and this test green for the wrong reason. With the true
-		// version the version guard is satisfied and the project filter is
-		// the only thing left standing between the two games.
 		row, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
 			ProjectID:       theirs,
 			RelationTypeID:  stored.RelationTypeID,
@@ -2272,11 +2112,6 @@ func TestRelationsArea(t *testing.T) {
 	// carries a field schema exactly as an entity type does, and editing it
 	// left every existing edge unjudged, with no column to record a verdict
 	// in.
-	//
-	// Both halves are asserted, and the second is the one a write-only flag
-	// would pass without: the edge that still fits keeps its values, its
-	// version and its updated_at, so a validation pass cannot read as an edit
-	// of content nobody edited.
 	t.Run("an edge schema change flags the edges that stop fitting without touching them", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2398,10 +2233,6 @@ func TestRelationsArea(t *testing.T) {
 	// the write path's half of the rule: UpsertRelation resets `invalid` to
 	// false because the values it just wrote were validated against the type's
 	// current schema, exactly as UpsertEntity does.
-	//
-	// Without it a designer who fixed a flagged edge would be told it is
-	// still broken, forever, and the only way back would be to delete and
-	// re-create it.
 	t.Run("rewriting a flagged edge clears its flag", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2441,11 +2272,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "invalid edges are findable through the listing"
 	// case is the read half of the flag, and it is the half a write-only
 	// column ships without.
-	//
-	// An agent that has just narrowed a relation type has to be able to ask
-	// "which edges did that break", the same way it asks it of entities. All
-	// three states of the filter are asserted, because a filter that ignored
-	// its argument would satisfy any one of them on its own.
 	t.Run("invalid edges are findable through the listing", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2503,12 +2329,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "a relations cursor cannot cross the invalid filter"
 	// case pins that the invalid filter is part of the listing's cursor
 	// fingerprint, exactly as it is on the two entity listings.
-	//
-	// Every filter of one listing shares one sort order, so a cursor carried
-	// from "the broken edges" to "all edges" would page perfectly and answer
-	// a different question. A fingerprint that ignored the filter would leave
-	// this test's cursor accepted and this whole listing silently mixing two
-	// questions.
 	t.Run("a relations cursor cannot cross the invalid filter", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2598,12 +2418,6 @@ func TestRelationsArea(t *testing.T) {
 	// games declare the same relation type key and hold an edge each;
 	// narrowing one game's declaration must flag that game's edge and leave
 	// the other alone.
-	//
-	// The relation type ids differ between the games, so the type filter
-	// alone would already do it — which is exactly why this is asserted
-	// rather than assumed: the whole file's rule is that every statement
-	// carries the project, and a sweep is the one place a missing filter
-	// would rewrite content in a game the caller cannot see.
 	t.Run("an edge sweep does not reach another games edges", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -2638,16 +2452,6 @@ func TestRelationsArea(t *testing.T) {
 	// TestRelationsArea's "the edge upsert statement refuses a stale version"
 	// case drives dbq.UpsertRelation directly, because nothing reachable
 	// through the service can observe the SQL guard on its own.
-	//
-	// upsertRelationWith takes a locked read first and refuses a stale version
-	// in Go, so every sequential caller is answered before the statement runs
-	// — measured, not assumed: making the DO UPDATE's `relations.version =
-	// expected_version` clause trivially true left TestRelationsArea's
-	// "concurrent edits to one edges fields are refused" case green. The
-	// clause is not redundant, it is the half that survives a race: on the
-	// creation path there is nothing to lock, so two writers can both pass the
-	// Go check and only the guard stands between them. A guard nothing pins is
-	// a guard the next edit of this statement deletes.
 	t.Run("the edge upsert statement refuses a stale version", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

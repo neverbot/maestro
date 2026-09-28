@@ -32,179 +32,6 @@ import (
 
 // The interface sub-project's definition of done, over the transports a
 // browser actually uses.
-//
-// **It is deliberately not views_e2e_test.go again.** That file walks the
-// same story over the MCP tool surface and answers "does the product
-// work"; this one seeds through those same tools and then reads
-// everything else the way the front end does — the shell at `/g/{slug}`,
-// `GET /api/games/{slug}/summary`, `GET …/views/by-key/{key}`,
-// `POST …/views/run`, `POST …/views/by-key/{key}/positions`, and the SSE
-// stream at `GET …/events`. Every number the frame puts on screen and
-// every rule the client obeys is a field of one of those responses, and
-// until this file nothing asserted that the *routes* carry them.
-//
-// # What was driven in a browser, and what a Go test can say about it
-//
-// Task 18 is the one task of this plan whose evidence is a real browser:
-// computed styles need a cascade, a frame budget needs a frame, and two
-// pages talking over an event stream need two pages. That half was driven
-// against a running instance (Firefox, `make dev`) and its measurements
-// are recorded below so they can be read next to the code they judge. **A
-// measurement recorded in a comment is not an assertion and this file
-// does not pretend otherwise** — what is asserted here is the server half
-// each browser step stood on, plus (at the end) three source-shape guards
-// over the exact wiring lines the browser found missing.
-//
-// Recorded from the driven run, on the seeded game described below:
-//
-//	step 2 — computed styles resolve the tokens. `--paper` resolved to
-//	  #faf8f5 and `body`'s computed `background-color` to
-//	  rgb(250, 248, 245), the same colour; `--ink` #14140f and the
-//	  computed `color` rgb(20, 20, 15). Three `section.lane` elements,
-//	  headed Views, Catalogue and Prose. No Node harness can see any of
-//	  this: it needs a cascade.
-//
-//	step 3 — `/g/{slug}/v/mage-quests?p.class_key=mage` drew 5 nodes and
-//	  5 edges. The parameter bar's input carried "mage" as a *property*
-//	  (Lit's `.value=`), so it is in `input.value` and in neither the
-//	  attribute nor the text — which is worth writing down, because a
-//	  check that read the DOM as text would have called a working binding
-//	  broken. The footer carried both durations: "5 nodes, 5 edges ·
-//	  depth 1 · query 9 ms · layout 23 ms". The legend did not exist at
-//	  all; see the first defect below.
-//
-//	step 4 — the budgets, measured with `performance.now()` around a
-//	  freshly opened window:
-//	    game page, first contentful paint      33-56 ms   (budget 1 s)
-//	    game page, three lanes populated      121-182 ms  (budget 1 s)
-//	    500-node graph, opened to nodes drawn 340-540 ms  (budget 1 s)
-//	      of which layout                      75-85 ms   (budget 2 s)
-//	    1000-node graph, opened to drawn          502 ms
-//	      of which layout                         230 ms
-//	  The 500-node layout is faster than the 85-101 ms the plan recorded
-//	  earlier and nowhere near the 2 s hard stop; no budget failed, so no
-//	  constant was touched. Measured in a `window.open`ed page and not an
-//	  iframe, because `frame-ancestors 'none'` refuses to be framed even
-//	  same-origin — an iframe stays at about:blank forever and the first
-//	  attempt at this measurement timed out rather than failing.
-//
-//	step 5 — four drags through real pointer events on the real surface:
-//	  one `POST …/positions` each, counted off resource timing, and the
-//	  four coordinates survived a reload exactly (each rect's `x` was the
-//	  stored centre minus half its width, to the digit).
-//
-//	step 6 — the two-page case, and the first time anything watched a
-//	  second page receive a drag. Page B, open on the same view, went
-//	  from 1 to 2 `/views/run` requests — **one** coalesced re-read, not a
-//	  patch from the payload — and the dragged node moved 396 to 441 to
-//	  match page A. With a *local* drag in flight on page B, page A's next
-//	  drag did not arrive: the run count stayed at 2 and the node page A
-//	  had moved stayed where page B last saw it. On page B's drop the
-//	  deferred re-read arrived, exactly one (2 to 3), page B's own dropped
-//	  node kept its new coordinate and the colleague's caught up.
-//
-//	step 6b — the frame cost of one drag move, which is Task 14's
-//	  performance claim and had never been measured on a real frame. A
-//	  `MutationObserver` over the whole canvas shadow tree during one
-//	  `pointermove`: **5 mutations** — one `transform` on the drag layer's
-//	  group, and `x1`/`y1`/`x2`/`y2` on the one edge leaving the
-//	  selection — out of 25 elements in the surface, in 3 ms. The claim
-//	  holds: one transform write plus the edges of the selection, never
-//	  the tree.
-//
-//	step 7 — twelve quests added over MCP. They do **not** arrive in an
-//	  open page and that is by design, not a fault: client.js's
-//	  `applyEvent` handles the four `view.*` kinds, the two renames and
-//	  `resync`, and `entity.upserted` falls to the `kind.unhandled` arm,
-//	  so a picture is never swapped under a designer by content arriving.
-//	  The honest consequence is recorded as the fourth finding below. On
-//	  the next run they were all there: 17 nodes, the four pinned ones at
-//	  byte-identical coordinates, and on the map 4 solid anchors, 13
-//	  hollow rings and the band "12 new nodes were placed automatically."
-//
-//	step 8 — the rename alone does **not** stop the view drawing, and the
-//	  plan's step 8 assumed it would. A rename moves the catalogue and not
-//	  the reference: the stored ref row still carries the relation type's
-//	  id, so `views.run` answered 200 with a `stale[]` advisory and the
-//	  full 17-node picture, and the frame showed a `<details>` in the
-//	  title strip reading "This view names 1 thing the game now spells
-//	  differently" over the pointer `/traverse/0/via/0` and both
-//	  spellings. What produces the refusal step 8 describes is a reference
-//	  the game no longer has, so the walk removed the `requires` relation
-//	  type as well. Then: `views.run` refused with `query_stale`, the page
-//	  drew **zero node marks**, the diagnostics panel carried both of the
-//	  server's own sentences with their pointers, and one click on "Run
-//	  anyway (best effort)" produced 17 nodes and 16 edges — one edge
-//	  fewer, the dropped one — under a `data-code="stale"` banner naming
-//	  the dropped step, whose row swatch computed to rgb(176, 168, 154),
-//	  which is `--dropped` (#b0a89a).
-//
-//	step 9 — the keyboard path, driven alone. Focusing a twin row selects
-//	  its node, and after the fix below one ArrowRight on the focused
-//	  surface moved the node 287 to 288 and sent exactly one write.
-//	  Enumerating every focusable element in the page, light DOM and every
-//	  shadow root: none is inside an `aria-hidden="true"` subtree, and the
-//	  one focusable thing in the canvas is `.surface-host`, which wraps
-//	  the hidden `<svg>` rather than living in it.
-//
-//	step 10 — **not driven, because it does not exist.** Below tablet
-//	  width the view page is meant to fall back to the twin with the
-//	  writing interactions disabled rather than shrunk (design spec §9).
-//	  At a 600 px viewport the canvas was still displayed at 536 px with
-//	  every writing interaction live, and `styles.css` has exactly one
-//	  media query that is not the dark theme — the game home's three-lane
-//	  grid. No task of this plan built the fallback and Task 18 is not the
-//	  place to invent a responsive mode, so the step is left unticked and
-//	  recorded here rather than reported as done. It is the one item of
-//	  §11 this sub-project does not deliver.
-//
-// # The four things the browser found that no harness had
-//
-//  1. **The colour key was built by four renderers and drawn by nobody.**
-//     `palette.js`'s `legendFor` returns the rows, every renderer test
-//     asserts over them, `scene.legend` carries them — and no component,
-//     page or emitter ever read the field. A `graph` with `color_by` drew
-//     eight hues with nothing anywhere on the page saying what one meant.
-//     Fixed by `scene.js`'s `legendModel` and a legend strip in
-//     `mst-view-frame`; confirmed on the seeded game, where the two rows
-//     computed to rgb(122, 53, 140) and rgb(110, 79, 233) and the nodes
-//     carried `var(--data-6)` and `var(--data-4)`, which are those two
-//     colours.
-//
-//  2. **The map renderer was never given a composition.** `map.js`
-//     promises that a node new to a saved arrangement is placed by the
-//     client, drawn hollow and counted; it reads that from
-//     `options.layout`, and `pages/view.js` passed none. Twelve quests
-//     added to a map with four pinned rows all went to the shelf, zero
-//     rings were hollow and the band could not fire. Fixed by
-//     `mapComposition`; after it, 4 solid, 13 hollow, "12 new nodes were
-//     placed automatically", pinned coordinates unmoved.
-//
-//  3. **`mst-select` had no listener.** The twin dispatches it on row
-//     focus, its header says the selection travels so a canvas can follow
-//     it, `twin_test.mjs` asserts it goes out "under the name a canvas
-//     will listen for" — and nothing listened. The whole keyboard path of
-//     §8.1 was dead: tab through the twin, move to the canvas, press an
-//     arrow key, and nothing moved and nothing was written.
-//
-//  4. **A view says nothing when the game grows under it.** Not a defect
-//     of any one line — it is what the event rules add up to. Content
-//     events are unhandled by design, and `relation_type.renamed` re-reads
-//     the *view row*, which a rename does not change; so an open picture
-//     is silently a picture of an older game, with no band and no
-//     invitation to re-run. Recorded, not fixed: changing it means
-//     deciding what a designer is told and when, which is a design
-//     decision and not a wiring one.
-//
-// All three of the wiring defects are the same defect, and it is the one
-// this sub-project keeps finding: correct in the module, asserted by a
-// harness that called the module directly, dead at the call site. The
-// three guards at the bottom of this file are the cheapest thing that
-// goes red for the fourth instance without a browser.
-
-// The fixture: one game, one designer's cookie, one agent's token, and a
-// hub, because step 6's whole subject is what one page's write does to
-// another page's stream.
 type interfaceWorld struct {
 	srv   *web.Server
 	ts    *httptest.Server
@@ -307,20 +134,11 @@ const interfaceRepairedQuery = `{
 
 // TestTheInterfaceEndToEnd is the walk, over the routes the front end
 // calls, in the order §11 names them.
-//
-// It is one test and not ten, because the steps are a sequence: step 5
-// drags what step 3 drew, step 7 asserts those coordinates did not move,
-// and step 8 breaks the query step 1 saved. Splitting it would either
-// re-seed nine times or share state between tests that claim to be
-// independent.
 func TestTheInterfaceEndToEnd(t *testing.T) {
 	t.Parallel()
 	w := newInterfaceWorld(t)
 
 	// --- Step 2: the game page's own data, by slug ---------------------
-	//
-	// The shell resolves nothing server-side, so what the browser gets at
-	// /g/{slug} is bytes, and what fills the three lanes is the summary.
 	shell := w.get(t, w.human, "/g/"+w.slug)
 	assert.Must(t, shell.Code == http.StatusOK, "GET /g/%s = %d, want 200", w.slug, shell.Code)
 	assert.Must(t, strings.Contains(shell.Body.String(), "<!doctype html") || strings.Contains(shell.Body.String(), "<!DOCTYPE html"), "GET /g/%s did not answer with a shell:\n%s", w.slug, first(shell.Body.String(), 200))
@@ -367,10 +185,6 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	assert.Must(t, len(docs.Items) == 1 && docs.Items[0].Path == "lore/westfall.md", "the prose lane holds %+v", docs.Items)
 
 	// --- Step 3: the view, its parameter, and the two durations --------
-	//
-	// The page reads the row first (it needs the renderer and its
-	// parameters before it can draw), then runs it with the binding the
-	// URL carried.
 	var row struct {
 		Key            string          `json:"key"`
 		Renderer       string          `json:"renderer"`
@@ -407,9 +221,6 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 		len(zones), unset)
 
 	// --- Steps 5 and 6: the write, and what a second page sees ---------
-	//
-	// One subscriber, opened *before* the write, because the whole claim
-	// is about what the stream delivers to a page that was already there.
 	stream, closeStream := w.subscribe(t)
 	defer closeStream()
 
@@ -509,12 +320,6 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	}
 
 	// --- Step 8: the vocabulary moves, and the view says so ------------
-	//
-	// Two moves, because they are two different failures and the plan's
-	// step 8 assumed the first was the second. A *rename* leaves the
-	// stored reference resolvable — the ref row carries the id — so the
-	// view runs and reports; a *removal* leaves nothing to resolve, and
-	// that is what refuses.
 	renameVersion := int32(w.relationTypeVersion(t, "available_to"))
 	if _, err := web.MCPRelationTypesRename(context.Background(), w.deps, w.agent, w.game,
 		web.RelationTypesRenameInput{From: "available_to", To: "usable_by", ExpectedVersion: &renameVersion}); err != nil {
@@ -599,17 +404,6 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 }
 
 // --- The three call sites a browser had to find ------------------------
-//
-// These are source-shape guards and they are the weakest kind of check in
-// this repository. They are here because the property each one holds has
-// no runtime signature any harness in this package can reach: the value
-// travels from a pure function, through one line of `pages/view.js`, into
-// a Lit template that only a browser renders. Every one of the three
-// defects they close was live for four or more tasks with every check
-// green, and the alternative to a weak guard is no guard.
-//
-// Each reads the shipped file off disk and each fails on an empty read,
-// so none can pass vacuously.
 
 func shippedAsset(t *testing.T, name string) string {
 	t.Helper()

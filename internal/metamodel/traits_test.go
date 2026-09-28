@@ -80,14 +80,6 @@ func TestTraitsArea(t *testing.T) {
 	// TestTraitsArea's "a trait outside the vocabulary is invalid schema and
 	// not internal error" case is review finding H3 asked of the second
 	// constrained column on relation_types.
-	//
-	// Without the Go-side check the value travels to Postgres, comes back as
-	// an untyped check-constraint violation (SQLSTATE 23514) that errors.Is
-	// matches nothing, and reaches an agent as internal_error: a server
-	// fault, with no path and no list of what would have been accepted, for
-	// something the agent typed. The assertion that the message names **all
-	// seven** traits is what makes the refusal actionable rather than merely
-	// correct.
 	t.Run("a trait outside the vocabulary is invalid schema and not internal error", func(t *testing.T) {
 		_, svc, project := traitsFixture(t)
 
@@ -202,11 +194,6 @@ func TestTraitsArea(t *testing.T) {
 
 	// TestTraitsArea's "a redundant acyclic is accepted and read back
 	// unchanged" case.
-	//
-	// prerequisite_of implies acyclic, so declaring both says nothing new —
-	// and stripping the redundant word would make what a caller reads back
-	// differ from what it sent, which is the round-trip rule
-	// relation_types.upsert's own description states.
 	t.Run("a redundant acyclic is accepted and read back unchanged", func(t *testing.T) {
 		_, svc, project := traitsFixture(t)
 
@@ -220,11 +207,6 @@ func TestTraitsArea(t *testing.T) {
 	})
 
 	// TestTraitsArea's "traits survive a rename of their type" case.
-	//
-	// Traits hang off the relation type's row and a rename moves the key on
-	// that same row, so this ought to hold — and asserting it is cheap while
-	// the alternative is discovering it from an analysis that silently
-	// stopped reading a gate.
 	t.Run("traits survive a rename of their type", func(t *testing.T) {
 		_, svc, project := traitsFixture(t)
 		ctx := context.Background()
@@ -252,8 +234,6 @@ func TestTraitsArea(t *testing.T) {
 	// *undeclared* — this type has never been given an opinion — and
 	// `{annotation}` is *deliberately inert*. An empty array would be a third
 	// spelling of one of them, and the constraint refuses it outright.
-	//
-	// This is the only test that separates them on the write path.
 	t.Run("clearing traits makes a type undeclared and not inert", func(t *testing.T) {
 		pool, svc, project := traitsFixture(t)
 		ctx := context.Background()
@@ -293,18 +273,6 @@ func TestTraitsArea(t *testing.T) {
 	// constraint that has grown an eighth word no Go reader knows about, and
 	// passes against a Go slice that has grown one the column will refuse at
 	// write time with an untyped 23514.
-	//
-	//   - Go → database, behaviourally: every word in metamodel.AnalysisTraits
-	//     is written through the service and lands. A word Go offers that the
-	//     column refuses fails here.
-	//   - database → Go, textually: every literal in
-	//     relation_types_traits_vocab's own definition, read back from
-	//     pg_get_constraintdef, is in metamodel.AnalysisTraits. A word the
-	//     column admits that no Go reader knows about fails here — and it is
-	//     the direction that matters most, because the six places a trait has
-	//     to reach (this slice, the coherence rules, the resolver, the tool
-	//     description, the analysis package's alias and its semantics_source)
-	//     all hang off the Go list.
 	t.Run("the trait vocabulary is one set in go and in the database", func(t *testing.T) {
 		pool, svc, project := traitsFixture(t)
 
@@ -345,13 +313,6 @@ func TestTraitsArea(t *testing.T) {
 	// is in the table" case is the other bidirectional guard: the coherence
 	// check and AnalysisTraitConflicts are one rule set, not two that agree
 	// today.
-	//
-	// Forwards, every row of the table is actually refused. Backwards, every
-	// *pair* of traits the check refuses is named by some row of the table —
-	// checked by trying all of them, which is 21 pairs and therefore cheap.
-	// A rule hard-coded into the check but missing from the table would ship
-	// a refusal no generated description mentions, which is precisely a
-	// mechanism nothing reads.
 	t.Run("every refused combination is refused and every refusal is in the table", func(t *testing.T) {
 		_, svc, project := traitsFixture(t)
 		assert.Must(t, len(metamodel.AnalysisTraitConflicts) != 0, "the conflict table is empty, so every assertion below is vacuous")

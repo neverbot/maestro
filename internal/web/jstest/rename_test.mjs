@@ -1,26 +1,5 @@
 // The harness for the product's first write by a person: renaming an
 // entity, and what the screen does when somebody else wrote first.
-//
-// What this layer covers that no Go test can. The server's part is a
-// compare-and-set and is already tested; what is not is the **page's**
-// answer to a refusal, and the whole design turns on two properties that
-// are properties of the client:
-//
-//   - the edit is never lost — a refusal leaves what was typed where it
-//     was typed, because the person's sentence is the only thing in the
-//     exchange that exists nowhere else;
-//   - the edit never silently wins — nothing re-reads a version and
-//     writes again on its own, which is last-writer-wins with extra
-//     steps and nobody told.
-//
-// And one defect that only this layer could have caught: the batch route
-// answers **200 with a `failed` list** rather than 409, so the first
-// version of this page read a refused write as a success and showed the
-// typed name over a row the server had kept. A page lying about a write
-// is worse than a page refusing one.
-//
-// Run directly: `node internal/web/jstest/rename_test.mjs`.
-// internal/web/static_rename_test.go shells out to it too.
 
 import path from "node:path";
 import { register } from "node:module";

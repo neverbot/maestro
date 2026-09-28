@@ -1,7 +1,4 @@
 // Package testutil provides throwaway databases for integration tests.
-//
-// Every pool lives in its own freshly created database and is dropped on
-// cleanup. No test ever touches a live Maestro database.
 package testutil
 
 import (
@@ -36,17 +33,6 @@ var (
 const staleAfter = time.Hour
 
 // sweepStale drops the test databases that earlier runs abandoned.
-//
-// Every database here is created by newDatabase and dropped by the
-// cleanup it registers — but a run that is interrupted never reaches its
-// cleanup, and each leftover keeps a migrated schema on disk. They are
-// identified by the millisecond stamp in their own name, so this cannot
-// mistake a live one for a dead one and does not need to ask Postgres
-// when a database was made (it does not record it).
-//
-// It runs once per process, before the first test database is created,
-// and never fails a test: a leftover is untidy and a refused DROP is
-// not a reason to stop.
 var sweepOnce sync.Once
 
 func sweepStale(adminDB *pgxpool.Pool) {
@@ -127,17 +113,6 @@ func admin(t *testing.T, adminURL string) *pgxpool.Pool {
 
 // templateFor is the migrated database every other test database in this
 // process is copied from.
-//
-// Built once, from the same `db.Migrate` every caller would have run, so
-// the schema a test meets is the schema the product creates and not a
-// second description of it. A failure to build it is not fatal: the
-// caller falls back to creating an empty database and migrating it
-// itself, which is what every test did before this existed.
-//
-// The template is dropped when the process ends — `TestMain` is not
-// available to a library, so this registers the drop on the test that
-// happened to build it and relies on the sweep in sweepStale for the
-// case where that test is interrupted.
 var (
 	templateOnce sync.Once
 	templateName string
@@ -248,7 +223,6 @@ func newDatabase(t *testing.T, migrated bool) (testURL, name string) {
 	}
 
 	// Register the drop immediately, before anything that can fail below.
-	// A failing migration must not leak the database it was about to test.
 	t.Cleanup(func() {
 		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer dropCancel()

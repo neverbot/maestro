@@ -1,24 +1,5 @@
 // A game's own settings: what it is called, the address every URL into
 // it carries, and the tokens its agents hold.
-//
-// **Two tabs, because the two halves answer to two different gates.**
-// The name and the address are the owner's. The tokens are any member's
-// to list and revoke and an editor's to mint — `api_tokens.go` refuses a
-// viewer deliberately, because a token carries the project binding and a
-// viewer minting one would be handing themselves a credential wider than
-// their own role. One page with one gate would have to pick a side, and
-// either side is wrong.
-//
-// **This screen exists because an address could never be changed.** It
-// is derived from the name when a game is created, which is right for
-// the ninety-nine percent who never think about it and useless for the
-// one who renamed their game six months in. `internal/projects` had
-// `Create` and nothing else; now it has `Update`, and this is the only
-// place in the product that calls it.
-//
-// Owner-only, and the refusal is a state rather than a disabled form: a
-// reader who may not change these is told so, instead of being shown
-// two inputs and a button the server will refuse.
 
 import {
   STATE_REFUSED,
@@ -154,17 +135,6 @@ export async function settingsPage(opened) {
 
 
 // --- The People tab ---------------------------------------------------
-//
-// **A game could be created from the web and never shared from it.**
-// Every membership route has existed since Task 8 and nothing in the
-// interface called one: the instance's invitations make an account and
-// grant no game, so a game had exactly one person in it, whoever made
-// it. This tab is the other half.
-
-// The three roles, in the words a person reads. `owner` is the key on
-// the wire — the API, the database's CHECK constraint and the skill
-// bundle all say it — and "manager" is what it is called on a screen.
-// The key is never printed.
 export const ROLE_WORDS = { owner: "manager", editor: "editor", viewer: "viewer" };
 export const ROLE_MANAGER = "owner";
 
@@ -238,11 +208,6 @@ export function memberRow(doc, member, onEdit) {
 
 // editMember is the one form that changes what somebody may do here,
 // and the one place they are removed from the game.
-//
-// **Not your own membership.** A manager demoting themselves walks out
-// of the door they are standing in: the server would allow it while
-// another manager exists, and the reader would lose the screen they are
-// on with no way back. Another manager does it.
 export function editMember(doc, member, actions) {
   const form = doc.createElement("form");
   form.setAttribute("id", "edit-member");
@@ -596,13 +561,6 @@ export const REVOKE_CONFIRM = "Revoke this token?";
 export const NOT_YOURS = "theirs";
 
 // A row of the token list.
-//
-// **It is not the shared catalogue row**, and that is deliberate: every
-// catalogue in this product is a fixed six-cell grid marked up as a
-// table, and this list carries a control. A row with a button in a cell
-// is a table row a screen reader reads as data; a list of tokens with an
-// action each is a list. What it shares with a catalogue is the
-// vocabulary, not the markup.
 export function tokenRow(doc, token, onRevoke, mayRevoke) {
   const item = doc.createElement("li");
   item.className = "token";
@@ -808,12 +766,6 @@ export async function agentsTab(opened, role) {
 
 // showIssuedToken is the one place a clear token is ever rendered, and
 // it renders it **in a dialog the reader closes**.
-//
-// It was a panel on the page, and a panel is the wrong shape for this
-// twice over: a credential nobody can dismiss stays on screen while its
-// owner walks away from the desk, and it pushed the list of tokens half
-// a window down, so the screen said two things at once. Closing the
-// dialog empties it, so the token is not left in a hidden node either.
 export function showIssuedToken(opened, token) {
   const doc = opened.document;
   const origin = opened.origin || (globalThis.window && globalThis.window.location

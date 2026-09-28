@@ -23,12 +23,6 @@ func TestBounds(t *testing.T) {
 
 	// TestEveryBoundIsExported reads bounds.go's own AST and fails on an
 	// unexported const in it.
-	//
-	// It is the bidirectional guard for the rule that file's comment states,
-	// which is correction 24's: **a bound a caller cannot read is a bound a
-	// caller trips over.** Stating the rule in a comment leaves it true for
-	// the constants that are there today and silent about the eleventh one a
-	// later task adds; this is what makes it true for that one.
 	t.Run("every bound is exported", func(t *testing.T) {
 		fset := token.NewFileSet()
 		parsed, err := parser.ParseFile(fset, "bounds.go", nil, parser.ParseComments)
@@ -63,14 +57,6 @@ func TestBounds(t *testing.T) {
 	// TestTheCapsRefuseRatherThanClamp is the behavioural half of the rule
 	// bounds.go states in prose, asserted on the one caller-settable bound
 	// this task ships.
-	//
-	// The distinction is deliberate and is not new: **a declared limit is
-	// refused, a page limit is clamped.** metamodel.MaxBulkItems refuses,
-	// paging.Size clamps, and this package sits on the refusing side of that
-	// line for every bound a caller can state — because an answer computed
-	// under a bound the caller did not ask for is indistinguishable from a
-	// complete one, and this engine's whole value is that a designer can
-	// trust what it says.
 	t.Run("the caps refuse rather than clamp", func(t *testing.T) {
 		g := a.game(t)
 		g.declareRelationType(t, "requires", "", []string{"prerequisite_of"})
@@ -112,16 +98,6 @@ func TestBounds(t *testing.T) {
 	// TestAnAnalysisTransactionIsActuallyReadOnly is what turns "this
 	// package only ever emits SELECT" from a property of today's code into a
 	// guarantee.
-	//
-	// It asserts the *refusal* rather than the settings, and through runInTx
-	// itself with a statement of its own, because the question is not
-	// whether two lines executed but whether a write that reached this path
-	// would be stopped.
-	//
-	// It also pins the measurement this package inherits rather than
-	// re-derives: `SET LOCAL default_transaction_read_only` does not make
-	// its own transaction read-only, which is why runInTx sets
-	// `transaction_read_only` on a transaction already begun read-only.
 	t.Run("an analysis transaction is actually read only", func(t *testing.T) {
 		g := a.game(t)
 
@@ -156,12 +132,6 @@ func TestBounds(t *testing.T) {
 
 	// TestBoundsArea's "the budget postgres holds is the one this package
 	// computed" case.
-	//
-	// This is not decoration. On the default path the knob is zero, `0ms`
-	// means *no timeout at all* in Postgres, and a run that quietly lost its
-	// bound looks exactly like one that kept it — so the only honest
-	// assertion is over the value the database reported back, read through
-	// runInTx's own path.
 	t.Run("the budget postgres holds is the one this package computed", func(t *testing.T) {
 		g := a.game(t)
 		var timeout, readOnly string
@@ -211,12 +181,6 @@ func TestBounds(t *testing.T) {
 
 	// TestAnUnknownAnalysisArgumentIsRefusedRatherThanIgnored sends the typo
 	// an agent will actually make.
-	//
-	// Silently ignoring an unknown member would answer "your entire game is
-	// unreachable" to a caller who did supply seeds — a wrong answer in the
-	// right shape, which is the worst thing this engine can produce. It is
-	// also O5's reservation: refusing what is unknown now is what lets a
-	// `source` argument be added later as an additive change.
 	t.Run("an unknown analysis argument is refused rather than ignored", func(t *testing.T) {
 		type seedArgs struct {
 			SeedEntities []string `json:"seed_entities"`

@@ -297,22 +297,6 @@ func TestDiffArea(t *testing.T) {
 	// is stored, is readable through one call, and is invisible through the
 	// one a caller actually uses to ask "what changed between these two
 	// versions".
-	//
-	// A delete appends a tombstone version carrying the document exactly as it
-	// stood (Delete's own comment says so, and TestDeleteArea's "a tombstones
-	// body is still readable as a version" case pins it). So the body of the
-	// last live version and the body of the tombstone are identical, and a
-	// diff between them is empty — byte for byte the same answer as diffing a
-	// version against itself. Nothing on DiffResult told the two apart, and
-	// the reading view's own describeComparison turned that empty diff into
-	// the sentence "These two versions are identical", which is a false
-	// statement about a comparison that spans a deletion.
-	//
-	// FromDeleted and ToDeleted are the two bools that make the difference
-	// visible, and they are separate fields rather than one "spans a delete"
-	// flag because a comparison can run in either direction: reverting a
-	// deletion and deleting are different events and a client renders them
-	// differently.
 	t.Run("a diff across a tombstone says which side is deleted", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()

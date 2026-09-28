@@ -24,11 +24,6 @@ import (
 // bundle: reference/tools.md is generated and committed, and this test
 // regenerates it in memory and diffs it against what is on disk. A tool
 // added, renamed or removed without running the generator fails here.
-//
-// It is **not** enough on its own, which is why the test below it
-// exists. This one compares the file against the *generator*, so a
-// generator that skipped a whole domain produces a file that agrees with
-// it forever.
 func TestToolReferenceIsCurrent(t *testing.T) {
 	t.Parallel()
 	want := web.NewToolReferenceServer().ToolReference()
@@ -43,20 +38,6 @@ func TestToolReferenceIsCurrent(t *testing.T) {
 // TestTheToolReferenceNamesEveryRegisteredTool compares the committed
 // file against the **server**, in both directions: a registered tool
 // missing from the file, and a name in the file no tool answers to.
-//
-// It builds its own server rather than calling
-// web.NewToolReferenceServer, deliberately. That constructor is what the
-// generator uses; a test driving it would be asking the generator
-// whether the generator saw everything. The service list here is
-// assembled from the domains this server has, and the fixture below
-// refuses to run over a suspiciously small table, so a server that
-// registered almost nothing cannot pass this by having little to
-// compare.
-//
-// **Mutation, run and recorded in this task's plan corrections:** make
-// ToolReference skip the docs group. TestToolReferenceIsCurrent stays
-// green the moment the file is regenerated from the broken generator;
-// this test goes red immediately and names all fourteen docs tools.
 func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 	t.Parallel()
 	srv := web.NewServer(web.Options{
@@ -265,34 +246,14 @@ const conflictModeSpelling = "on_conflict"
 
 // conflictModeMention matches the argument as a whole token, with `_`
 // counted as part of a word.
-//
-// **A plain substring search is wrong here and was wrong on its first
-// run**, which is why this is a pattern: `version_conflict` — the code
-// both batch upserts already answer a stale write with, and a word in
-// both of their descriptions today — ends in `on_conflict`. A tripwire
-// built on strings.Contains fired on the shipped surface, reported that
-// a conflict mode had landed, and would have had this page rewritten
-// around an argument that does not exist. It is the `request`/`quest`
-// mistake in a second place, and the fixture below pins it.
 var conflictModeMention = regexp.MustCompile(`(^|[^A-Za-z0-9_])` + conflictModeSpelling + `([^A-Za-z0-9_]|$)`)
 
 // batchUpsertsTaughtByTheSeedingRecipe are the tools whose read-then-write
 // loop `recipes/seeding-a-game.md` teaches.
-//
-// Both of them, not one. The recipe's re-seed section ends with "the same
-// three steps work for edges", so a conflict mode arriving on the entity
-// tool alone would still make half that page bad advice, and a tripwire
-// watching only the tool the plan happened to name is the rule not
-// carried one step along.
 var batchUpsertsTaughtByTheSeedingRecipe = []string{"entities.upsert", "relations.upsert"}
 
 // conflictModeOnTheBatchUpserts reports every batch upsert whose
 // description has grown a conflict mode.
-//
-// It is a function taking the table rather than a test body reading the
-// server, so its own precision can be asserted against a fixture in the
-// same test — a scanner that looked at nothing would otherwise report
-// nothing and read exactly like a surface that has not changed.
 func conflictModeOnTheBatchUpserts(descriptions map[string]string) []string {
 	var grown []string
 	for _, name := range batchUpsertsTaughtByTheSeedingRecipe {
@@ -314,23 +275,6 @@ func conflictModeOnTheBatchUpserts(descriptions map[string]string) []string {
 
 // TestTheSeedingRecipeIsStillNeeded fails when a batch upsert grows an
 // on_conflict argument.
-//
-// **This is not a drift guard. It is its mirror image.** The four guards
-// around it catch a bundle that has become *false*: a page restating a
-// contract, a vocabulary that lost a word, an example that stopped
-// running. This one catches a bundle that has become *bad advice*.
-//
-// `recipes/seeding-a-game.md` teaches a three-call re-seed — list the
-// type, read each row's version, send the payload back with each version
-// claimed — and that loop is correct today only because there is no
-// conflict mode on the surface. The day one lands, that page starts
-// teaching three calls where one would do, while remaining true in every
-// sentence and while every other test in this package stays green.
-//
-// When this goes red: rewrite the recipe's "Re-running a seed" section
-// around the new argument, delete the loop and its "what this recipe
-// will look like when the surface changes" section, and delete this
-// test.
 func TestTheSeedingRecipeIsStillNeeded(t *testing.T) {
 	t.Parallel()
 	// The precision fixture first. Without it, a matcher that read the
@@ -380,16 +324,6 @@ func TestRouteReferenceIsCurrent(t *testing.T) {
 // against the **server**, in both directions, for the reason its tool
 // twin does: a file regenerated from a broken generator matches that
 // generator forever.
-//
-// What it closes: an agent given the bundle and no MCP client could not
-// start. It spent about thirty-five probe requests finding the surface,
-// guessed `relation-types` with a hyphen against every spelling in the
-// bundle, took six guesses to turn `games.counts` into `/summary`, and
-// never derived `routes.check` at all — fifteen path shapes, all 404 —
-// so a whole section of the analysis reference was unreachable for it.
-//
-// Mutation: make routeReference skip a group and this names every route
-// in it.
 func TestTheRouteReferenceNamesEveryAPIRoute(t *testing.T) {
 	t.Parallel()
 	srv := web.NewServer(web.Options{

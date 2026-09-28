@@ -83,12 +83,6 @@ func TestListArea(t *testing.T) {
 	// pins the one cost of deciding a cursor by "the page came back full": a
 	// listing whose row count is an exact multiple of the limit spends one
 	// extra call finding out it is over.
-	//
-	// The alternative — reading limit+1 rows and dropping the last — buys
-	// nothing here and costs a row on every page of every listing, so the
-	// empty page stands. It is pinned rather than merely tolerated because a
-	// caller looping on NextCursor must know an empty page is reachable and
-	// is not an error.
 	t.Run("a full final page carries a cursor to an empty one", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -111,15 +105,6 @@ func TestListArea(t *testing.T) {
 	// TestListArea's "a page is not shifted by a concurrent write" case pins
 	// what a keyset cursor buys over an offset, which is the whole reason it
 	// is a keyset.
-	//
-	// Between the two pages this test deletes a row of the first page and
-	// inserts one before the cursor's position. An OFFSET would have slid the
-	// window by the net change and skipped or repeated a row; a keyset asks
-	// for "the rows after this name and id", so the second page is exactly
-	// the rows it would have been. The inserted row sorts before the position
-	// and is therefore never seen — correct, and stated in ListEntities'
-	// doc comment, because a caller paging a game that is being edited under
-	// it needs to know a page is a position and not a snapshot.
 	t.Run("a page is not shifted by a concurrent write", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -181,11 +166,6 @@ func TestListArea(t *testing.T) {
 
 	// TestListArea's "a malformed cursor is invalid input" case pins the code,
 	// the path and the message of every way a cursor can be unreadable.
-	//
-	// It is invalid_input and not a bare error because the cursor is the
-	// caller's own argument and the recovery is the caller's: page from a
-	// cursor a previous call handed it, or omit it. Left untyped this reaches
-	// an agent as internal_error over a value the agent itself supplied.
 	t.Run("a malformed cursor is invalid input", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -221,13 +201,6 @@ func TestListArea(t *testing.T) {
 	// TestListArea's "a cursor issued for another listing is refused" case
 	// pins the one thing a keyset cursor cannot do on its own: tell a caller
 	// it has been carried across to a different filter.
-	//
-	// A cursor holds a position in a sort order, and every filter of this
-	// listing shares that order, so a cursor from the quest listing pages
-	// perfectly well into the zone listing and returns zones — a silently
-	// wrong answer to a call nobody meant to make. The cursor therefore
-	// carries a fingerprint of the filter it was issued for and a mismatch
-	// is refused at path "cursor".
 	t.Run("a cursor issued for another listing is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -274,15 +247,6 @@ func TestListArea(t *testing.T) {
 
 	// TestListArea's "a forged cursor cannot reach another games rows" case
 	// pins what stops a cursor being an escape from a game.
-	//
-	// A cursor is an unsigned, unencrypted position, so a caller can write
-	// one naming any name and any id it likes, including a row of another
-	// game. It buys nothing: the cursor only ever becomes a `>` comparison
-	// inside a statement already filtered by this game's project id, so the
-	// worst a forged position does is skip the caller's own rows. This test
-	// hands one listing a cursor built from another game's row, under this
-	// game's own fingerprint, and pins that the answer is still this game's
-	// rows.
 	t.Run("a forged cursor cannot reach another games rows", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -642,10 +606,6 @@ func TestListArea(t *testing.T) {
 	// second half of the claim EntityFilter makes: neither of the two filters
 	// that apply to both shapes of listing is dropped on the traversal path.
 	// The entity type half is the test above; this is the flag.
-	//
-	// The type is evolved after the neighbour is written, which is what
-	// makes the row invalid without touching it — types.go's re-validation
-	// sweep does the flagging.
 	t.Run("a traversal honours the invalid filter", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -801,12 +761,6 @@ func TestListArea(t *testing.T) {
 	// TestListArea's "an edge cannot outlive its relation type" case pins the
 	// answer to "what does a traversal do with an edge whose type was
 	// deleted": there is no such edge to have an opinion about.
-	//
-	// relations.relation_type_id is ON DELETE RESTRICT, so a type with edges
-	// cannot be dropped, and RemoveRelationType(cascade) deletes the edges
-	// first — so the two ways a relation type goes away either refuse or take
-	// the edges with them. This traversal therefore never sees a dangling
-	// edge, and nothing in the query filters for one.
 	t.Run("an edge cannot outlive its relation type", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -850,9 +804,6 @@ func TestListArea(t *testing.T) {
 	// the whole story and a game with more edges than the cap could not be
 	// read past it, with nothing in the answer to say rows had been left
 	// behind.
-	//
-	// The order is (created_at, id), so the pages come back in creation
-	// order and every edge is seen exactly once.
 	t.Run("a relation listing pages with a cursor", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -948,25 +899,6 @@ func TestListArea(t *testing.T) {
 
 	// TestListArea's "a cursor from another game is refused" case pins the
 	// half of the fingerprint's job that the filter alone cannot do.
-	//
-	// Two games seeded from the same keys produce two listings with the same
-	// resolved filter parts in everything but the project — the entity type
-	// ids differ per game, but an *unfiltered* listing has no type part at
-	// all, and a relation listing sorts on created_at, which is not even
-	// game-specific. So a cursor issued to game A digested nothing that
-	// named A, and handing it to game B's listing was accepted: B answered
-	// from A's position, returning the tail of B's rows and silently hiding
-	// the head. On relations, where games are seeded in sequence and the
-	// sort key is a timestamp, B's cursor fed to A skipped every one of A's
-	// edges — an empty page with no cursor, which an agent reads as "this
-	// game has no edges".
-	//
-	// No row of another game was ever returned; the listings' project filters
-	// see to that and TestListArea's "a forged cursor cannot reach another
-	// games rows" case pins it. What crossed was the *position*, which makes
-	// this a wrong answer rather than a leak — and a wrong answer with nothing
-	// in it that says so is the defect this whole read surface is most exposed
-	// to. The project id is therefore the first part of every fingerprint.
 	t.Run("a cursor from another game is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1036,23 +968,6 @@ func TestListArea(t *testing.T) {
 	// TestListArea's "paging is stable when every row shares one name" case
 	// pins the half of the keyset that nothing else in this suite touches: the
 	// id tiebreak in ORDER BY.
-	//
-	// The SQL comment argues at length that a keyset whose comparison
-	// disagrees with its own sort skips or repeats rows and says nothing
-	// about it, and then defends only the collation half of that agreement.
-	// The other half was pinned by no test at all: dropping `id` from
-	// `ORDER BY name, id` on either listing left the whole suite green,
-	// because every other test seeds distinct names. With ten rows sharing
-	// one name and a page of three, the unpinned version returned five
-	// distinct rows out of ten and three of them twice — Postgres is free to
-	// order the tied rows differently on each of the four statements, so the
-	// `(name, id) > (name, id)` comparison lands somewhere unrelated to
-	// where the previous page stopped.
-	//
-	// Duplicate names are ordinary in game content — "Kobold", "Bandit",
-	// "Wolf" across a dozen zones — so this is the common case rather than
-	// an adversarial one, and it is pinned for the traversal too, which has
-	// its own copy of the clause.
 	t.Run("paging is stable when every row shares one name", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1111,15 +1026,6 @@ func TestListArea(t *testing.T) {
 	// sharpest edge of "a page is a position, not a snapshot", which
 	// EntityPage now states to callers and which nothing pinned while it was
 	// documented on an unexported type.
-	//
-	// A row not yet read, renamed between two pages to sort before the
-	// cursor's position, is never returned by that listing again, however
-	// many pages are still to come — it has moved behind the reader. That is
-	// inherent to a keyset over a mutable sort key and it is not an error,
-	// so the only defence a caller has is knowing about it: an agent walking
-	// a game it is also editing can finish the walk having never seen a row
-	// that existed throughout. The recovery is to re-read from no cursor,
-	// which the second half of this test does.
 	t.Run("a renamed row can move behind the reader", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1158,19 +1064,6 @@ func TestListArea(t *testing.T) {
 
 	// TestListArea's "list filters by name prefix" case pins the one filter a
 	// designer can compose without a query language.
-	//
-	// It is what makes a type with a thousand entities readable: the
-	// listing's order is by name, so a prefix narrows a contiguous stretch
-	// of it and pages exactly as an unfiltered listing does. Before it, a
-	// catalogue of a thousand rows had no sort, no filter and a "show 50
-	// more" button nineteen clicks from the end.
-	//
-	// The case-insensitivity is asserted rather than assumed: a designer
-	// looking for the quests beginning "the" is not asking a question about
-	// capitalisation.
-	//
-	// Mutation: drop the `prefix` clause from ListEntitiesPage, or the
-	// `lower()` on either side of it, and this fails.
 	t.Run("list filters by name prefix", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1222,15 +1115,6 @@ func TestListArea(t *testing.T) {
 
 	// TestListArea's "a cursor issued for one prefix is refused under another"
 	// case pins that the prefix is part of what a cursor belongs to.
-	//
-	// A cursor is a position in one listing. Carried into a differently
-	// filtered one it would skip or repeat rows with nothing anywhere saying
-	// so, which is the failure the fingerprint exists to prevent — and a
-	// filter added to the query without being added to the fingerprint is
-	// exactly how that hole opens.
-	//
-	// Mutation: remove `f.Prefix` from the fingerprint in ListEntities and
-	// this fails.
 	t.Run("a cursor issued for one prefix is refused under another", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1292,9 +1176,6 @@ func TestListArea(t *testing.T) {
 	// walked*; a cursor carrying the name while the statement compares keys
 	// pages from a position that is not in that order at all, and the answer
 	// is a stretch of rows nobody asked for with nothing red anywhere.
-	//
-	// Mutation: make pageOf write last.Name whatever the order is, and the
-	// key and recency arms here come back with repeated or missing rows.
 	t.Run("every order pages through every row exactly once", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1411,12 +1292,6 @@ func TestListArea(t *testing.T) {
 	// shares one name" case ; the recency order needs its own because a tie
 	// there is not contrived — a bulk write stamps a whole page of rows with
 	// one `updated_at`, which is how content actually arrives in this product.
-	//
-	// The tie is made here rather than hoped for: ten separate upserts land
-	// ten distinct microsecond timestamps, so the rows are flattened onto
-	// one instant before the walk. Drop `id` from either the ORDER BY or
-	// the comparison of the two recency statements and this returns six
-	// distinct rows of ten with three of them twice.
 	t.Run("the recency order pages through rows written together", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1697,15 +1572,6 @@ func seedZoneAnchor(t *testing.T, svc *metamodel.Service, project uuid.UUID) {
 }
 
 // --- Order -------------------------------------------------------------
-//
-// The catalogue's column headers are what these exist for: a thousand
-// rows in one order and no way to ask for another was half of why that
-// screen could not be read. The properties worth holding are not "the
-// rows came back sorted" — Postgres does that — but the two a second
-// order breaks: a cursor that carries the position of the order it was
-// issued in, and a cursor that cannot walk into a different one.
-
-// namesOf is keysOf's sibling for the orders whose sort key is the name.
 func namesOf(page metamodel.EntityPage) []string {
 	names := make([]string, 0, len(page.Entities))
 	for _, e := range page.Entities {
@@ -1715,9 +1581,3 @@ func namesOf(page metamodel.EntityPage) []string {
 }
 
 // --- Order by a declared field ----------------------------------------
-//
-// The half of the catalogue's complaint that needed the schema: a column
-// holding `level` sorted as text puts 10 before 9, which is a wrong
-// answer that looks like a right one. The SQL orders by `fields -> key`
-// — jsonb's own comparison — so a number sorts as a number without the
-// statement being told which fields are numbers.

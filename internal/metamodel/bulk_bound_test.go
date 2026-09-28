@@ -18,19 +18,6 @@ import (
 // before Postgres sees it (the search query at 4 KiB, a page limit
 // clamped to its cap, the request body at 4 MiB); this was the one that
 // was not.
-//
-// **Both kinds and both modes**, because the check is in the shared
-// driver and a check in the shared driver is exactly the kind of thing that
-// gets moved to one call site later. internal/markdown's documents are the
-// third kind and are pinned in their own package, by TestBulkArea's "a
-// document batch is bounded by the same ceiling" case, because they reach
-// the same driver from outside this one.
-//
-// The batches here are of *invalid* items — no entity type is declared —
-// so a build without the bound fails them at the item level rather than
-// at the argument, and the assertion on path `items` is what tells the
-// two apart. That also means nothing in the database is touched, which
-// is the claim the row count at the end makes.
 func TestABatchIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
@@ -78,11 +65,6 @@ func TestABatchIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 	// And nothing an over-large batch named exists. The refusal happens
 	// before any transaction opens, so partial mode cannot have landed a
 	// prefix of it.
-	//
-	// It is a full paged walk because the game now holds more quests than
-	// one page can carry, which is itself the reason MaxBulkItems and
-	// MaxEntityPage are the same number: a batch at the ceiling writes
-	// exactly one page's worth.
 	filter := metamodel.EntityFilter{TypeKey: "quest", Limit: metamodel.MaxEntityPage}
 	total := 0
 	for {

@@ -13,21 +13,6 @@ import (
 
 // Traits and TraitConflicts are the metamodel's, aliased rather than
 // redeclared.
-//
-// **The dependency runs metamodel → nothing and analysis → metamodel,
-// and the vocabulary sits at the bottom of it.** The obvious placement
-// is here, in the package that reads traits — but this package depends
-// on internal/metamodel for FieldError, Actor and every reused sentinel,
-// so a vocabulary here would need the reverse edge and there is no
-// acyclic way to have both. The vocabulary therefore lives beside the
-// column it constrains and beside the upsert that writes it
-// (relation_types.upsert is where a trait combination arrives), and this
-// package aliases it. Two copies would be two lists that drift, which is
-// exactly what metamodel.SemanticRoles' own comment says about the CHECK
-// beside it.
-//
-// This inversion is stated in both files because it is the sort of thing
-// a later reader reverses "for tidiness". Reversing it does not compile.
 var (
 	Traits         = metamodel.AnalysisTraits
 	TraitConflicts = metamodel.AnalysisTraitConflicts
@@ -35,12 +20,6 @@ var (
 
 // Source says where one relation type's traits came from, and every
 // result embeds it per type.
-//
-// It exists so a designer can see that the engine treated `available_to`
-// as a gate because of a role they set months ago, rather than
-// discovering it from a finding they cannot explain. A mechanism nothing
-// reads is a lie; this is the mechanism that makes the resolver's three
-// sources readable.
 type Source string
 
 const (
@@ -68,19 +47,6 @@ var Sources = []Source{SourceDeclared, SourceDerivedFromRole, SourceCallerSuppli
 // an analysis reads it as, and it is a translation rather than a guess:
 // every entry restates in behavioural terms something the game already
 // said in descriptive ones.
-//
-// It is checked **in both directions** against metamodel.SemanticRoles —
-// TestEverySemanticRoleHasADerivedTraitSet and
-// TestEveryDerivedTraitSetNamesARealRole — so a seventh role added over
-// there fails the first and a typo'd trait in here fails the second.
-// That bidirectional guard is the pattern the views sub-project ranked
-// fifth among the things that actually caught defects, and this is the
-// cheapest place in the whole engine to apply it.
-//
-// `reward` maps to {annotation} and not to a gate, deliberately: a
-// reward edge says what a player gets, which is a fact about content and
-// not a constraint on order, and reading it as a gate would make every
-// rewarding quest a prerequisite for its own reward.
 var derivedTraits = map[string][]string{
 	"prerequisite": {"prerequisite_of"},
 	"unlock":       {"unlocks"},
@@ -100,11 +66,6 @@ type TypeSemantics struct {
 
 // Semantics is the resolved reading of a whole game's relation types:
 // which ones this run walks, how each behaves, and where that came from.
-//
-// Every analysis result embeds it — as `semantics_source` on the wire —
-// so a verdict always arrives with the reading it rests on. An engine
-// whose interpretation of a game is invisible produces findings a
-// designer can only accept or reject wholesale.
 type Semantics struct {
 	// ByType is keyed by relation type id, which is what a walk's rows
 	// carry. Nothing outside this package addresses a relation type by
@@ -152,26 +113,6 @@ type ResolveInput struct {
 // Resolve reads a game's relation types and decides how this engine will
 // treat each of them. It is the spec's §2, in order, and it does not
 // guess:
-//
-//  1. If the caller passed relation_types keys, **those are the set**,
-//     and the declared/derived selection below is not consulted for
-//     which types participate: the caller has said which edges this
-//     question is about, and that is a stronger statement than anything
-//     stored. Each such type is reported as caller_supplied. A key that
-//     names no relation type of **this game** is not_found naming the
-//     key — never a silently empty filter, which would answer "your
-//     whole game is unreachable" to a caller who did narrow the run.
-//  2. Otherwise, every relation type with non-null analysis_traits →
-//     declared.
-//  3. For a type whose traits are null but whose semantic_role is set,
-//     the fixed mapping → derived_from_role.
-//  4. If nothing remains, semantics_undeclared, carrying the whole
-//     catalogue. **Not "no problems found".**
-//
-// A type that is neither declared nor derivable is simply not in the
-// result: it is an edge this engine has been told nothing about, and
-// walking it as though it gated progression would be exactly the guess
-// the metamodel exists to avoid.
 func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, in ResolveInput) (Semantics, error) {
 	if len(in.RelationTypeKeys) > MaxTypeKeys {
 		return Semantics{}, limitExceeded("relation_types", len(in.RelationTypeKeys), MaxTypeKeys)
@@ -199,16 +140,6 @@ func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, in ResolveIn
 
 // catalogueSemantics is steps 2 and 3 alone: declared traits, then
 // traits derived from a semantic_role, and **no refusal**.
-//
-// It is separated from Resolve because one analysis reads a game's
-// traits without needing them: the orphan aggregate asks the vocabulary
-// for exactly one thing -- which relation types are `annotation` -- and a
-// game with no traits and no roles has no annotation type, which is a
-// perfectly meaningful input rather than an engine with nothing to read.
-// Resolve's refusal is right for the three analyses that walk edges and
-// wrong for the one that counts them, so the refusal sits in Resolve and
-// the reading sits here. orphans.go's own comment names the asymmetry
-// from the other side.
 func catalogueSemantics(rows []dbqRelationType) Semantics {
 	resolved := Semantics{ByType: make(map[uuid.UUID]TypeSemantics, len(rows))}
 	for _, row := range rows {
@@ -239,11 +170,6 @@ func catalogueSemantics(rows []dbqRelationType) Semantics {
 
 // ResolveWithoutRefusing reads a game's relation types the way Resolve
 // does and **answers an empty reading rather than semantics_undeclared**.
-//
-// It has exactly one caller, analysis.orphans, and the argument for the
-// asymmetry is that analysis's own: see catalogueSemantics above and
-// Orphans' doc comment, which names the three analyses that do refuse so
-// the difference reads as a decision rather than as an oversight.
 func (s *Service) ResolveWithoutRefusing(ctx context.Context, projectID uuid.UUID) (
 	Semantics, error,
 ) {
@@ -255,15 +181,6 @@ func (s *Service) ResolveWithoutRefusing(ctx context.Context, projectID uuid.UUI
 }
 
 // resolveCallerSupplied is step 1: the caller's list is the set.
-//
-// Its traits still come from the row — declared first, then derived —
-// because "which types this question is about" and "how those types
-// behave" are two different statements and the caller only made the
-// first. A named type that carries neither is kept in the set with no
-// traits and reported as caller_supplied, so it appears in
-// semantics_source; if *none* of the named types carries any traits, the
-// run has a set and no behaviour and falls to the same
-// semantics_undeclared refusal as an undeclared game.
 func (s *Service) resolveCallerSupplied(rows []dbqRelationType, keys []string) (Semantics, error) {
 	byKey := make(map[string]dbqRelationType, len(rows))
 	for _, row := range rows {
@@ -326,15 +243,6 @@ func undeclared(rows []dbqRelationType) error {
 // vocabulary: what each word is for, which combinations are refused, and
 // which semantic roles this engine translates when a type declares no
 // traits.
-//
-// **It is generated from the structures it describes** — the vocabulary,
-// metamodel.AnalysisTraitConflicts and derivedTraits — and parsed back
-// in three tests, in both directions each. Generating agent-facing text
-// from the structure it describes is the first thing the views
-// sub-project named as worth copying: it is what caught views.run
-// shipping without its operator table at all. Prose written by hand
-// beside a table is prose that stops being true on the first edit to the
-// table, and an agent has no way to notice.
 func TraitDescription() string {
 	var b strings.Builder
 	b.WriteString("An analysis reads a game through its relation types' `analysis_traits`. " +

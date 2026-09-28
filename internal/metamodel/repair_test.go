@@ -94,18 +94,6 @@ func TestRepairArea(t *testing.T) {
 
 	// TestRepairArea's "a repair walks the whole four step loop task nine
 	// found" case is the case this whole file exists for.
-	//
-	// Task 9 walked four steps and could not finish any of them cheaply: add
-	// a required field under existing rows (all flagged, correctly); find
-	// that nothing writable into the *type* makes them fit again, because
-	// Schema.Check refuses `required` with a `default` and is right to;
-	// rewrite every row one at a time; then take the field back out and
-	// watch all of them flagged a *second* time, because the value they now
-	// carry has become an unknown field. Both halves of that loop are one
-	// call each now, and the fixture walks all four steps in order rather
-	// than testing the two operations separately, because the second flagging
-	// is a consequence of the first repair and no test of `drop_unknown`
-	// alone would see it.
 	t.Run("a repair walks the whole four step loop task nine found", func(t *testing.T) {
 		f := newRepairFixture(t, 3)
 		ctx := context.Background()
@@ -173,16 +161,6 @@ func TestRepairArea(t *testing.T) {
 
 	// TestRepairArea's "a schema edit repairs nothing by itself" case is the
 	// standing check that the back door stays shut.
-	//
-	// The flag-rather-than-back-fill decision is the one this file is built
-	// around and does not revisit: a schema edit re-checks rows and never
-	// writes to them. A repair exists precisely because that is true, so the
-	// way a repair could quietly undo it is by being called from the schema
-	// edit — at which point every schema edit becomes a back-fill and the
-	// designer's content is edited by a validation pass. Nothing here can
-	// prove a call site absent, which is why this asserts the *outcome*: a
-	// narrowing edit against a type with a defaulted field leaves every row
-	// exactly as it was, flag and all.
 	t.Run("a schema edit repairs nothing by itself", func(t *testing.T) {
 		f := newRepairFixture(t, 3)
 		ctx := context.Background()
@@ -211,21 +189,6 @@ func TestRepairArea(t *testing.T) {
 		assert.Must(t, len(fields) == 1, "a schema edit wrote to a row's values: %v", fields)
 
 		// **Direction two: widening, which is the constructible back-fill.**
-		//
-		// The direction above cannot be back-filled at all — the rows are
-		// flagged for a *required* field, a required field may not declare a
-		// default, and there is therefore nothing a schema edit could invent
-		// that would make them fit. A test that stopped there would be a
-		// fixture too small to distinguish any policy, and it was: an
-		// experiment that made UpsertEntityType call RepairEntities with
-		// every declared default left it green, because the repair failed
-		// every row on the missing `rank`.
-		//
-		// Removing a field is the case that *can* be repaired automatically:
-		// the rows are flagged because they carry a value the type no longer
-		// declares, and dropping it fixes every one of them with no decision
-		// to make. So this is the half where a schema edit that quietly
-		// repaired its own rows would succeed — and must not.
 		if _, err := f.svc.UpsertEntity(ctx, f.project, metamodel.EntityInput{
 			TypeKey: "quest", Key: "q0000", Name: "Quest 0000",
 			Fields:          map[string]any{"summary": "s", "rank": "gold", "laps": float64(3)},
@@ -253,11 +216,6 @@ func TestRepairArea(t *testing.T) {
 	// TestRepairArea's "a repair touches only the rows the schema rejects"
 	// case is what stops a repair being a bulk content editor wearing a
 	// repair's name.
-	//
-	// One row is made to fit before the pass runs, by the ordinary write path
-	// — which is how a concurrent designer's fix arrives too. The pass must
-	// not see it: it is not in the selection, its version must not move, and
-	// the value the pass is setting must not land on it.
 	t.Run("a repair touches only the rows the schema rejects", func(t *testing.T) {
 		f := newRepairFixture(t, 3)
 		ctx := context.Background()
@@ -296,13 +254,6 @@ func TestRepairArea(t *testing.T) {
 
 	// TestRepairArea's "a repair clears the flag only by revalidating" case
 	// pins that there is no way to tell a repair "these are fine now".
-	//
-	// The pass sets a value that does not satisfy the schema. Every row goes
-	// through the ordinary write path, so every row is refused there, and the
-	// report says so at the row's own key with the schema's own complaint —
-	// the same code entities.upsert would have answered with. A repair that
-	// cleared the flag by fiat would leave this green and the game's content
-	// wrong.
 	t.Run("a repair clears the flag only by revalidating", func(t *testing.T) {
 		f := newRepairFixture(t, 3)
 		ctx := context.Background()
@@ -329,13 +280,6 @@ func TestRepairArea(t *testing.T) {
 	// TestRepairArea's "a repair pass is bounded and converges" case pins the
 	// loop the tool description tells a caller to write, on more rows than one
 	// pass may touch.
-	//
-	// There is no cursor, and this is why there does not need to be one: a
-	// repaired row leaves the selection, so the next call's first page is
-	// what the last call did not fix. The assertion is that the loop
-	// terminates and that it terminates in the number of passes the bound
-	// implies, which is what would break if a pass ever re-read rows it had
-	// already repaired.
 	t.Run("a repair pass is bounded and converges", func(t *testing.T) {
 		const rows = 250
 		f := newRepairFixture(t, rows)
@@ -379,13 +323,6 @@ func TestRepairArea(t *testing.T) {
 	// TestRepairArea's "a repair that states no operation is refused" case
 	// pins the refusal that keeps this from becoming a back-fill by the back
 	// door.
-	//
-	// A pass with neither `set` nor `drop_unknown` rewrites every flagged row
-	// with the values it already holds — which either changes nothing, or,
-	// where the schema has since grown a default, injects that default into
-	// every flagged row. The second reading is exactly the back-fill the
-	// schema-evolution rule refuses, arrived at by a call that looks like it
-	// does nothing.
 	t.Run("a repair that states no operation is refused", func(t *testing.T) {
 		f := newRepairFixture(t, 3)
 		ctx := context.Background()
@@ -457,12 +394,6 @@ func TestRepairArea(t *testing.T) {
 	// TestRepairArea's "an edge schema edit is repaired the same way" case
 	// carries the rule one step along, which is where this repository's most
 	// repeated defect lives.
-	//
-	// 0009 gave relations a field schema's invalid flag and a version, and
-	// revalidate is one function for both kinds precisely so that a schema
-	// edit flags edges exactly as it flags entities. A repair that covered
-	// only entities would leave a designer who narrows a *relation* type's
-	// schema with the two-hundred-round-trip loop this file exists to close.
 	t.Run("an edge schema edit is repaired the same way", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

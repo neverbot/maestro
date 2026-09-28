@@ -1,23 +1,6 @@
 // The harness for internal/web/static/rows.js, and specifically for the
 // one part of it that is now a control rather than a label: a column
 // heading the listing can be ordered by.
-//
-// What it holds, and why each one is here rather than left to a browser:
-//
-//   - **Pressing a column asks for that column**, and pressing the
-//     column already sorted asks for its reverse. A header whose every
-//     press asked for the same ascending order is a sort that looks
-//     wired and is not.
-//   - **A column the server has no order for gets no control.** The
-//     declared-field columns cannot be ordered yet, and a heading that
-//     looked pressable and refused would be worse than a plain one.
-//   - **The arrow is never the only carrier.** The direction is in the
-//     button's accessible name, in words, because an arrow is one
-//     character to a screen reader and this product does not let a glyph
-//     or a colour carry a value alone.
-//
-// Run directly: `node internal/web/jstest/rows_test.mjs`.
-// internal/web/static_rows_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 
@@ -57,11 +40,6 @@ function header(sorted) {
 }
 
 // --- A declared field's own heading -----------------------------------
-//
-// The catalogue's field columns are orderable too: the server orders by
-// the stored jsonb value, so a number sorts as a number. A cell heading
-// that names an order is a control; one that names none stays a label,
-// which is what every other listing in the product passes.
 function fieldHeader(sorted) {
   const asked = [];
   const row = headerRow(doc, {
@@ -135,14 +113,6 @@ check("and it still says its columns",
   ["Quest", "key"]);
 
 // --- What "there is more" means ---------------------------------------
-//
-// Every listing answer carries `next_cursor`, and a server that has
-// reached the end sends `""`. Six pages tested it with
-// `typeof body.next_cursor === "string"`, which `""` passes — so the
-// pager stayed on screen at the end of a listing, and pressing it
-// re-fetched the first page and appended it again. Seen in a browser on
-// the images list: two images became four, under a count that then said
-// "4 images".
 
 const { nextCursorOf } = await import("../static/rows.js");
 
@@ -155,12 +125,6 @@ check("the end of a listing is not a cursor", [
 ], [null, null, null, null, "abc"]);
 
 // --- What a screen reader is told ------------------------------------
-//
-// A catalogue is a `ul` of `li`s in a subgrid: the right thing to look
-// at, and ten flat strings per row to listen to, with no column ever
-// named. The roles are meaningful precisely because the shape is fixed —
-// every row emits the same cells in the same order — so a cell is always
-// under the heading that names it.
 
 const { markTables } = await import("../static/rows.js");
 

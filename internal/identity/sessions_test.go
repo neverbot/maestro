@@ -253,23 +253,6 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 // each run, not one) — and found that a naive "read the final
 // expires_at" test would have stayed green throughout, because the
 // final value looks identical whether one write happened or six.
-//
-// This calls ExtendSession directly, concurrently, rather than driving
-// it through resolveSessionCaller over HTTP: going through the
-// middleware adds a second source of nondeterminism this test does not
-// want — UserForSession's own read (no row lock) can itself observe an
-// already-renewed expires_at and skip calling ExtendSession at all once
-// any one request's write has landed, which is a legitimate reason for
-// fewer than N attempts and not what this test is trying to pin. Calling
-// ExtendSession unconditionally, N times, concurrently, against one
-// already-stale session isolates the SQL guard's own concurrency
-// property from that Go-side decision.
-//
-// RowsAffected (this method's own return value, via :execrows — see its
-// doc comment) is summed across every goroutine rather than reading
-// expires_at afterward, so the assertion is a direct count of writes
-// Postgres reports, not an inference from a value that cannot tell one
-// write apart from several.
 func TestConcurrentRenewalsProduceExactlyOneWrite(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

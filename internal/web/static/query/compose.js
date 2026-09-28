@@ -1,44 +1,5 @@
 // The query builder's emitter: a clause stack in, a query document out,
 // plus the map from each control to the JSON pointer it wrote.
-//
-// This module is pure. It imports nothing, touches no DOM, makes no
-// request, and holds no state between calls, because the two properties
-// the builder rests on are both properties of a function:
-//
-//   1. **It generates; it does not edit** (design spec §4). The builder
-//      never modifies a stored document. It opens an existing one only
-//      when that document round-trips through `decompose` and `compose`
-//      with nothing added, nothing dropped and no value changed — which
-//      is what `roundTrips` below answers. A language addition the
-//      builder has not learned closes the door by itself rather than
-//      silently dropping a clause.
-//   2. **Validation points at a clause, not at a page** (§5). A
-//      diagnostic from `views.validate` arrives with a JSON pointer, and
-//      the only thing that can turn that pointer back into the line of
-//      the sentence that produced it is the mapping this emitter builds
-//      while it emits. It is returned beside the document rather than
-//      rebuilt afterwards for the reason the spec gives: the builder
-//      must have it anyway, and a second derivation of it is a second
-//      thing to drift.
-//
-// **On "byte for byte".** The spec says the round-trip is byte for byte.
-// What is compared here is the canonical text of both sides — every
-// object key sorted, deep — because whitespace and key order are not
-// things the query language means, and the promise that is literally
-// about bytes is the *copy* path, which never comes through this module.
-// Every difference the language does mean — a field the builder does not
-// know, a value it would rewrite, a clause it would drop — fails the
-// comparison.
-//
-// The shapes it does not hold are refused by `decompose` returning null
-// rather than by an approximation: `params`, branching (`traverse` whose
-// `from` is not the previous set), a depth range, explicit `nodes` /
-// `edges` selection, `limits`, `include_invalid`, and any key this
-// module does not write. §3 lists them, and TOO_MUCH is what the builder
-// says when one is met.
-
-// The language version every document this module writes carries.
-// internal/views/query.go refuses anything else.
 export const V = 1;
 
 export const CLAUSE_FROM = "from";
@@ -60,13 +21,6 @@ export const TOO_MUCH =
 export const DIRECTIONS = ["out", "in", "both"];
 
 // compose turns a clause stack into { document, pointers, problems }.
-//
-// `pointers` maps "<clause id>.<control>" to the JSON pointer of the
-// value that control wrote. `problems` names the structural mistakes a
-// picker cannot prevent and a document cannot express — a Narrow line
-// with nothing above it, a stack with no Start line — so the primary
-// button can be disabled with the reason beside it (§5) before a
-// validate call is even worth making.
 export function compose(clauses) {
   const stack = Array.isArray(clauses) ? clauses.filter(isObject) : [];
   const document = { v: V, from: [] };
@@ -290,10 +244,6 @@ export function decompose(document) {
 
 // roundTrips answers §4's question about one stored document, given its
 // bytes: can the builder open this without changing it?
-//
-// It takes text rather than a parsed value because the bytes are what
-// the promise is about and because a caller holding the parsed object
-// has already lost the one thing being checked.
 export function roundTrips(text) {
   let parsed;
   try {

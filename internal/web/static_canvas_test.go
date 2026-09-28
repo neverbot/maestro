@@ -13,53 +13,6 @@ import (
 )
 
 // The escaping perimeter, for the context the canvas draws in.
-//
-// Task 5 answered the hostile-name question for the text twin like this:
-// a game's words reach the DOM as interpolated values in child position
-// of a Lit template, **Lit** commits them as Text nodes, nothing in this
-// repository escapes anything, and so the property under our control is
-// *placement* — asserted by a scanner that finds where each value is
-// bound. internal/web/static_twin_test.go closes the hole that argument
-// leaves, which is Lit's own raw-HTML escape hatches.
-//
-// **That argument does not transfer to the canvas, and this file is the
-// difference.** There is no framework on the SVG path at all:
-// internal/web/static/components/mst-canvas.js builds its tree with
-// createElementNS, setAttribute and textContent. None of the three
-// parses markup, so nothing is escaped because nothing is ever
-// re-parsed; the property is *no parsing*, which is strictly stronger
-// than *correct escaping* and needs no scanner to confirm — a
-// `textContent` assignment cannot put an element into a document however
-// the string is spelled.
-//
-// What SVG adds that HTML text position did not have is a set of
-// elements that are not drawings:
-//
-//   - `<foreignObject>` re-enters the **HTML** parsing context, which is
-//     the one way back to the twin's question through a door the twin's
-//     answer does not cover.
-//   - `<script>` and the animation elements run code; `<a>` navigates;
-//     `<use>`, `<image>`, `<iframe>`, `<object>` and `<embed>` fetch
-//     what an attribute names.
-//   - `xlink:href` is the legacy spelling of the one attribute a browser
-//     *resolves* rather than draws, and it is the spelling a filter
-//     written against `href` does not see.
-//
-// None of them is reachable today: element names come from
-// render/scene.js's MARK_ELEMENTS, which a mark cannot add to, and the
-// one URL-valued attribute is filtered by isDrawableHref. Both of those
-// are arrangements rather than vigilance, so this is the guard that
-// fails **loudly** on the day one changes, in the same commit rather
-// than in a browser.
-//
-// internal/web/jstest/canvas_test.mjs holds the runtime half: a node
-// named with a script tag arrives through textContent, and no attribute
-// value anywhere in the emitted tree carries a `<`.
-
-// scriptableSVG is the set of SVG elements that are not drawings. `a`
-// and `set` are in it and are short enough to be words, which is why
-// this set is only ever matched against the *literal tag argument of a
-// createElementNS call* and never against free text.
 var scriptableSVG = map[string]bool{
 	"script":           true,
 	"foreignObject":    true,

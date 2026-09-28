@@ -24,32 +24,6 @@ const (
 
 // Catalogue is one game's declared vocabulary, read once and reused by
 // resolution, by compilation and by the staleness report.
-//
-// It is loaded through internal/metamodel's own ListEntityTypes and
-// ListRelationTypes, which take a project id and filter on it in SQL,
-// rather than one lookup per key. Three reasons: a query with eight steps
-// would otherwise make a dozen round trips inside a call that is already
-// the most expensive one in the product; staleness (Task 12) needs
-// exactly this data, so a run and its staleness report read the game once
-// between them; and going through the accessors that shipped keeps one
-// implementation of "a lookup is scoped to the caller's game" instead of
-// a copy of it here.
-//
-// Keys are folded to lower case in the maps because the database folds
-// them: entity_types_key_key is UNIQUE (project_id, lower(key)). The
-// *stored* spelling is kept on the row, which is what a rename diagnostic
-// compares against. TestResolveArea's "a catalogue folds case on both
-// sides" case pins both sides of that folding.
-//
-// **It carries the id of the game it was read for**, and every entry
-// point that takes a catalogue takes that id too and refuses a mismatch. A
-// catalogue with no identity makes this package's whole isolation story
-// rest on callers pairing two arguments correctly, which is the one thing
-// reading through one scoped path was supposed to remove: a query resolved
-// against another game's catalogue would come back with that game's type
-// ids, and Task 12 would compare a saved view against the wrong game's
-// vocabulary and answer "not stale". TestResolveArea's "a catalogue from
-// another game is refused" case pins it.
 type Catalogue struct {
 	ProjectID     uuid.UUID
 	EntityTypes   map[string]dbq.EntityType
@@ -108,13 +82,6 @@ func (s *Service) LoadCatalogue(ctx context.Context, projectID uuid.UUID) (*Cata
 // TypeRef is one reference from a query to a declared type, with the
 // pointer that addresses it. It is what Task 11 writes into view_refs and
 // what Task 12's staleness report reads back.
-//
-// A reference that resolved to nothing is still a reference: Key and
-// Pointer are filled and ID is nil. That is the whole point of the list — a
-// stale view has to be able to say *which part of itself* broke, and a
-// pointer plus the key the document spells is exactly that.
-// TestResolveArea's "a reference that does not resolve is still listed with
-// its key" case pins it.
 type TypeRef struct {
 	Kind    string // KindEntityType or KindRelationType
 	Key     string // as the query spells it
@@ -123,12 +90,6 @@ type TypeRef struct {
 }
 
 // ResolvedSet is one seed selector, with its type key turned into an id.
-//
-// It carries no resolved entity ids: a selector's `keys` shortcut
-// compiles to `lower(e.key) = ANY($n)` over the keys themselves, bound as
-// a text array beside the project filter, so there is nothing for this
-// pass to look up and no round trip to spend. Selector is kept so the
-// compiler reads the keys from the document rather than from a copy.
 type ResolvedSet struct {
 	Name         string
 	EntityTypeID *uuid.UUID
@@ -149,16 +110,6 @@ type ResolvedStep struct {
 
 // ResolvedEdge is one edges[] entry with its relation type keys turned
 // into ids.
-//
-// Only the `via`/`between` spelling has anything to resolve — the
-// `from_step` spelling names a set, which is resolved by being compiled. It
-// is resolved here rather than in the compiler for the reason LoadCatalogue
-// exists at all: a second place that turns a key into an id is a second
-// place that can forget the project filter, and a reference the compiler
-// resolved privately would be missing from Refs, so deleting a relation
-// type a view draws edges with would report the view as fine.
-// TestCompileExtraArea's "an edge entrys relation type is resolved and
-// listed" case pins both halves.
 type ResolvedEdge struct {
 	Spec            *EdgeSpec
 	RelationTypeIDs []uuid.UUID
@@ -182,12 +133,6 @@ type ResolvedPredicate struct {
 // ResolvedLeaf is one comparison, ready to compile. Value is a Go value
 // the compiler binds as a parameter and never spells into SQL; a Value of
 // type ParamRef stands in for one the caller supplies at run time.
-//
-// What Value holds, for Task 6 to bind without guessing: a value coerced
-// to Type for the scalar operators, a bool for exists and empty, and a
-// float64 for the length operators — the last two compare against the
-// operand's own type rather than the field's, and each is guarded here.
-// Values, not Value, carries the operands of the list and pair operators.
 type ResolvedLeaf struct {
 	Field   FieldRef
 	Type    metamodel.FieldType
@@ -199,12 +144,6 @@ type ResolvedLeaf struct {
 
 // Resolved is a query with every name turned into something the compiler
 // can bind.
-//
-// Params holds **declared defaults only**, each coerced to its
-// parameter's declared type. A parameter declared without a default has
-// no entry here at all, and a value the caller supplies at run time never
-// passes through this pass: Task 7 coerces it with coerceParam and
-// overlays it on this map.
 type Resolved struct {
 	Query  *Query
 	Cat    *Catalogue
@@ -231,33 +170,6 @@ type ResolvedLimits struct {
 
 // Resolve turns a parsed query into one the compiler can emit SQL for,
 // against one game.
-//
-// **Nothing it produces is ever concatenated into SQL.** Every type key
-// becomes a uuid, every field key becomes a declared type plus the key
-// the compiler binds as a jsonb path parameter, and every value becomes a
-// Go value. After this pass the compiler has nothing left that a caller
-// controls except bind parameters — which is the property that makes the
-// injection question answerable rather than a matter of care. **Nothing
-// here pins it**, and cannot: it is a statement about emitted SQL and
-// this pass emits none, so the assertion belongs to Task 6's compiler.
-//
-// **Every lookup it makes is scoped to the caller's game**, because the
-// only catalogue it can see is the one LoadCatalogue read for that project.
-// TestResolveArea's "a key from another game does not resolve" case and
-// TestResolveArea's "a relation type from another game does not resolve"
-// case pin both statements, each with a positive control in the same test.
-//
-// It collects every problem in one pass. An agent writing a five-step
-// traversal against an unfamiliar game gets all five mistakes at once;
-// TestResolveArea's "every problem in one query is reported in one pass"
-// case pins it.
-//
-// The problems come back in **document order**, because the pass walks the
-// document in that order and nothing sorts them afterwards. Sorting by
-// pointer string is what an earlier version did, and it reads /from/10
-// before /from/2 — a list that jumps about in a query long enough for the
-// order to matter. TestResolveArea's "problems are reported in document
-// order not pointer order" case pins it.
 func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, q *Query) (*Resolved, error) {
 	cat, err := s.LoadCatalogue(ctx, projectID)
 	if err != nil {
@@ -275,9 +187,6 @@ var ErrWrongGame = errors.New("this catalogue belongs to another game")
 // ResolveAgainst is Resolve with the catalogue already in hand, for a
 // caller that has just read it — Task 12's staleness report, and Task 7's
 // execution, which resolves and compiles in one pass over one read.
-//
-// It takes the game the query is being resolved for as well as the
-// catalogue, and refuses the pair when they disagree: see Catalogue.
 func ResolveAgainst(projectID uuid.UUID, cat *Catalogue, q *Query) (*Resolved, error) {
 	if err := cat.belongsTo(projectID); err != nil {
 		return nil, err
@@ -315,17 +224,6 @@ func ReferencesOf(projectID uuid.UUID, cat *Catalogue, q *Query) ([]TypeRef, err
 
 // resolveInto is the pass itself, always returning what it built alongside
 // whatever it could not resolve.
-//
-// st is nil for every query that is not a stored one. A saved view hands
-// it the dependency index that view was written with, and that is what
-// turns this pass into the staleness report as well: a type reference
-// resolves by id first (a rename does not change an id), by key second,
-// and is dead third, and every judgement this pass already makes about a
-// field, an operator or an enum option gains the diagnostic code that
-// names what moved. **One pass, not two**, because a second walk over the
-// document would be a second implementation of every one of those rules,
-// and the first thing it would drift on is which of them counts as
-// staleness. See stale.go.
 func resolveInto(cat *Catalogue, q *Query, st *staleness) (*Resolved, []metamodel.FieldError) {
 	r := &Resolved{Query: q, Cat: cat, Params: map[string]any{}}
 	var problems []metamodel.FieldError
@@ -510,33 +408,12 @@ func resolveInto(cat *Catalogue, q *Query, st *staleness) (*Resolved, []metamode
 	// The projection's one-hop related attributes are type references too,
 	// and a stale one breaks a colour rather than a filter — which is the
 	// silent failure the whole view_refs table exists to make loud.
-	//
-	// The five positions are read off predicate.go's projectionAttrs
-	// rather than listed again here, which is what makes
-	// TestEveryProjectionAttributeReferenceHasALineInTheTable cover this
-	// pass as well as checkProjection: a sixth *AttrRef added to
-	// Projection fails that test, and the line it then gains is the line
-	// this loop reads.
 	r.Projection = resolveProjection(cat, q, add, entityType, relationType, st)
 
 	return r, problems
 }
 
 // fieldScope is the set of declared fields a predicate position may name.
-//
-// It is a *set* of schemas rather than one because a step may reach several
-// entity types and follow several relation types at once, and a declared
-// field is only comparable there if every one of them declares it the same
-// way. Taking the first schema and ignoring the rest gets this wrong in
-// both directions: a field declared on one of two reached types compiles to
-// a comparison that silently matches nothing on the other, and a key
-// declared number on one type and enum on another is coerced against
-// whichever happened to be listed first. TestResolveArea's "a field must be
-// declared the same way on every type a step reaches" case pins the
-// not-declared-everywhere direction; TestResolveArea's "a field declared
-// two ways names each type with its own declaration" case pins the other
-// one, and pins that each type is named beside its own declaration in both
-// the type and the enum-options message.
 type fieldScope struct {
 	// subject names what the schemas belong to, for the refusal message.
 	subject string
@@ -552,15 +429,6 @@ type fieldScope struct {
 	// fields, its validity flag and its timestamps and nothing else
 	// (0004_metamodel.sql plus 0009), so @name and @key name no column
 	// there and would compile to SQL Postgres refuses.
-	//
-	// **@invalid used to be refused here too, and 0009 is why it is not.**
-	// An edge now carries the same flag an entity does, set by the same sweep
-	// when a relation type's field schema stops fitting the values an edge
-	// holds. Leaving it refused would have meant a designer could draw "the
-	// quests that no longer fit" and not "the edges that no longer fit" — a
-	// flag visible on half the graph. TestCompileExtraArea's "an edge
-	// predicate admits only the builtins a relation has" case pins the refusal
-	// that remains, with @type, @created_at and @invalid as its controls.
 	edge bool
 }
 
@@ -848,24 +716,6 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 // coerceOperand checks one literal against the declared type it will be
 // compared with, and is where an enum option outside its declaration is
 // refused rather than becoming an empty result.
-//
-// It reuses metamodel.Schema.Validate rather than reimplementing the
-// coercion: a single-field schema whose one field is the declared one,
-// validated against a single-value map, gives exactly the metamodel's own
-// judgement and exactly its wording. A second copy of that judgement is
-// how a query starts accepting values the write path refuses.
-//
-// **It takes that judgement minus the declared range**, and that
-// exception is deliberate rather than an oversight. Min and Max are rules
-// about what may be *written*; a stored value can sit outside them, since
-// the metamodel flags an entity invalid on a schema change and leaves its
-// values in place, and the query language has an include_invalid switch for
-// exactly those rows. Keeping the bounds would refuse `difficulty gte 0` on
-// a field declared min 1 — an ordinary "everything" query, and no mistake
-// at all. An enum's options are kept, and the asymmetry is the point: a
-// value outside them is a misspelling the refusal can name, while a number
-// outside a range is a legitimate question. TestResolveArea's "a declared
-// range does not refuse a comparison outside it" case pins both halves.
 func coerceOperand(typ metamodel.FieldType, declared metamodel.Field, raw any) (any, error) {
 	if typ == TypeTimestamp {
 		s, ok := raw.(string)

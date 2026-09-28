@@ -1,18 +1,5 @@
 // The four pickers this product keeps needing, each as the one function
 // that turns a client into options.
-//
-// **Three screens wanted the same control and none of them had it**: the
-// query builder needs an entity type, a relation type, a field of a type
-// and an entity; the route step list needs the last of those; and the
-// Draw clause needs the third. Built once, they are one control a
-// designer learns once — and, more to the point, one place where "what
-// may be chosen" is decided from the game's own vocabulary rather than
-// from whatever each screen happened to fetch.
-//
-// Nothing here draws: `mst-picker` is the control and these are the
-// sources it is fed from. They are ordinary async functions so a page
-// can await one, a harness can call one with a stub client, and neither
-// has to mount a component to find out what a picker would offer.
 
 import { MstPicker, optionsFrom } from "./mst-picker.js";
 
@@ -41,9 +28,6 @@ export async function relationTypeOptions(client, options = {}) {
 // fieldOptions is the fields one type declares, in the order it declares
 // them — which is the order the game means, and is why this does not
 // sort.
-//
-// It reads the type rather than taking a schema, because every caller
-// has a type key and only one of them has already fetched the type.
 export async function fieldOptions(client, typeKey, options = {}) {
   if (typeof typeKey !== "string" || typeKey === "") return [];
   const answer = await client.getType(typeKey);
@@ -53,16 +37,6 @@ export async function fieldOptions(client, typeKey, options = {}) {
 }
 
 // entitySource is the one picker that cannot be a list.
-//
-// A game in this instance has a thousand entities of one type, so the
-// options are an answer to a question rather than a vocabulary: it
-// returns a **source** — the function `mst-picker` calls as somebody
-// types — and the search it runs is the product's own, which indexes a
-// row's key alongside its name.
-//
-// **It answers with the key the game wrote**, like every other picker,
-// and labels with the entity's name. A picker that answered with an id
-// would hand the query language a value it cannot address a row by.
 export function entitySource(client, typeKey, options = {}) {
   return async (query) => {
     const asked = String(query ?? "").trim();

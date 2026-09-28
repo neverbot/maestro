@@ -293,11 +293,6 @@ func TestSchemaRoundTripPreservesADeclaredZeroValuedDefault(t *testing.T) {
 	// stored, read back and decoded before Validate ever sees it. The round
 	// trip, not the in-memory struct literal, is what must decide whether a
 	// declared false default survives.
-	//
-	// Both directions are covered, because only one of them is the path an
-	// agent's schema takes. Go -> JSON -> Go is below; JSON -> Go, an
-	// agent-shaped field_schema arriving over MCP and validated straight
-	// away, is first.
 	fromWire, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":false}]`))
 	assert.Must(t, err == nil, "ParseSchema: %v", err)
 	wireOut, err := fromWire.Validate(map[string]any{})
@@ -774,10 +769,6 @@ func TestCheckValuesReturnsNoDataToWriteBack(t *testing.T) {
 	// a normalised map with defaults injected, and a caller that forgets to
 	// discard it back-fills every row it inspected. CheckValues has nothing
 	// to forget.
-	//
-	// The compile-time shape is the guarantee: CheckValues returns exactly
-	// one value, an error. valueChecker below fails to compile the day it
-	// returns anything else.
 	var checker valueChecker = questSchema()
 	if err := checker.CheckValues(map[string]any{"min_level": float64(20)}); err != nil {
 		t.Fatalf("CheckValues: %v", err)

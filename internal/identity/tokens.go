@@ -87,29 +87,6 @@ const TokenPrefix = "mst_"
 // Invite's TokenHash (invites.go): nothing outside this package needs
 // it, and nothing should be one careless writeJSON away from serving a
 // value an attacker could brute-force offline against.
-//
-// LastUsedAt reflects the row as read at the start of ResolveAPIToken,
-// before that call's own conditional touch (if any) is applied — so the
-// value returned to whoever just made this exact call can be up to one
-// touchThrottle interval stale relative to what the database holds
-// immediately afterward. Callers that need the precise current value
-// (an operator's listing, say) get it from ListAPITokens instead, which
-// reads it fresh with no touch of its own.
-//
-// UserDisplayName is populated only by ListAPITokens, which joins users
-// so an operator triaging a leaked token can see who minted it instead
-// of a raw id; CreateAPIToken does not join users and always leaves it
-// empty.
-//
-// UserIsAdmin is populated only by ResolveAPIToken, for a different
-// reason than UserDisplayName: web.resolveBearerCaller needs the token
-// creator's admin flag to build a Caller, and without it the middleware
-// would need a second round trip (identity.UserByID) on every
-// bearer-authenticated request to get one boolean — the exact
-// last_used_at-style write Task 9 already fought to keep off this path,
-// reintroduced as a read. GetLiveAPIToken's join exists for exactly this
-// (see its own doc comment in identity.sql); CreateAPIToken, RevokeAPIToken
-// and ListAPITokens do not join for this and always leave it false.
 type APITokenSummary struct {
 	ID              uuid.UUID
 	ProjectID       uuid.UUID
@@ -226,8 +203,6 @@ func (s *Service) CreateAPIToken(ctx context.Context, req CreateAPITokenRequest)
 // projects.mapMembershipInsertError narrows one on memberships: checked
 // by constraint name, not just SQLSTATE 23503, so a future unrelated
 // foreign key on this table cannot be misreported as "bad request".
-// Returns nil when err is not a foreign-key violation on either
-// constraint, so the caller falls through to its own generic wrap.
 func mapAPITokenInsertError(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
@@ -242,22 +217,6 @@ func mapAPITokenInsertError(err error) error {
 }
 
 // ResolveAPIToken maps a bearer value to its live token and records use.
-// "Live" means not revoked; GetLiveAPIToken's own WHERE clause is the only
-// thing that decides that, so there is exactly one place that answers
-// "is this token still good".
-//
-// ResolveAPIToken answers authentication, not authorization: it proves
-// the caller holds a value that hashes to a live row, and the ProjectID
-// on the row it returns names what that token is bound to. It does not
-// re-check whether the token's creator is still a member of that
-// project — a caller that treats ProjectID as permission to act on that
-// project must satisfy itself the binding is still one the product
-// wants to honour. Today that guarantee comes from
-// projects.RemoveMember revoking a departing member's tokens for that
-// project in the same transaction as the membership deletion (see its
-// own doc comment); nothing in this method re-derives that from
-// memberships on every call, so a caller relying on ProjectID for
-// authorization is trusting that revocation path, not re-verifying it.
 func (s *Service) ResolveAPIToken(ctx context.Context, token string) (APITokenSummary, error) {
 	row, err := s.lookupLiveAPIToken(ctx, token)
 	if err != nil {
@@ -336,15 +295,6 @@ type RevokeAPITokenRequest struct {
 }
 
 // RevokeAPIToken revokes a token, scoped to the project that owns it.
-// Revoking an unknown token id, an already-revoked one, or one that
-// belongs to a different project is not an error: the caller's goal (no
-// live token under this id in this project) is already satisfied, the
-// same convention RevokeSession and RevokeInvite already establish. The
-// project scope in the query's own WHERE clause is what makes this safe
-// to call with a project id taken from the caller's own request path
-// without a separate ownership check: a caller can never revoke a token
-// it does not administer, and never learns whether the id it named
-// belongs to some other project instead.
 func (s *Service) RevokeAPIToken(ctx context.Context, req RevokeAPITokenRequest) error {
 	if err := s.q.RevokeAPIToken(ctx, dbq.RevokeAPITokenParams{ID: req.TokenID, ProjectID: req.ProjectID}); err != nil {
 		return fmt.Errorf("revoke api token: %w", err)
@@ -409,19 +359,6 @@ func (s *Service) CountAPITokensForProject(ctx context.Context, projectID uuid.U
 // sessions.go's IssueSession and invites.go's CreateInvite use),
 // base64url-encoded, followed by a tokenChecksumRunes-long base62 CRC32
 // of that encoded string.
-//
-// The checksum is not a security control — CRC32 is not remotely
-// collision-resistant against a determined attacker, and none of this
-// package's authorization guarantees rest on it. What it buys is two
-// things that only matter for a value with no attacker in the loop: a
-// bare base64 body carries no distinctive structure, so a secret
-// scanner's regex for "mst_" tokens either overmatches on unrelated
-// base64 or has to fall back to entropy heuristics; appending a
-// checksum a scanner can verify collapses that false-positive rate
-// towards zero. And a human who mistypes or truncates a paste gets
-// ErrTokenInvalid straight out of verifyTokenChecksum, with no database
-// round trip, instead of a lookup miss indistinguishable from "this
-// value was never valid at all".
 func newTokenBody() (string, error) {
 	raw, err := randomToken()
 	if err != nil {

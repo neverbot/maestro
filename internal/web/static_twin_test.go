@@ -13,38 +13,6 @@ import (
 )
 
 // The escaping perimeter for a templating library.
-//
-// internal/web/static_sinks_test.go holds the DOM-shaped half: no own
-// asset assigns `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
-// `setHTMLUnsafe`, `createContextualFragment` or `document.write`,
-// outside the one allowed sink in doc.js. That list is complete for a
-// module that touches the DOM directly, and it is blind to the way this
-// front end now writes markup, which is Lit.
-//
-// **Lit's escape hatches are imports, not property assignments.**
-// `unsafeHTML`, `unsafeSVG` and the static-html tags (`literal`,
-// `unsafeStatic`, and `html` re-exported from `lit/static-html.js`) each
-// take a string and put it into the parsed markup, which is exactly the
-// hole the sink perimeter exists to close and which none of its
-// spellings match. The text twin is where this stops being theoretical:
-// it renders more of the game's own words than any other surface —
-// names, keys, types, projected values and the column headings the query
-// chose — and a game's words are hostile input. This repository has
-// already shipped one stored cross-site scripting defect, an autolink
-// path with no dangerous-URL check beside an ordinary link path that had
-// one, so "the ordinary path is safe" is a sentence with a history here.
-//
-// What makes the property hold today is arrangement rather than
-// vigilance: those directives live in packages this repository has not
-// vendored, and internal/web/static_vendor_test.go's map guards mean an
-// unmapped bare specifier resolves to nothing in a browser. This test is
-// the part that fails *loudly* rather than at runtime, on the day
-// somebody vendors one.
-//
-// internal/web/jstest/twin_test.mjs holds the other side: that every
-// game string the twin renders is bound in child position, where Lit
-// commits it as a Text node, and that none of them appears in the
-// component's own markup.
 var unsafeDirectiveRE = regexp.MustCompile(
 	`\bunsafeHTML\b|\bunsafeSVG\b|\bunsafeStatic\b|\bstatic-html\b|\bstaticHtml\b|\bwithStatic\b`)
 

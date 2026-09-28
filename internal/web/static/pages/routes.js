@@ -1,11 +1,4 @@
 // The routes listing: every saved claim about a path, and its health.
-//
-// **Three states, never two.** A route is `never_checked`, `stale` or
-// `checked`, and the screen must not collapse them: a tick-or-cross would
-// turn "we do not know" into "it is fine", which is the one thing this
-// listing exists to prevent. `stale` is not a failure either — it means
-// the answer may no longer be about this game — and it is the one place
-// on these screens `--danger` is earned.
 
 import {
   DESTINATION_ANALYSIS,
@@ -27,13 +20,6 @@ export const NOTE_ROUTES =
   "again when the design moves.";
 
 // The empty state's heading, and what its sentence is about.
-//
-// **It no longer repeats the note above it.** The shell's copy of this
-// state said, word for word, the sentence #routes-note says three lines
-// higher — two paragraphs of identical prose stacked on an otherwise
-// empty screen. What the note does not say is who saves a route, which
-// is the one thing a reader looking at nothing needs, so the state says
-// that instead and the role decides how.
 export const NO_ROUTES_HEADING = "No routes yet";
 export const SAVES_ROUTES = "saves them";
 

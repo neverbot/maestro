@@ -164,12 +164,6 @@ func (s *Server) handleUpsertRoute(w http.ResponseWriter, r *http.Request,
 // handleRemoveRoute is a DELETE that reads its expected_version from the
 // query string, because a DELETE with a body is a shape half the HTTP
 // stack in the world drops.
-//
-// **A missing or unparseable version is not defaulted here.** The domain
-// refuses a removal with no version and says why, so this handler passes
-// nil through and lets that refusal be the one the caller reads —
-// inventing a zero here would turn "you must say which version you saw"
-// into a version_conflict about a number nobody sent.
 func (s *Server) handleRemoveRoute(w http.ResponseWriter, r *http.Request,
 	_ Caller, scope ProjectScope,
 ) {

@@ -11,25 +11,6 @@ import (
 )
 
 // This file mechanises the one line this whole sub-project turns on:
-//
-//	A tool description teaches one call. A skill page teaches what spans
-//	calls — a sequence, a decision taken before any call, or a
-//	consequence that only appears later.
-//
-// Its operational form, which is what the scanner below implements, is
-// the one-tool test: a sentence that names exactly one registered tool
-// and makes a claim about that tool's arguments, admitted values,
-// defaults, bounds or refusals belongs in that tool's description. The
-// bundle may route to it, and may quote it verbatim with attribution; it
-// may not reword it.
-//
-// It is not a test file, deliberately. The pages of this bundle are
-// written against this notion of a sentence and of an attributed quote,
-// and rules only a test file can see are rules no page author can read.
-
-// bundleSentence is one sentence of one bundle file, carrying the
-// position that lets a failure say "modelling/naming.md:41" rather than
-// "somewhere in the bundle".
 type bundleSentence struct {
 	Path string
 	Line int
@@ -54,26 +35,9 @@ type bundleSentence struct {
 }
 
 // quoteOpener recognises the one attribution form the bundle uses:
-//
-//	> **From `views.validate`'s own description:**
-//	> Every refusal is addressed by JSON pointer into the document.
-//
-// One form, closed, because a family of forms is a family of ways to
-// look attributed without being checkable.
 var quoteOpener = regexp.MustCompile("^>\\s*\\*\\*From `([a-z_]+(?:\\.[a-z_]+)+)`'s own description:\\*\\*\\s*$")
 
 // indexBullet recognises the generated tool index's own line shape:
-//
-//   - `entities.get` — Read one entity by its address.
-//
-// That bullet is an attributed quote in every sense this file cares
-// about — it names the tool and carries text out of that tool's
-// description — so it is read as one rather than exempted. The
-// difference matters: an exemption would let reference/tools.md say
-// anything at all about a tool, while this makes every bullet on the
-// page subject to the same verbatim-substring check as a hand-written
-// quote. Reword a description without regenerating and the page goes
-// red here as well as in TestToolReferenceIsCurrent.
 var indexBullet = regexp.MustCompile("^-\\s+`([a-z_]+(?:\\.[a-z_]+)*)`\\s+—\\s+(.*)$")
 
 // toolShaped matches a token that looks like a tool name. Whole tokens
@@ -141,24 +105,6 @@ func flatten(text string) string {
 }
 
 // scanBundle splits every file of the bundle into sentences.
-//
-// It walks the whole tree with fs.WalkDir rather than a list of pages,
-// for the reason every guard in this package does: a rule that watches
-// the files it was written for stops watching the moment somebody adds
-// one.
-//
-// Markdown headings, list items and table cells are sentences too — a
-// claim does not stop being a claim for being a bullet — and JSON files
-// are scanned through their string values, so a genre transcript that
-// grows an explanatory comment restating a bound is caught by the same
-// rule as a page of prose.
-//
-// **Paragraphs are joined before they are split.** The bundle is
-// hard-wrapped at seventy-odd columns, so a sentence about a tool
-// routinely spans two lines with the tool's name on one and the claim
-// marker on the other. A line-at-a-time splitter sees two harmless
-// halves and reports nothing, which is a scanner that has stopped
-// working while looking exactly like a bundle that is clean.
 func scanBundle(fsys fs.FS) ([]bundleSentence, error) {
 	var out []bundleSentence
 	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
@@ -355,13 +301,6 @@ func scanJSON(name string, body []byte) ([]bundleSentence, error) {
 }
 
 // splitSentences cuts one flattened fragment into sentences.
-//
-// The rule is a full stop, question mark or exclamation mark followed by
-// a space or by the end of the fragment — which is what keeps the dot
-// inside `entities.upsert` from cutting a sentence in half, since that
-// dot is followed by a letter. Abbreviations that end in a dot and are
-// followed by a space are the one form that rule gets wrong, and they
-// are skipped from a closed list.
 func splitSentences(fragment string) []string {
 	flat := flatten(fragment)
 	if flat == "" {
@@ -413,35 +352,6 @@ func (r restatement) String() string {
 }
 
 // auditRestatement is the one-tool test, applied to a whole bundle.
-//
-// Two rules, one per side of the quote marker:
-//
-//   - **Outside a quote**, a sentence that names exactly one registered
-//     tool and carries a claim marker is a crossing. Two tools is a
-//     sequence, which is the bundle's own subject; no marker is routing,
-//     which the bundle is for.
-//   - **Inside an attributed quote**, every sentence must be a verbatim
-//     substring — whitespace flattened — of the description it is
-//     attributed to, marker or no marker. That half is not about what the
-//     page claims but about whether its copy is still a copy, and it is
-//     checked on every quoted sentence because the interesting failure is
-//     the one nobody edited: the description reworded underneath a page
-//     that has not changed.
-//
-// The quoted half is the reason the attributed tool is a claim subject in
-// its own right. A quote's body routinely does not repeat the tool's name
-// — the generated index's bullets never do, since the name is in the
-// bullet's own backticks — so a rule that only judged sentences naming a
-// tool would exempt exactly the text most likely to drift.
-//
-// Both halves of the quote exemption are load-bearing and both have been
-// broken before in this repository. Attribution to a tool the server
-// does not register is refused, so the header cannot be forged by
-// naming something that has no description to check against. An empty
-// sentence, or an attributed tool whose description is empty, is refused
-// rather than admitted — `strings.Contains(anything, "")` is true, and a
-// guard whose exemption is satisfied by emptiness is a guard that can be
-// switched off by deleting text.
 func auditRestatement(sentences []bundleSentence, registered map[string]string) []restatement {
 	var out []restatement
 	for _, sentence := range sentences {
@@ -462,14 +372,6 @@ func auditRestatement(sentences []bundleSentence, registered map[string]string) 
 }
 
 // judgeQuote holds an attributed quote to being a quote.
-//
-// The order of the checks is the point. A quoted sentence passes on one
-// condition only — it is a whitespace-flattened verbatim substring of
-// the description it is attributed to — and every other outcome is a
-// report. In particular a quote whose body mentions some *other* tool is
-// fine when it is verbatim (registered descriptions cross-reference each
-// other constantly, and the generated index carries their first
-// sentences), and is a mis-attribution when it is not.
 func judgeQuote(sentence bundleSentence, named []string, marker string, registered map[string]string) []restatement {
 	subject := sentence.QuoteFor
 	if len(named) == 1 {
@@ -529,10 +431,6 @@ var fileExtensions = map[string]bool{
 // bundleToolTokens collects every backticked, tool-shaped token in the
 // bundle, with its position. It walks the whole tree, markdown and JSON
 // alike: a transcript is authored text too.
-//
-// This is what makes the ship-order rule mechanical rather than
-// remembered. A page that mentions `analysis.cycles` before any
-// analysis tool is registered is a failing build, not a review comment.
 func bundleToolTokens(fsys fs.FS) ([]toolToken, error) {
 	var out []toolToken
 	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
@@ -574,11 +472,6 @@ var backtickedWord = regexp.MustCompile("`([a-z_]+(?:\\.[a-z_]+)*)`")
 
 // bundleToolMentions finds every mention of a registered tool in the
 // bundle, by name, in backticks.
-//
-// It exists because the dotted-token scan above cannot see an unprefixed
-// tool: `whoami` and `search` carry no dot, and a routing guard built on
-// the dotted scan alone would report them as unrouted forever while
-// looking like it had checked them.
 func bundleToolMentions(fsys fs.FS, registered map[string]string) ([]toolToken, error) {
 	var out []toolToken
 	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {

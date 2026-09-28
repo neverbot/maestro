@@ -23,13 +23,6 @@ func TestTheHint(t *testing.T) {
 // source guard because a stylesheet a shadow root adopts is invisible to
 // every harness in this directory: the behaviour test above builds the
 // element against a stub with no CSS in it at all.
-//
-// What it holds is the part a reviewer cannot see by reading the
-// component: that the panel's chrome is the product's tokens rather than
-// a second opinion about what a floating sheet looks like, and that the
-// transition animates opacity only. A panel that animated its own
-// position or size would animate layout, which docs/design.md forbids by
-// name.
 func TestTheHintPanelIsASurfaceAndNotABox(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/components/mst-hint.js")
@@ -66,17 +59,6 @@ func TestTheHintPanelIsASurfaceAndNotABox(t *testing.T) {
 // TestEveryControlAnswersThePointerAndThePress is the guard for a defect
 // a person reported as "no button reacts to anything", which was true
 // and was general.
-//
-// `.ghost:hover` painted `--ground`, and `body` *is* `--ground`: every
-// secondary control standing on a page changed, on hover, to exactly the
-// colour already behind it. The same rule was in control-styles.js, so
-// the controls inside every shadow root had the same nothing. And
-// `:active` appeared nowhere at all, so a control gave one answer to
-// "the pointer is over me" and to "you are pressing me".
-//
-// Both files are read, because a control vocabulary that disagrees
-// across the shadow boundary is the defect control-styles.js exists to
-// prevent.
 func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 	t.Parallel()
 	// **One file, where there were two.** The ghost's rule used to be
@@ -117,22 +99,6 @@ func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 
 // TestNoStyleSheetIsCutInHalfByABacktick is the guard for a defect that
 // landed three times in one afternoon and is invisible to `node --check`.
-//
-// Every component in this product ships its CSS as a template literal,
-// because `adoptedStyleSheets` takes a string and the server's policy
-// refuses a built `<style>` element. A backtick inside that CSS — and
-// this repository's prose puts identifiers in backticks everywhere, so
-// a comment saying `--ground` does it — **ends the literal**. The rest
-// of the sheet is then parsed as JavaScript, where `--ground` is a
-// decrement of an undeclared name, and the browser refuses the whole
-// module with "Invalid left-hand side expression in postfix operation".
-//
-// It survives `node --check`, because the text after the stray backtick
-// often happens to parse: the file is valid JavaScript that means
-// something entirely different. What it does not survive is being
-// opened, and by then it has taken down every module that imports it —
-// control-styles.js is imported by every component, so one backtick
-// blanked five screens.
 func TestNoStyleSheetIsCutInHalfByABacktick(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob("static/components/*.js")
@@ -196,9 +162,6 @@ var interactiveControls = []struct {
 // can see rather than the invisible repaint it is on the page itself.
 // The exemption is by name, and it is two, so a third one has to be
 // argued here rather than inherited.
-//
-//   - the game switcher lives in the header, which is paper;
-//   - a chip belongs to a panel's control strip, never to bare page.
 var standsOnPaper = map[string]bool{
 	"the game switcher": true,
 	"a chip":            true,
@@ -210,14 +173,6 @@ var standsOnPaper = map[string]bool{
 
 // TestEveryControlSaysSomethingWhenPointedAt is the standing version of
 // a review that kept being done by hand and kept missing things.
-//
-// Two ways a hover can exist and say nothing, and this product shipped
-// both: painting the colour that is already behind the control
-// (`.ghost` painted `--ground`, which is `body`'s background) and
-// declaring a property the control does not have (`.link-button:hover`
-// set `background: none` on a control with no background). A third,
-// weaker, is a change too small to see: the primary's fill moves 1.18:1
-// in luminance, which is why it now lifts as well.
 func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 	t.Parallel()
 	// The control vocabulary and the screens' own rules, read together:
@@ -286,10 +241,6 @@ func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 // ruleFor returns the body of the first rule whose selector list
 // contains this exact selector, so `.ghost:hover:not(:disabled)` does
 // not match a rule that merely mentions it inside a longer one.
-//
-// The stylesheet is read with comments stripped first: this file's own
-// prose contains braces and selectors, and a scanner that read them
-// would report rules nobody wrote.
 func ruleFor(styles, selector string) string {
 	clean := stripComments(styles)
 	for at := 0; ; {

@@ -35,15 +35,6 @@ func decodeMCPError(t *testing.T, result *mcp.CallToolResult) map[string]any {
 // TestEveryMarkdownDomainErrorHasAWireCode drives one of each error the
 // markdown domain can produce through mcpErrorFor and fails on
 // internal_error.
-//
-// It exists because nothing a caller can fix may report internal_error,
-// and because the failure is silent: an unmapped error type falls
-// through mcpErrorFor's default arm, logs, and hands an agent "the
-// server broke" over a value the agent itself sent. markdown.
-// ConflictError is a different Go type from metamodel.VersionConflictError,
-// so the existing errors.As arm does not catch it, and a version
-// conflict — the one failure a re-read and a retry resolve — would
-// otherwise arrive as the code meaning "give up".
 func TestEveryMarkdownDomainErrorHasAWireCode(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -134,15 +125,6 @@ func TestAConflictOnADeletedDocumentSaysSoOnTheWire(t *testing.T) {
 // TestANamedMissPublishesItsPath asserts the discrimination the spec
 // wanted a separate `entity_not_found` code for arrives as data, **on
 // both surfaces and through the mappers a real call goes through**.
-//
-// The first version of this test called fieldDetails directly. It
-// passed, and it guarded nothing: neither mcpErrorFor's not_found arm
-// nor writeDomainError's passed the error to fieldDetails at all, so a
-// real docs.links.add with a mistyped entity key answered a flat
-// not_found with no details and an agent holding two addresses had to
-// parse prose to learn which one missed. A helper test cannot see that.
-// This one drives the error through both mappers, so either arm
-// regressing to nil details fails it.
 func TestANamedMissPublishesItsPath(t *testing.T) {
 	t.Parallel()
 	missing := &markdown.MissingError{Path: "entity_key", Message: "no such quest"}
@@ -200,13 +182,6 @@ func TestAPlainNotFoundCarriesNoFieldList(t *testing.T) {
 // into a struct declared in its own file, because DocsWriteInput did not
 // exist when it was written, and its own comment says its claim must be
 // re-pinned here.
-//
-// The three states have to survive JSON in both directions: omitted and
-// an explicit null preserve the document's attachments, an empty array
-// detaches everything, and a populated one replaces the set. `omitempty`
-// on a plain slice would collapse the empty case back into the omitted
-// one, which is the silent, destructive direction — and it is exactly
-// how `kind` broke once already, as a plain string with omitempty.
 func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType(t *testing.T) {
 	t.Parallel()
 	// The declaration itself, so a later edit cannot quietly drop the

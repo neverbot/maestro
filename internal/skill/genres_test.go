@@ -19,35 +19,10 @@ import (
 // thing the whole product says it is not: a built-in vocabulary. A
 // shipped "MMORPG template" is built-in vocabulary by another name
 // unless four rules hold, and three of them are testable.
-//
-//  1. The page's product is the reasoning, not the type list. Untestable,
-//     and it is what review is for.
-//  2. The page and its transcript declare the same types, so no page
-//     describes a type nothing builds — TestTheGenrePageAndItsTranscriptAgree.
-//  3. No two genres declare the same vocabulary, because three genres
-//     that agree on everything have collapsed into one domain —
-//     TestNoTwoGenresDeclareTheSameVocabulary.
-//  4. No genre word reaches the server's own code —
-//     TestNoGenreVocabularyInServerCode, which lives in internal/web
-//     because it walks the whole repository.
-//
-// Rule 2's fence is also what carries the vocabulary rule one step
-// along: knownVocabularies in vocab_test.go names every
-// `vocab:genre_types_*` fence and this file is the guard it names, so a
-// fourth genre page whose fence nothing compares fails there.
-
-// deliberateDifference is the heading every genre page carries exactly
-// once.
 const deliberateDifference = "## Where this differs deliberately"
 
 // genrePages walks the bundle and pairs `genres/<name>.md` with
 // `genres/<name>.json`.
-//
-// Both directions are errors: a page with no transcript is prose no test
-// ever executes, and a transcript with no page is a worked example with
-// its reasoning missing — which is the half this bundle says is the
-// valuable one. Pairs are discovered by walking rather than listed, so a
-// fourth genre is covered without editing any test here.
 func genrePages(t *testing.T) map[string]genrePair {
 	t.Helper()
 	pairs := map[string]genrePair{}
@@ -94,11 +69,6 @@ type genrePair struct {
 
 // transcriptTypeKeys reads the entity type keys a transcript declares,
 // off its `types.upsert` calls.
-//
-// It reads the calls rather than a list beside them for the reason every
-// guard in this package walks the tree: a second list is what goes
-// stale, and a transcript that adds a type and forgets the list would be
-// compared against a list that never mentioned it.
 func transcriptTypeKeys(fsys fs.FS, name string) ([]string, error) {
 	body, err := fs.ReadFile(fsys, name)
 	if err != nil {
@@ -130,12 +100,6 @@ func transcriptTypeKeys(fsys fs.FS, name string) ([]string, error) {
 
 // TestEveryGenrePageDeclaresADeliberateDifference holds every genre page
 // to naming another genre page and a decision taken differently there.
-//
-// The section is the one thing that stops three pages reading as three
-// copies of one template. A page that differs from `genres/rts.md` when
-// no such page ships is a dead reference, so the named page has to exist
-// in the bundle — and it has to be a *different* page, because a page
-// that cites itself has cited nothing.
 func TestEveryGenrePageDeclaresADeliberateDifference(t *testing.T) {
 	pairs := genrePages(t)
 	for _, pair := range pairs {
@@ -172,11 +136,6 @@ func TestEveryGenrePageDeclaresADeliberateDifference(t *testing.T) {
 // TestTheGenrePageAndItsTranscriptAgree is set equality, both
 // directions, between a page's `vocab:genre_types_<genre>` fence and the
 // entity types its transcript declares.
-//
-// It is the guard that stops a page describing a `mount` type the
-// transcript never builds, and it is the guard that stops a transcript
-// growing a type the page never explains. The pairs come from the walk,
-// so a fourth genre is checked without editing this test.
 func TestTheGenrePageAndItsTranscriptAgree(t *testing.T) {
 	fences, err := skill.VocabFences(skill.Files())
 	assert.Must(t, err == nil, "reading the bundle's vocab fences: %v", err)
@@ -213,13 +172,6 @@ func TestTheGenrePageAndItsTranscriptAgree(t *testing.T) {
 }
 
 // TestNoTwoGenresDeclareTheSameVocabulary is the convergence signal.
-//
-// Equality, not overlap. `requires` appearing in all three genres is
-// expected and is fine — it is one idea three games happen to share. Two
-// genres whose *whole* type vocabularies are equal have collapsed into
-// one built-in domain, and the bundle would then be teaching that
-// Maestro has a shape of its own, which is the one thing this product
-// says it does not.
 func TestNoTwoGenresDeclareTheSameVocabulary(t *testing.T) {
 	pairs := genrePages(t)
 	vocab := map[string]string{}
@@ -246,11 +198,6 @@ func TestNoTwoGenresDeclareTheSameVocabulary(t *testing.T) {
 
 // TestTheGenreGuardsArePrecise drives every reader in this file with
 // fixtures the real bundle does not contain.
-//
-// Every assertion above is of the form "the two sides agree", and a
-// reader that returned nothing would make all of them agree. So each
-// reader is given a case it must find something in and a case it must
-// find nothing in, here, rather than being trusted.
 func TestTheGenreGuardsArePrecise(t *testing.T) {
 	t.Run("the section reader finds one section and counts repeats", func(t *testing.T) {
 		body := "# A genre\n\nIntro.\n\n" + deliberateDifference +

@@ -107,13 +107,6 @@ func TestUnsubscribeManyDistinctProjectsLeavesHubUsable(t *testing.T) {
 // by a dropped event (a full buffer, the one mechanism this package
 // itself can silently lose an event to) without this hub keeping any
 // history of what it dropped.
-// TestPublishAssignsPerSubscriptionSequence pins Event.Seq's new
-// contract (moved off a per-project counter — see Hub's own doc comment
-// for why): it starts at 1 for a subscription's first received event,
-// increases by exactly 1 per event that subscription is gated in for,
-// and is tracked independently per subscription, not per project — two
-// subscribers of the very same project each see their own Seq start at
-// 1.
 func TestPublishAssignsPerSubscriptionSequence(t *testing.T) {
 	t.Parallel()
 	hub := realtime.NewHub()

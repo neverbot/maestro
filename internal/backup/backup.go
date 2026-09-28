@@ -1,28 +1,4 @@
 // Package backup runs periodic pg_dump backups in-process.
-//
-// **The readme said this was deliberately missing**, under the heading
-// that names what a self-hoster has to do themselves, and for a while
-// that was an honest trade: backing up an instance means backing up its
-// Postgres volume like any other database. It stopped being honest the
-// moment the product started holding a game's whole design — four
-// hundred missions nobody has a second copy of — behind a single
-// container somebody runs on a machine in their house.
-//
-// Disabled when Config.Dir is empty, which is the default: an instance
-// that says nothing about backups gets exactly what it got before. When
-// enabled, one goroutine sleeps until the next MAESTRO_BACKUP_AT slot in
-// local time, shells out to `pg_dump --format=custom` against
-// Config.DatabaseURL, writes the dump atomically, and prunes files older
-// than KeepDays. Errors are logged and the loop continues; the goroutine
-// never returns while ctx is alive, because a backup that stops after
-// one bad night is a backup nobody notices is gone.
-//
-// **What it guarantees, each part of it deliberate:** the dump is 0600 in
-// a 0700 directory, an existing directory is tightened on start, the
-// password reaches pg_dump through the environment so it is not in
-// `ps`, the write is atomic through a `.tmp` rename, and orphan `.tmp`
-// files from an interrupted dump are swept. It also changed the image:
-// the runtime was distroless and distroless has no pg_dump.
 package backup
 
 import (
@@ -158,16 +134,6 @@ func dumpOnce(ctx context.Context, c Config) error {
 	// **`--dbname=` and not a bare positional.** A positional that
 	// happened to begin with a dash would be read by pg_dump as a flag;
 	// fused to its option it can only ever be the connection string.
-	//
-	// gosec's G204 flags every exec with a non-constant argument, and
-	// this one is not a shell and not user input: the program is a
-	// literal, every argument is its own argv entry with no shell to
-	// interpolate it, `tmp` is built from a fixed prefix and a time
-	// format, and the connection string is the operator's own
-	// DATABASE_URL — the same string the server already connects with.
-	// This repository runs every gosec rule, so the reasoning sits on the
-	// line it answers for rather than in a path-wide exclusion that would
-	// also cover the next exec in this file.
 	cmd := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--file="+tmp, "--dbname="+dsn) //nolint:gosec // G204: literal program, argv without a shell, operator-supplied DSN; see above.
 	// The password goes through the environment: process arguments are
 	// world-readable in `ps` for as long as the dump runs.

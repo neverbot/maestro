@@ -12,9 +12,6 @@
 // a browser would — a successful login redirecting through
 // safeReturnPath — with each of those three payloads in ?return=, and
 // asserts every one lands on this origin, never on evil.example.
-//
-// Run directly: `node internal/web/jstest/safe_return_path_test.mjs`.
-// internal/web/static_appjs_invite_test.go shells out to this file too.
 
 const ORIGIN = "http://localhost:8124";
 

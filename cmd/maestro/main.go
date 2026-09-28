@@ -17,10 +17,6 @@ import (
 	// an operator asking for 03:00 would get the dump at another hour in
 	// silence. Measured on the real image — the first end-to-end run of
 	// that feature never fired at the minute it was told to.
-	//
-	// It is this import rather than a package in the image because it
-	// belongs to the binary that reads the clock: 450 KB compiled in,
-	// and an instance built for any base at all keeps the behaviour.
 	_ "time/tzdata"
 
 	"github.com/neverbot/maestro/internal/analysis"
@@ -75,19 +71,6 @@ func main() {
 // start-stop cycle against a real listener with a context it controls
 // (a plain context.WithCancel) instead of sending the test binary's own
 // process a real signal.
-//
-// Migration failure and start-up ordering: db.Migrate runs to completion
-// (or fails) before srv.ListenAndServe is ever called, so there is no
-// window in which this process accepts a connection — /healthz included —
-// while migrations are incomplete or failed; a caller either finds a
-// fully migrated instance or finds nothing listening at all. goose (the
-// migration runner db.Migrate wraps) runs each migration file in its own
-// transaction by default, so a failure partway through one file rolls
-// back that file's own statements and leaves every previously applied
-// migration exactly as it was; run() reports the error and exits
-// nonzero without starting the server, and the next start-up attempt
-// resumes from the same first still-unapplied migration rather than
-// re-running anything that already succeeded.
 func run(ctx context.Context, getenv func(string) string) error {
 	cfg, err := config.Load(getenv)
 	if err != nil {
@@ -113,12 +96,6 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// below, so the shutdown goroutine can call its Close() — see
 	// web.Server.Close's own doc comment for why http.Server.Shutdown
 	// alone is not enough once an SSE stream is in the mix.
-	// One hub, shared. The web server publishes its own membership and
-	// token events into it and the SSE endpoint reads from it, and the
-	// metamodel service publishes every content change into the same
-	// one; built here rather than left to NewServer's own nil default
-	// precisely because two of them would leave a designer's browser
-	// watching a stream nothing writes to.
 	hub := realtime.NewHub()
 	webServer := web.NewServer(web.Options{
 		Version:   version.Version,
@@ -208,13 +185,6 @@ func run(ctx context.Context, getenv func(string) string) error {
 // until ctx is done. Neither identity.Service method (Task 6, Task 7) had
 // a process-lifecycle owner before this: both are tested in isolation but
 // were deliberately left uncalled, with a comment on each pointing here.
-//
-// The immediate sweep before the ticker's first tick matters on its own:
-// time.NewTicker's first tick does not fire until a full pruneInterval
-// has elapsed, so without it a process restarted more often than that
-// (ordinary deploy churn, a crash loop, a rolling update) would never
-// prune at all across its whole lifetime — every restart resets the
-// ticker before it ever fires once.
 func startPruneLoop(ctx context.Context, ids *identity.Service) {
 	go func() {
 		pruneOnce(ctx, ids)

@@ -10,24 +10,6 @@ import (
 
 // **The fit has to run after the width, and only a source guard can say
 // so.**
-//
-// `fitOnce` is thoroughly driven by jstest/pages_test.mjs and was green
-// through the whole of this defect. It was called at the end of
-// `drawPicture`, which runs *before* `draw`'s `finally` — and
-// `watchWidth` applies the width once at mount, when `state.pictured` is
-// still false, so the canvas is `hidden` for the entire first draw. A
-// hidden element measures 0x0, so the fit answered null twice, reported
-// false honestly, and every view opened at the origin at 1x. Measured on
-// `marks-check/v/palette`: 48 of 105 nodes drawn outside a 1392x571
-// clip, with no scrollbar and no notice, and calling `fitOnce` by hand
-// afterwards brought all 105 in.
-//
-// The harness cannot see this: moving the call back inside `drawPicture`
-// leaves every assertion in pages_test.mjs green, which is the whole
-// reason this file exists. It holds the two halves of the ordering.
-//
-// Mutation: move the `fitAfterLayout` call back into `drawPicture`, or
-// above `applyWidth` in the `finally`, and this fails.
 func TestTheViewIsFittedAfterItsWidthIsApplied(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/pages/view.js")

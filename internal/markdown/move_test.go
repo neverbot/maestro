@@ -444,13 +444,6 @@ func TestMoveArea(t *testing.T) {
 	// needs; Postgres would break the cycle with SQLSTATE 40P01 and one caller
 	// would meet a deadlock over two writes that have a perfectly good serial
 	// order.
-	//
-	// It is a real race and not a staged one, because staging it means
-	// holding a lock across the two goroutines, which is what the ordering
-	// removes. Run repeatedly (-count=20) it reddens reliably with the
-	// ordering removed and stays green with it: what is asserted is that
-	// neither caller is ever answered with a deadlock, whichever of them
-	// wins.
 	t.Run("two opposite moves do not deadlock", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()

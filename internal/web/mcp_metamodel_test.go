@@ -25,12 +25,6 @@ import (
 
 // newMetamodelTestServer wires a server with a metamodel service over the
 // same ephemeral database, and hands back both.
-//
-// It is a second helper rather than a change to newTestServer's return
-// values: every one of newTestServer's several dozen callers would have
-// had to grow an ignored fourth result to reach a service none of them
-// use, and a Server built without a metamodel service is a shape this
-// package supports deliberately (MCPDeps.Metamodel).
 func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service, *markdown.Service) {
 	t.Helper()
 	pool := testutil.NewPool(t)
@@ -139,11 +133,6 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 // tells an agent to decide whether to re-create the row, and
 // `version_conflict` tells it to merge — and merging is the one recovery
 // that cannot work against a row that is gone.
-//
-// Both surfaces map metamodel.RemovedError through the ErrNotFound arm
-// they already had, so what could break is the domain's own Is method
-// rather than an arm here; that is exactly why this asserts the code an
-// agent reads rather than the Go type.
 func TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -188,16 +177,6 @@ func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
 
 // TestTheRenameToolsSayWhatARenameDoesNotDo is the description guard for
 // the one thing an agent will otherwise meet as a surprise.
-//
-// A rename leaves every saved view that names the type reporting
-// `*_renamed` until the view is saved again. That is the designed
-// behaviour — nothing rewrites a stored query behind its author — but an
-// agent that renames a type and then sees a diagnostic it was not warned
-// about will read it as a defect and go looking for a repair that does
-// not exist. Both tools carry the same paragraph, because a designer
-// renaming an entity type and a designer renaming a relation type meet
-// the same diagnostic and must not have to find the explanation under
-// only one of the two names.
 func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -225,12 +204,6 @@ func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {
 // surface: every tool that takes a project id is called with the id of a
 // game the caller's own *user* owns but the caller's own *token* is not
 // bound to, and every one must refuse before touching the database.
-//
-// One table rather than one test per tool, because the invariant is the
-// same one for every tool and a per-tool test is one chance per tool to
-// forget the next one. entities.repair and relations.repair are the
-// most recent additions and were added here in the same change that
-// added them to the surface, which is what this table is for.
 func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -436,10 +409,6 @@ func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
 	// argument rather than as a server fault. They take keys now, and a
 	// key that names nothing is not_found — a different answer to a
 	// different question.
-	//
-	// What is left is the shape the rule still applies to: an endpoint
-	// list names the *element* at fault and not just the list, so an
-	// agent with one bad key in five fixes that one.
 	if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
 		Key: "circuit", Label: "Circuit", LabelPlural: "Circuits",
 	}); err != nil {
@@ -475,12 +444,6 @@ func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
 // pass: a real token, a real MCP client, and the whole seeding round trip
 // an agent actually performs — declare two types, declare an edge type
 // between them, seed entities, join them, then find one by search.
-//
-// It is here rather than in mcp_http_test.go because it needs a server
-// built with a metamodel service; what it adds over the direct-function
-// tests above is everything the SDK does on the way — input schema
-// validation against the reflected Go types, output validation against
-// the hand-written schemas, and JSON marshalling of every uuid.
 func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -730,23 +693,6 @@ func callOK(t *testing.T, session *mcp.ClientSession, name string, args map[stri
 
 // TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire closes review
 // findings H1 and H2 at the layer where both were wrong: the wire.
-//
-// H1: `entities.list`'s description claimed the `related_to` traversal was
-// not paged, never set `next_cursor`, and silently dropped every neighbour
-// past `MaxEntityPage`. All three clauses were false — `listRelated` has
-// always used the same `pageSize`, cursor and `pageOf` as the plain listing
-// — and the description sent an agent to `relations.list` as the escape
-// hatch for a case that does not exist. An agent believing it would have
-// stopped at the first page holding a whole neighbourhood it had only part
-// of. The domain side was already pinned by TestListArea's "a traversal
-// pages like every other listing" case (internal/metamodel); what was
-// missing was a guard at the wire, where the sentence lives.
-//
-// H2: `direction` was `omitempty`, so the served input schema left it
-// out of `required`, and the description called "outgoing" its default —
-// while `listRelated` refused an absent one outright. The domain's
-// refusal is the right call; this test pins that the schema now says so
-// too, and that omitting the field cannot produce a listing.
 func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -866,15 +812,6 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 // the leading key: proved live, `Gnoll Pack` (a lower rank) sorted
 // before `Wanted: Hogger` (a higher one) because only the first is
 // *named* by the query.
-//
-// Exposing name_match on the wire, rather than only correcting the
-// prose, is what makes the guarantee legible: an agent that re-sorts by
-// rank, or reasons that a higher rank must come first, now has the
-// field that explains why it should not. This test fails two ways: it
-// will not compile if name_match is dropped from SearchHit, and it
-// fails outright if the order SearchEntities produced and the
-// name_match values on the wire ever disagree — either a hit marked
-// false sorting before one marked true, or the reverse.
 func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -935,25 +872,6 @@ func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 
 // TestTheDomainTypesOnTheWireCarryExactlyTheseKeys closes review finding
 // L1.
-//
-// mcp_metamodel.go's header claimed "no wire type here is a domain
-// type", unqualified. In the *input* direction that is true and
-// load-bearing — an Actor off the wire would let an agent name any
-// author it liked. In the *output* direction it was simply false:
-// TypeDetailOutput.Schema and RelationTypeDetailOutput.Schema are
-// metamodel.Schema, and the two bulk outputs carry []metamodel.BulkWrite,
-// []metamodel.RelationWrite and []metamodel.BulkFailure. The reviewer
-// added an `updated_by_user_id` to metamodel.BulkWrite and it reached
-// the wire, unblocked by the hand-written output schemas.
-//
-// Re-exporting them is still the right call: their field lists *are*
-// the wire contract, and a shadow struct beside each would be a copy to
-// keep in step, which is the failure this avoids rather than the one it
-// causes. What was missing is a place where growing one of them is
-// visible. That is here. A field added to any of the four fails this
-// test, and whoever added it decides in the open whether an agent
-// should see it — rather than discovering it in another package's
-// golden file, or not at all.
 func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -1159,12 +1077,6 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 
 // TestRelationsListFindsTheEdgesASchemaEditBroke is the MCP half of the
 // read surface 0009's flag needs.
-//
-// entities.list has taken an `invalid` filter since it shipped, and until
-// this task its edge counterpart had nothing to filter on: editing a
-// relation type's field_schema left every edge unjudged. An agent that
-// has just narrowed a schema has to be able to ask what it broke, on
-// both tables, with the same argument name.
 func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -1223,12 +1135,6 @@ func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
 // was no relations.get, and relations.list was the only way to see an
 // edge at all. Nine review rounds verified the write and none asked
 // whether anything could read it.
-//
-// Both readers are asserted here, in one test, because the defect was
-// precisely that one surface could write what no surface could read: a
-// case that proved only relations.get would leave a listing that still
-// cannot show an edge's values, which is what the views sub-project
-// renders from.
 func TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)

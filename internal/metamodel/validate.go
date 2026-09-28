@@ -10,17 +10,6 @@ import (
 
 // Validate checks a value map against the schema and returns the normalised
 // map to store. Every problem is reported at once.
-//
-// Three rules matter more than the rest, and each exists for a reason:
-//   - An unknown field is an error, never dropped: an agent that types
-//     "min_lvl" must find out immediately, not six hundred rows later.
-//   - An absent optional field with no default stays absent: zero-filling
-//     would make "not set" indistinguishable from "set to zero".
-//   - A declared default is applied when the field is absent or null, so a
-//     schema change gives every new row the value the designer intended.
-//     See hasDefault for what counts as declared. The default goes through
-//     the same coercion a hand-written value does, so it lands in the row
-//     with the same Go type and cannot smuggle past the field's bounds.
 func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	byKey := make(map[string]Field, len(s))
 	for _, f := range s {
@@ -92,18 +81,6 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 // CheckValues re-validates a stored row against this schema and reports
 // whether it still fits, returning nothing a caller could accidentally write
 // back.
-//
-// This is the re-validation path. When a type's field schema is edited,
-// every stored row of that type has to be re-examined and flagged, and the
-// design is explicit that flagging must not alter the rows: an entity's
-// content is the designer's, and a validation pass is not an edit. Validate
-// cannot serve that purpose safely — it returns a normalised map with
-// declared defaults injected, so a caller who re-validates with it and then
-// stores what came back silently back-fills every row it touched. Returning
-// only an error removes the possibility rather than documenting against it.
-//
-// The rules are exactly Validate's, so the two never disagree about whether
-// a row is valid; the difference is only what comes back.
 func (s Schema) CheckValues(values map[string]any) error {
 	_, err := s.Validate(values)
 	return err
@@ -227,10 +204,6 @@ func coerce(f Field, raw any) (any, error) {
 // free to do, and Go callers inside Maestro pass the small and unsigned
 // widths. Missing any of them would break every number field at once, and
 // widening is far cheaper than finding out which decoder is in play.
-//
-// Finiteness is deliberately not decided here: NaN and the infinities widen
-// cleanly, and coerce rejects them with a message that says what is actually
-// wrong rather than claiming the value is not a number.
 func toFloat(raw any) (float64, bool) {
 	switch n := raw.(type) {
 	case float64:

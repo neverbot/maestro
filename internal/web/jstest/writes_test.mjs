@@ -2,36 +2,6 @@
 // internal/web/static/components/mst-canvas.js and the MstGround in
 // internal/web/static/components/mst-ground.js, driven against a stubbed
 // data client whose every request is counted.
-//
-// What this layer covers that no Go test can.
-//
-// **That one drag is one write.** The property is a *count of requests
-// across a gesture*, and a gesture does not exist on the server: by the
-// time internal/web sees anything, sixty writes and one write differ
-// only in how many rows were already written. So the instrument is the
-// stubbed fetch's call list, and the fixture is forty nodes and sixty
-// pointermoves, where the wrong answer is unmissable rather than a near
-// miss.
-//
-// **That the same write comes out of the keyboard.** Two write paths are
-// two chances to differ, so the assertion is not that the arrow keys work
-// — it is that the *shape* of the body a nudge posts is the shape of the
-// body a drag posts, compared structurally rather than by reading both
-// and agreeing they look similar.
-//
-// **That a screen coordinate is never written.** A drag ends inside a
-// pan-and-zoom transform. The fixture drags at 2× with the world panned,
-// and asserts the number that reaches the wire is the game's, which is
-// the number the layout composed against.
-//
-// **That a refused write reverts.** This is the one outcome a shared
-// design tool may not produce: a screen that disagrees with the database
-// indefinitely and says nothing. The assertion is on the model *and* on
-// the coordinate in the DOM, because a revert that only moved the model
-// would leave a designer looking at the arrangement they did not get.
-//
-// Run directly: `node internal/web/jstest/writes_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 
@@ -516,21 +486,6 @@ check("draggingIsDisabledInAutoAndTheCanvasSaysWhy", async () => {
 
 // **A canvas nobody can see accepts no write, and that is a gate rather
 // than a stylesheet.**
-//
-// Below tablet width the view page falls back to the twin (design spec
-// §9). Hiding the canvas in CSS would leave this controller believing it
-// may write: the twin stays on screen and stays focusable, its rows
-// still select nodes, and one arrow key would then write a position
-// against a picture with no observer. That is the same thing `auto`
-// refuses a drag for and it gets the same answer — every path refuses,
-// and the canvas says why.
-//
-// This check drives the six writes one by one because they are guarded
-// by two different gates: `pointerDown`, `nudge` and `commit` read
-// `draggable`, and `unpin`, `clearPositions` and `switchToMixed` read
-// `mayWrite`. A fix that closed only one of them would leave three
-// writes armed on an invisible drawing, and the count at the end is what
-// says so.
 check("anUndrawnCanvasAcceptsNoWriteAtAll", async () => {
   const { server, canvas, arrangement, nodes } = stage({ rows: 2, mode: MODE_MANUAL });
   arrangement.select(nodes[0].address);
@@ -628,13 +583,6 @@ check("aViewerGetsTheSentenceWithoutTheButton", async () => {
 
 // **The two writes that act on a selection are refused by the menu when
 // there is none, rather than answered with silence.**
-//
-// `unpin` and `clearPositions` both begin by returning null on an empty
-// list, so the buttons "worked" — they were enabled on a fresh load, a
-// click sent no request and nothing on screen changed, which reads as a
-// broken page rather than as a missing selection. Their treatment was
-// the ink-filled primary, on a screen whose most likely action is
-// reading, and the one with no undo was one click from happening.
 check("theArrangementsWritesAreOfferedOnlyWhenThereIsSomethingToWriteAbout", async () => {
   const { canvas, arrangement, nodes } = stage({ rows: 1 });
 

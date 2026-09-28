@@ -658,13 +658,6 @@ func TestVersionsArea(t *testing.T) {
 // there both TestVersionsArea's "revert is announced with the version it
 // restored" case and TestVersionsArea's "no revert is announced when the
 // revert is refused" case stay green.
-//
-// The technique is TestNoDeletionIsAnnouncedWhenTheDeleteCannotCommit's,
-// unchanged: a deferred foreign key from document_versions.id to
-// projects.id is satisfied by nothing, but being DEFERRABLE INITIALLY
-// DEFERRED it is checked at COMMIT, so every statement succeeds and only
-// the commit fails. NOT VALID is what lets it be added while earlier
-// versions already stand.
 func TestNoRevertIsAnnouncedWhenTheRevertCannotCommit(t *testing.T) {
 	svc, _, hub, pool := newService(t)
 	ctx := context.Background()

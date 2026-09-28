@@ -11,17 +11,6 @@ import (
 // TestTheBuilderDoorIsDecidedFromTheStoredQuery is a source guard over
 // one call, and it exists because the thing it protects is a promise
 // rather than a behaviour anything else can see.
-//
-// The builder spike's §4 says the builder **generates and never edits**:
-// it opens a stored query only when that document round-trips through
-// parse and re-emit unchanged, so a clause it has not learned closes the
-// door by itself instead of being dropped on the way through. Two places
-// have to ask: the view page, before it offers the way in, and the
-// builder itself, because a person can reach its address by hand.
-//
-// A page that offered the door without asking would look right on every
-// view in the seeded games — they all round-trip — and would quietly
-// rewrite the first query that did not.
 func TestTheBuilderDoorIsDecidedFromTheStoredQuery(t *testing.T) {
 	t.Parallel()
 	for _, page := range []struct {

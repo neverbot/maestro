@@ -43,14 +43,6 @@ func TestAnInlineHTMLSpanIsNotRendered(t *testing.T) {
 // TestADangerousLinkSchemeIsNeutralised drives the allowlist: anything
 // that is not http, https, mailto or a relative reference is replaced by
 // "#".
-//
-// Every case asserts the neutralised destination `href="#"` (or
-// `src="#"`) rather than only the absence of the payload's own spelling.
-// Absence alone would pass against a renderer that dropped the
-// destination entirely, and — worse — against one that left a *differently*
-// spelled live scheme behind; the entity cases below are exactly that
-// shape, and they are why this test asserts what was written instead of
-// what was not.
 func TestADangerousLinkSchemeIsNeutralised(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -96,29 +88,6 @@ func TestADangerousLinkSchemeIsNeutralised(t *testing.T) {
 // TestAnEntityEncodedSchemeIsResolvedBeforeItIsJudged is the case that
 // found the bug safeDestination's comment describes, and the reason it
 // calls util.URLEscape before reading the scheme.
-//
-// `javascript&#58;alert(1)` carries **no colon at all** in the bytes
-// goldmark stores on the node. A check that cut the raw destination at
-// ":" therefore found no scheme, concluded "relative reference", and
-// passed it through — while goldmark's own renderLink writes
-// util.EscapeHTML(util.URLEscape(dest, true)), and URLEscape's
-// resolveReference arm runs ResolveNumericReferences and
-// ResolveEntityNames, turning those bytes into a live
-// `href="javascript:alert(1)"`.
-//
-// **This was verified, not reasoned about**: rendering these three
-// bodies through plain goldmark.New() — whose own destination handling
-// refuses a literal `javascript:` — produces
-// `<a href="javascript:alert(1)">` for every one of them, and so does a
-// safeDestination that judges dest instead of URLEscape(dest, true).
-// Three spellings of the same colon get past both. That is what makes
-// these the cases worth pinning: they are not a variation on a payload
-// the layer below already stops, they are the payload it does not.
-//
-// The last case is the mirror image and is here so a "fix" that
-// resolved *harder* than the renderer does cannot pass: `%6a` is not a
-// scheme byte to any browser, so `%6aavascript:` is refused for having
-// an unknown scheme, and never by decoding it into `javascript:`.
 func TestAnEntityEncodedSchemeIsResolvedBeforeItIsJudged(t *testing.T) {
 	for _, body := range []string{
 		"[click](javascript&#58;alert(1))\n",   // decimal reference
@@ -192,11 +161,6 @@ func TestADiffsFileAndContextLinesAreClassedApart(t *testing.T) {
 // accepts any scheme of two to thirty-three URL-safe bytes. So
 // `<javascript:alert(1)>` rendered as a live href until safeLinks
 // started rewriting this kind too.
-//
-// The cases mirror TestADangerousLinkSchemeIsNeutralised one for one:
-// the same payload written in autolink syntax must end up at the same
-// `href="#"`, because a reader pasting a game bible has no idea which
-// of the two spellings the renderer treats as a different code path.
 func TestAnAutolinkDestinationIsJudgedTheSameWayALinksIs(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -279,15 +243,6 @@ func TestAnAutolinkLabelIsEscapedAndNotReRendered(t *testing.T) {
 
 // TestEveryAutolinkInAParagraphIsJudged is the case that pins *when*
 // the rewrite happens, not what it produces.
-//
-// Replacing a node in the middle of ast.Walk unlinks it from its
-// siblings, and Walk reads NextSibling off the node it has just
-// visited — so an in-place rewrite judges the first autolink in a
-// paragraph and never sees the rest. That failure is invisible in any
-// body with one autolink in it, and every other case in this file has
-// one. Here the dangerous spelling is deliberately last, behind two
-// harmless ones whose output is identical either way: only a
-// transformer that collects first and replaces afterwards reaches it.
 func TestEveryAutolinkInAParagraphIsJudged(t *testing.T) {
 	body := "a <https://example.com/1> b <https://example.com/2> c <javascript:alert(1)> d\n"
 	got, err := markdown.Render(body)
@@ -304,16 +259,6 @@ func TestEveryAutolinkInAParagraphIsJudged(t *testing.T) {
 
 // TestRenderDocAdmitsATableAndRenderStillDoesNot pins the one difference
 // between the two renderers, in both directions.
-//
-// The documentation site publishes this repository's own pages — the
-// trait vocabulary, the route table, the field types — and half of them
-// are tables. A game's prose is a different audience with a different
-// promise: it is written by designers and agents, read in a panel this
-// product styles, and a table in it is a shape nothing here has agreed
-// to draw.
-//
-// Mutation: give `renderer` the Table extension and the second half
-// fails; take it off `docRenderer` and the first half does.
 func TestRenderDocAdmitsATableAndRenderStillDoesNot(t *testing.T) {
 	const body = "| Trait | What it means |\n| --- | --- |\n| `unlocks` | it opens something |\n"
 
@@ -330,8 +275,6 @@ func TestRenderDocAdmitsATableAndRenderStillDoesNot(t *testing.T) {
 // TestRenderDocKeepsTheLinkAllowlist pins that the site's renderer shares
 // the policy rather than restating it: one copy of the allowlist is the
 // whole point of `safeLinks` being a transformer.
-//
-// Mutation: drop the transformer from docRenderer and this fails.
 func TestRenderDocKeepsTheLinkAllowlist(t *testing.T) {
 	out, err := markdown.RenderDoc("[click](javascript:alert(1))")
 	assert.Must(t, err == nil, "RenderDoc: %v", err)

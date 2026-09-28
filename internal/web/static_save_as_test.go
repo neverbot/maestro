@@ -15,20 +15,6 @@ import (
 )
 
 // The guards over "Save as" — the one view a human alone can make.
-//
-// internal/web/jstest/save_as_test.mjs drives the dialog and asserts the
-// properties that are about *a gesture and the bytes it produces*: that
-// the copied query is the source's document byte for byte, that an
-// illegal key costs no request, that the chooser offers the list the
-// server served. None of those exists on the server, and none of these
-// exists in the browser.
-//
-// What lives here is the join. The dialog states a key rule before it
-// sends anything and claims a version that means "this row must not
-// exist yet", and both of those are second copies of rules that live in
-// Go. A second copy of a rule is what this repository's standing failure
-// list calls drift, so both are pinned, in both directions, to the
-// source that enforces them.
 
 const saveAsModule = "static/components/mst-save-as.js"
 
@@ -46,20 +32,6 @@ func readModule(t *testing.T, path string) string {
 // sentences and the pattern the dialog refuses a key with to
 // internal/metamodel/keys.go's rowKeyProblems, which is what will judge
 // the key when the request arrives.
-//
-// The dialog checks the key itself so that a designer who typed a space
-// is not charged a round trip for it — and, more to the point, so that
-// the one refusal it can prevent entirely is prevented. That is only
-// worth doing while the words and the rule are the server's. A dialog
-// promising a rule the server does not apply is worse than one that
-// promises nothing: the sentence looks authoritative, and the designer
-// who obeys it is still refused.
-//
-// The Go side is read out of the source rather than called, because
-// rowKeyProblems, rowKeyPattern and maxRowKeyLen are all unexported —
-// deliberately, since the key policy is internal/metamodel's alone. A
-// source read is the only join available and it is a real one: it fails
-// on a rule changed there and left alone here.
 func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
 	t.Parallel()
 	module := readModule(t, saveAsModule)
@@ -105,15 +77,6 @@ func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
 
 // TestTheSaveAsDialogClaimsTheKeyIsFree pins client.js's
 // CREATE_EXPECTED_VERSION to internal/views' createExpectedVersion.
-//
-// This one is not cosmetic. `expected_version` is the whole of what
-// stops a copy overwriting a view somebody else is using: 0 means "this
-// view must not exist yet" and every other value is a claim about a row.
-// A copy that sent the *source's* version would be a write that
-// destroys whatever is at the key it was given, which is the one thing
-// no write in this front end may do — and a copy that sent nothing at
-// all would be refused as a conflict with a sentence about versions that
-// a designer who is creating a view cannot act on.
 func TestTheSaveAsDialogClaimsTheKeyIsFree(t *testing.T) {
 	t.Parallel()
 	client := readModule(t, "static/client.js")
@@ -142,17 +105,6 @@ func TestTheSaveAsDialogClaimsTheKeyIsFree(t *testing.T) {
 // TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper is the
 // fourth of this round's screen findings, applied to the surface this
 // task adds rather than only to the ones that already had it.
-//
-// mst-view-frame wraps the drawing in an `aria-hidden` div because the
-// text twin is the accessible content of the answer. Anything appended
-// to the frame is slotted into that wrapper, so a focusable control put
-// there is one a keyboard can reach and a screen reader will never
-// announce — which is worse than either alone. The dialog is full of
-// focusable controls, so it gets a hole of its own in the shell.
-//
-// The harness asserts the mount really mounts; what it cannot see is
-// *where the hole is*, because a stub has no shadow DOM and no slot.
-// That is this test's half.
 func TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper(t *testing.T) {
 	t.Parallel()
 	shell := readModule(t, "static/view.html")
@@ -171,13 +123,6 @@ func TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper(t *testing.T) {
 
 // TestTheRendererCatalogueRouteServesTheWholeTable drives the route the
 // dialog's chooser reads.
-//
-// It is asserted against internal/views.RendererCatalogue rather than
-// against a list written here, in both directions, for the reason the
-// generated description exists at all: a route that served five of six
-// renderers would leave one unreachable from the interface for as long
-// as nobody counted, and a route serving a name the catalogue does not
-// hold would offer a designer a renderer views.upsert refuses.
 func TestTheRendererCatalogueRouteServesTheWholeTable(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)

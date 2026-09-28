@@ -30,11 +30,6 @@ import (
 // analysisWorld is one server with an analysis service, one game seeded
 // so that **every one of the four analyses has something to find**, and
 // the credentials to drive it over either surface.
-//
-// The "something to find" is the point rather than convenience. Views'
-// own transport test ran a view before anything had been written and an
-// array of nothing satisfies any item schema at all, so two broken
-// schemas passed it. Nothing here is called against an empty game.
 type analysisWorld struct {
 	srv    *web.Server
 	deps   web.MCPDeps
@@ -111,11 +106,6 @@ func newAnalysisWorld(t *testing.T) *analysisWorld {
 }
 
 // seed writes the game through the same tools an agent would call.
-//
-// The shape is deliberate and every part of it is read by some assertion
-// below: a three-cycle in `requires`, a quest gated behind it that no
-// player can reach, an entity whose only edge is an annotation, and an
-// ordering pair a route then walks backwards.
 func (w *analysisWorld) seed(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
@@ -199,20 +189,6 @@ func analysisRouteSteps() []web.RoutesStepInput {
 
 // TestEveryAnalysisToolIsCallableOverTheRealTransport drives all eight
 // tools through the mounted MCP endpoint.
-//
-// **It is a schema test wearing a smoke test's clothes.** The SDK
-// validates a call's arguments against the registered *input* schema
-// before any handler runs, and the handler's answer against the
-// registered *output* schema before it reaches the wire; neither is read
-// by a test that calls the MCP* functions directly. Views shipped three
-// tools uncallable by any real client with its whole package green,
-// twice over, because every one of its tests crossed no schema.
-//
-// The table is checked against the **registry**, so a ninth tool added
-// without a call here fails rather than going unexercised. And every
-// call is made against a game seeded to answer non-emptily: an array of
-// nothing satisfies any item schema at all, which is how a misspelled
-// member goes on passing a transport test that ran too early.
 func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 	t.Parallel()
 	w := newAnalysisWorld(t)
@@ -351,11 +327,6 @@ func analysisKeysOf(out map[string]any) []string {
 
 // TestEveryAnalysisSentinelHasAWireCode drives analysis.Sentinels()
 // through the two mapping functions rather than repeating the list.
-//
-// A sentinel added there and not mapped here surfaces as internal_error,
-// which tells an agent to give up on something it could fix in one call.
-// That is the pattern TestEveryViewsSentinelHasAWireCode established and
-// the reason it exists.
 func TestEveryAnalysisSentinelHasAWireCode(t *testing.T) {
 	t.Parallel()
 	sentinels := analysis.Sentinels()
@@ -389,13 +360,6 @@ func TestEveryAnalysisSentinelHasAWireCode(t *testing.T) {
 }
 
 // TestSemanticsUndeclaredIs422OnRESTAndCarriesTheCatalogue.
-//
-// **422 and not 400 or 409.** The request is well formed and the game is
-// in a state the caller can fix by declaring something, which is exactly
-// what invalid_schema and schema_violation are 422 for. And the payload
-// is the whole reason the code exists: the recovery is "declare
-// something about your relation types", and no caller can perform it
-// without the list.
 func TestSemanticsUndeclaredIs422OnRESTAndCarriesTheCatalogue(t *testing.T) {
 	t.Parallel()
 	err := &analysis.UndeclaredError{
@@ -423,19 +387,6 @@ func TestSemanticsUndeclaredIs422OnRESTAndCarriesTheCatalogue(t *testing.T) {
 }
 
 // TestEveryAnalysisToolDescriptionCarriesTheGeneratedTraitTable.
-//
-// Nothing in these descriptions restates the vocabulary, the coherence
-// rules or the derivation mapping in prose: they splice
-// analysis.TraitDescription(), which is generated from the tables the
-// engine enforces against. A hand-written paragraph beside a table is a
-// paragraph that goes false on the first edit to the table, and an agent
-// has no way to notice.
-//
-// The set of tools that must carry it is derived rather than listed: any
-// tool that can answer `semantics_undeclared` needs to tell a caller
-// what to declare. `analysis.orphans` carries it too, because it reads
-// the `annotation` word off the same vocabulary even though it does not
-// refuse.
 func TestEveryAnalysisToolDescriptionCarriesTheGeneratedTraitTable(t *testing.T) {
 	t.Parallel()
 	table := analysis.TraitDescription()
@@ -456,12 +407,6 @@ func TestEveryAnalysisToolDescriptionCarriesTheGeneratedTraitTable(t *testing.T)
 // TestNoAnalysisToolDescriptionNamesATraitOutsideTheTable is the other
 // direction, and it is the half that catches a hand-written mention of a
 // trait that no longer exists.
-//
-// Every backticked lowercase token in the *hand-written* part of an
-// analysis description — the description with the generated table
-// removed — must be either an argument this tool actually takes or a
-// word of the trait vocabulary. A trait dropped from the vocabulary
-// leaves its mention behind, and that mention then names neither.
 func TestNoAnalysisToolDescriptionNamesATraitOutsideTheTable(t *testing.T) {
 	t.Parallel()
 	descriptions := web.NewToolReferenceServer().ToolDescriptionsForTest()
@@ -602,11 +547,6 @@ func backtickedTokens(text string) []string {
 }
 
 // TestTheAnalysisToolsAreAbsentWithoutAnAnalysisService.
-//
-// A Server built with no analysis service still starts and still answers
-// every other tool, which is the shape Options.Analysis documents. It is
-// asserted rather than assumed because the registration is behind an
-// `if` and an `if` nothing exercises is a branch that can be deleted.
 func TestTheAnalysisToolsAreAbsentWithoutAnAnalysisService(t *testing.T) {
 	t.Parallel()
 	srv := web.NewServer(web.Options{
@@ -624,27 +564,6 @@ func TestTheAnalysisToolsAreAbsentWithoutAnAnalysisService(t *testing.T) {
 
 // TestAViewerCanRunAnAnalysisAndCannotUpsertARoute pins what actually
 // ships on both surfaces, including the half that is a finding.
-//
-// **A token is editor-equivalent by construction** (requireProject's own
-// doc comment argues it), so the role gate this test is about only bites
-// a *session* caller — a designer in a browser. For that caller:
-//
-//   - routes.upsert is a write and is refused. Correct.
-//   - **analysis.cycles is a read and is refused too**, because an
-//     analysis is a POST and registerContentRoute gates every non-GET
-//     route on this surface. That is the finding api_analysis.go's
-//     header records: it is the same shape `views.run` has carried since
-//     the views sub-project, and it belongs to the change that builds the
-//     browser client rather than to one domain.
-//
-// Over MCP, where an agent lives and where these tools are primary, a
-// viewer's token runs the analysis. So a viewer *can* run one, on the
-// surface a viewer with a token has, and cannot on the one it does not —
-// which is the sentence this test's name makes, spelled out.
-//
-// It asserts what ships rather than what would be nicer, because a test
-// asserting the nicer thing would have to be skipped, and a skipped test
-// is a claim nobody checks.
 func TestAViewerCanRunAnAnalysisAndCannotUpsertARoute(t *testing.T) {
 	t.Parallel()
 	w := newAnalysisWorld(t)
@@ -703,11 +622,6 @@ func (w *analysisWorld) callAs(t *testing.T, cookie *http.Cookie, method, path, 
 }
 
 // TestARouteCheckIsPublishedToASubscriber is the SSE half.
-//
-// **Analyses are not streamed** — they are pull, not push, and there is
-// nothing about running one that another session needs to learn. A route
-// is different: it holds a stored verdict that another writer can
-// invalidate, so the three route kinds are published.
 func TestARouteCheckIsPublishedToASubscriber(t *testing.T) {
 	t.Parallel()
 	w := newAnalysisWorld(t)
@@ -734,20 +648,6 @@ func TestARouteCheckIsPublishedToASubscriber(t *testing.T) {
 }
 
 // TestStalenessIsReadFromTheRouteAndNotFromAnEvent.
-//
-// The plan asked for `design_version` to ride on every metamodel event,
-// so a client could compare it locally against each route's
-// `last_checked_design_version`. **It does not, and the reason is that
-// the server already answers the question the comparison exists to
-// answer.** `routes.list` computes each route's three-state status
-// against the game's current counter, server-side, on every read — so a
-// client that hears any metamodel event and re-reads gets the answer
-// directly, and putting the counter on every event would cost a query
-// per published event during exactly the burst (a bulk seed) where the
-// events are already being dropped into a resync.
-//
-// This test is what makes that a decision rather than an omission: it
-// asserts the path the client actually has.
 func TestStalenessIsReadFromTheRouteAndNotFromAnEvent(t *testing.T) {
 	t.Parallel()
 	w := newAnalysisWorld(t)

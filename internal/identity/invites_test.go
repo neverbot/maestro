@@ -299,17 +299,6 @@ func TestRedeemUnboundInviteAppliesDomainAllowlist(t *testing.T) {
 // Correction 8, still enforced at creation time). Redemption must not
 // re-apply the allowlist to an address the admin already committed to by
 // name.
-//
-// CreateInvite itself still refuses to *mint* a bound invite for a
-// disallowed domain (see TestCreateInviteRejectsDisallowedDomain), so this
-// test cannot demonstrate the property using one Service end to end — that
-// would only prove CreateInvite's own gate works, not RedeemInvite's. It
-// mints the invite through a permissively configured Service and redeems
-// it through a second Service, sharing the same database, configured with
-// a strict allowlist that would refuse the address on the open
-// self-service path — the same shape as an operator tightening
-// ALLOWED_EMAIL_DOMAINS after an invite was already minted and handed out,
-// which must not retroactively break it.
 func TestRedeemBoundInviteAllowsOffDomainEmail(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -340,13 +329,6 @@ func TestCreateInviteUsesConfiguredDefaultTTL(t *testing.T) {
 	svc := identity.New(pool, cfg)
 
 	// Bracketed against the *database's* clock, not this process'.
-	// CreateInvite no longer computes a timestamp at all — it sends the
-	// TTL as an interval and Postgres writes now() + it — so bracketing
-	// with time.Now() would be asserting that two machines' clocks agree
-	// to within the round trip, which is the very assumption whose
-	// failure this change removed (see CreateInvite in identity.sql).
-	// Measured against the local test database, that bracket was already
-	// off by about 1.6ms.
 	before := dbNow(t, pool).Add(cfg.InviteTTL)
 	_, summary, err := svc.CreateInvite(context.Background(), identity.InviteRequest{})
 	assert.Must(t, err == nil, "CreateInvite: %v", err)
@@ -399,9 +381,6 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 	// invite itself is unbound, so nothing here relies on the users table's
 	// email-uniqueness constraint to reject a would-be second redemption —
 	// that constraint is exactly what must NOT be doing this test's job.
-	// The only thing that may stop a second, differently-addressed
-	// redemption of the same token is the invite-row lock inside
-	// RedeemInvite's transaction (see its doc comment).
 	const attempts = 8
 	var wg sync.WaitGroup
 	// start is closed once, after every goroutine has been spawned and is
@@ -702,8 +681,6 @@ func TestListAndRevokeOutstandingProjectInvites(t *testing.T) {
 // both doc comments (ListOutstandingInvites and
 // ListOutstandingProjectInvites) claim the two surfaces never overlap,
 // but until this test existed only one direction was actually checked.
-// An account-only invite (no project) must never appear in a game's own
-// listing.
 func TestListOutstandingInvitesForProjectExcludesAccountOnly(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -981,22 +958,6 @@ func TestRedeemInviteForExistingUserMarksInviteRedeemed(t *testing.T) {
 
 // TestAnInviteIsJudgedByTheClockThatWroteItsExpiry is the regression
 // test for the defect a flaky test led back to.
-//
-// `expires_at` used to be `time.Now().Add(ttl)` computed in this
-// process, while `GetLiveInvite` and `MarkInviteRedeemed` both compare
-// it against Postgres' own `now()`. So whether an invite was live was a
-// claim about two clocks agreeing — the application's and the database
-// server's, which in a Compose deployment are two containers. It was
-// found as `TestRegisterWithExpiredInviteReportsExpired` failing under
-// load, because that test's whole margin was nine milliseconds of
-// tolerance for a skew nothing bounds.
-//
-// What is pinned here is the property that replaced it: an invite's
-// life is decided entirely by the clock that wrote its expiry, so
-// moving `expires_at` in the database's own terms is what makes an
-// invite live or dead, and this process' clock is nowhere in the
-// answer. Both directions, because a fix that expired everything would
-// pass a one-sided version of this test.
 func TestAnInviteIsJudgedByTheClockThatWroteItsExpiry(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -1040,13 +1001,6 @@ func TestAnInviteIsJudgedByTheClockThatWroteItsExpiry(t *testing.T) {
 }
 
 // TestARevokedInviteListsAsRevoked is the read side of the same rule.
-//
-// RevokeProjectInvite sets `expires_at` to Postgres' `now()`, and the
-// listing's `revoked` flag used to be `!ExpiresAt.After(time.Now())`
-// computed in internal/web — a comparison across two clocks whose whole
-// margin was one HTTP round trip, so a database clock a few
-// milliseconds ahead reported a just-revoked invite as live. The flag is
-// now computed beside the column it is about.
 func TestARevokedInviteListsAsRevoked(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -1087,12 +1041,6 @@ func TestARevokedInviteListsAsRevoked(t *testing.T) {
 // really deleted, and the insert really fails against Postgres, which is
 // what makes this a statement about the path and not only about the
 // mapping.
-//
-// It is the race an owner meets when a co-owner deletes the game between
-// their membership check and this insert. Before mapInviteInsertError,
-// the raw SQLSTATE 23503 reached internal/web unrecognised and was
-// answered 500 — a caller told this server broke, when what happened is
-// that the thing they named is gone.
 func TestInviteForAVanishedGameIsRefusedNotAFault(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

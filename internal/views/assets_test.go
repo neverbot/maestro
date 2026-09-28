@@ -98,12 +98,6 @@ func webpVP8L(width, height int) []byte {
 
 // hugePNG is a PNG signature and a well-formed IHDR claiming an enormous
 // canvas, with nothing behind it.
-//
-// This is the decompression bomb in its cheapest form: forty bytes on
-// the wire that a browser would try to expand into gigabytes of RGBA.
-// Nothing in this package decodes it — png.DecodeConfig reads the header
-// and stops — which is exactly why the *claim* has to be bounded rather
-// than the decode.
 func hugePNG(width, height uint32) []byte {
 	ihdr := make([]byte, 0, 17)
 	ihdr = append(ihdr, "IHDR"...)
@@ -138,13 +132,6 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "an SVG is refused whatever it calls itself" case is
 	// the case a filename check misses, and the reason the mime is read from
 	// the bytes.
-	//
-	// An SVG is a script-execution vector when it is served inline, on the
-	// same origin as the session cookie of the designer looking at it. It is
-	// refused by the allowlist of magic numbers — not by recognising SVG —
-	// so the recognition below is asserted for its *wording* and the refusal
-	// is asserted for every spelling, including one that carries no `<svg`
-	// at all.
 	t.Run("an SVG is refused whatever it calls itself", func(t *testing.T) {
 		g, _ := a.games(t)
 
@@ -184,9 +171,6 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "the mime is sniffed not trusted" case stores the same
 	// bytes under three misleading names and requires the stored mime to be
 	// the one the bytes carry.
-	//
-	// The filename is the only thing a caller controls that could be
-	// mistaken for a format, and it is deliberately wrong in every row here.
 	t.Run("the mime is sniffed not trusted", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -218,11 +202,6 @@ func TestAssetsArea(t *testing.T) {
 
 	// TestAssetsArea's "an oversize asset is refused before it is read" case
 	// asserts both halves of that sentence, because they are different claims.
-	//
-	// "Refused" is the error. "Before it is read" is the byte count: an
-	// implementation that read the whole body and then measured it would
-	// pass the first assertion and fail the second, and it is the second
-	// that stands between one caller and this process's memory.
 	t.Run("an oversize asset is refused before it is read", func(t *testing.T) {
 		g, _ := a.games(t)
 		body := &countingReader{total: 64 << 20}
@@ -237,27 +216,10 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "a body one byte past the cap is not stored truncated"
 	// case is the other half of the bound, and the half that says why
 	// readBounded reads one byte past it.
-	//
-	// It is a separate test from the byte count above because the two
-	// mutations differ: that one is about how much is read, this one is
-	// about what "too big" is measured against. A reader stopped at exactly
-	// the cap sees the first eight megabytes of a larger file and cannot
-	// tell them from a file of exactly eight megabytes.
 	t.Run("a body one byte past the cap is not stored truncated", func(t *testing.T) {
 		g, _ := a.games(t)
 		// The control, so the refusal below cannot pass by refusing everything:
 		// exactly the cap is accepted, and one byte more is not.
-		//
-		// **Both are built from a JPEG, and that is the point of the
-		// fixture.** jpeg.DecodeConfig returns as soon as it has read the
-		// frame header, so it never looks at the padding — which means a
-		// truncated body is *not* caught by the decoder, and a bound that
-		// read only MaxAssetBytes would store the first eight megabytes of a
-		// larger file and report success. With a PNG the same mutation goes
-		// red for the wrong reason: png.DecodeConfig walks chunks past the
-		// header and trips over the padding. That is the difference between
-		// a mutation this test kills and one the standard library kills for
-		// it.
 		atCap := padded(jpegBytes(t, 8, 8), MaxAssetBytes)
 		if _, err := g.views.CreateAsset(context.Background(), g.projectID, Actor{},
 			"exactly-at-the-cap.png", bytes.NewReader(atCap)); err != nil {
@@ -286,12 +248,6 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "width and height are decoded and read back" case is
 	// this task's write-only column test, and the third time this sub-project
 	// has needed one.
-	//
-	// Width and height are decoded rather than given, so nothing but a read
-	// says the decoder ran at all: a CreateAsset that stored 0 and 0, or
-	// that stored the height as the width, would pass every other test in
-	// this file. The sizes are deliberately unequal and deliberately not
-	// round, so a transposition is a failure rather than a coincidence.
 	t.Run("width and height are decoded and read back", func(t *testing.T) {
 		g, _ := a.games(t)
 		cases := []struct {
@@ -330,14 +286,6 @@ func TestAssetsArea(t *testing.T) {
 
 	// TestAssetsArea's "a header claiming an enormous canvas is refused" case
 	// bounds what a header may claim.
-	//
-	// Nothing in this package decodes pixels, so an enormous claim costs
-	// this process nothing — which is precisely why it has to be refused
-	// here: the browser that draws the background is the reader that *does*
-	// expand it, and forty bytes of crafted IHDR would otherwise become
-	// gigabytes of RGBA in a designer's tab. Both shapes are covered,
-	// because a per-side bound alone lets a one-pixel-tall strip through and
-	// a pixel bound alone lets a 1x2,000,000,000 strip through.
 	t.Run("a header claiming an enormous canvas is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, tc := range []struct {
@@ -364,10 +312,6 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "bytes whose header is broken are refused rather than
 	// stored at zero" case pins what happens when the magic number matches and
 	// nothing behind it does.
-	//
-	// The alternative — storing 0x0 and carrying on — is the write-only
-	// column this file's other test exists to prevent, arriving through the
-	// error path instead of the success one.
 	t.Run("bytes whose header is broken are refused rather than stored at zero", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, tc := range []struct {
@@ -483,22 +427,6 @@ func TestAssetsArea(t *testing.T) {
 
 	// TestAssetsArea's "a background write publishes its invalidation" case is
 	// the fourth kind, asserted rather than described.
-	//
-	// The argument is view.positions', verbatim: a browser holding a picture
-	// has no other way to learn the picture changed, and a background is
-	// more of the picture than a drag is — it is the map renderer's ground.
-	// views.sql states the equivalence from the storage side ("a dragged
-	// node is the same kind of act as a placed background"), so the two
-	// writes cannot differ on whether anyone is told.
-	//
-	// Both arms are driven. A clear removes the ground as surely as a
-	// placement changes it, and a test that drove only the placement would
-	// leave the clear free to go quiet.
-	//
-	// The two subscribers are the pair a wrong gating would silently cut
-	// out — a viewer, excluded by any MinRole above viewer, and a token
-	// caller, excluded by HumanOnly — which is the same pair the position
-	// and upsert tests use, because the gating of this kind *is* theirs.
 	t.Run("a background write publishes its invalidation", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -542,9 +470,6 @@ func TestAssetsArea(t *testing.T) {
 	// refused" case is the control the test above cannot be without: a publish
 	// placed before the write announces a ground that never landed, and every
 	// subscriber's reaction is to re-read a picture that did not change.
-	//
-	// Two refusals, one per pass SetBackground makes: the call's own
-	// arguments, and the view itself.
 	t.Run("no background event is published when the write is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -618,11 +543,6 @@ func TestAssetsArea(t *testing.T) {
 	// setter for the query or the renderer parameters — CheckRenderer's single
 	// caller is what makes "no stored view is undrawable" a guarantee rather
 	// than a hope.
-	//
-	// It also pins the decision that a background does not advance the
-	// version, for the reason a drag does not: the version guards the query
-	// document, and a caller holding one should not meet a conflict over a
-	// change to something it never wrote.
 	t.Run("setting a background changes nothing else about the view", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -655,12 +575,6 @@ func TestAssetsArea(t *testing.T) {
 	// case carries this file's first rule — a stored value no renderer reads
 	// is a lie a designer will believe — to the value that lives in a column
 	// instead of in renderer_params.
-	//
-	// It drives **every** renderer in the catalogue rather than one of each
-	// kind, so a seventh renderer added later cannot quietly land outside
-	// the rule, and it carries a vacuity check in both directions: a run in
-	// which everything is accepted, or everything refused, is a run that
-	// proves nothing.
 	t.Run("only a renderer that draws a background accepts one", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -746,15 +660,6 @@ func TestAssetsArea(t *testing.T) {
 
 	// TestAssetsArea's "an asset of another game cannot become this views
 	// background" case drives both mechanisms and both controls.
-	//
-	// The service lookup is what produces a sentence a caller can act on;
-	// 0008_views.sql's composite FOREIGN KEY (background_asset_id,
-	// project_id) is what actually guarantees it, and it is the only thing
-	// standing there — SetViewBackground's own WHERE clause cannot see the
-	// asset argument at all. So the statement is driven directly as well,
-	// the way Task 11 pinned its delete filters, because that is the only
-	// way to observe a constraint the service path has already made
-	// redundant.
 	t.Run("an asset of another game cannot become this views background", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
@@ -875,25 +780,6 @@ func TestAssetsArea(t *testing.T) {
 
 	// TestAssetsArea's "every byte of every magic number is load bearing" case
 	// turns the WAV case above into the table it should have been.
-	//
-	// The WAV case pinned one byte of one magic number — the second half of
-	// RIFF/WEBP — and four mutations of exactly the same shape survived the
-	// whole package afterwards: the PNG signature cut from eight bytes to
-	// four, the JPEG one from three to two, the WebP VP8 start code check
-	// disabled, and svgLooking's xml-declaration arm dropped. Each is a
-	// widened allowlist, which is the one direction this file's whole
-	// defence is written against.
-	//
-	// **The VP8 one is not cosmetic.** With that check gone, a RIFF/WEBP
-	// container whose first chunk is `VP8 ` followed by ten arbitrary bytes
-	// yields dimensions inside every bound, and the garbage is *stored* as
-	// an image rather than refused — so the row that drives it asserts the
-	// refusal and the emptiness of the listing, not just the error.
-	//
-	// The shape of each row is "one byte short of legitimate": a file
-	// carrying the prefix of a magic number and then plausible bytes. A
-	// sniffer that compares fewer bytes than the format declares accepts
-	// every one of them.
 	t.Run("every byte of every magic number is load bearing", func(t *testing.T) {
 		g, _ := a.games(t)
 
@@ -954,18 +840,6 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "changing the renderer away from map is refused while a
 	// background is attached" case closes the half of Task 14's own rule that
 	// reached only one of the two writers of background_asset_id.
-	//
-	// SetBackground refuses a background under a renderer that draws none —
-	// the image would be stored and read by nothing — and its refusal used
-	// to say "change the renderer through views.upsert", naming the call
-	// that produced exactly the state it was refusing: UpsertView never
-	// consulted Renderer.ReadsBackground, so save with `map`, set a
-	// background, upsert with `graph`, and the row carried an image under a
-	// renderer that draws none, with the scale and the offset still set.
-	//
-	// The refusal rather than a silent clear is the same call every write in
-	// this package makes: a designer's placed world map is not an agent's to
-	// discard while editing a query, and the repair is one named call.
 	t.Run("changing the renderer away from map is refused while a background is attached", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -1011,15 +885,6 @@ func TestAssetsArea(t *testing.T) {
 	// TestAssetsArea's "a game cannot hold more assets than the cap" case is
 	// the bound that was missing while every other bound in this file was
 	// present.
-	//
-	// Eight megabytes an asset and forty megapixels a canvas, and nothing at
-	// all on how many: twelve uploads under one filename all landed, and so
-	// would twelve thousand. Any editor — a designer, or an agent's token,
-	// and one token is one game — could push unbounded bytes into Postgres
-	// eight megabytes at a time.
-	//
-	// The refusal names the count and the cap, because "delete one first" is
-	// the only recovery and a caller has to know how many it is holding.
 	t.Run("a game cannot hold more assets than the cap", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
@@ -1058,13 +923,6 @@ func TestAssetsArea(t *testing.T) {
 
 	// TestAssetsArea's "the asset listing is paged and its cursor is its own"
 	// case pins the limit and the keyset the listing did not have.
-	//
-	// It answered with every asset a game held — the whole library in one
-	// call — while view_assets_project_idx's own comment said its order
-	// existed "so a page can be sought to rather than read whole and
-	// sorted". The rows are asserted in order and without repetition,
-	// because a keyset whose comparison disagrees with its sort order skips
-	// or repeats at a page boundary and says nothing about it.
 	t.Run("the asset listing is paged and its cursor is its own", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()

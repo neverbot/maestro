@@ -1,69 +1,5 @@
 // The `nested` renderer: boxes inside boxes, and a refusal to draw a
 // tree over a graph that is not one.
-//
-// A renderer is a **pure function from an envelope to a scene** — the
-// rule render/graph.js's header sets out — and this one is the purest of
-// the six: it asks the layout engine for nothing at all. Its geometry is
-// determined by the containment tree itself. See "Why no engine" below,
-// because §5.1 names `nested` as one of the engine's three consumers and
-// this is a deliberate departure from it.
-//
-// **One relation type, read as containment.** `contain_via` names it and
-// the catalogue refuses a view whose query draws no edges of it, so the
-// nesting is always a relation somebody chose. `source` is contained in
-// `target` (internal/views/renderers.go says so in the parameter's own
-// doc), which is the direction a reader has to get right once and never
-// again.
-//
-// **Colour tints the header strip and never the box.** A nest four
-// levels deep with a fill at every level is four overlapping fills and
-// no legible text, so the box is `--paper` at every level and the tint
-// goes on the strip that carries the name. That is §4.5's decision and
-// `colourTintsTheHeaderNotTheBox` is what holds it.
-//
-// **Where the colour comes from, since this renderer has no `color_by`
-// parameter.** The catalogue gives `nested` three knobs and none of them
-// is a colour; §4.5 nonetheless says "colour from `color_by`". Those are
-// reconciled the way `graph` already reconciles the label: `color_by` is
-// a **projection slot** in the query language (the views spec lists
-// `color_by`, `group_by`, `size_by`, `sort_by` as the conventional slot
-// names), so a query that declares `project.color_by` puts a value on
-// every node's `attrs` and this renderer tints from it, exactly as
-// render/graph.js reads `attrs.label` with no parameter naming it. No
-// knob is invented, no catalogue entry is changed, and nothing here is a
-// mechanism nothing can reach: the query author turns it on.
-//
-// **The negative half, all three cases real.**
-//
-//   beyond `max_depth` — the container shows a count chip (`+12`) and
-//     expanding it re-draws from the **envelope already in hand**. A
-//     drawing depth is not a fetch boundary, and treating it as one
-//     would make one parameter mean two things.
-//   a node with no container — two different things that must not look
-//     alike. A node no containment edge points out of is a **root**,
-//     which is ordinary. A node whose containment edge names a target
-//     that is not in this picture is an **orphan of the cap**: it is
-//     drawn at the top level too, dashed, and counted in the truncation
-//     band. "This thing is top-level" and "this thing's parent did not
-//     fit" are two statements.
-//   a containment cycle — A contains B contains A is data the metamodel
-//     permits and recursion over it does not terminate. The nesting
-//     stops at the repeat, the repeated box carries the cycle glyph, and
-//     the frame names **both** ends. Silently stopping would draw a
-//     plausible tree over a graph that is not one, which is the whole
-//     class of defect this sub-project exists against.
-//
-// **Why no engine.** Spec §5.1 lists `nested` among dagre's three
-// consumers, on the strength of dagre's compound graphs. What a compound
-// layout is *for* is arranging nodes that also have edges between them;
-// `nested` consumes "nodes, edges of one containment relation type" and
-// draws no other relation, so there is nothing left for a ranking to
-// decide. The arrangement of a container's children is determined by the
-// tree and by their measured sizes, and asking a graph algorithm for it
-// would be asking for an arrangement the data already states — while
-// putting 48 kB of vendored dagre on the path of every nest. The packing
-// is bottom-up and deterministic: children in address order, in a grid,
-// with the shared vocabulary's own padding.
 
 import { addressOf } from "../address.js";
 import { fillFor, labelFor, legendFor } from "../palette.js";
@@ -94,11 +30,6 @@ export const PARAM_LEAF_LABEL = "leaf_label";
 export const COLOUR_SLOT = "color_by";
 
 // How deep the nesting goes when the view does not say.
-//
-// Four, because that is the depth §4.5's own hand check asks about and
-// because a fifth level of boxes inside boxes is a strip of text inside
-// a strip of text. A view that wants more says so; the chip says what
-// was held back, and expanding it costs nothing.
 export const DEFAULT_MAX_DEPTH = 4;
 
 // The gap between two siblings inside a container.
@@ -107,10 +38,6 @@ export const SIBLING_GAP = 10;
 // The controls. Each tooltip says what the knob does to the **picture**,
 // which is the half internal/views/renderers.go deliberately does not
 // carry (render/controls.js's header has the argument).
-//
-// `max_depth`'s is the one worth reading twice: a designer who thinks it
-// controls how much was *fetched* will raise it to see more content,
-// and the honest sentence is that everything is already here.
 export const CONTROLS = [
   control(
     PARAM_CONTAIN_VIA,
@@ -138,27 +65,6 @@ export const CONTROLS = [
 // --- The scene -------------------------------------------------------
 
 // nestedScene is the picture.
-//
-// There is no `layout` argument, and its absence is the point: see the
-// header. `options.expanded` is the set of container addresses a
-// designer has clicked open, which is the whole of the chip's behaviour
-// and is why it needs no client.
-//
-// Returns:
-//   marks     — the scene.
-//   legend    — the palette's rows for the `color_by` slot, or null when
-//               no node carries one. Null and not empty: "this query
-//               colours nothing" is not "this slot had no values".
-//   drawn     — the addresses that got a box of their own.
-//   hidden    — the addresses held back by the depth bound. Drawn plus
-//               hidden is every node the answer has, which is what the
-//               twin describes.
-//   chips     — `{key, count}` per container that is holding children
-//               back, so a test and a click handler read one answer.
-//   orphans   — the addresses drawn at the top level because the
-//               container they name is not in this picture.
-//   cycles    — `{outer, inner}` per repeat, by label, for the frame.
-//   stubs     — as every renderer reports them, for the footer.
 export function nestedScene(envelope, params = {}, options = {}) {
   const nodes = nodesOf(envelope);
   const config = readParams(params);
@@ -270,13 +176,6 @@ export function nestedScene(envelope, params = {}, options = {}) {
 // --- Measuring -------------------------------------------------------
 
 // measure sizes one subtree, bottom-up.
-//
-// `path` is the chain of containers this node is being drawn inside. A
-// node already on it is a **repeat**: the recursion stops there, the box
-// is drawn once more with the cycle glyph, and the pair is recorded for
-// the frame. That check is what makes a containment cycle terminate, and
-// the test for it exists because the failure without it is a stack
-// overflow rather than a wrong picture.
 function measure(key, depth, path, context) {
   const node = context.byAddress.get(key);
   const label = labelOf(node, context.config.leafLabel, context.children.get(key).length === 0);
@@ -341,10 +240,6 @@ function measure(key, depth, path, context) {
 
 // pack lays a row of measured boxes into a grid and returns its size,
 // writing each box's offset from the grid's top-left corner.
-//
-// A grid rather than a row because a container with forty children in a
-// line is a picture nobody can read at any zoom; the column count is the
-// square root, so a nest stays roughly as wide as it is tall.
 function pack(boxes, originX, originY) {
   if (boxes.length === 0) return { width: 0, height: 0 };
   const columns = Math.max(1, Math.ceil(Math.sqrt(boxes.length)));
@@ -415,11 +310,6 @@ function emit(tree, marks, context, left = null, top = null) {
 
 // tintFor is the header's fill: the palette's hue for this node's
 // `color_by` value.
-//
-// A view that colours nothing gets the plate's own ground, and a node
-// whose slot found nothing gets the palette's `unset` — which is
-// transparent, so the strip shows the paper under it and the legend's
-// own `unset` row names the absence in words. The box is never asked.
 function tintFor(node, legend) {
   if (legend === null) return undefined;
   const json = valueJSON(node, COLOUR_SLOT);
@@ -472,11 +362,6 @@ function edgesOf(envelope) {
 
 // labelOf is what a box says: `leaf_label`'s slot on a box that contains
 // nothing, and the projection's `label` otherwise.
-//
-// A leaf whose `leaf_label` slot found nothing keeps its ordinary label
-// rather than going blank: an empty strip is indistinguishable from a
-// rendering fault, and the slot being absent is not a reason to stop
-// naming the thing.
 function labelOf(node, leafLabel, isLeaf) {
   if (!isObject(node)) return "";
   if (isLeaf && leafLabel !== null) {

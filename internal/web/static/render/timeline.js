@@ -1,56 +1,5 @@
 // The `timeline` renderer: nodes along one axis, optionally in lanes,
 // and an axis that is a **declaration** rather than a sort.
-//
-// A renderer is a **pure function from an envelope to a scene** — the
-// rule render/graph.js's header sets out — and like `map` and `nested`
-// this one asks the layout engine for nothing: §5.1 says so outright
-// ("`timeline` has an axis"), and a graph algorithm asked for a position
-// the game already states would be inventing an arrangement over one
-// somebody wrote down.
-//
-// **An enum axis is its option sequence, not its set.** A championship
-// declaring `[heat, semi, final]` has an axis in that order, and
-// `[final, heat, semi]` is a different axis over the same three words.
-// Sorting them alphabetically would produce a picture that is wrong in a
-// way nothing in it shows — which is exactly why
-// internal/views/renderers.go refuses to save a view whose two ends are
-// enums over different option lists, and why the options arrive here
-// **from the declaration** and are never derived from the values in the
-// answer. An answer contains the values a query found; the axis is what
-// the game says exists, which is why a declared option with no node
-// still gets a tick.
-//
-// **What the catalogue enforces and this renderer therefore does not
-// restate.** `axis_field` has to be declared identically across every
-// type in scope, and `axis_end_field` has to land on the same axis; both
-// are checked at save time, so a *saved* view cannot violate either. An
-// inline run can, and this module's answer to it is the same one it
-// gives any value it cannot place: the node is drawn before the axis
-// begins and counted. It does not refuse, it does not repeat the
-// server's sentence, and it does not guess a second axis.
-//
-// **What it draws when the answer is not a clean one:**
-//
-//   a node with no value for the axis — a mark in the region **before
-//     the axis begins**, captioned and counted, and never at the axis
-//     origin: the origin is a value the axis means, exactly as `map`'s
-//     (0,0) is a place a designer may have meant.
-//   a value that is not on the axis — the same region and the same
-//     count. An enum axis is its options; a value outside them is not a
-//     value *of this axis*, which is the honest reading and the one that
-//     needs no second sentence.
-//   a span whose end is before its start — a zero-length mark with a
-//     caret, and the frame names it. **The two ends are not swapped**:
-//     that is a content defect a designer wants to know about, and a
-//     renderer that sorted the pair would draw a plausible bar over it.
-//   a span whose end is not on the axis — the start's own point mark,
-//     and a count. There is no length to draw between a value and one
-//     that is not on this axis.
-//   more than three marks overlapping in one lane — three stacked and
-//     the rest collapsed into a count chip, which expands from the
-//     envelope already in hand. A drawing density is not a fetch
-//     boundary, exactly as `nested`'s depth is not.
-//   a truncated answer — what an untruncated one draws.
 
 import { addressOf } from "../address.js";
 import { UNSET_LABEL, labelFor } from "../palette.js";
@@ -116,12 +65,6 @@ export function offAxisCaption(field) {
 // The controls. Each tooltip says what the knob does to the **picture**,
 // which is the half internal/views/renderers.go deliberately does not
 // carry (render/controls.js's header has the argument).
-//
-// `axis_field`'s is the one that matters most: the catalogue says it
-// takes a number or an enum, and what a designer needs to know is that
-// choosing an enum chooses its **declared order** as the axis — which is
-// the whole reason two enums over different options cannot be the two
-// ends of one span.
 export const CONTROLS = [
   control(
     PARAM_AXIS_FIELD,
@@ -159,17 +102,6 @@ export const CONTROLS = [
 // --- The axis --------------------------------------------------------
 
 // axisFor is the whole of "an enum axis is its option sequence".
-//
-// `declaration` is the field the *game* declares — `{type, options}` —
-// and it arrives from the caller because it is not in the envelope: the
-// answer carries the values a query found, and an axis is what the type
-// says exists. That is the difference `everyDeclaredOptionGetsATickEven
-// WithNoNodes` is about, and it cannot be recovered from the nodes.
-//
-// With no declaration there is only a number axis: a value that is not a
-// number has no position without one, and inventing an order from the
-// values in the answer would be exactly the sort this renderer exists to
-// refuse.
 export function axisFor(declaration, values) {
   const declared = declaration && typeof declaration === "object" ? declaration : {};
   if (declared.type === AXIS_ENUM) {
@@ -218,12 +150,6 @@ export function axisFor(declaration, values) {
 }
 
 // niceTicks is a deterministic set of round numbers across a range.
-//
-// Deterministic is the property that matters and the one the test names:
-// the same data twice is the same ticks, because nothing here reads
-// anything but the two ends of the domain. The step is 1, 2 or 5 times a
-// power of ten, which is what makes a caption a number a reader
-// recognises rather than 13.7142857.
 export function niceTicks(min, max, target = TICK_TARGET) {
   if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
   if (!(max > min)) return [min];
@@ -254,31 +180,6 @@ function round(value, step) {
 // --- The scene -------------------------------------------------------
 
 // timelineScene is the picture.
-//
-// `options`:
-//   axis     — the *declared* field `axis_field` names: `{type, options}`.
-//              See axisFor: it is not in the envelope and cannot be.
-//   expanded — the chips a designer has clicked open, by key, which is
-//              the whole of a chip's behaviour and is why it needs no
-//              client.
-//
-// Returns:
-//   marks    — the scene.
-//   axis     — `{type, label, ticks}`, the ticks in axis order.
-//   lanes    — `{value, caption, count, y}` per lane, or null when the
-//              view lanes nothing. Null and not empty, as everywhere.
-//   drawn    — the addresses that got a mark of their own.
-//   collapsed — the addresses a chip is holding. Drawn plus collapsed is
-//              every node the answer has, which is what the twin
-//              describes.
-//   chips    — `{key, count}` per chip.
-//   offAxis  — `{count, field, keys}`: the nodes drawn before the axis
-//              begins, whether their value was absent or simply not on
-//              this axis.
-//   inverted — `{key, name, from, to}` per span that ends before it
-//              starts, for the frame's band.
-//   openSpans — how many spans have a start on the axis and an end that
-//              is not, drawn as their start's point.
 export function timelineScene(envelope, params = {}, options = {}) {
   const nodes = nodesOf(envelope);
   const config = readParams(params);
@@ -478,12 +379,6 @@ function offAxisX(entry, all) {
 
 // layOut places a run of marks in their lanes, stacking the ones that
 // overlap and collapsing what will not fit.
-//
-// The stack is a greedy colouring of the overlap intervals in x order:
-// each mark takes the first row whose last mark ends before this one
-// starts. A row past the third is not drawn — §4.8 stacks three deep —
-// and the marks that would have been there are counted into one chip,
-// which expands from the envelope already in hand.
 function layOut(entries, sink) {
   const byLane = new Map();
   for (const entry of entries) {
@@ -562,10 +457,6 @@ function emit(entry, lane, row, sink) {
 
 // lanesFor is one lane per value of the `lane_by` slot, in value order,
 // with the absence **last**.
-//
-// Last for `layered`'s reason: a lane of "the ones we know nothing
-// about" at the top would read as the first lane of the answer, which is
-// a claim about content made out of a missing value.
 function lanesFor(nodes, laneBy) {
   if (laneBy === null) {
     return [{ value: null, caption: "", keys: nodes.map(addressOf), y: LANE_HEIGHT / 2 }];
@@ -630,14 +521,6 @@ function labelOf(node) {
 
 // valueOf is a node's value for a declared field key, from `attrs` or
 // from `fields`.
-//
-// `axis_field` names a **declared field key**, which reaches the
-// envelope through `project.fields` (internal/views/renderers.go's
-// kindAxisField requires exactly that) and through `include_fields` on a
-// run that asked for one. Both are the game's own value for this node.
-//
-// `hasOwnProperty` and not a falsiness test: a field absent and a field
-// carrying 0 — or the first option of an enum — are two answers.
 function valueOf(node, key) {
   if (key === null) return undefined;
   for (const bag of [node.attrs, node.fields]) {

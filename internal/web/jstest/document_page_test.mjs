@@ -4,24 +4,6 @@
 // actually renders from GET /docs/rendered, /members, /summary,
 // /docs/history and /docs/comparison, and what it actually sends to
 // /docs/revert.
-//
-// A Go test cannot cover any of it. The routes have their own tests in
-// internal/web/api_docs_test.go; what those cannot see is whether the
-// rendered HTML reaches the page as markup while every *other* string
-// reaches it as text, whether a history row shows a person's name
-// instead of a uuid, whether a revert sends the document's current
-// version as expected_version (the compare-and-set that stops it
-// overwriting somebody else's save) and whether a conflict is shown in
-// the server's own words.
-//
-// Run directly: `node internal/web/jstest/document_page_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
-
-
-// pages/page.js defines the read-only notice's hint component when it
-// loads, and a custom element's class needs these two globals to exist
-// before it is declared. Neither is what this file checks; they are here
-// so importing a page does not fail on the platform being absent.
 globalThis.HTMLElement ??= class {};
 globalThis.customElements ??= { define() {}, get: () => undefined };
 
@@ -140,13 +122,6 @@ function fakeElement(tag = "div") {
 
 // assertHidden and assertVisible are the only way this file asks about
 // visibility, and they refuse to pass on the stub's initial state.
-//
-// This exists because three assertions in this repository passed for
-// that reason: the stub set a flag to the value the case wanted, the
-// code under test never touched it, and deleting the line that should
-// have set it left the suite green. Counting the writes makes the
-// difference observable — "nobody set this" is a distinct outcome from
-// "somebody set it to the right thing", and only the second is a pass.
 function assertHidden(el, id, why) {
   if (el.hiddenWrites === 0) {
     fail(`#${id}: nothing under test ever wrote .hidden, so "${why}" would be an assertion on the stub's own initialisation`);
@@ -869,21 +844,6 @@ console.log(
 );
 
 // Case 12: the document's own body, written from the page that reads it.
-//
-// The third write a person can make in this product, and the first whose
-// subject is the game's prose. Three properties are asserted here and
-// each of them is a way this could be quietly wrong:
-//
-//   - **it opens from the source.** The page holds the *rendered* HTML
-//     and rendering is not reversible, so an editor filled from what is
-//     on screen would hand a designer their own document turned into
-//     HTML.
-//   - **the write states the version the page drew from**, which is what
-//     makes somebody else's save a conflict instead of an overwrite.
-//   - **`links` is absent, deliberately.** internal/markdown's contract
-//     is that a links array replaces the whole attachment set and
-//     omitting it preserves it, so an editor sending `[]` would detach
-//     every entity the document is attached to, on a save about a typo.
 {
   const { elements, posted, location } = await runCase({
     rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
@@ -933,11 +893,6 @@ console.log(
 }
 
 // Case 13: somebody saved while this reader was writing.
-//
-// The page says what happened to *their* text — which the server does
-// not know — and the server says which version the document is on now,
-// which the page cannot know. Both, each whole, and the edit is still in
-// the box.
 {
   const { elements, location } = await runCase({
     rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
@@ -966,12 +921,6 @@ console.log(
 }
 
 // Case 14: a document longer than the read cap.
-//
-// GET /docs/one answers `truncated: true` when it could not return the
-// whole body, and saving what came back would silently cut the document
-// to the length of the answer. It is refused, in a sentence, rather than
-// offered — and the textarea is not even filled, so there is nothing to
-// press Save on.
 {
   const { elements, posted } = await runCase({
     rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
@@ -989,10 +938,6 @@ console.log(
 }
 
 // Case 15: a viewer.
-//
-// The read-only notice is a claim about the screen, so a screen that has
-// gained a write loses the half of the claim that said it had none — and
-// a viewer still gets it, because for them it is still true.
 {
   const { elements } = await runCase({
     rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },

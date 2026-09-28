@@ -64,24 +64,6 @@ function recallGame() {
 // back only a same-origin path. This is the one place user-supplied text
 // becomes a navigation target rather than DOM text, so it gets its own
 // guard rather than trusting the query string.
-//
-// A pattern match on the raw string is not that guard: a review proved a
-// leading-slash-count check bypassable three ways a browser's own URL
-// parser disagrees with a naive regex about — "/\evil.example" and
-// "/\/evil.example" (a browser's URL parser treats a backslash as a
-// path separator on a special scheme, same as a second forward slash),
-// and a raw control character such as a newline between two slashes
-// (which the parser strips before it ever looks at the string). Every
-// one of those still resolves to a different host once actually parsed,
-// which a character-counting regex has no way to know without
-// re-implementing the parser's own stripping and normalization rules by
-// hand — and the next variant it doesn't happen to enumerate would pass
-// silently. Resolving raw through the URL constructor and comparing the
-// *result's* origin to this page's own does that parsing correctly by
-// construction, is robust to encoded/backslash/control-character variants
-// alike, and is what this function does instead: only a resolved URL
-// whose origin matches is accepted, and only its parsed path (never the
-// raw string) is handed to the caller.
 function safeReturnPath() {
   const raw = new URLSearchParams(window.location.search).get("return");
   if (!raw) {
@@ -195,32 +177,6 @@ export function setFormBusy(form, busy, busyLabel) {
 export const GAMES_PATH = "/games";
 
 // gameSwitcher is the door handle on the inside of a game.
-//
-// Until it existed, signing in landed a designer in the remembered game
-// and nothing in the product listed another one: the wordmark pointed at
-// "/", "/" redirected back, and an account in three games could reach
-// exactly one of them. The exit is put *here*, in the chrome beside the
-// wordmark, rather than by pointing the wordmark somewhere else, for two
-// reasons. It is where a person looks for "which of my things am I
-// in" — and so it answers that question too: the summary is the current
-// game's name, which is the only line outside the home page's own <h1>
-// that says which game these pages belong to. And it is on every page of
-// a game, not only the home, so the way out does not depend on first
-// navigating back to a particular page of the game you are trying to
-// leave.
-//
-// Every game the caller can reach is listed, the current one included
-// and marked with aria-current rather than dropped — the same rule
-// `destinations` (pages/page.js) follows, and for the same reason: a
-// list that changes shape as you move through it is a list nobody learns
-// the shape of.
-//
-// It is <details>/<summary> and not a scripted menu: it opens on click
-// and on Enter, closes on Escape, is reachable by keyboard and readable
-// by a screen reader without a line of JavaScript, and cannot get stuck
-// open in a state this file forgot to close. Built with
-// createElement/textContent throughout, never innerHTML — a game's name
-// is chosen by whoever created the game.
 function gameSwitcher(games, current, destinations, destination) {
   const details = document.createElement("details");
   details.className = "game-switcher";
@@ -289,15 +245,6 @@ function gameSwitcher(games, current, destinations, destination) {
 // send an anonymous visitor that isn't back to /login. Built with
 // createElement/textContent throughout, never innerHTML, the same rule
 // every other DOM write in this file follows.
-//
-// `options.games` is the caller's own game list and `options.current` is
-// the game this page is inside, or null. They are **passed in and never
-// fetched here**: every page that renders this header has already asked
-// GET /api/games (page.js's openGame, doc.js) because it needs that list
-// to resolve its own slug, so a fetch inside the header would be a
-// second identical request on every page in the product. A caller with
-// no list — the picker itself, which *is* the list — passes nothing and
-// gets no switcher.
 export function renderHeader(options = {}) {
   // Two elements, not one: the bar spans the window so its bottom rule
   // crosses the whole page, and the row inside it is capped at the page
@@ -348,11 +295,6 @@ export function renderHeader(options = {}) {
 // else: the one screen where a person could check which account they
 // were using was the one screen that never named it, on a product whose
 // first design principle is "always say where you are".
-//
-// It is a `<details>`, the same disclosure the game switcher already is,
-// so the bar carries one pattern rather than two. Sign out moves inside
-// it: a destructive action behind one deliberate click, beside the two
-// screens that belong to a person rather than to a game.
 export const SIGN_OUT = "Sign out";
 export const SIGN_OUT_ARMED = "Sign out — click again";
 
@@ -467,16 +409,6 @@ let inviteToken = "";
 if (loginForm || inviteForm) {
   // login.html only: figure out which of the two forms to show, and with
   // what copy, before either is usable.
-  //
-  // The invite token travels in the URL *fragment* (#invite=…), never the
-  // query string: a fragment is a browser-only construct that is never
-  // sent in an HTTP request at all, so it cannot leak through Referer on
-  // the very next same-origin request (this page's own subresources,
-  // including this script) the way a query parameter demonstrably did in
-  // review. history.replaceState below additionally scrubs it from the
-  // visible URL and from browser history the moment it's read, and the
-  // no-referrer <meta> on this page is a second, independent layer for
-  // anything this page still sends elsewhere.
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   inviteToken = (hashParams.get("invite") ?? "").trim();
   if (window.location.hash) {
@@ -589,10 +521,6 @@ if (loginForm) {
 // the server's own sentence in --danger, the field that has to change
 // wearing the same token on its border, and the cursor put back where
 // the correction happens.
-//
-// The border is set and cleared through a class rather than a style
-// attribute, because this server's policy admits no inline style and an
-// element.style assignment here would be refused in silence.
 export function markRefused(form, field, errorEl, message) {
   errorEl.textContent = message;
   if (!field) return;
@@ -669,10 +597,6 @@ export async function fetchAPI(path) {
 // needs the person's name and whether they are an admin, and so does the
 // account screen; a second call for the same answer on one page is a
 // round trip spent on a fact that cannot have changed in between.
-//
-// A failure is not fatal to anything that calls it: the header falls
-// back to saying "Account", which is worse than a name and better than
-// no way to sign out.
 let mePromise = null;
 
 export function fetchMe() {
@@ -838,19 +762,3 @@ if (createGameForm) {
   });
 }
 // --- Where the game home page went -----------------------------------
-//
-// It is `internal/web/static/pages/home.js` now, and this file no longer
-// draws a game.
-//
-// Task 15 made /g/{slug} the three-lane home — Views, Catalogue, Prose —
-// and every call it makes goes through internal/web/static/client.js,
-// which is the rule internal/web/static_client_test.go holds for
-// everything this sub-project has built since Task 3. Leaving the
-// catalogue here would have meant one page fetching through `fetchAPI`
-// and six fetching through the client, which is exactly the drift that
-// guard exists to prevent.
-//
-// What stays here is what the two shells this file still drives need —
-// the picker (index.html), the sign-in and invite forms (login.html) —
-// plus the four helpers `doc.js` and the page modules import: one fetch
-// wrapper, one POST wrapper, one 401 policy and one header.

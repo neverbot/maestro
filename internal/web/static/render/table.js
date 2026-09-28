@@ -1,66 +1,6 @@
 // The `table` renderer: rows and columns, and the most-used picture in
 // the product per the catalogue's own comment — so it gets the most care
 // and none of the drama.
-//
-// A renderer is a **pure function from an envelope to a scene** — the
-// rule render/graph.js's header sets out — and this one departs from the
-// other five in exactly one way, which is the whole of what makes it
-// different: **it emits no marks.** A table is rows on paper with
-// hairline rules; there is no coordinate anywhere in it, nothing to pan,
-// nothing to drag, and a `marks: []` on the way out would be a mechanism
-// nothing reads pretending to be a picture. What it returns is the model
-// a route paints as a document (Task 15), in the same shape the text
-// twin already returns, which is not a coincidence:
-//
-// **This renderer and the text twin are the same table, drawn twice.**
-// render/twin.js is the accessible content of every view, built from the
-// envelope alone; this is the *view* for a designer who asked for rows.
-// So the cells come from twin.js — `valueCell`, `presentCell`,
-// `absentCell` — rather than from a second implementation, because the
-// em dash, the `absent` flag and the palette's own text rule are one
-// decision each and a table that respelled any of them would tell a
-// reader something different about the same answer.
-//
-// **Where the two deliberately differ**, since a difference nobody
-// states is a defect nobody finds:
-//
-//   columns — the twin shows every slot any node carries, in its own
-//     order, because it describes the answer. This shows the columns the
-//     **view declares**, in the order it declares them, because a
-//     designer chose them. A table that reordered them would be
-//     answering a question nobody asked.
-//   paging — the twin has none. `page_size` pages the rows the client
-//     **already holds**: views.run has no cursor, and §4.7 is explicit
-//     that the pager says so when the result is also truncated, so
-//     nobody reads a page count as a content count.
-//   edges — the twin has an edge table and this has none. The catalogue
-//     says `table` consumes "nodes only" and deliberately does **not**
-//     refuse a query that draws edges, because one envelope for every
-//     renderer is what lets a saved view swap `graph` for `table`
-//     without rewriting its query. The edges are still in the answer and
-//     still in the twin; this renderer simply draws no relation.
-//
-// **`color_by` is not offered here and is not honoured here.** The
-// catalogue gives this renderer no such parameter, and §4.7 says why: a
-// slot another renderer would colour is a **column** in a table, which
-// is the honest form of the same information. A table that tinted a row
-// would be inventing a channel the catalogue refused it, and one a
-// reader who cannot separate two hues could not read at all.
-//
-// **What it draws when the answer is not a clean one:**
-//
-//   an absent value — an em dash, never a blank cell: an empty cell is
-//     indistinguishable from a rendering bug. The empty string is a
-//     blank cell, because that is what it is.
-//   zero rows — the header row stays. A table with no header is not an
-//     empty table, it is a broken one, and the sentence sits under it.
-//   a truncated answer — the pager says `capped` beside the count and
-//     the frame bands it. The count itself is never adjusted for it:
-//     the client holds what it holds.
-//   a group value that is absent — its own group, captioned in the
-//     palette's own words and placed **last**, exactly as `layered`'s
-//     unranked band is: a group of absences first would read as the
-//     leading group of the answer.
 
 import { addressOf } from "../address.js";
 import { UNSET_LABEL, labelFor } from "../palette.js";
@@ -132,11 +72,6 @@ export const UNGROUPED_CAPTION = UNSET_LABEL;
 // The controls. Each tooltip says what the knob does to the **picture**,
 // which is the half internal/views/renderers.go deliberately does not
 // carry (render/controls.js's header has the argument).
-//
-// `page_size`'s is the one worth reading twice, for `nested`'s
-// `max_depth` reason: a designer who reads it as "how much was fetched"
-// has the mechanism exactly backwards, and the pager's own `capped` is
-// the only thing in this interface that says how much was not.
 export const CONTROLS = [
   control(
     PARAM_COLUMNS,
@@ -174,29 +109,6 @@ export const CONTROLS = [
 // --- The scene -------------------------------------------------------
 
 // tableScene is the table.
-//
-// `options`:
-//   sort — what a reader clicked: `{column, direction}`. It overrides
-//          the view's `sort`, which is what "sort applied on open and
-//          re-sortable by clicking a header" means, and it is where the
-//          click ends: there is no fetch anywhere in this module and
-//          nothing to fetch, because views.run returned every row.
-//   page — which page to show, 1-based. Out of range is clamped rather
-//          than empty: a page number nobody can reach is a table that
-//          looks like it lost its rows.
-//
-// Returns:
-//   columns — `{key, label, builtin, style}` in the order they are
-//             drawn.
-//   rows    — every row of the answer, ordered, before paging. The twin
-//             has one of these per node and so does this.
-//   page    — `{rows, from, to, total, size, number, pages, capped,
-//             text}`. `rows` is the page's own rows.
-//   groups  — `{value, caption, count, from}` per group, or null when
-//             the view groups nothing. Null and not empty: "this view
-//             does not group" is not "this slot had no values".
-//   sort    — `{column, direction, source}`, or null.
-//   marks   — deliberately absent. See the header.
 export function tableScene(envelope, params = {}, options = {}) {
   const nodes = nodesOf(envelope);
   const config = readParams(params);
@@ -232,15 +144,6 @@ export function tableScene(envelope, params = {}, options = {}) {
 
 // columnsFor is the declared columns in their declared order, or the
 // default table when the view names none.
-//
-// **No column is dropped and none is invented.** A declared column
-// naming a slot no node carries is still a column: internal/views'
-// `column` checker refuses one the query cannot produce at *save* time,
-// so a client that silently dropped it would be hiding a view the server
-// already judged, and a designer would be left with a table that is
-// missing a column and says nothing about it. Every one of its cells is
-// simply absent, which is the honest answer and the one a reader can act
-// on.
 function columnsFor(nodes, declared) {
   const names = declared !== null ? declared : [...DEFAULT_BUILTINS, ...slotsOf(nodes)];
   const seen = new Set();
@@ -294,12 +197,6 @@ function slotsOf(nodes) {
 }
 
 // cellFor is one cell, and the two arms are the two kinds of column.
-//
-// A built-in is the entity's own identity, which every node has and
-// which is therefore never absent — the empty string is a legal name and
-// reads as an empty cell, which is exactly what it is. Everything else
-// goes through the twin's own `valueCell`, so that a slot that found
-// nothing is an em dash here and an em dash there, once.
 function cellFor(node, column) {
   switch (column.key) {
     case BUILTIN_NAME:
@@ -317,11 +214,6 @@ function cellFor(node, column) {
 
 // sortFor decides which ordering is in force: the reader's click, or the
 // view's own `sort`, or none.
-//
-// A click on a column this table does not draw is not an ordering, and
-// neither is a `sort` naming one — the catalogue refuses the second at
-// save time, so meeting it means meeting a document the server would not
-// have stored.
 function sortFor(columns, declared, clicked) {
   const has = (name) => columns.some((column) => column.key === name);
   if (clicked && typeof clicked === "object" && has(clicked.column)) {
@@ -342,21 +234,6 @@ function sortFor(columns, declared, clicked) {
 }
 
 // order sorts the rows in place.
-//
-// **A number column sorts as numbers.** The cell carries its underlying
-// value beside its text (render/twin.js), and comparing the text would
-// put 10 before 9 — a wrong answer that looks like a right one, in the
-// renderer a designer reaches for most.
-//
-// **A row with nothing in the sort column goes last, in both
-// directions.** Reversing the direction reverses the rows that have an
-// answer; it does not promote the ones that have none to the top, where
-// they would read as the extreme of the column rather than as its
-// absence.
-//
-// **Ties keep the answer's own order**, by comparing `index` last, so
-// stability is a property of this function rather than of the engine's
-// sort algorithm.
 function order(rows, columns, sort) {
   const at = columns.findIndex((column) => column.key === sort.column);
   if (at < 0) return;
@@ -384,11 +261,6 @@ function compareValues(left, right) {
 
 // groupsFor is one entry per value of the `group_by` slot, each with the
 // count §4.7's sticky sub-header carries.
-//
-// The groups are ordered by value, and the absence is **last**: a group
-// of "the ones we know nothing about" at the top would read as the
-// leading group of the answer, which is the same mistake `layered`
-// refuses when it puts its unranked band at the end.
 function groupsFor(rows, nodes, groupBy) {
   const byAddress = new Map(nodes.map((node) => [addressOf(node), node]));
   const groups = new Map();
@@ -412,11 +284,6 @@ function groupsFor(rows, nodes, groupBy) {
 
 // regroup rewrites the row order so that the groups are contiguous, and
 // records where each one starts.
-//
-// The rows **inside** a group keep the ordering the sort gave them:
-// grouping is a second axis and not a second sort, and a designer who
-// sorted by level and grouped by zone means "by zone, and by level
-// within it".
 function regroup(rows, groups) {
   let at = 0;
   const ordered = [];
@@ -434,17 +301,6 @@ function regroup(rows, groups) {
 // --- The pager -------------------------------------------------------
 
 // pageFor is which rows are on screen and the sentence beside them.
-//
-// **`total` is the rows this client holds and never an estimate of the
-// game.** views.run has no cursor — a page of a graph is not a graph —
-// so a result too large for one response is truncated and flagged, and
-// this pager pages what arrived. `capped` is that flag, said out loud
-// beside the count, so nobody reads a page count as a content count.
-//
-// A single page of an untruncated answer says **nothing**: there is no
-// sentence for the absence of a thing, which is render/scene.js's own
-// first rule, and *"showing 1–7 of 7"* under a table of seven rows is a
-// machine talking to itself.
 function pageFor(rows, size, requested, capped) {
   const total = rows.length;
   const perPage = size === null || size >= total ? total : size;
@@ -475,11 +331,6 @@ function clamp(value, low, high) {
 // --- Reading the parameters ------------------------------------------
 
 // readParams is the one reader of renderer_params.
-//
-// `color_by` is deliberately not among them and is not read anywhere in
-// this module: the catalogue does not offer it, §4.7 says a slot another
-// renderer would colour is a *column* here, and a table that honoured it
-// would be drawing a channel the catalogue refused it.
 function readParams(params) {
   const p = params && typeof params === "object" ? params : {};
   const columns = Array.isArray(p[PARAM_COLUMNS])

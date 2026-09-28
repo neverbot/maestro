@@ -1,38 +1,6 @@
 // The harness for internal/web/static/layout/: the real, unmodified
 // engine.js, compose.js and budget.js, imported and driven over plain
 // data.
-//
-// What this covers that no Go test can, and no browser needs to. Layout
-// is where three of this sub-project's load-bearing claims are either
-// true or quietly false:
-//
-//   - **The engine is deterministic.** `manual` mode lays out unplaced
-//     nodes and never writes the result back, and the views table's seed
-//     column was dropped (Task 17, migration 0012), both on that one
-//     premise. Every determinism assertion below runs the same input
-//     twice *and a third time with the arrays shuffled*, because dagre
-//     is deterministic given an insertion order and not otherwise —
-//     measured, on the vendored 3.1.1 — and it is engine.js sorting by
-//     address that turns "deterministic given an order" into
-//     "deterministic". Without the shuffled run these tests would pass
-//     on an engine whose stability was an accident of the envelope's
-//     `ORDER BY … capped.id`, which is an order by uuid and does not
-//     survive a re-seed.
-//   - **Pinned nodes never move.** Asserted with `===` against the
-//     stored number, not within a tolerance: a designer's coordinate
-//     surviving a float round trip *approximately* is a coordinate that
-//     drifts one pixel per re-run.
-//   - **The fit does not rotate.** A full similarity fit would rotate,
-//     and would be strictly better at minimising the error it was given.
-//     The fixture below is one whose best-fit rotation is 90°, so the
-//     refusal is asserted rather than assumed.
-//
-// The three degeneracies of the fit get one test each and three
-// different fixtures, because a fixture that cannot tell a translation
-// from a scale of 1 proves nothing about either.
-//
-// Run directly: `node internal/web/jstest/layout_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import {
   ACTION_RETRY_LAYOUT,
@@ -668,11 +636,6 @@ check("theSeparationPassIsAReductionAndNotAGuarantee", async () => {
   // into the second, clearing the second pushes it straight back into
   // the first, and the pass — one pass, obstacles in order, no going
   // back — does not return to the pin it has already passed.
-  //
-  // If this fixture ever stops overlapping, the pass has changed shape,
-  // and what must be re-read is compose.js's sentence rather than this
-  // test: a settling loop is a simulation, which §5.2 refused when it
-  // refused a force layout.
   const tall = (key, x) => ({ key: addressOf({ type: "q", key }), x, y: 0, width: 30, height: 100 });
   const result = compose(MODE_MIXED, [tall("left", 0), tall("mover", 10), tall("right", 40)], [
     stored("q", "left", 0, 0),

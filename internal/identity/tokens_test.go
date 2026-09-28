@@ -251,12 +251,6 @@ func (c *statementCounter) count() int64 { return c.n.Load() }
 // WHERE clause) when it wasn't there to decide that, or was there and
 // decided wrong. Counting round trips with a pgx.QueryTracer is the only
 // way to see that distinction from outside the package.
-//
-// This attaches the tracer to a second pool built from testutil's own
-// pool config (same database, same connection string), rather than the
-// pool CreateAPIToken and the backdating UPDATE below use directly, so
-// only the statements ResolveAPIToken itself issues are counted — setup
-// and the deliberate backdate are excluded on purpose, not by luck.
 func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

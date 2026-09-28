@@ -19,37 +19,6 @@ import (
 
 // The provenance, payload and resolution guards for the vendored half of
 // internal/web/static.
-//
-// Three files this project did not write are shipped inside its binary:
-// Lit, dagre and graphlib. A vendored file in a public repository is a
-// file this project answers for, and the four questions that answer
-// consists of are all mechanical:
-//
-//   - **Where did it come from?** manifest.json records the package, the
-//     exact version, the URL the bytes were fetched from and their
-//     SHA-256, and this file walks the manifest and the tree in both
-//     directions so neither can drift from the other in silence. A
-//     re-vendored file that skipped the manifest fails here, which is
-//     the only way anyone notices.
-//   - **What does it cost?** The sizes are summed against a stated
-//     budget and the number is logged on every run, so the margin is
-//     visible long before it is spent rather than only at the failure.
-//   - **May we redistribute it?** Every package's licence text is
-//     committed next to the code it covers, and every entry names one.
-//   - **Will it load?** The import map is what makes `import … from
-//     "lit"` resolve with no build step. It has to be the same map in
-//     every shell, it has to point at files that exist and that this
-//     server actually serves as JavaScript, and no module — ours or
-//     theirs — may reach for the network, because a self-hosted instance
-//     on a private network has no outbound route and a CDN import would
-//     fail there and nowhere else.
-//
-// **What this file cannot answer.** Whether the upstream bytes are
-// themselves trustworthy: a SHA-256 pins *which* file was vendored, not
-// that the file is good. Nor does a `https?://` scan see a URL a module
-// assembles at runtime from fragments — the same blind spot
-// static_sinks_test.go names for markup sinks, and the same answer:
-// catching that needs a parser and a dataflow.
 
 const (
 	vendorRoot   = "static/vendor"
@@ -66,17 +35,6 @@ const (
 	// Counting it against a first-paint budget would have meant either
 	// giving up the design system's central rule or quietly redefining
 	// what the number measures, and both are worse than splitting it.
-	//
-	// So: what a browser must have before it can draw keeps the original
-	// figure and the original argument, and what arrives afterwards has
-	// its own. TestEveryVendoredFontIsSwapped is what stops the second
-	// from being a loophole — a face without `swap` blocks the paint and
-	// is spending the wrong budget.
-	//
-	// Both live here rather than in manifest.json for the reason the
-	// first one did: a budget a contributor can raise by editing the
-	// same file it is checked against is not a budget; raising one of
-	// these is a diff to a test, which is a conversation.
 	renderBlockingBudget = 150 * 1024
 
 	// fontBudget is the latin subsets of the two voices: Literata
@@ -221,11 +179,6 @@ func TestNoVendoredFileIsUnlisted(t *testing.T) {
 // before this front end can draw anything, and logs the number whether
 // it passes or fails. The log is the point: a budget nobody sees until
 // it breaks is a budget that breaks.
-//
-// It sums the bytes on disk rather than the manifest's numbers, so a
-// manifest understating a file's size cannot buy headroom — that
-// disagreement is TestVendoredFilesMatchTheirManifest's to report, and
-// this test stays true regardless of it.
 func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
 	t.Parallel()
 	manifest := readVendorManifest(t)
@@ -270,18 +223,6 @@ func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
 
 // TestEveryVendoredFontIsSwapped is the condition the split above rests
 // on, and without it the second budget is a loophole.
-//
-// A font counted against `fontBudget` is counted there because it
-// arrives *after* the first paint. That is true of a face declared
-// `font-display: swap` and false of one that is not: the default
-// (`auto`, in practice `block` for about three seconds) makes the
-// browser hold the text back until the file lands, which is exactly the
-// thing `renderBlockingBudget` exists to bound.
-//
-// It also asserts the other direction — every face in the stylesheet
-// points at a file the manifest knows — because a `@font-face` reaching
-// a URL this repository does not vendor is either a 404 or, worse, a
-// third-party origin the CSP would refuse in silence.
 func TestEveryVendoredFontIsSwapped(t *testing.T) {
 	t.Parallel()
 	sheet, err := os.ReadFile(filepath.Join("static", "styles.css"))
@@ -325,11 +266,6 @@ func TestEveryVendoredFontIsSwapped(t *testing.T) {
 // permit redistribution in a public repository *provided the notice
 // travels with the code*, so the notice travelling with the code is the
 // condition, and this is the test that it does.
-//
-// It checks in both directions, like the manifest walk: an entry with no
-// licence file fails, and a licence file no entry points at fails too —
-// the second because a stale licence for a package that is no longer
-// vendored is a claim about code that is not here.
 func TestEveryVendoredPackageHasItsLicence(t *testing.T) {
 	t.Parallel()
 	manifest := readVendorManifest(t)
@@ -382,55 +318,15 @@ var (
 )
 
 // namespaceDeclaration is the one exemption, and it is exact.
-//
-// `http://www.w3.org/2000/svg` is an **XML namespace name**, not a
-// resource: `createElementNS` compares it as a string and no browser has
-// ever fetched it. Refusing it would mean an SVG element built with
-// `createElement` instead, which is an unknown HTML element that lays
-// out as nothing — a bug with no error message, bought to satisfy a
-// guard about outbound traffic that this line does not cause.
-//
-// The exemption is deliberately not "any w3.org URL" and not "any line
-// containing the namespace". It is a whole line declaring a constant
-// whose name ends in `NS`, so `fetch("http://www.w3.org/2000/svg")` is
-// still reported, an https spelling is still reported, and the xlink
-// namespace — which this front end has no business naming at all, see
-// internal/web/static_canvas_test.go — is still reported.
-// TestTheNamespaceExemptionIsExactlyOneDeclaration holds all four.
 var namespaceDeclaration = regexp.MustCompile(`^export const [A-Z_]*NS = "http://www\.w3\.org/2000/svg";$`)
 
 // documentationLink is the second exemption, and it is exact in the same
 // shape and for the same kind of reason.
-//
-// Task 15 ships the product's one piece of onboarding: a game with no
-// saved views is told, in a sentence, that a view is written by an agent
-// over MCP, with a link to the documentation that teaches it. That link
-// is a **hyperlink a human may click** and not a resource this front end
-// loads — nothing fetches it, and every page it appears on renders whole
-// without it — so the property this scan exists for, that an instance
-// with no outbound route works completely, is untouched. What is not
-// untouched is the *hole*: an exemption nobody bounds is where every
-// future CDN import would hide.
-//
-// So it admits one shape and one host: a whole line declaring a constant
-// named SKILL_BUNDLE_HREF, https, on this project's own documentation
-// site, with nothing after the semicolon.
 var documentationLink = regexp.MustCompile(
 	`^export const SKILL_BUNDLE_HREF = "https://github\.com/neverbot/maestro(#[a-z][a-z0-9-]*)?";$`)
 
 // publishedSite is the third exemption, and it is exact for the third
 // time.
-//
-// The strip every screen carries gained a **Documentation** item
-// pointing at the site this repository publishes. Like the two above it
-// is a hyperlink a person may press and not a resource any page loads:
-// it opens in a tab of its own, nothing fetches it, and an instance with
-// no outbound route draws the strip whole and simply fails to resolve it
-// when pressed.
-//
-// One shape, one host, nothing after the semicolon — the same bound the
-// other two carry, because an exemption nobody bounds is where the first
-// CDN import will hide.
 var publishedSite = regexp.MustCompile(
 	`^export const DOCUMENTATION_HREF = "https://neverbot\.github\.io/maestro/";$`)
 
@@ -526,13 +422,6 @@ func TestNoModuleFetchesFromTheNetwork(t *testing.T) {
 // says `.js` — which is what the interface plan's own sentence says, and
 // which would silently exempt dagre.mjs and graphlib.mjs, i.e. two
 // thirds of the code this project did not write.
-//
-// **It spells the module extensions out itself rather than reusing
-// moduleExtensions.** Sharing that map is what made the first version of
-// this test a tautology: narrowing the map to `.js` narrowed the scan
-// and this test's own expectation in the same stroke, and the mutation
-// that was supposed to turn it red left it green. Two spellings of the
-// same list is the price of one of them being able to judge the other.
 func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
 	t.Parallel()
 	isModule := func(p string) bool {
@@ -879,11 +768,6 @@ func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
 // the third hole, written to the standard the first two set: what it
 // admits, what it still refuses, and that exactly one line in the front
 // end benefits from it.
-//
-// The strip on every screen inside a game ends with **Documentation**,
-// pointing at the site this repository publishes and opening in a tab of
-// its own. It is a hyperlink and not a resource: no page loads it, and
-// an instance with no outbound route draws the strip whole.
 func TestThePublishedSiteExemptionIsExactlyOneDeclaration(t *testing.T) {
 	t.Parallel()
 	admitted := `export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/";`

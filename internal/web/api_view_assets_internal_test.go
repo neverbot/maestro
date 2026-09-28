@@ -18,22 +18,6 @@ import (
 
 // TestTheServingRoutesNoSniffHeaderIsItsOwn asserts the header below the
 // middleware that masks it.
-//
-// The route sets X-Content-Type-Options itself, deliberately, because
-// this is the one response in the product whose safety depends on it: a
-// browser sniffing its own type out of bytes a designer uploaded is the
-// whole of the risk the closed mime list bounds. That line's own comment
-// says a global middleware narrowed later must not silently take it away
-// from here — and the assertion behind it went through the full server,
-// where securityHeaders sets the same header outermost, so deleting the
-// route's line left the entire web suite green. A line a comment calls
-// load-bearing that can be deleted in silence is exactly what the
-// comment says must not happen.
-//
-// So this test calls the handler directly, with no middleware in front
-// of it at all. It is the only assertion in this package that can tell
-// the two sources apart, and it is why the duplication is defensible
-// rather than merely argued.
 func TestTheServingRoutesNoSniffHeaderIsItsOwn(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

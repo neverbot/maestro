@@ -88,12 +88,6 @@ func TestListArea(t *testing.T) {
 		// listing that invented a plausible time would pass the weaker check,
 		// and these four are exactly the fields that were selected by this
 		// query and dropped on the floor before this run.
-		//
-		// The two authors come out of the struct comparison first, because
-		// Author carries a *uuid.UUID and == on a pointer compares addresses
-		// rather than ids: two authors naming the same user would fail an
-		// equality that reads correct in the failure message, which is worse
-		// than no test. They are asserted by value immediately below.
 		gotCreatedBy, gotUpdatedBy := got.CreatedBy, got.UpdatedBy
 		got.CreatedBy, got.UpdatedBy = markdown.Author{}, markdown.Author{}
 		want := markdown.DocumentSummary{
@@ -131,12 +125,6 @@ func TestListArea(t *testing.T) {
 	// some other name that happens to carry prose is caught too. A listing is
 	// the one call in this domain an agent makes against a whole game, and a
 	// body on it would blow a context window on the first call.
-	//
-	// A version of this test that instead matched a hardcoded set of field
-	// names shipped in Task 8 and was proved too weak by a later review:
-	// adding a populated `Markdown string` field to DocumentSummary left it
-	// green. This shape was proved red against that same mutation, both
-	// empty and populated with the seeded body text.
 	t.Run("a listing row carries no body at all", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()

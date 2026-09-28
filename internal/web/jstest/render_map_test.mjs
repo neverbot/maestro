@@ -3,39 +3,6 @@
 // (internal/web/static/render/marks.js, render/controls.js), the frame's
 // own bands (render/scene.js) and the one reader of a saved arrangement
 // (internal/web/static/positions.js).
-//
-// What this layer covers that no Go test can, and what is this
-// renderer's alone.
-//
-// **That a node with no coordinate is never at the origin.** `map` is
-// the one renderer whose coordinates are *required*, and the two ways a
-// node can fail to have one — a declared field that is absent, and a
-// saved arrangement that has no row — both end on the shelf. `(0,0)` is
-// a place a designer may deliberately have used, which is why
-// internal/views/execute.go refuses to return "unplaced" as a
-// coordinate; a picture that put an unplaceable node there would invent
-// a position and let a designer drag and save it. So the assertion is
-// not "the node is on the shelf" alone: it is that **no mark in the
-// whole scene sits at (0,0)**.
-//
-// **That a fresh manual map is not the empty state.** This is the
-// product's first-run experience for its best feature: the query
-// matched, the answer is full, and the only thing missing is the
-// designer's own work. The generic *"This view matched nothing"* would
-// say the opposite of all three. Both halves are asserted — the map's
-// own sentence is present, and the frame's is absent — because a
-// renderer that said both would still pass a test for either.
-//
-// **That a background can go away without taking the map with it.**
-// `background_asset_id` is ON DELETE SET NULL, so a view losing its
-// ground is an ordinary transition between two runs; every coordinate is
-// asserted unchanged across it, which is the fact a designer needs and
-// the one a re-fit would quietly destroy.
-//
-// **That the grid is `snap`'s and manual mode's**, at 1x zoom and above.
-//
-// Run directly: `node internal/web/jstest/render_map_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
 import {
@@ -379,18 +346,6 @@ check("aNewEntityInASavedArrangementIsPlacedUnpinnedAndCounted", () => {
 // **A pinned anchor and an unpinned one are two different marks**, which
 // is the one distinction the mixed layout mode is entirely about and
 // which the drawing did not carry.
-//
-// Found by opening a manual map in a browser whose stored rows
-// alternated `pinned: true` and `pinned: false`: all 105 drawn anchors
-// came back identical — `class="point"`, `fill: var(--ink)`, `r: 3.5` —
-// so *which nodes did I place and which did the engine* was written,
-// stored, returned in `positions[]` and never drawn. The check that
-// existed (above) only ever fed pinned rows, so it could not fail.
-//
-// The ring is reused rather than a third mark invented, because the two
-// facts are one fact from a designer's side: a coordinate the client
-// computed and a stored coordinate nobody is holding are both *nobody
-// put this here*.
 check("aStoredPositionThatIsNotPinnedIsDrawnAsTheEnginesAndNotAsADesignersOwn", () => {
   const nodes = [node("held"), node("released")];
   const envelope = envelopeOf(nodes, [], {
@@ -623,10 +578,6 @@ check("thePictureAndTheTwinDescribeTheSameAnswer", () => {
   // The twin is built from the envelope alone and the scene from the
   // envelope and an arrangement; two descriptions of one answer that
   // disagree is the defect this ordering exists to catch.
-  //
-  // The fixture carries every way this renderer can meet an edge: one
-  // drawn between two pins, one whose far end is on the shelf, one that
-  // leaves the picture, and one from an entity to itself.
   const envelope = envelopeOf(
     [node("a"), node("b"), node("shelved"), node("c")],
     [edge("a", "b"), edge("a", "shelved"), edge("b", "gone"), edge("c", "c")],

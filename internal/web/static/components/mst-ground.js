@@ -1,57 +1,9 @@
 // The ground: choosing a background image, placing it, and clearing it.
-//
-// The second of Task 14's two writes, and the only place in this front
-// end where a designer hands the server bytes.
-//
-// **The picker states the refusal before a file is chosen.** Eight
-// megabytes, PNG/JPEG/WebP, and *SVG is refused because an SVG served to
-// a browser can carry script*. A picker that waited for a designer to
-// find a 30 MB PNG, upload it over a hotel connection and then read a
-// sentence about it has spent their time to say something it knew all
-// along. The three facts are the server's own — the byte count is
-// internal/views' MaxAssetBytes and the formats are its three sniffed
-// mimes — and internal/web/static_ground_test.go pins them against those
-// values, so a bound that changes on the server cannot leave a stale
-// promise on the picker.
-//
-// What this file does **not** do is compose a refusal. A rejected upload
-// shows the server's own message, character for character, exactly as
-// client.js carried it. The picker's sentences are preconditions a
-// designer reads before acting; a refusal's sentence belongs to whoever
-// refused.
-//
-// **Placement is a mode.** While *adjust ground* is active the image
-// moves and scales and the nodes hold still, because a designer aligning
-// an image to a graph is moving one of the two and an interface that
-// moved both would be asking them to do it by feel. Committing writes
-// one `set_background {asset_id, scale, offset}`; cancelling writes
-// nothing at all, which is what makes the mode safe to enter. Clearing
-// sends `asset_id: null` — the only spelling for it — behind a
-// confirmation, because internal/views' RemoveAsset resets the scale and
-// the offset with it and there is nothing to put back.
-//
-// **This component fetches nothing.** Every call goes through the data
-// client it is handed, which is what internal/web/static_client_test.go's
-// perimeter checks and what keeps this file a function from state to a
-// small tree.
-//
-// It is not a LitElement, for mst-canvas.js's reason carried one step
-// along: it lives inside that component's floating panel slot, its
-// sentences must arrive as character data rather than as markup, and
-// building with `createElement` and `textContent` means nothing on this
-// path ever parses a string. A designer's own filename is a game string
-// like any other.
 
 import { CLASS_PENDING, worldDelta } from "./mst-canvas.js";
 import { adoptControlStyles } from "./control-styles.js";
 
 // The bounds, in the server's own numbers.
-//
-// MAX_ASSET_BYTES is internal/views.MaxAssetBytes; the three mimes are
-// its MimePNG, MimeJPEG and MimeWebP. They are spelled here because a
-// picker cannot ask the server what it will refuse without uploading
-// something first, and they are pinned to those values by a Go guard
-// rather than left to drift.
 export const MAX_ASSET_BYTES = 8 << 20;
 export const MIME_PNG = "image/png";
 export const MIME_JPEG = "image/jpeg";

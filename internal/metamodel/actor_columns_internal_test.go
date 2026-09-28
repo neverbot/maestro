@@ -14,29 +14,6 @@ import (
 // TestEveryCompositeTokenKeyIsNamedInActorColumns is the sweep rather
 // than a list, and it exists because the list has now been one column
 // short three times.
-//
-// actorColumns started as the two `updated_by_` names, which was
-// complete for 0004_metamodel.sql; 0007_documents.sql added `author_`
-// on document_versions and 0008_views.sql added `created_by_` on
-// view_assets, and each was noticed only when a foreign token's write
-// came back as a raw SQLSTATE 23503 over a generated constraint name.
-// Three tables, three separate discoveries, one list.
-//
-// So this test asks the database rather than repeating the names: every
-// FOREIGN KEY in the schema whose target is api_tokens is an actor
-// column by construction — api_tokens is scoped to a project and
-// nothing else references it — and the mapping must recognise the
-// constraint name Postgres generated for it. A migration that adds a
-// fourth prefix fails here, in the same run that creates it, instead of
-// two sub-projects later.
-//
-// The refusal itself is synthesised rather than provoked: provoking one
-// requires a write path per table, three of which do not exist yet, and the
-// thing under test is the name scan and not the database's willingness to
-// refuse — which the per-domain tests (TestAssetsArea's "the uploader is
-// recorded and a foreign token is refused" case, TestDocumentsArea's "a
-// document written with another games token is refused as such" case)
-// already drive end to end.
 func TestEveryCompositeTokenKeyIsNamedInActorColumns(t *testing.T) {
 	pool := testutil.NewPool(t)
 	rows, err := pool.Query(context.Background(), `

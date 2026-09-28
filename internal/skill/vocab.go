@@ -8,28 +8,6 @@ import (
 )
 
 // A closed vocabulary is the one thing the bundle enumerates.
-//
-// Everything else the surface can state about itself, it states in a tool
-// description, and the bundle routes to it. Four vocabularies are the
-// exception, because an agent needs them *before* a description is
-// useful: they are what it chooses between when writing its first
-// declaration, and a round trip to discover the list of field types is a
-// round trip in the wrong place.
-//
-// The price of enumerating them is that every one is a second copy of a
-// list that lives in Go, so every one is carried in a delimited fence and
-// set-compared against its declaration on every build:
-//
-//	```vocab:field_types
-//	text longtext number bool enum list<text>
-//	```
-//
-// The comparison runs in both directions — a word in the code the bundle
-// lacks, and a word in the bundle the code lacks — and refuses to run
-// over an empty set, because two empty sets compare equal and that is how
-// a guard of this shape goes quiet.
-
-// VocabFence is one delimited vocabulary found in the bundle.
 type VocabFence struct {
 	// Name is the fence's vocabulary name: "field_types" for
 	// ```vocab:field_types.
@@ -42,15 +20,6 @@ type VocabFence struct {
 }
 
 // VocabFences reads every `vocab:` fence in the bundle.
-//
-// It walks the whole tree rather than a list of pages: a vocabulary
-// enumerated on a page added tomorrow is exactly as much of a second copy
-// as one enumerated today, and a guard that watches the files it was
-// written for stops watching the moment somebody adds one.
-//
-// A fence with no name (```vocab:) and a fence that is never closed are
-// both errors rather than silently skipped: an unnamed or unterminated
-// fence is an enumeration wearing the costume of a checked one.
 func VocabFences(fsys fs.FS) ([]VocabFence, error) {
 	var out []VocabFence
 	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
@@ -118,10 +87,6 @@ func fencesIn(path, body string) ([]VocabFence, error) {
 
 // VocabWords returns the words of the single fence with this name, and
 // reports whether exactly one such fence exists.
-//
-// Exactly one, deliberately. Two fences for one vocabulary is two copies
-// again, and a guard comparing "the" fence would compare one of them and
-// leave the other to drift.
 func VocabWords(fences []VocabFence, name string) ([]string, error) {
 	var found []VocabFence
 	for _, fence := range fences {
@@ -153,12 +118,6 @@ func VocabWords(fences []VocabFence, name string) ([]string, error) {
 // returns what each side is missing: words the code declares and the
 // bundle does not list, and words the bundle lists and the code does not
 // declare.
-//
-// It is one function rather than two comparisons written at each call
-// site because both directions matter and only one of them is ever
-// remembered. The bundle missing a word is a value an agent never learns
-// exists; the bundle carrying an extra one is a value an agent sends and
-// the server refuses.
 func DiffVocabularies(bundle, code []string) (missing, extra []string) {
 	inBundle := map[string]bool{}
 	for _, word := range bundle {

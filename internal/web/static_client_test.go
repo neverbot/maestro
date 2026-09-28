@@ -15,13 +15,6 @@ import (
 
 // The source-shape guards over internal/web/static/client.js — the one
 // module in this front end that talks to the server.
-//
-// Two of them exist because the properties they hold have no runtime
-// signature any harness can see. A client that composed one error
-// sentence would pass every check in
-// internal/web/jstest/client_test.mjs that did not happen to provoke
-// that exact refusal, and a second module that started fetching would
-// pass all of them.
 
 const clientModule = "static/client.js"
 
@@ -36,21 +29,6 @@ const maxClientLiteral = 48
 // TestTheDataClientComposesNoSentence is the mechanical form of this
 // module's central rule: a refusal reaches a designer as the server's
 // own code, pointer and message, unmodified.
-//
-// The rule is easy to state and impossible to hold by review, because
-// breaking it is one convenient string. So it is held by shape instead:
-// **no string literal in client.js contains whitespace.** A sentence has
-// spaces; a protocol token — a path segment, a header name, an event
-// kind, a decision, a reason — does not. The module is written to that
-// constraint deliberately, which is why its own reasons are spelled
-// `placement.moved` and `kind.unhandled` rather than as English.
-//
-// What this cannot catch is a one-word sentence ("failed") smuggled into
-// a message field. What it does catch is every sentence anybody would
-// actually write, at the cost of one convention this file's own comment
-// explains — and the alternative on offer, a comment asking future
-// readers not to write prose here, is the thing this repository's
-// standing failure list calls a mechanism nothing reads.
 func TestTheDataClientComposesNoSentence(t *testing.T) {
 	t.Parallel()
 	literals := clientStringLiterals(t)
@@ -76,12 +54,6 @@ func TestTheDataClientComposesNoSentence(t *testing.T) {
 // it has two halves because the test above reports nothing in two
 // indistinguishable cases: the module is clean, or the scanner never saw
 // its strings.
-//
-// The first half pins literals the module is known to contain, so a
-// scanner that silently returned an empty set fails. The second half
-// feeds the scanner a fixture that *does* carry a sentence — including
-// one in a comment, which must not be read as a literal — and asserts it
-// is found. A guard that cannot be made to fail is not a guard.
 func TestTheSentenceGuardReadsWhatItClaimsTo(t *testing.T) {
 	t.Parallel()
 	literals := clientStringLiterals(t)
@@ -117,37 +89,11 @@ func TestTheSentenceGuardReadsWhatItClaimsTo(t *testing.T) {
 // networkPrimitives are the spellings of "reach the server" a browser
 // offers. `fetch` as a bare word (not `fetchImpl`, not `fetchAPI`),
 // EventSource, XMLHttpRequest, WebSocket, sendBeacon and importScripts.
-//
-// This is a different question from static_vendor_test.go's outbound-URL
-// scan, and both are needed: that one asks *where* a module reaches (an
-// instance with no outbound route must work completely), this one asks
-// *which module* reaches at all.
 var networkPrimitives = regexp.MustCompile(
 	`\bfetch\b|\bEventSource\b|\bXMLHttpRequest\b|\bWebSocket\b|\bsendBeacon\b|\bimportScripts\b`)
 
 // modulesAllowedToFetch is the whole list of own modules that may name a
 // network primitive, each with the reason it is on the list.
-//
-// client.js is this sub-project's answer: one module owns every call and
-// the stream, so a component is a function from data to marks. app.js is
-// the shipped page bundle that predates it and wraps every call the four
-// existing HTML shells make (fetchAPI, postJSON, fetchGames); doc.js
-// reaches the server only through those, and is deliberately *not* on
-// this list, which is what makes the list mean something.
-// components/control-styles.js is the third, and it is on this list for
-// a reason none of the data rules touch: what it fetches is **a
-// stylesheet, not data**. There is one statement of what a control looks
-// like (static/controls.css); the page reads it through an `@import` and
-// every shadow root adopts the same constructed sheet, which has to be
-// read from somewhere. The alternative was the one this repository had —
-// the vocabulary written twice, in the sheet and in a JavaScript string
-// — and it diverged: an invisible hover shipped on both sides of the
-// shadow boundary and had to be found twice.
-//
-// It reaches its own origin, for a file this server serves, and no page
-// waits on it: a root that mounts before the sheet arrives is unstyled
-// for a frame. Nothing about "one module owns the data" is weakened,
-// which is what this list is for.
 var modulesAllowedToFetch = map[string]string{
 	"static/client.js":                    "the data client: one fetcher for every call and the stream",
 	"static/app.js":                       "the shipped page bundle, whose wrappers every other page calls",
@@ -158,11 +104,6 @@ var modulesAllowedToFetch = map[string]string{
 // rule Task 3 introduces, at the moment it becomes checkable: this
 // sub-project's modules — renderers, layout, components, pages — are
 // pure functions over data, and the one that is not is named here.
-//
-// It also keeps the allowance from outliving its reason: every entry
-// must name a file that exists and that really does name a primitive, so
-// a module that stopped fetching cannot leave a permission behind for
-// the next one.
 func TestOnlyTheDataClientAndTheShippedBundleFetch(t *testing.T) {
 	t.Parallel()
 	found := map[string][]string{}
@@ -262,11 +203,6 @@ func clientStringLiterals(t *testing.T) []clientLiteral {
 // stringLiteralsIn returns every string literal in JavaScript source,
 // comments removed first by codeLines (static_sinks_test.go) so a doc
 // comment discussing an error sentence is not read as one.
-//
-// A template literal's whole body counts as one literal, interpolations
-// included. That is conservative in the loud direction — a template
-// mixing two values with a space between them is reported — which is the
-// right way round for a guard whose whole subject is composed text.
 func stringLiteralsIn(src string) []clientLiteral {
 	var out []clientLiteral
 	for _, line := range codeLines(src) {

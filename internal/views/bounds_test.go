@@ -27,11 +27,6 @@ func TestBoundsArea(t *testing.T) {
 	// current code into a guarantee. The compiler is careful today; a
 	// transaction that refuses a write is careful in every task that adds a
 	// clause to it.
-	//
-	// It asserts the refusal rather than the settings, and it asserts it
-	// through runInTx itself with a statement of its own, because the
-	// question is not whether two lines were executed but whether a write
-	// that reached this path would be stopped.
 	t.Run("every query runs in a read only transaction", func(t *testing.T) {
 		g, _ := a.games(t)
 		// The positive control: the same call with a SELECT reads a row, so a
@@ -69,9 +64,6 @@ func TestBoundsArea(t *testing.T) {
 	// than to be convenient: twelve quests against a cap of ten separates
 	// "trimmed to the cap" from "returned whatever there was", which three
 	// against ten cannot.
-	//
-	// It asserts exactly ten rather than eleven, so the sentinel row the
-	// `LIMIT cap + 1` fetches is proved to be consumed rather than returned.
 	t.Run("a truncated result is flagged not errored", func(t *testing.T) {
 		g, _ := a.games(t)
 		seedQuests(t, g, 9) // twelve in all, with the fixture's own three
@@ -107,19 +99,6 @@ func TestBoundsArea(t *testing.T) {
 	// TestBoundsArea's "the node cap counts nodes not rows" case is the
 	// assertion the two tests above cannot make: both draw one set, where a
 	// row and a node are trivially the same thing.
-	//
-	// `max_nodes` is documented as a cap on nodes. It was enforced as a cap
-	// on *rows*, and the same entity drawn by two `nodes` entries is two rows
-	// — so three quests declared as two overlapping sets came back as the
-	// identical three nodes with Truncated.Nodes set at a cap of three, and
-	// clear at a cap of six. Nobody was ever told a truncated result was
-	// complete, which is why this is the direction it is; being told a whole
-	// picture is partial is still a designer chasing a cap that was never
-	// reached, and the trim in Go could hand back fewer nodes than the cap
-	// allowed.
-	//
-	// The control is the other direction in the same shape, so a cap that
-	// stopped flagging anything at all cannot pass.
 	t.Run("the node cap counts nodes not rows", func(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"from":[{"type":"quest","as":"a"},{"type":"quest","as":"b"}],
@@ -203,10 +182,6 @@ func TestBoundsArea(t *testing.T) {
 	// `retryable`, because that is already what a cancelled statement maps to
 	// and a ninth code meaning the same thing helps nobody, and the *advice*
 	// is what gets completed.
-	//
-	// "Send the same call again" is right for contention and wrong for a
-	// query that is simply too expensive, and 57014 cannot tell those apart —
-	// so the message names the budget that elapsed and the bounds to lower.
 	t.Run("a timed out query is retryable and says which bound to lower", func(t *testing.T) {
 		g, _ := a.games(t)
 		// Enough rows that the statement cannot finish inside a millisecond
@@ -290,26 +265,6 @@ func TestBoundsArea(t *testing.T) {
 	// computed" case is the assertion the clamp above cannot make:
 	// statementBudget is a pure function, and a pure function nobody calls is
 	// worth nothing.
-	//
-	// Run passes `s.statementBudget()` to runInTx. Change that one identifier
-	// to `s.statementTimeout` and every other test in this package stays
-	// green — on the default path the knob is zero, `0ms` binds, and *zero
-	// means no timeout in Postgres*, so every production view would run
-	// unbounded while the bounds table advertises 5s and 15s. The three tests
-	// that touch the timeout all set the knob, so the default path was
-	// asserted by nobody.
-	//
-	// So this one asserts the value the *database* came back holding, through
-	// Run's own path, on both ends of the clamp:
-	//
-	//   - knob unset — the production path — must be 5s, which is what fails
-	//     the moment Run passes the raw knob;
-	//   - knob above the ceiling must be 15s, which is the only assertion
-	//     proving the clamp travels through Run rather than sitting unused.
-	//
-	// The observation goes through Service.observeBounds, which reports what
-	// set_config returned rather than what Go computed: the readback is also
-	// what makes runInTx refuse a transaction that came back unbounded.
 	t.Run("the budget postgres holds is the one this package computed", func(t *testing.T) {
 		g, _ := a.games(t)
 		doc := mustParse(t, `{"v":1,"from":[{"type":"quest"}]}`)
@@ -361,20 +316,6 @@ func TestBoundsArea(t *testing.T) {
 	// the pool carrying neither setting, and if it did not, every later write
 	// in this process would be refused with 25006 and every later query would
 	// inherit a millisecond.
-	//
-	// **Two things make that true and the test holds the pair, not either
-	// half.** The settings are made with is_local, and runInTx always rolls
-	// back — and a plain SET is transactional too, so a rollback undoes a
-	// session-level one as well. Measured: flipping is_local to false alone
-	// leaves this test green. Only losing both (is_local off *and* the
-	// rollback turned into a commit) leaks, and that is the mutation this
-	// test was proved red against.
-	//
-	// It checks **every connection in the pool**, not one, and that is the
-	// difference between an assertion and a coincidence: the pool holds four,
-	// the run borrowed whichever was free, and a single SHOW would three
-	// times out of four ask a connection the run never touched and pass
-	// whatever the answer was.
 	t.Run("the bounds do not leak onto the next caller", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.views.statementTimeout = time.Millisecond
@@ -412,47 +353,10 @@ func TestBoundsArea(t *testing.T) {
 
 	// TestBoundsArea's "no statement text is assembled outside the compiler"
 	// case closes the route the frag guard cannot see.
-	//
-	// TestCompileArea's "the only string to fragment conversions are the ones
-	// named here" case watches conversions into the builder's fragment type,
-	// which is every statement the compiler emits — but this file executes SQL
-	// of its own, written as Go string literals that never become a frag, and
-	// a value concatenated or formatted into one of those would reach Postgres
-	// with no guard speaking. That is the shape of defect this repository
-	// keeps producing: a hole closed at one call site and left open one step
-	// along.
-	//
-	// So: every statement this package hands to pgx is either a literal it
-	// wrote or the identifier holding the compiler's output. A `+`, a
-	// fmt.Sprintf, a function call — anything a caller's value could be in —
-	// fails here, and the failure names the argument.
-	//
-	// The plan's own block would have failed this test: it formatted the
-	// milliseconds into `SET LOCAL statement_timeout` with fmt.Sprintf and
-	// called it the one deliberate exception. set_config takes its value as a
-	// bind parameter, so the exception is unnecessary and this guard needs no
-	// allowance carved into it.
-	//
-	// **It watches the assignment as well as the call**, because the call
-	// site alone is one step short of the hole: `statement` is allowed by
-	// name, so `statement = statement + " -- " + fromACaller` one line above
-	// the Query left both halves of the earlier guard green. An identifier
-	// this test lets through must therefore be one whose only value is
-	// compileWith's.
 	t.Run("no statement text is assembled outside the compiler", func(t *testing.T) {
 		// The pgx methods that take statement text, and which argument of each
 		// one it is (Exec/Query/QueryRow take a ctx first; Batch.Queue does
 		// not; Conn.Prepare takes ctx and a name).
-		//
-		// **This set is a list of the pgx entry points this package uses, and
-		// it has to be revisited whenever a new one is.** The vacuity check
-		// below only fails when a *watched* call disappears, so an unwatched
-		// executor that is added is invisible to it: `batch.Queue("SELECT " +
-		// fromACaller)` executed with every guard in this file silent until
-		// Queue was named here. CopyFrom takes a table identifier rather than
-		// SQL, and is watched anyway — it is a write, this package performs
-		// none, and a composite literal in that position fails the default arm
-		// loudly, which is the answer wanted.
 		executors := map[string]int{
 			"Exec": 1, "Query": 1, "QueryRow": 1,
 			"Queue": 0, "Prepare": 2, "CopyFrom": 1,

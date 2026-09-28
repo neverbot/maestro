@@ -1,17 +1,4 @@
 // The page a mistyped address lands on.
-//
-// **It exists because the alternative was Go's own 404.** Any path the
-// mux does not know — `/g/interface-e2e/images`, where the destination
-// is called Images and the route is `/assets`; a game slug with a typo;
-// a link from a document somebody moved — answered `404 page not found`
-// in the browser's default serif on a transparent body, with no header,
-// no game switcher and no way back. It did not look like Maestro at all,
-// and the product's first design principle is that a screen says where
-// you are.
-//
-// What it adds to the shell is the header (so there is always a way to
-// another game) and one sentence naming the address that missed, with
-// the one action the negative state allows.
 
 import { fetchGames, fetchMe, goToLogin, renderHeader } from "../app.js";
 import {

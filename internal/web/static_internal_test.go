@@ -13,12 +13,6 @@ import (
 // /g/{slug} must never trigger a session-cookie lookup, since a browser
 // sends its cookie on every same-origin request regardless of whether the
 // handler ever reads CallerFrom, and none of these three handlers do.
-//
-// stubOptions (server_test.go) builds an Identity service over a nil
-// pool, so if authenticate ever attempted resolveSessionCaller for one of
-// these paths, the resulting query would panic on the nil pool and this
-// test would fail loudly instead of quietly passing — a request that
-// completes normally is the proof the lookup was never attempted.
 func TestPublicPathsSkipAuthentication(t *testing.T) {
 	t.Parallel()
 	srv := NewServer(stubOptions("test"))

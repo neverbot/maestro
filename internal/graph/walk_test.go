@@ -192,12 +192,6 @@ func TestTheProjectFilterIsInBothTermsOfTheRecursion(t *testing.T) {
 // instead of once per depth up to the bound: 4 rows here against 11,
 // measured on this project's Postgres. The cost is the branching factor
 // raised to the depth bound, not the length of the cycle.
-//
-// The edge set is the other half, and it is the one an earlier shape of
-// this walk failed: suppressing the *row* that closes the cycle rather
-// than only its expansion returned an n-cycle with n-1 of its n edges,
-// so the one thing a designer needs to see about a prerequisite cycle --
-// the edge that closes it -- was the one thing no caller could be handed.
 func TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -331,12 +325,6 @@ func TestDepthBoundsTheWalk(t *testing.T) {
 // renderer that was handed one of them could not draw the other. What
 // must not double is a single *edge* traversed from a single node, which
 // is what the per-depth assertions below pin on the relation ids.
-//
-// It is also where the non-backtracking guard is visible. Under Any, the
-// hop from b would otherwise re-traverse the very edge it arrived by and
-// report a closed row for a on every edge in the graph; what closes here
-// is the *other* edge of the pair, once from each of the two ways b was
-// reached.
 func TestDirectionAnyTraversesEachEdgeOnceFromEachNode(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -386,20 +374,6 @@ func TestDirectionAnyTraversesEachEdgeOnceFromEachNode(t *testing.T) {
 // TestASelfLoopIsReturnedOnceAndNotExpanded pins the one shape that can
 // match an edge from both ends at once, and it is the test that makes
 // the emitter's arm count observable.
-//
-// A self-loop is a cycle of length one. The walk hands it back -- once,
-// closed, over the loop's own relation -- and does not expand from it: an
-// earlier shape of this walk suppressed the row along with the expansion,
-// so the single most obvious design error a game can contain was the one
-// thing this package could not show.
-//
-// Because the row is now returned, the arm count is pinned here. A
-// two-armed emitter -- the legal form of "one arm per direction", a
-// two-armed edge relation feeding one self-reference -- matches this
-// loop under both arms and returns it twice; that doubling was measured
-// at 1, 2, 4 and 8 rows for depths 0 to 3 with the path guard removed,
-// and while the row was suppressed no test in this package could see it.
-// The count below is red against that emitter.
 func TestASelfLoopIsReturnedOnceAndNotExpanded(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -571,14 +545,6 @@ func TestMaxRowsReturnsOneRowPastTheCapSoTruncationIsDetectable(t *testing.T) {
 // connected prefix of the nearest hops rather than an arbitrary scatter
 // of nodes whose own edges were dropped -- which is not something a
 // designer can be shown.
-//
-// It has two halves and they pin different things. The behavioural half
-// below passes on an emitter with no ORDER BY at all, because Postgres
-// evaluates a recursive CTE breadth-first and therefore already yields
-// rows in depth order; it is the positive control that the prefix really
-// is the near hops. The *text* half is what pins the ordering as a
-// contract rather than as an executor detail, and it is red when the
-// ORDER BY is removed.
 func TestATruncatedWalkIsOrderedByDepth(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -783,16 +749,6 @@ func TestANegativeOrInvertedBoundPanics(t *testing.T) {
 
 // TestAnEdgePredicateIsAppliedInsideTheRecursion is the test that says
 // where the caller's own condition on a relation belongs.
-//
-// The fixture is a chain a -> b -> c and the predicate excludes the first
-// edge. Inside the recursion, that edge is never followed and *neither* b
-// nor c comes back. Applied to the walk's output instead -- which is
-// where a caller could plausibly have put it, beside the to_type and
-// where filters that do live outside -- b would be filtered out and c
-// would still be reached and returned, a node the caller can only have
-// arrived at through an edge it said not to follow. So the control here
-// is not "the predicate narrows the answer" but the specific node c, the
-// one that separates the two placements.
 func TestAnEdgePredicateIsAppliedInsideTheRecursion(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

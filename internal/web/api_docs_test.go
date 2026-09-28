@@ -55,12 +55,6 @@ func writeDocREST(t *testing.T, f restFixture, path, content string, expected in
 
 // TestTheBatchRouteMirrorsTheBatchTool drives POST /docs/batch as the SPA
 // would and reads the same report the MCP tool answers with.
-//
-// **The status is 200 even though an item failed**, which is the one
-// thing this route decides that its MCP twin does not have to: in
-// partial mode a batch that lands two of three documents is not a failed
-// request, and the failure is in the body with its index, its path and
-// its code. Only a refusal of the call itself carries a status.
 func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -647,14 +641,6 @@ func newProseEventServer(t *testing.T) (*web.Server, *identity.Service, *project
 // those prove the hub is published to, this proves a designer's browser
 // actually receives it, over the endpoint it actually subscribes to, on
 // a server wired the way main.go wires it.
-//
-// It subscribes **as a token caller**, not as a session. That is the
-// case a session-only test cannot see: internal/web's member, token and
-// invite events all set HumanOnly true, and a document's do not
-// (internal/markdown/events.go argues why at length) — so a test that
-// only ever subscribed with a cookie would stay green if someone
-// published document.written with HumanOnly: true, and the finding would
-// be that agents had silently stopped being told their base moved.
 func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newProseEventServer(t)
@@ -791,16 +777,6 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 // records the decision; this test records what a subscriber actually
 // receives, which is a DocumentEvent naming the document and nothing
 // about the entity.
-//
-// **It subscribes as a token**, for the reason
-// TestADocumentEventReachesAnSSESubscriber gives at length and which
-// applied to this fourth kind just as much: subscribing with a cookie
-// leaves the stream's HumanOnly filter unobserved for document.linked,
-// so flipping documentEventHumanOnly to true would keep this test green
-// while every agent silently stopped being told a document it holds had
-// been attached to something. The link itself is still made by the
-// session caller, so the event crosses from a human's write to an
-// agent's stream — the direction the filter breaks.
 func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newProseEventServer(t)
@@ -870,20 +846,6 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 // TestTheProseRoutesAreVisibleToTheConventionTests is requirement 1 of
 // the two Task 10's review handed this task, turned into a test rather
 // than left as an argument in a comment.
-//
-// TestEveryGameScopedRouteGoesThroughRequireProject and
-// TestEveryContentRouteIsRegisteredAsContent both build their server
-// from stubOptions, which passes no Markdown. If this file's routes were
-// registered behind `opts.Markdown != nil`, both would simply not see
-// them, and a docs route wired outside requireProject — or outside the
-// content set — would pass every test in this package. That is not a
-// prediction: it is what happened to TestEveryMCPToolGoesThroughAdd
-// ScopedTool, blind to all twelve docs tools until Task 10's review.
-//
-// This test fails the moment a gate is introduced, from the same
-// stubOptions server those two use, naming the reason. It lives in the
-// external test package and reads the routing table through the same
-// exported hooks the viewer test uses.
 func TestTheProseRoutesAreVisibleToTheConventionTests(t *testing.T) {
 	t.Parallel()
 	srv := web.NewServer(web.Options{

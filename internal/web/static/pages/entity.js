@@ -1,32 +1,5 @@
 // One entity: its name, its address, its fields, the edges either side
 // of it, and the prose attached to it.
-//
-// **A field the entity does not carry is rendered, not hidden.** *What
-// could be filled in here* is the question a designer is usually asking,
-// and a page that showed only what happens to be set answers a different
-// one — it makes an empty schema and a fully-populated one look the
-// same. The row is marked `absent` and wears the em dash, which is
-// render/twin.js's own cell shape, called rather than restated: the twin,
-// the `table` renderer and this page are three places a reader meets the
-// same value, and one function is what makes them agree.
-//
-// **A relation carries its own fields.** A relation type may declare a
-// field schema, `relations.upsert` validates an edge's values against it
-// and stores them, and until this page nothing in the interface showed
-// them — a whole declared feature that was write-only for a whole
-// sub-project. The readme's own example of why typed edges exist, a door
-// declaring which ability opens it, is a row on this page now.
-//
-// **Both directions are two lists and never one.** An edge is directed;
-// asking once and sorting the answer would be inventing a direction the
-// server did not state, and "what leads here" and "what leads away" are
-// two questions a designer asks separately.
-//
-// The same body is what a node click opens over a canvas
-// (`pages/view.js`), so this module exports the builder as well as
-// driving the page. **It runs no view**: it reads the entity, its type,
-// its edges and its documents, and `theEntityPanelRunsNoViews` pins that
-// the panel over a diagram costs the diagram nothing.
 
 import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
 import { CATALOGUE_CELLS, row } from "../rows.js";
@@ -85,10 +58,6 @@ export const INVALID_NOTE = "This entity no longer fits its type's field schema.
 // --- The model -------------------------------------------------------
 
 // formatValue renders one value by its declared type.
-//
-// Every arm answers with a string and none of them answers with a blank:
-// a blank is what an *empty* value looks like, and the distinction
-// between empty and absent is the one this whole file is careful about.
 export function formatValue(type, value) {
   switch (type) {
     case FIELD_BOOL:
@@ -111,13 +80,6 @@ export function formatValue(type, value) {
 
 // fieldRows is the fields of one entity, **in the order its type
 // declares them**, with every declared field present as a row.
-//
-// A value that is `null` reads as absent, which is what
-// internal/metamodel/schema.go's own Validate says null means everywhere
-// else in this product: "not set". A field the entity carries that its
-// type no longer declares is appended at the end and marked
-// `undeclared` — it is why the row is flagged invalid, and dropping it
-// would hide the reason from the one page that can explain it.
 export function fieldRows(schema, entity) {
   const declared = Array.isArray(schema) ? schema : [];
   const values = entity && typeof entity.fields === "object" && entity.fields !== null ? entity.fields : {};
@@ -153,14 +115,6 @@ export function fieldRows(schema, entity) {
 }
 
 // relationGroups groups one direction's edges by relation type.
-//
-// The group is the relation type, because a typed edge is a first-class
-// idea here: "requires" and "unlocks" are two different statements about
-// the same pair of entities and a flat list would read as one. Each row
-// carries the edge's **own** fields, in key order — the schema they
-// answer to is a call per group, and a row on a summary page is not
-// worth one; `relation_types.get` is where the declared order lives, and
-// the catalogue links to it.
 export function relationGroups(relations, direction, labels) {
   const items = Array.isArray(relations) ? relations : [];
   const groups = new Map();
@@ -434,21 +388,6 @@ export function entityBody(doc, slug, model) {
 // --- The one write a person makes here --------------------------------
 
 // --- Writing a field value -------------------------------------------
-//
-// The second write a person can make, and the first that has to know
-// what a value *is*. Everything it does about refusals, versions and
-// losing nothing it inherits from the rename below; what is its own is
-// the control per declared type, and one rule that the rename never had
-// to face:
-//
-// **Absent and empty are two answers and the editor keeps them apart.**
-// A field a row does not carry reads as "no zone"; a field holding ""
-// reads as nothing at all. Clearing a text field therefore *removes* the
-// value rather than storing an empty string, and the page says which of
-// the two it did by drawing the absent mark rather than a blank.
-
-// EDIT_LABEL and the two words beside it are constants because the
-// harness asks for them by identity rather than by matching prose.
 export const EDIT_LABEL = "Edit";
 export const SAVE_LABEL = "Save";
 export const CANCEL_LABEL = "Cancel";
@@ -457,18 +396,6 @@ export const NOT_A_NUMBER = "This field takes a number.";
 
 // controlFor builds the control one declared type deserves, already
 // carrying the value the row holds.
-//
-// It answers `{ el, read }`: the element to put on screen, and a
-// function that reads back either `{ value }` — what to store — or
-// `{ absent: true }` for "remove it", or `{ problem }` for something the
-// control could not turn into a value of its type.
-//
-// **A control per type, and never a text box for all of them.** A bool
-// is a checkbox because "true" typed into a field is a string; an enum
-// is the options the type declared and nothing else, so the one way to
-// fail a schema check that a picker can prevent is prevented; a list is
-// one value per line, because a comma-joined string is a thing the
-// designer would have to re-split by hand and the game may hold commas.
 export function controlFor(doc, field, value) {
   const type = String(field && field.type ? field.type : "");
   switch (type) {
@@ -557,12 +484,6 @@ function readText(el) {
 
 // fieldsWith returns the row's whole `fields` object with one key set or
 // removed.
-//
-// **A write is the whole row.** `entities.upsert` replaces what it is
-// given, so editing one value means sending every other one back
-// unchanged — including values this page could not represent, which is
-// why this copies the object it was handed rather than rebuilding it
-// from the rows on screen.
 export function fieldsWith(fields, key, answer) {
   const next = { ...(fields && typeof fields === "object" ? fields : {}) };
   if (answer && answer.absent === true) delete next[key];
@@ -572,19 +493,6 @@ export function fieldsWith(fields, key, answer) {
 
 // wireFieldEdits turns each declared field's value into something a
 // person can change, in place, on the screen they are reading it on.
-//
-// It walks the painted list rather than painting one of its own: the
-// list is a model rendered, and this is the writing attached to it, the
-// same separation the page head and `wireRename` already have. Three
-// children per field — the label, the value, the type — so the value
-// cell is found by position and by its own class, and a row the list
-// marks `undeclared` is skipped: a value whose type says nothing about
-// it has no control to offer and the fix is a schema change.
-//
-// The refusal behaviour is the rename's, deliberately: the edit is never
-// lost, and it never silently wins. What is new is that a refusal about
-// a value arrives with a path (`fields.min_level`), so it belongs under
-// that control and not at the top of the page.
 export function wireFieldEdits(doc, opened, model, schema) {
   const holder = model.fieldsList;
   if (!holder || typeof holder.children === "undefined") return null;
@@ -747,12 +655,6 @@ function editable(doc, opened, cell, field, hooks) {
 }
 
 // resolveFieldConflict is the rename's conflict, about a value.
-//
-// It shares the shell's one conflict box: the heading is the same fact
-// ("somebody changed this while you were editing"), the two rows are
-// Theirs and Yours, and neither button is a default. What differs is
-// what is compared — this field's value, formatted by its declared type,
-// rather than the row's name.
 async function resolveFieldConflict(doc, opened, spec) {
   const box = doc.getElementById("rename-conflict");
   const current = await opened.client.getEntity(spec.entity.type_key, spec.entity.key);
@@ -815,16 +717,6 @@ async function resolveFieldConflict(doc, opened, spec) {
 
 // wireRename is the product's first write by a person: an entity's own
 // name, on the screen that shows it.
-//
-// The whole of the design it obeys is in
-// `.superpowers/specs/2026-09-11-writing-in-the-interface-design.md`,
-// and it comes to two rules. **The edit is never lost**: a refusal
-// leaves what was typed in the field, because the person's sentence is
-// the one thing in the exchange that exists nowhere else. **The edit
-// never silently wins**: nothing here re-reads a version and writes
-// again on its own, which would be last-writer-wins with extra steps and
-// nobody told. A conflict is shown, both values are named, and the next
-// move is theirs.
 export function wireRename(doc, opened, model) {
   const actions = doc.getElementById("page-actions");
   const form = doc.getElementById("rename");
@@ -921,10 +813,6 @@ export function wireRename(doc, opened, model) {
 
 // showConflict reads what the row says now and puts the two values side
 // by side, with two actions and no default.
-//
-// **When the two are equal the conflict is not shown at all**: the other
-// writer wrote the same words, the person's intent already holds, and a
-// refusal with no consequence is noise.
 export async function showConflict(doc, opened, entity, typed, settle) {
   const box = doc.getElementById("rename-conflict");
   const form = doc.getElementById("rename");

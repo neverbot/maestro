@@ -1,20 +1,5 @@
 // The harness for the picker: the control the query builder rests on,
 // built before the builder because three other screens want it too.
-//
-// What this layer covers. Two halves are pure and are driven directly —
-// what a game's vocabulary becomes as options, and what a filter
-// matches — and the component half is driven through the DOM stub the
-// other components use, because the properties that matter are about
-// what it emits and what it keeps:
-//
-//   - a choice answers with the **key the game wrote**, never a label,
-//     because a misspelled key is the commonest way a query fails and
-//     the whole point of a picker is that it cannot be misspelled;
-//   - options that go away take an impossible choice with them;
-//   - an empty list and an empty filter are two different sentences.
-//
-// Run directly: `node internal/web/jstest/picker_test.mjs`.
-// internal/web/static_picker_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 

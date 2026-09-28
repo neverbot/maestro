@@ -136,16 +136,6 @@ func TestSetAdminUnknownUserReturnsErrUserNotFound(t *testing.T) {
 // (TestConcurrentRemovalLeavesExactlyOneOwner, projects_test.go),
 // applied to the instance-wide admin invariant: two goroutines racing to
 // demote the instance's last two admins must never both succeed.
-//
-// Looped 25 times, each round against a fresh pair of admins: a Round 2
-// review pointed out that a single round of this exact test can pass
-// without the two goroutines' SetAdmin calls ever actually overlapping
-// inside CountAdminsForUpdate's own FOR UPDATE window — go test's
-// scheduler offers no guarantee the two goroutines are even both
-// running before one finishes — so one green run was never strong
-// evidence the lock was doing anything. Looping gives the race many
-// independent chances to occur; the assertion inside each round is
-// exactly as strict as the single-round version was.
 func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

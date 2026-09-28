@@ -17,24 +17,6 @@ import (
 
 // This file is staleness: a view saved against one vocabulary, run
 // against the next one.
-//
-// **A rename is performed here through the product's own rename**, and
-// that is new: until types.rename existed these helpers ran a bare
-// UPDATE on the catalogue row, because both type upserts are addressed
-// by key and upserting under a new one creates a second type rather than
-// moving the first. The staged UPDATE was a fair imitation — a rename
-// moves the key column and nothing else — but an imitation is what it
-// was, and every staleness test in this file rested on it. They now
-// drive metamodel.RenameEntityType and metamodel.RenameRelationType, so
-// what the diagnostics report is the state the product can actually
-// produce. That is also the answer to why id-first resolution was built
-// before any rename existed: it is what made the operation addable
-// without breaking every saved view in a game.
-//
-// The service is called rather than the SQL kept beside it for the
-// reason a mirror that is never called is a mirror that compiles: a
-// rename that started tidying view_refs, or rewriting a stored query,
-// would leave these tests green if they went on staging their own.
 
 func (g *game) renameEntityType(t *testing.T, from, to string) {
 	t.Helper()
@@ -148,13 +130,6 @@ func TestStaleArea(t *testing.T) {
 	// rename" case is the first half of the whole design: a rename does not
 	// change an id, the stored dependency index holds the id, so the view
 	// still draws what it drew.
-	//
-	// The two assertions are independent and both are load-bearing. That the
-	// nodes come back says the id resolved — a by-key implementation returns
-	// query_stale here. That the diagnostic comes back says the spelling was
-	// noticed — an implementation that resolved by id and said nothing would
-	// leave a designer with a document that quietly disagrees with the game
-	// forever.
 	t.Run("a renamed relation type still runs and reports its rename", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "chain", chainView)
@@ -206,25 +181,6 @@ func TestStaleArea(t *testing.T) {
 	// it asserts a *negative* about a call in another package:
 	// metamodel.RenameEntityType moves the catalogue row and must not touch
 	// view_refs.
-	//
-	// **Why the hands-off is the load-bearing half.** storedID (stale.go)
-	// resolves a reference by id only when the ref row and the stored query
-	// agree on the spelling, because a disagreement is how a torn index —
-	// refs written from a document this run is not holding — is told from an
-	// ordinary one. A rename that helpfully tidied `ref_key` to the new
-	// spelling would manufacture exactly that disagreement on every view
-	// that names the type: storedID would answer nil, resolution would fall
-	// through to the by-key lookup, find nothing under the old key, and the
-	// view would report its type **missing** — the feature causing the exact
-	// failure it exists to prevent, on views it was supposed to carry
-	// through untouched.
-	//
-	// So the assertions are, in order: the ref row still spells the old key,
-	// it still carries the same non-null type id, the stored document is
-	// untouched at the same version, and the run therefore reports a rename
-	// rather than a missing type and draws the picture it drew before.
-	// Teaching the rename to update `ref_key` turns the last of those from
-	// entity_type_renamed into entity_type_missing.
 	t.Run("a rename leaves the view reference index spelling the old key", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -363,11 +319,6 @@ func TestStaleArea(t *testing.T) {
 
 	// TestStaleArea's "best effort drops the stale part and says what it
 	// dropped" case.
-	//
-	// **Non-empty is the control.** An implementation that dropped
-	// everything, or that returned an empty picture with a warning, satisfies
-	// "no error" and answers the designer's question with a lie of a
-	// different shape.
 	t.Run("best effort drops the stale part and says what it dropped", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "chain", chainView)
@@ -392,17 +343,6 @@ func TestStaleArea(t *testing.T) {
 	// must not be *dropped*: the set would then come back wider than the
 	// document asks for, which is a picture that is wrong rather than one that
 	// is short.
-	//
-	// **The fixture is built so that the widening is visible**, which took
-	// some care and is the point of this comment. The obvious construction —
-	// filter on a field, then drop that field from the schema — cannot show
-	// it: dropping a declared key that entities hold values for marks every
-	// one of them invalid, so the widened set draws nothing anyway and a
-	// broken implementation looks exactly like a correct one. Narrowing an
-	// enum's options invalidates only the rows holding the option that went,
-	// which leaves the other two quests valid, drawable, and outside the
-	// filter this view asks for. Those two are what a dropped condition
-	// would put on the picture.
 	t.Run("best effort drops the set rather than the condition it cannot evaluate", func(t *testing.T) {
 		g, _ := a.games(t)
 		// One set filtered to the single epic quest, one set that is not
@@ -502,12 +442,6 @@ func TestStaleArea(t *testing.T) {
 	})
 
 	// TestStaleArea's "deleting a type lists the views it broke" case.
-	//
-	// Two things are pinned, and the second is why the list is read before
-	// the delete rather than after it: the same ON DELETE SET NULL that lets
-	// a ref row survive its type empties the column this lookup matches on,
-	// so the answer afterwards is "nothing broke" — a wrong answer rather
-	// than an error.
 	t.Run("deleting a type lists the views it broke", func(t *testing.T) {
 		g, other := a.games(t)
 		g.save(t, "factions", `{"v":1,"from":[{"type":"faction","as":"f"}]}`)
@@ -538,19 +472,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "removing a type through the views report still
 	// announces it" case is the event half of the call above, and it exists
 	// because this service composes a write it does not own.
-	//
-	// RemoveTypeReportingViews is the only path a transport has to the
-	// broken-view report, so it is the path every type deletion in the
-	// product takes — and it removes the type through *this* package's
-	// metamodel handle. That handle was built with a nil hub, on the
-	// argument that this package calls only read accessors on it; the
-	// argument was true when it was written and stopped being true here.
-	// With a nil hub the removal announced nothing at all, so a designer
-	// watching a game would never learn a type had gone — a silence, not a
-	// boundary. The handle takes the same hub now, and this is what says so.
-	//
-	// Both kinds, because a rule carried to one of two callers is the defect
-	// this sub-project found nineteen times.
 	t.Run("removing a type through the views report still announces it", func(t *testing.T) {
 		g, _ := a.games(t)
 		hub := realtime.NewHub()
@@ -680,13 +601,6 @@ func TestStaleArea(t *testing.T) {
 	// pointer" case is the guard over the eight promises. A code nothing can
 	// produce is a documented mechanism that does not exist, and a code
 	// produced by a path no test drives is one that can stop working silently.
-	//
-	// Every case runs a *saved* view against a game that moved under it, and
-	// asserts the code with the pointer it is addressed at — a report with
-	// the right code at the wrong position sends a designer to rewrite the
-	// wrong line. The last clause is the vacuity check: the eight cases must
-	// between them cover diagnosticCodes(), so a ninth code added without a
-	// case fails here.
 	t.Run("every diagnostic code is reachable and carries its pointer", func(t *testing.T) {
 		quest := func(schema metamodel.Schema) func(t *testing.T, g *game) {
 			return func(t *testing.T, g *game) {
@@ -877,10 +791,6 @@ func TestStaleArea(t *testing.T) {
 	// every label_from without looking at a schema. So the check the entry is
 	// supposed to get is silently switched off by a rename somewhere else in
 	// the document.
-	//
-	// What makes it observable is a label_from that should now be refused:
-	// the field it names is dropped from the relation type in the same edit
-	// that renames it.
 	t.Run("a renamed relation type still judges the edge label it draws", func(t *testing.T) {
 		g, _ := a.games(t)
 		note := metamodel.Field{Key: "note", Type: metamodel.FieldText}
@@ -940,13 +850,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "best effort keeps the projected fields it can still
 	// read" case pins what a best-effort picture carries under
 	// `project.fields` when one of the keys has gone.
-	//
-	// It is also what showed that pruning the projection is nothing pruneStale
-	// has to do: resolution already walks past a key it cannot judge, so the
-	// resolved list handed to the compiler lacks it before anything is
-	// pruned. This test asserts the outcome — the surviving keys, and only
-	// those — rather than the mechanism, so it holds whichever pass does the
-	// work.
 	t.Run("best effort keeps the projected fields it can still read", func(t *testing.T) {
 		g, _ := a.games(t)
 		// hogger is given a difficulty, because the fixture declares that
@@ -999,18 +902,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "a renamed type does not switch off the projections typo
 	// check" case is what actually observes the scope the test above only half
 	// reaches.
-	//
-	// A projection's scope built by key alone does not *refuse* a renamed
-	// type's projection — it comes back holding no type at all, which
-	// projectionScope reads as "unresolved" and answers every key with a
-	// shrug. So the picture is identical and only the judgement is gone: a
-	// key the game no longer declares is accepted, and the run draws the
-	// flat one-colour picture this package refuses everywhere else. The
-	// difference is visible exactly where a key needs refusing.
-	//
-	// difficulty is the field dropped here because the fixture declares it
-	// and no entity holds a value for it, so removing it from the schema
-	// flags nothing invalid and this test's subject stays the projection.
 	t.Run("a renamed type does not switch off the projections typo check", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "hard", `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -1059,12 +950,6 @@ func TestStaleArea(t *testing.T) {
 	// comes back then is not a smaller picture — it is `no set named "f" is
 	// declared`, a query_invalid about a set the designer never removed, from
 	// a run they explicitly asked to do its best.
-	//
-	// Both dependants are in one document on purpose: they fail the same way
-	// and a fixture holding one of them would leave the other unwatched. The
-	// second step reads from the first, which is what makes the propagation
-	// a fixed point rather than one pass: a step reading from a step reading
-	// from a dropped set survives a single sweep.
 	t.Run("best effort drops what depended on what it dropped", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "web", `{"v":1,"from":[
@@ -1119,13 +1004,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "a type that is gone is reported once and not again by
 	// the fields it declared" case is the second position where one broken
 	// thing could be reported twice.
-	//
-	// A step whose to_type has gone reaches entities of no known type, so
-	// every field its `where` names is undeclared *there* — and answering
-	// that as field_missing beside the type's own diagnostic would tell a
-	// designer to repair a field that never moved. fieldScope says which of
-	// its refusals is staleness and which is a consequence of one already
-	// reported, and this is the case where the distinction shows.
 	t.Run("a type that is gone is reported once and not again by the fields it declared", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "narrow", `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -1155,28 +1033,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "a ref id is trusted only when its key is the one the
 	// document spells" case is the pairing check the id-first road needs to be
 	// safe.
-	//
-	// `RunView` reads the document and the dependency index in two separate
-	// pool statements, with no transaction and no version check between them.
-	// Task 11 writes the pair in *one* transaction, so they are consistent on
-	// disk; a read does not pair them. An upsert committing between the two
-	// statements hands a run document version N beside refs version N+1, and
-	// every ref whose pointer survived the edit then redirects by id to the
-	// type the *new* document names.
-	//
-	// The state that race produces for an instant is exactly the row edit
-	// below — the same kind of direct edit the rename tests use, for the same
-	// reason: the product has no way to produce it on purpose. Trusting the
-	// id there draws the wrong types, returns success, and calls the
-	// disagreement a rename, which is the wrong-picture-that-looks-right the
-	// default policy exists to prevent, arriving with a diagnostic that
-	// misdescribes it.
-	//
-	// The check that closes it is one comparison: trust the stored id only
-	// when the ref's own key is the key the document spells at that pointer.
-	// After a rename the document and the ref still agree — both hold the old
-	// spelling, since neither is rewritten — and only the catalogue differs,
-	// so every rename test above is untouched.
 	t.Run("a ref id is trusted only when its key is the one the document spells", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "quests", `{"v":1,"from":[{"type":"quest","as":"q"}]}`)
@@ -1206,20 +1062,6 @@ func TestStaleArea(t *testing.T) {
 	// that turns a key into a declared thing — and the one where its absence
 	// made the *rename diagnostic itself* prescribe a repair the product then
 	// refused.
-	//
-	// A renderer parameter naming a relation type is a reference exactly as
-	// `via` is: deleting the type breaks the view, and a rename has to be
-	// carried by the id. It was resolved only by `CheckRenderer`, which is
-	// called from the upsert and never from a run, so a rename left the
-	// document reported and the parameter silent — and re-saving with the
-	// new spelling, which is what the rename diagnostic says to do, came back
-	// refused at `/renderer_params/contain_via` with advice that would
-	// recreate the type the designer had just renamed away from. The view was
-	// uneditable until they guessed.
-	//
-	// The whole loop is asserted here, because the loop is the finding: the
-	// run names both positions, repairing both is accepted, and the repaired
-	// view runs with nothing reported.
 	t.Run("a renamed relation type is reported at the renderer parameter that names it", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.saveNested(t, "nest", nestedView, "requires", nil)
@@ -1274,19 +1116,6 @@ func TestStaleArea(t *testing.T) {
 	// look the renamed type up by key, find nothing, and report a type
 	// *missing* that the rename left standing — refusing a view whose picture
 	// had not changed.
-	//
-	// It is asserted on the stored index rather than only through the run,
-	// because the run is green either way for one round: a by-key lookup that
-	// happens to find the type says nothing is wrong, and the difference
-	// shows only once something has moved.
-	//
-	// **The deletion report gains nothing measurable from this row**, and
-	// that is worth saying rather than claiming otherwise: `contain_via` is
-	// the only type-naming renderer parameter, and the nested renderer
-	// structurally requires the query to draw an edges[] entry of that same
-	// relation type — so a view naming it in the parameter already named it
-	// in the query, and already appeared in the report. The row is here for
-	// the id, not for the list.
 	t.Run("a renderer parameter is a recorded reference", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.saveNested(t, "nest", nestedView, "requires", nil)
@@ -1342,14 +1171,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "a negated type comparison is a dependency like any
 	// other" case pins the one place the `@type` dependency costs more than it
 	// buys, so the asymmetry stays a decision rather than becoming a surprise.
-	//
-	// A deleted type cannot change what `@type neq` selects: nothing is of a
-	// type this game no longer has, so the view below would draw exactly what
-	// it drew. It is still reported broken and still refused, for the three
-	// reasons written at typeOperand — chiefly that the no-op is a property
-	// of today's rows and not of the document, and re-declaring the key
-	// (which resolution's step 2 exists for) makes the negation narrow again
-	// with nothing said.
 	t.Run("a negated type comparison is a dependency like any other", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "notclasses", `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -1395,14 +1216,6 @@ func TestStaleArea(t *testing.T) {
 	// case is the guard against the silent widening by the one road nothing
 	// watched: a broken pointer outside the three document positions the
 	// pruner knows how to drop.
-	//
-	// It prunes nothing, so the document runs whole with a resolution problem
-	// standing against it — a picture drawn as if the problem were not there,
-	// with a warning beside it saying that it is. A renderer parameter naming
-	// a deleted relation type is that pointer, which is what makes this a
-	// live arm rather than defence in depth: the containment renderer without
-	// its containment relation draws one flat row of boxes, and drawing that
-	// under a warning is exactly the wrong-picture-that-looks-right.
 	t.Run("best effort refuses a problem pruning cannot act on", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.saveNested(t, "nest", nestedView, "requires", nil)
@@ -1422,14 +1235,6 @@ func TestStaleArea(t *testing.T) {
 	// did not prune" case records what the "an empty picture reads as this
 	// game has nothing" guard does
 	// *not* cover, because the sentence invites the wrong reading.
-	//
-	// The guard is about the query — every seed set pruned away — and not
-	// about the result. Emptiness also arrives by a road pruning cannot see:
-	// narrowing a schema invalidates the rows that held a value for what it
-	// dropped, so a seed set that survives whole comes back with no rows at
-	// all. Refusing empty results is not the fix; a legitimately empty query
-	// is a thing a designer asks for. This pins the measurement rather than a
-	// wish: zero nodes, no error, and the warning attached.
 	t.Run("best effort can still answer with an empty picture it did not prune", func(t *testing.T) {
 		g, _ := a.games(t)
 		// Two selectors, so nothing here is the "every seed set is gone"
@@ -1464,13 +1269,6 @@ func TestStaleArea(t *testing.T) {
 	// TestStaleArea's "the dependency list is one row per reference and not
 	// per view" case pins the shape of the deletion report, which nothing
 	// asserted and which a caller can read exactly one way too many.
-	//
-	// It is one row per *reference*, so a view naming the type at three
-	// positions comes back three times. That is intentional and it is what
-	// the pointers are for — a designer told to repair a view wants the three
-	// positions, not the view's name three times — but it means a caller
-	// counting rows and reporting "three views broken" is wrong, and nothing
-	// said so. Now something does.
 	t.Run("the dependency list is one row per reference and not per view", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.save(t, "thrice", `{"v":1,"from":[

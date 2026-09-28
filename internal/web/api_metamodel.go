@@ -32,55 +32,6 @@ import (
 // spelled: an MCP tool answers with a code inside a tool result, and
 // this file answers with the same code and the same details object under
 // an HTTP status.
-//
-// **Route shapes: a row key never shares a segment with a literal.**
-// This is Task 8's first recorded decision. Row keys permit `new`,
-// `index`, `id`, `null`, `games`, `types` and `search` (see
-// internal/metamodel/keys.go, which recorded the collision and left the
-// choice here), so /types/{key} would make a key's legality depend on
-// which sibling routes happen to exist — and would silently change
-// meaning the day a /types/new page is added, because Go's ServeMux
-// prefers a literal segment over a wildcard without saying so. Every
-// row here is therefore addressed through a fixed discriminator:
-// /types/by-key/{key}, /entities/by-key/{type}/{key}. The discriminator
-// sits where no key ever sits, so no key can collide with it —
-// "by-key" and "by-id" are themselves perfectly legal keys, and
-// TestARouteShapedKeyIsStillAddressable declares a type for each of the
-// dangerous words, reads it and removes it.
-//
-// **Metamodel 14 removed the by-id half.** The four removals took uuids
-// and now take keys, so `by-key` is the only discriminator this surface
-// has; the shape it discriminates against is unchanged, and the segment
-// stays because what makes it safe is that a key never sits where a
-// literal could claim it. The two alternatives
-// keys.go recorded — a reserved-word list in the domain, or resolving
-// the ambiguity in the router — were both rejected for the same reason:
-// they make a designer's vocabulary hostage to a routing table, and a
-// key rule tightened after a game is seeded costs renames.
-//
-// **Nothing here flattens a game's fields onto a row.** That is the
-// second decision. A game may declare fields named `key`, `name`, `id`,
-// `version`, `invalid` or `type_key`; the database keeps them in a jsonb
-// column, walled off from the row's own columns, and this surface keeps
-// exactly that wall — an entity answers with its own identity at the top
-// level and the game's values nested under `fields`, the same shape the
-// MCP surface uses and the same shape the page renders from. So there is
-// no reserved-key list, no rename forced on a game that legitimately
-// calls a field `name`, and no place where lifting one namespace into
-// the other could shadow the other. TestAGameFieldNamedLikeARowColumnNeverShadowsIt
-// writes an entity whose every field is named after a row column and
-// reads it back to prove it.
-
-// maxContentRequestBodyBytes bounds a game-content request body.
-//
-// It is deliberately far larger than maxAuthRequestBodyBytes (16 KiB,
-// api_auth.go), because the bodies are a different kind of thing: a
-// login carries three short strings, while one entities.upsert batch is
-// the unit a seed is written in — hundreds of rows, each of which may
-// carry up to metamodel.MaxIndexedText of prose. 4 MiB holds a large
-// batch comfortably and still bounds what a single request can make this
-// process allocate. Over it, the caller is told the body was too large
-// (413) rather than being handed a JSON parse error to puzzle over.
 const maxContentRequestBodyBytes = 4 << 20
 
 // deps builds the MCPDeps the shared cores take. Built per call rather
@@ -109,15 +60,6 @@ func (s *Server) requireContentService(w http.ResponseWriter) bool {
 // construction (see requireProject's own doc comment for why that is
 // deliberate), but a session caller's role is real, and a viewer is
 // someone who may read a game and not change it.
-//
-// No handler in this file calls it. registerContentRoute (server.go)
-// applies it to every non-GET route on this surface, so a write is gated
-// because it is a write rather than because its handler remembered — a
-// review stripped this call from five of the eight handlers when they
-// each made it themselves, and nothing failed.
-//
-// The message names the caller's actual role, because "forbidden" alone
-// leaves a designer who was quietly demoted with nothing to act on.
 func requireEditor(w http.ResponseWriter, scope ProjectScope) bool {
 	if roles.AtLeast(roles.Role(scope.Role), roles.Editor) {
 		return true
@@ -138,17 +80,6 @@ func decodeContentBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // confirmation, never a selector. Present and disagreeing with the game
 // in the URL, the call is refused; present and agreeing, it is accepted;
 // absent, nothing happens.
-//
-// Silently ignoring a disagreeing `game` would be the alternative,
-// and it is the dangerous one: a client that has lost track of which
-// game it is editing would be told its write succeeded, in the other
-// game, which is exactly the mistake the field exists to catch.
-//
-// The judgement itself is statedProjectProblem's (mcp.go), which both
-// surfaces call, so "the same rule" is a shared function and not two
-// switches that agreed when they were written. Only the message is this
-// surface's own: the caller here holds a session, not a token, and the
-// URL is what it disagreed with.
 func checkStatedProject(w http.ResponseWriter, scope ProjectScope, in scopedInput) bool {
 	switch statedGameProblem(in.requestedGame(), scope.Slug) {
 	case errCodeBadRequest:
@@ -169,22 +100,6 @@ func checkStatedProject(w http.ResponseWriter, scope ProjectScope, in scopedInpu
 // arms are deliberately in the same order and matched the same way —
 // errors.As for the two typed errors, errors.Is against a sentinel for
 // the rest, never by reading a code off the error itself.
-//
-// The statuses are the only thing this adds:
-//
-//   - 400 for invalid_input: the caller's own argument is malformed —
-//     a cursor, a uuid, a limit, an oversized query — which is a bad
-//     request in the plainest sense.
-//   - 422 for invalid_schema, schema_violation and endpoint_type_mismatch:
-//     the request was well formed and the content it carried was refused
-//     by a rule the game itself declared.
-//   - 409 for version_conflict and in_use: the caller is not wrong, the
-//     world moved (or is holding on to the row).
-//   - 404 for not_found, 503 for retryable, 500 for anything unmapped.
-//
-// Nothing an agent or a designer can fix reports internal_error; that is
-// this project's standing rule and the default arm is only reached by a
-// fault neither of them caused, which is why it also logs.
 func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	var domainErr *MCPError
 	if errors.As(err, &domainErr) {
@@ -236,15 +151,6 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 		writeCodedError(w, http.StatusNotFound, errCodeNotFound, err.Error(), fieldDetails(err))
 	// The views domain's four, arm for arm with mcpErrorFor and in the
 	// same order. The statuses are the only thing this side adds:
-	//
-	//   - 400 for query_invalid and limit_exceeded: the document, or a
-	//     bound written into it, is the caller's own malformed argument.
-	//   - 422 for renderer_requirements: the request was well formed and
-	//     was refused by a rule the catalogue declares, which is exactly
-	//     what invalid_schema and schema_violation are 422 for.
-	//   - 409 for query_stale: the caller is not wrong, the game moved
-	//     under a document it saved earlier — the same statement
-	//     version_conflict and in_use make.
 	case errors.Is(err, views.ErrQueryInvalid):
 		writeCodedError(w, http.StatusBadRequest, errCodeQueryInvalid, err.Error(), fieldDetails(err))
 	case errors.Is(err, views.ErrRendererRequirements):
@@ -338,19 +244,6 @@ func writeCodedError(w http.ResponseWriter, status int, code, message string, de
 
 // withoutCodePrefix drops the sentinel's own name from the front of a
 // message that is about to be sent beside it.
-//
-// The domain wraps its sentinels — `fmt.Errorf("%w: no entity type %q in
-// this game", ErrNotFound, key)` — so `err.Error()` reads
-// `not_found: no entity type "quest" in this game`. Both halves then go
-// on the wire: `error: "not_found"` and a message that begins by saying
-// it again, in the domain's identifier rather than in words. A screen
-// that shows the message shows the code, which is how
-// `not_found: no entity type "nosuchtype" in this game` came to be the
-// sentence a designer met after mistyping a link.
-//
-// Stripped here rather than at each of the thirty call sites above, and
-// only when the prefix **is** the code being sent: a message that begins
-// with some other word keeps it.
 func withoutCodePrefix(code, message string) string {
 	prefix := code + ": "
 	if code == "" || !strings.HasPrefix(message, prefix) {
@@ -619,22 +512,6 @@ func (s *Server) handleUpsertEntities(w http.ResponseWriter, r *http.Request, ca
 
 // handleRepairEntities and handleRepairRelations mirror the two repair
 // tools.
-//
-// **POST, not PATCH**, and the route is a verb — `/entities/repair` —
-// rather than a resource. Both are deliberate: a pass names no row, so
-// there is no resource to PATCH, and it is not idempotent in the sense
-// PUT would promise — running it twice moves a second batch of flagged
-// rows, which is the point of the loop the tool description teaches. It
-// takes a body rather than query parameters because `set` is a map of
-// arbitrary declared values and a query string is the wrong shape for
-// one.
-//
-// The answer is 200 with the report even when rows failed, for the
-// reason handleUpsertEntities gives: a pass that repairs nineteen of
-// twenty rows is not a failed request, and the twentieth is in the body
-// with its key and its code. Only a refusal of the *call* — an unknown
-// type, a `set` key the type does not declare, a pass stating no
-// operation — is a status.
 func (s *Server) handleRepairEntities(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !s.requireContentService(w) {
 		return
@@ -753,17 +630,6 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 }
 
 // handleGetRelation reads one edge by its triple.
-//
-// The address is in the query string rather than in the path, and that
-// is this file's route rule doing its job: an edge is named by five
-// keys, and /relations/{type}/{source_type}/{source_key}/... would put
-// five row keys in five path segments where the header's own argument
-// says a key never shares a segment with anything. `/docs/one` already
-// addresses a row by query string on this surface for the same reason.
-//
-// Every part is required, and an absent one is refused by the domain as
-// invalid_input naming the part, not read as an empty key: an edge with
-// four fifths of an address is not a request anyone meant.
 func (s *Server) handleGetRelation(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !s.requireContentService(w) {
 		return
@@ -894,20 +760,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 
 // querySingle reads the one value of a query parameter, and is the
 // single door every parameter on this surface comes in through.
-//
-// It enforces the half of that surface's stated rule the individual
-// readers below could not see: a parameter appears at most once. Go's
-// url.Values keeps every repetition and Get returns the first, so
-// `?invalid=true&invalid=false` used to be answered from the first and
-// the second dropped without a word — and `?invalid=true&invalid=garbage`
-// answered 200 having never looked at the garbage at all, which is the
-// one path on which an unrecognised spelling of `invalid` still got
-// through after refusing it everywhere else.
-//
-// present is not the same as raw != "": `?invalid=` is a parameter the
-// caller wrote and left empty, and the readers below all treat that as
-// something to refuse rather than as absence. Absent is absent; written
-// is written.
 func querySingle(w http.ResponseWriter, r *http.Request, name string) (raw string, present, ok bool) {
 	values, present := r.URL.Query()[name]
 	if !present {
@@ -923,18 +775,6 @@ func querySingle(w http.ResponseWriter, r *http.Request, name string) (raw strin
 
 // queryPresentValue is querySingle plus the other half of the rule: a
 // parameter written with no value is refused rather than read as absent.
-//
-// That is the same judgement checkStatedProject makes about an empty
-// `game` — an empty confirmation confirms nothing — applied to the
-// query string, and it holds here for the same reason. `?invalid=` used
-// to answer with the whole listing, so a designer whose client dropped
-// the value of the filter naming the rows that no longer fit their type
-// was handed every row instead, which is this surface's own "wrong
-// answer that looks like a right one". The one deliberate cost is the
-// bare-flag idiom: `?verbose` and `?cascade` (which url.Values also
-// present as written-and-empty) are refused rather than read as true.
-// Refusing is the safe direction for a parameter one of whose callers is
-// a cascading delete, and the caller is told exactly what to write.
 func queryPresentValue(w http.ResponseWriter, r *http.Request, name string) (raw string, present, ok bool) {
 	raw, present, ok = querySingle(w, r, name)
 	if !ok || !present {
@@ -964,9 +804,6 @@ func queryString(w http.ResponseWriter, r *http.Request, name string) (string, b
 // holds for a genuine two-state flag — `cascade` and `verbose`, its only
 // callers. A filter whose absence is a third state goes through
 // queryTriState instead.
-//
-// The leniency is about spelling and nothing else: a repeated flag and a
-// flag written with no value are both refused, by queryPresentValue.
 func queryBool(w http.ResponseWriter, r *http.Request, name string) (bool, bool) {
 	raw, present, ok := queryPresentValue(w, r, name)
 	if !ok || !present {
@@ -993,9 +830,6 @@ func queryBool(w http.ResponseWriter, r *http.Request, name string) (bool, bool)
 // handleListRelations takes the same filter, over the same column on the
 // edge table (0009), and reads it through this same function rather than
 // through a second parse — one spelling of `?invalid=` on both routes.
-//
-// Both spellings of both sides are accepted, and anything else is the
-// caller's own argument at its own path.
 func queryTriState(w http.ResponseWriter, r *http.Request, name string) (*bool, bool) {
 	raw, present, ok := queryPresentValue(w, r, name)
 	if !ok || !present {
@@ -1022,14 +856,6 @@ func queryTriState(w http.ResponseWriter, r *http.Request, name string) (*bool, 
 // is *not* refused here — the domain clamps it, deliberately, and
 // re-deciding that here would be a second bound to keep in step with the
 // first.
-//
-// A number too wide for the int32 the field is gets its own answer.
-// strconv reports range and syntax through the same error, so both used
-// to be reported as "limit is not a number" — false for `999999999999`,
-// which is a number, and unactionable, because a caller told their
-// number is not one has nowhere to go from there. The clamp above is
-// about the domain's page size and cannot help here: the value never
-// reaches an int32 to be clamped.
 func queryLimit(w http.ResponseWriter, r *http.Request) (int32, bool) {
 	raw, present, ok := queryPresentValue(w, r, "limit")
 	if !ok || !present {
@@ -1052,17 +878,6 @@ func queryLimit(w http.ResponseWriter, r *http.Request) (int32, bool) {
 // queryVersion reads a version-shaped query parameter: absent is
 // (nil, true), present and well-formed is (&v, true), present and
 // malformed is a 400 at that parameter's own path.
-//
-// It exists rather than reusing queryLimit because the two report
-// different paths and because a version is a *int32 — absent and zero
-// are different things for expected_version, where zero means "create".
-// Sharing queryLimit and mapping its zero would be exactly the guess the
-// whole expected_version design refuses.
-//
-// Its only callers are the prose surface's (api_docs.go): DELETE
-// /docs/one, whose method has no body to carry expected_version in, and
-// requiredVersion, which adds the "absent is refused" half the three
-// version arguments MCP marks `required` need.
 func queryVersion(w http.ResponseWriter, r *http.Request, name string) (*int32, bool) {
 	raw, present, ok := queryPresentValue(w, r, name)
 	if !ok || !present {
@@ -1095,29 +910,6 @@ var relatedToParts = []string{
 
 // queryRelatedTo reads the traversal filter, or refuses an incomplete
 // one naming every part that is missing.
-//
-// Any part present turns the listing into a traversal — any, not all
-// four. Read as "all four", a query naming one part and forgetting the
-// rest falls through to an ordinary listing, which answers a caller who
-// asked for one entity's neighbours with every entity in the game.
-//
-// Completeness is decided here rather than left to the domain, and that
-// is what makes this surface's parity with MCP true rather than
-// asserted. RelatedToInput (mcp_metamodel.go) carries no `omitempty` on
-// any of its four fields, so all four are `required` in the tool's
-// served schema and the SDK's validator refuses an incomplete traversal,
-// naming the absent properties, before the core is ever called. REST
-// used to reach the domain instead and answer whatever its resolution
-// order produced: three of the four one-part permutations at
-// related_to.direction, and the fourth as `not_found: no relation type
-// ""`, naming a lookup the caller never asked to make. The core is
-// shared; the two surfaces were not answering the same question to it.
-// They refuse the same four requests now, at the same paths.
-//
-// A part written with no value is present and missing both, so it is
-// listed among the missing rather than refused on its own by
-// queryPresentValue — one answer naming everything absent beats four
-// answers naming one thing each.
 func queryRelatedTo(w http.ResponseWriter, r *http.Request) (*RelatedToInput, bool) {
 	values := make([]string, len(relatedToParts))
 	present := false
@@ -1165,20 +957,6 @@ func queryRelatedTo(w http.ResponseWriter, r *http.Request) (*RelatedToInput, bo
 // GameSummaryOutput is what a game's home page renders: the game's
 // declared vocabulary with a count against each entry, and the three
 // totals.
-//
-// It is deliberately a *catalogue and not a listing*. The one property
-// this endpoint has to hold is that its answer is the same size for a
-// game with four entities and a game with four hundred thousand: it
-// carries one row per declared type — a handful of rows a designer wrote
-// by hand — and never a row of content. A page that wants content asks
-// for a page of it (GET /entities), with a cursor, like everything else
-// here. TestTheGameSummaryCountsContentWithoutListingIt pins that.
-//
-// It has no MCP counterpart, and none is implied: an agent seeding a
-// game already knows what it wrote, and every number here is one
-// entities.list or relations.list away. This exists because a person
-// opening a game needs to see what is in it before they can decide
-// anything, which is not a need an agent has.
 type GameSummaryOutput struct {
 	GameCountsOutput
 
@@ -1197,19 +975,6 @@ type GameSummaryOutput struct {
 
 // GameCountsOutput is the counted half of a game summary: one row per
 // declared type with what the game holds of it, plus three totals.
-//
-// **It is a type of its own because it is what both surfaces answer
-// with, and `role` is what only one of them has.** The REST page needs
-// the caller's own role to word its empty state; an agent over MCP has a
-// token, not a membership row, and a `"role": ""` would be a field that
-// says nothing. GameSummaryOutput embeds this, so the page's JSON is
-// byte-for-byte what it was.
-//
-// **Metamodel 14 put it on MCP, and nothing else changed.** Task 9's
-// seeding run found that nothing on the agent surface counted: answering
-// "how many races are there" was a full paged walk — five calls in the
-// seeded game — while this page had the number the whole time from two
-// grouped queries. The queries existed; only the exposure was missing.
 type GameCountsOutput struct {
 	EntityTypes   []EntityTypeSummary   `json:"entity_types"`
 	RelationTypes []RelationTypeSummary `json:"relation_types"`
@@ -1227,12 +992,6 @@ type EntityTypeSummary struct {
 
 // RelationTypeSummary is one declared relation type, how many edges
 // instance it, and how many of those a schema edit stopped fitting.
-//
-// InvalidCount is spelled the same as EntityTypeSummary's and means the
-// same thing, because since 0009 an edge is judged against its relation
-// type's field schema by the same sweep an entity is judged by. This
-// comment used to say an edge could not be invalid; a page that showed
-// the flag on half a game's content was the read half of that gap.
 type RelationTypeSummary struct {
 	RelationTypeOutput
 	RelationCount int64 `json:"relation_count"`
@@ -1240,12 +999,6 @@ type RelationTypeSummary struct {
 }
 
 // GameTotals is the whole game in three numbers.
-//
-// **Invalid counts both tables**, entities and edges together, and it did
-// not before 0009 gave edges the flag. It is the "what do I have to go
-// and fix" number, and the designer fixing it does not care which table a
-// row lives in — a total that silently omitted every broken edge would
-// send them away from a game that still had work in it.
 type GameTotals struct {
 	Entities  int64 `json:"entities"`
 	Relations int64 `json:"relations"`
@@ -1268,19 +1021,6 @@ func (s *Server) handleGameSummary(w http.ResponseWriter, r *http.Request, _ Cal
 }
 
 // gameCounts is the four queries and the assembly both surfaces share.
-//
-// Four queries, none of which grows with the game's content: the two
-// type listings and the two grouped counts. So a game holding four
-// hundred entities answers exactly as fast, and as small, as one holding
-// four, which is why this needs no page and no cursor.
-//
-// **Prose is deliberately not counted here.** The markdown domain is
-// optional (MCPDeps.Markdown may be nil) and a document has no declared
-// type to group by, so there is no row this shape could carry; more to
-// the point, adding a count to one of the two surfaces this function
-// serves and not the other is exactly the drift one shared assembly
-// exists to prevent. docs.list answers "how much prose is under this
-// path" by paging it.
 func gameCounts(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (GameCountsOutput, error) {
 	entityTypes, err := deps.Metamodel.ListEntityTypes(ctx, projectID)
 	if err != nil {

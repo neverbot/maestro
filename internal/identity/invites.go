@@ -81,18 +81,6 @@ type InviteSummary struct {
 
 	// Revoked is "this invite's expiry has passed", **decided by the
 	// database and not recomputed here or above this package.**
-	//
-	// internal/web used to derive it as `!ExpiresAt.After(time.Now())`,
-	// which compared a timestamp Postgres wrote (RevokeProjectInvite
-	// sets expires_at to its own now()) against the application's clock,
-	// with a margin of one HTTP round trip. A database clock a few
-	// milliseconds ahead of the application's reported a just-revoked
-	// invite as still live — the same two-clock defect CreateInvite's own
-	// comment describes, on the read side.
-	//
-	// It is false on a freshly minted invite by construction rather than
-	// by a comparison: CreateInvite refuses a non-positive TTL, so the
-	// row it returns cannot already have expired.
 	Revoked bool
 }
 
@@ -175,8 +163,6 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 		// The TTL travels as an interval; the database turns it into a
 		// timestamp, because the database is what judges it (GetLiveInvite
 		// and MarkInviteRedeemed both compare against its own now()).
-		// See CreateInvite's own comment in identity.sql for the whole
-		// argument, and for the flaky test that found it.
 		Ttl: pgtype.Interval{Microseconds: ttl.Microseconds(), Valid: true},
 	}
 	if email := strings.ToLower(strings.TrimSpace(req.Email)); email != "" {
@@ -217,14 +203,6 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 // alone, so a future unrelated foreign key on this table cannot be
 // misreported as "bad request". Returns nil when err is neither, so the
 // caller falls through to its own generic wrap.
-//
-// **This was the one insert of the three that never got the treatment**,
-// and it is reachable by the same race the other two are: an owner
-// inviting someone into a game a co-owner is deleting at that moment
-// resolved their membership a round trip earlier, so the project row can
-// be gone by the time this insert runs. Unnarrowed, that answered 500 —
-// a lost race reported as a fault in this server, when what the caller
-// needs to be told is that the game is gone.
 func mapInviteInsertError(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
@@ -246,68 +224,6 @@ func mapInviteInsertError(err error) error {
 // granting the membership run in one transaction (via withTx, from Task
 // 5): a failure partway through must not leave a replayable invite or a
 // user with no membership.
-//
-// req is the same CreateUserRequest CreateUser takes, not four adjacent
-// strings: a public, unauthenticated handler decoding this straight out of
-// a JSON body is exactly the call site Task 5's Correction 11 wrote
-// CreateUserRequest to protect — a transposed DisplayName/Password would
-// otherwise compile, pass validation (both are plausible-length strings),
-// and write a plaintext password into users.display_name where every
-// other member can read it.
-//
-// Redemption is safe under concurrent use of the same token. The lookup
-// below (GetLiveInvite) runs before the transaction purely to reject an
-// unknown token cheaply and to compare the bound email without paying for
-// a transaction; it does not by itself prevent two concurrent redemptions
-// of the same live token from both reaching this point. What prevents a
-// double redemption is MarkInviteRedeemed inside the transaction: it is a
-// conditional UPDATE (`WHERE ... AND redeemed_at IS NULL AND expires_at >
-// now()`) whose row lock serializes concurrent redeemers of the same
-// invite — the first to commit wins, and the second, once unblocked, finds
-// the row no longer matches its WHERE clause and updates zero rows. This
-// method treats "zero rows updated" as ErrInviteInvalid, which rolls back
-// the whole transaction, so the loser's user insert and membership grant
-// are undone along with it rather than left as an orphaned account with no
-// membership.
-//
-// The same mechanism also covers a project deleted out from under a live
-// invite: invites.project_id is ON DELETE CASCADE, so deleting a project
-// deletes every invite that named it in the same transaction as the
-// delete. If that commits between the lookup below and this method's own
-// transaction, the invite row is simply gone by the time
-// MarkInviteRedeemed runs, its UPDATE affects zero rows, and redemption
-// fails with ErrInviteInvalid instead of granting membership in a project
-// that no longer exists.
-//
-// A pre-existing account for req.Email is also mapped to ErrInviteInvalid
-// rather than left as ErrEmailTaken. Without that, an unbound invite (no
-// email attached) would let anyone holding it probe an unlimited number of
-// addresses for an existing account: redeem, read the error, learn whether
-// that address is taken, and try again with the invite still unconsumed
-// (a failed insert never reaches MarkInviteRedeemed). Bounding the number
-// of attempts against one client is the HTTP layer's job (Task 11's
-// invite-redemption rate limiter); this method's job is only to make sure
-// the response itself carries no signal either way.
-//
-// ALLOWED_EMAIL_DOMAINS is applied, or not, depending on the invite's own
-// shape — see the prepareUser/prepareUserForInvite selection below, and
-// prepareUserForInvite's own doc comment in users.go, for why a bound
-// invite skips the check and an unbound one does not.
-//
-// Returns a RedeemInviteResult, not a bare User: a quality review of
-// internal/web's SSE-publishing task found this was the one mutation in
-// the plan that grants project membership through a handler
-// (handleRegister, api_auth.go) with neither a Caller nor a ProjectScope
-// to publish through — every other membership-granting call
-// (handleChangeRole's SetRole) runs behind requireProject, which already
-// hands its handler the project id an event needs. RedeemInviteResult
-// carries exactly what handleRegister needs to publish both halves of
-// what just happened — a new (or promoted) member, and a consumed
-// invite — without this package importing realtime or holding a
-// *realtime.Hub itself: identity.Service's own tests build it with no
-// hub in sight, the same as projects.Service, and this keeps that true
-// rather than threading a publishing dependency into a package whose job
-// is accounts and credentials, not who is subscribed to which stream.
 func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUserRequest) (RedeemInviteResult, error) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
@@ -331,21 +247,6 @@ func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUser
 	// connection for the full derivation and lengthen how long the
 	// invite row's lock (see this method's own doc comment above) is
 	// held, for every client racing to redeem a stale or shared link.
-	//
-	// Which validator runs depends on whether this invite is bound to an
-	// email. A *bound* invite (invite.Email != nil) means the admin typed
-	// this exact address when they created it — they named the person,
-	// and CreateInvite already ran EmailAllowed against that address at
-	// creation time (Task 5, Correction 8); skipping the check again here
-	// is what makes "an invite wins over the instance's registration
-	// mode" true for the case it exists to cover, an admin deliberately
-	// inviting an outside contractor. An *unbound* invite only ever said
-	// "whoever holds this link gets in" — it names no domain, so the
-	// instance's own ALLOWED_EMAIL_DOMAINS is still the only statement
-	// anyone has made about who may hold an account, and an unbound link
-	// is also the one most likely to be forwarded or pasted into a
-	// shared channel, which is exactly when that second gate earns its
-	// keep. See prepareUserForInvite's own doc comment in users.go.
 	prepareFn := s.prepareUser
 	if invite.Email != nil {
 		prepareFn = s.prepareUserForInvite
@@ -457,39 +358,6 @@ func (s *Service) lookupLiveInviteForRedemption(ctx context.Context, token strin
 // calls this instead of RedeemInvite specifically when the request
 // arrives from a live, human, session-authenticated caller — see that
 // handler's own doc comment for the routing decision.
-//
-// existingUserID must be the caller's OWN id, resolved server-side from
-// their session (CallerFrom, internal/web/auth.go) — never a value taken
-// from the request body. This method does not, and cannot, verify that
-// on its own: it trusts its caller completely, the same way
-// projects.SetRole trusts the HTTP layer to have already decided who is
-// allowed to act. Passing anything other than the caller's own id here
-// would turn redeeming an invite into a way to grant a game's membership
-// to somebody else — the invite's own clear token would no longer be
-// the credential that matters, whoever is logged in when it is redeemed
-// would be.
-//
-// An account-only invite (invite.ProjectID == nil) has nothing left to
-// grant an account that already exists, so it is refused with
-// ErrInviteInvalid — the same response an anonymous redeemer gets for a
-// dead link, not a distinct "you already have an account" message that
-// would tell a caller something about a token they merely guessed.
-//
-// A *bound* invite's email is checked against existingUserID's own
-// stored email, not against anything the request supplied: an invite
-// naming "designer@example.test" still only grants membership to the
-// account that email belongs to, whether that account is being created
-// fresh (RedeemInvite) or already exists and is simply logged in
-// (here) — the binding means the same thing either way. An *unbound*
-// invite grants to whoever holds the link, logged in or not, matching
-// RedeemInvite's own behaviour for the anonymous case.
-//
-// Redeeming a second time for a member who already holds some role in
-// the project upserts the invited role over their existing one — the
-// same "an invite is a deferred SetRole" semantics Task 18 established
-// for a fresh grant, applied here to a promotion or lateral change
-// reached via an invite link instead of an owner's direct
-// PATCH .../members/{user} call.
 func (s *Service) RedeemInviteForExistingUser(ctx context.Context, token string, existingUserID uuid.UUID) (RedeemInviteResult, error) {
 	invite, err := s.lookupLiveInviteForRedemption(ctx, token)
 	if err != nil {
@@ -544,23 +412,6 @@ func (s *Service) RedeemInviteForExistingUser(ctx context.Context, token string,
 // given hash — meaning the token is unknown, its invite has already been
 // redeemed, or it has expired. It distinguishes only the expired case
 // (ErrInviteExpired), via a second lookup keyed on the hash alone.
-//
-// This is safe against an attacker with no token in hand: reaching this
-// function at all already requires holding the clear token whose SHA-256
-// equals tokenHash, and nobody can produce that without either holding the
-// real token or having brute-forced 256 bits of entropy — the same
-// property GetInviteByTokenHash's own doc comment relies on. Telling the
-// holder "this expired" therefore leaks nothing an attacker without the
-// token could use; it only ever reaches someone who could otherwise have
-// learned the same thing by successfully redeeming a still-live version of
-// the same link.
-//
-// An unknown token and an already-redeemed one both still return the
-// generic ErrInviteInvalid: there is no user-facing action for either
-// beyond "ask for a new invite", the same as expired, so nothing is
-// gained by telling them apart — and collapsing "redeemed" into the
-// generic error keeps this from becoming an oracle for whether some
-// other, unrelated holder of the same link already used it.
 func (s *Service) resolveInviteMiss(ctx context.Context, tokenHash []byte) error {
 	stale, err := s.q.GetInviteByTokenHash(ctx, tokenHash)
 	if err != nil {
@@ -600,9 +451,6 @@ func (s *Service) ListOutstandingInvites(ctx context.Context) ([]InviteSummary, 
 // ListOutstandingInvitesForProject is ListOutstandingInvites' project-
 // scoped counterpart, added in Task 18 for GET /api/games/{game}/invites:
 // every invite naming projectID that is not yet redeemed, newest first.
-// Gated by the HTTP layer on that game's own owner role, not on
-// Caller.IsAdmin — see ListOutstandingInvites' own doc comment for why the
-// two surfaces never share a query.
 func (s *Service) ListOutstandingInvitesForProject(ctx context.Context, projectID uuid.UUID) ([]InviteSummary, error) {
 	rows, err := s.q.ListOutstandingProjectInvites(ctx, projectID)
 	if err != nil {

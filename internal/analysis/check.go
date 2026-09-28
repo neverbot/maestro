@@ -15,30 +15,6 @@ import (
 // Checking a route is the reachability closure of reach.go asked k
 // questions instead of one: for each consecutive pair (n, n+1), is step
 // n+1 reachable given the seed set **plus every step up to n**?
-//
-// **The closure is computed once and resumed, not recomputed per step.**
-// Seeds are added and never replaced, so the reached set only grows --
-// and adding a seed that is *already* reached admits nothing new, which
-// is a property of a monotone closure and not an optimisation with an
-// edge case. So a step that came back `ok` costs no walk at all, and a
-// five-hundred-step route that holds is exactly one walk inside one
-// statement-timeout budget. Only a step the closure did not reach opens
-// new territory, and only that step pays for a resumed walk. RouteCheck
-// reports Walks so the claim is visible in the answer rather than only
-// in this comment, and
-// TestCheckingAFiveHundredStepRouteStaysInsideOneBudget asserts the
-// count as well as the completion.
-
-// Verdict is one step's answer, and **its zero value is deliberately not
-// `ok`**.
-//
-// An enum whose zero value is its success case is an enum that reports
-// success for every step a check forgot to fill in, and a route of five
-// unwritten verdicts and a route of five proved ones are then the same
-// JSON. So the zero value is the empty string, it is in no list, and
-// MarshalJSON refuses it outright rather than letting it reach a caller
-// as `""`. TestTheZeroVerdictIsNotOk is the whole guard, and it is the
-// cheapest one in this file.
 type Verdict string
 
 const (
@@ -53,14 +29,6 @@ const (
 	VerdictMissingEntity Verdict = "missing_entity"
 	// VerdictOutOfOrder: an `ordering` edge says this step must come
 	// before a step the route places earlier.
-	//
-	// **It is not a reachability question and does not read the
-	// closure.** It is a depth-1 lookup over ordering-typed edges
-	// between the route's own entity ids, comparing edge direction
-	// against step position -- see orderingViolations, which says the
-	// same thing beside the code, because a reader who assumed the
-	// closure produced this verdict would look for a bug in the walk
-	// that is not there.
 	VerdictOutOfOrder Verdict = "out_of_order"
 	// VerdictUnmetPrerequisite: the closure does not reach this step.
 	// Blockers names the entities standing in the way, capped at
@@ -70,33 +38,11 @@ const (
 
 // Verdicts is every verdict **in the order a step that qualifies for
 // more than one is reported under**, and the order is a decision.
-//
-// missing_entity first: a step with no entity cannot be judged for
-// anything else, and the other two would be answering about a row that
-// is not there. Then out_of_order, then unmet_prerequisite -- and that
-// pair is the one worth arguing. out_of_order is a fault in the
-// *route*, which is the artefact the caller just wrote and can fix by
-// editing it; unmet_prerequisite is a claim about the *game*, whose fix
-// is content. Reporting the fault in the thing the caller owns first is
-// the rule Reasons already applies one file away, and
-// TestTheVerdictsAreOrderedMostActionableFirst holds it with a step that
-// qualifies for both.
-//
-// **`ok` is last and is not a fallback**: it is reached only when no
-// other verdict applies, which is what makes it a statement rather than
-// a default.
 var Verdicts = []Verdict{
 	VerdictMissingEntity, VerdictOutOfOrder, VerdictUnmetPrerequisite, VerdictOK,
 }
 
 // MarshalJSON refuses the zero verdict rather than encoding it.
-//
-// This is the "a mechanism nothing reads is a lie" rule applied to an
-// enum from its far end: declaring that the zero value is invalid buys
-// nothing unless something refuses it, and the encoder is the last place
-// that can. A verdict that reached a caller as `""` would be read by
-// every client as "no opinion", which is not one of the four answers
-// this call gives.
 func (v Verdict) MarshalJSON() ([]byte, error) {
 	for _, known := range Verdicts {
 		if v == known {
@@ -127,26 +73,10 @@ type StepCheck struct {
 
 	// MustPrecede names the earlier steps an `ordering` edge says this
 	// one should come before, and is set on `out_of_order` alone.
-	//
-	// It is its own field rather than a second meaning for Blockers.
-	// One field carrying two unrelated things under two verdicts is the
-	// shape a later reader collapses and a client mis-renders, and the
-	// two lists genuinely answer different questions: one is "what is in
-	// the way", the other is "what this step is on the wrong side of".
 	MustPrecede []SeedRef `json:"must_precede,omitempty"`
 
 	// TypeRenamed is a **diagnostic beside a verdict and never a verdict
 	// of its own.**
-	//
-	// A step whose entity resolves by id to a type whose key has moved
-	// is still `ok` if it is reachable. internal/metamodel/rename.go
-	// moves the catalogue row and nothing else -- the stored step keeps
-	// spelling the old key, deliberately, exactly as view_refs does --
-	// and conflating that with a break would report a healthy route as
-	// broken for a cosmetic change. What a caller needs is to be told
-	// the spelling moved, which is this field.
-	// TestARouteWhoseTypeWasRenamedIsStillOkAndSaysTheKeyMoved is the
-	// pair of assertions.
 	TypeRenamed *RenamedKey `json:"type_renamed,omitempty"`
 }
 
@@ -159,20 +89,6 @@ type RenamedKey struct {
 
 // RouteVerdict is what routes.check decided, and it is exactly what is
 // written to routes.last_check.
-//
-// **It is the only thing this sub-project caches**, and it is allowed to
-// be cached for one reason: it can say when it went out of date. The
-// rule it is the single exception to is stated here rather than in a
-// plan -- *nothing is cached unless it can say when it went out of
-// date* -- and the two columns beside it in the row,
-// last_checked_at and last_checked_design_version, are what make the
-// sentence true for this one.
-//
-// **Every count here exists because an empty findings list is not a
-// verdict.** Five `ok`s from a check that walked nothing and five from a
-// check that walked four hundred edges are the same JSON without
-// StepsChecked, EdgesWalked and Seeds beside them, and a route that
-// holds is the negative half this whole sub-project is most exposed to.
 type RouteVerdict struct {
 	// Holds is true when every step came back ok. It is derived from
 	// Steps and reported anyway, because the one question a caller has
@@ -204,10 +120,6 @@ type RouteVerdict struct {
 
 // RouteCheck is one check as a caller reads it: the stored verdict, plus
 // the three values that say how old it is and what it cost.
-//
-// The staleness fields are outside RouteVerdict on purpose: they are
-// facts about *when* the verdict was taken, and storing them inside the
-// blob they describe would be one fact in two places on the same row.
 type RouteCheck struct {
 	RouteVerdict
 	Key string `json:"key"`
@@ -226,24 +138,6 @@ type RouteCheck struct {
 }
 
 // CheckRoute walks a route and stores the verdict.
-//
-// The route is addressed **by key**, matched without regard to case, and
-// the lookup filters on this game: a route key from another game is
-// not_found and never a check of somebody else's progression.
-//
-// **It checks under the route's own stored parameters and not the
-// caller's defaults.** RouteParams.Reach is the single conversion, and
-// it exists so a route authored with `gate: "all"` cannot be quietly
-// proved under `any` by a caller who passed nothing --
-// TestARouteChecksUnderItsOwnStoredParamsAndNotTheCallersDefaults is
-// that assertion, and it is the write-only-field defect in its
-// route-shaped form.
-// **It takes no Actor**, unlike every write in this package. A check
-// does not edit the route -- it neither moves the version nor touches
-// updated_by_user_id / updated_by_token_id -- so an actor here would be
-// an argument nothing reads, which is the same lie as a constant with no
-// reader. The audit columns on the row still name whoever last *wrote*
-// it, which is the question they answer.
 func (s *Service) CheckRoute(ctx context.Context, projectID uuid.UUID, key string) (
 	RouteCheck, error,
 ) {
@@ -359,11 +253,6 @@ const eventRouteChecked = "route.checked"
 
 // routeCheckedEvent is the payload: **the verdict summary, never the
 // per-step list.**
-//
-// Publication order is not commit order, so a client that rendered the
-// steps out of an event would eventually render the older of two checks.
-// What is here is enough to invalidate a held answer and to colour a
-// listing; routes.get is where the per-step answer comes from.
 type routeCheckedEvent struct {
 	ID           uuid.UUID `json:"id"`
 	Key          string    `json:"key"`
@@ -375,13 +264,6 @@ type routeCheckedEvent struct {
 
 // liveStep is one step with the address its entity carries **today**,
 // which is not always the address the step stores.
-//
-// The two spellings are the whole rename decision made concrete. The
-// stored pair is a tombstone a rename does not touch; the live pair is
-// what the entity's type is called now. A step is seeded into the
-// closure by the live pair -- seeding by a key the game no longer has
-// would answer not_found on a route that is perfectly healthy -- and
-// reported under the stored pair, which is what the caller wrote.
 type liveStep struct {
 	step       RouteStep
 	entityID   uuid.UUID
@@ -392,14 +274,6 @@ type liveStep struct {
 
 // liveSteps reads each step's entity back by id and gives it its current
 // address.
-//
-// By id, because that is the resolution path a rename leaves intact: the
-// step's stored keys may name a spelling this game no longer has, and
-// resolving by them would report a renamed type as a deletion. A step
-// whose entity_id is NULL is a tombstone the database wrote and is not
-// looked up at all; a step whose id resolves to nothing is one whose
-// entity went between the two statements, and it is treated as the same
-// tombstone rather than as an error.
 func (s *Service) liveSteps(ctx context.Context, projectID uuid.UUID, steps []RouteStep) (
 	[]liveStep, error,
 ) {
@@ -578,24 +452,6 @@ func (s *Service) blockersFor(ctx context.Context, params Params, reach Reach, o
 
 // orderingViolations is the fourth verdict, and it is **a different
 // mechanism from the other three**.
-//
-// It reads no closure, seeds nothing and recurses nowhere: it asks the
-// database for the ordering-typed edges *between the route's own step
-// entities*, and compares each edge's direction against the two
-// positions the route gives its endpoints. An ordering edge is read
-// source-before-target, which is the direction `unlocks` is already
-// read in and which traits.go's own description of the word states, so
-// the two are one convention rather than two.
-//
-// A step is out_of_order when an ordering edge says it must come before
-// a step the route places *earlier*. The verdict lands on the later of
-// the two, because that is the one the route put in the wrong place, and
-// swapping the pair clears it --
-// TestAStepThatViolatesAnOrderingRelationIsOutOfOrder holds both halves.
-//
-// It is applied **after** walkSteps and can overwrite an
-// unmet_prerequisite, which is Verdicts' declared order: a fault in the
-// route the caller just wrote outranks a claim about the game's content.
 func (s *Service) orderingViolations(ctx context.Context, projectID uuid.UUID,
 	semantics Semantics, route Route, live []liveStep, verdict *RouteVerdict,
 ) error {

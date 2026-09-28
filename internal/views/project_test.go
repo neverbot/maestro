@@ -48,11 +48,6 @@ func TestProjectArea(t *testing.T) {
 	// TestProjectArea's "a projected field appears in attrs and not in fields"
 	// case is a read-back: it asserts the value came out of the database, not
 	// that the query ran.
-	//
-	// The second half is the token-discipline rule from the other side —
-	// projecting one field is not the same as including the payload, so
-	// Fields stays empty while attrs carries the one value the projection
-	// named.
 	t.Run("a projected field appears in attrs and not in fields", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -75,12 +70,6 @@ func TestProjectArea(t *testing.T) {
 	// TestProjectArea's "a one hop related attribute reads the far entity"
 	// case is the spec's own case: the colour is not a property of the quest,
 	// it is the name of the zone one hop away.
-	//
-	// The third quest is the load-bearing one. `cook` has no zone, and it
-	// gets **no attribute at all** rather than an empty string, so "this
-	// node has no zone" and "this node's zone is named the empty string"
-	// stay distinguishable to a renderer. It is also what says the join is a
-	// LEFT one: an inner join would drop the row entirely.
 	t.Run("a one hop related attribute reads the far entity", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -113,9 +102,6 @@ func TestProjectArea(t *testing.T) {
 	// picked" case is why the hop is detected rather than assumed. A quest in
 	// two zones has no one zone colour, and silently painting it with the
 	// first would produce a map that is wrong in a way nobody can see.
-	//
-	// The single-zone quest in the same result is the control: it is what
-	// stops a flag that is always true from passing this test.
 	t.Run("an ambiguous hop is marked rather than silently picked", func(t *testing.T) {
 		g, _ := a.games(t)
 		// hogger is now in Elwynn Forest *and* in Westfall. Alphabetically
@@ -201,13 +187,6 @@ func TestProjectArea(t *testing.T) {
 	// allowed" case states the rule that separates a projection from a
 	// predicate, because the two read the same document syntax and mean
 	// different things.
-	//
-	// A predicate naming a field only one of the types in scope declares is
-	// refused: it would silently match nothing on the other. A projection has
-	// no such failure — a node whose type does not declare the key simply
-	// carries no attribute, which is the same "unset" a node with no value
-	// carries, and colouring quests by min_level while zones stay uncoloured
-	// is a picture a designer legitimately wants.
 	t.Run("a projected field declared on one of several types is allowed", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -230,13 +209,6 @@ func TestProjectArea(t *testing.T) {
 	// case pins the optional half of the hop: `type` narrows the far side, and
 	// leaving it out is a hop over every entity the relation reaches rather
 	// than a refusal.
-	//
-	// The hop below writes neither `direction` nor `attr` either, so it also
-	// pins the two defaults applyDefaults fills for it — `out`, the direction
-	// a step and an edge entry default to, and @name, which is what "coloured
-	// by zone" means. Both are refusals in the compiler when they are empty,
-	// so a default that stopped being filled is an error rather than a hop
-	// answered backwards or reading nothing.
 	t.Run("a related hop without a type reads every neighbour", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -358,10 +330,6 @@ func TestProjectArea(t *testing.T) {
 	// case is the middle setting between "no payload" and "the whole payload",
 	// and the one the spec's §5.5 recommends: a picture that needs one field
 	// per node should pay for one field per node.
-	//
-	// The two controls are what make it mean something: the key the document
-	// named is there, and the key it did not name is *not*, so a run that
-	// quietly returned everything fails.
 	t.Run("project fields carries exactly the keys it names", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -436,16 +404,6 @@ func TestProjectArea(t *testing.T) {
 	// type declared in both directions between the same two entities matches
 	// twice** — two rows, one far entity. Counting rows, the node was flagged
 	// ambiguous with a single candidate to choose from.
-	//
-	// That is the flag lying, not being conservative: Node.Ambiguous's doc,
-	// this file's header and the plan all say the flag means *more than one
-	// entity was found*, and `any` is the natural spelling for a symmetric
-	// relation type — `connects_to` is one this project names itself. A flag
-	// that fires where there is nothing to resolve is one designers learn to
-	// ignore, which costs exactly what a flag that never fires costs.
-	//
-	// The two controls are in the test above: two distinct zones still report
-	// true, and one zone still reports false.
 	t.Run("a reciprocal pair is one far entity not two", func(t *testing.T) {
 		g, _ := a.games(t)
 		// The fixture already carries `defias requires hogger`. The reverse

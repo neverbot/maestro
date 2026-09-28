@@ -1,16 +1,5 @@
 // One relation type: what it may join, what a walk makes of it, and what
 // each of its edges carries.
-//
-// **It exists because a relation type had no screen at all.** The
-// Catalogue listed them as rows that hovered like links and went
-// nowhere, so a designer who met `requires` on an entity page — with a
-// field value on it, no less — had no way to find out which types it
-// joins, whether the analysis engine treats it as a gate, or what that
-// field was declared to be. Every one of those facts was already on the
-// wire; nothing drew them.
-//
-// It is a read-only page and says so where a button would be: relation
-// types are declared by agents, like everything else in the metamodel.
 
 import {
   DESTINATION_CATALOGUE,
@@ -63,12 +52,6 @@ export function endpointSentence(sources, targets) {
 
 // joinKeys is the one spelling of a list of allowed types, and both the
 // sentence above and the drawn version below go through it.
-//
-// It is shared rather than written twice because it was written twice
-// for about ten minutes: the sentence said "quest, class" and the page
-// drew "quest or class", so the pure function a test asserts and the
-// element a reader sees disagreed — a test passing over a screen that
-// says something else is worse than no test.
 export function joinKeys(keys) {
   const list = Array.isArray(keys) ? keys.filter((key) => key !== "") : [];
   if (list.length === 0) return ANY_TYPE;

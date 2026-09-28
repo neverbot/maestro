@@ -1,33 +1,5 @@
 // The harness for the second write a person can make: an entity's field
 // values, edited where they are read.
-//
-// What this layer covers that no Go test can. The server's part —
-// compare-and-set, schema validation — is tested where it lives. What is
-// not is the **page's** part, and this write has three properties the
-// rename never had to face:
-//
-//   - **a control per declared type.** A bool is a checkbox and not a
-//     text field holding "true"; an enum is the options the type
-//     declared, so the one schema failure a picker can prevent is
-//     prevented; a list is one value per line, because a comma-joined
-//     string is something a designer would have to re-split by hand and
-//     a game may hold commas.
-//   - **absent is not empty.** Clearing a text field removes the value
-//     rather than storing "", and the page then draws the absent mark
-//     rather than a blank — the distinction internal/views/execute.go
-//     goes out of its way to preserve, kept at the last step where it
-//     could be thrown away.
-//   - **a write is the whole row.** `entities.upsert` replaces what it
-//     is given, so editing one value sends every other one back
-//     unchanged, including values this page cannot represent.
-//
-// It drives the **page**: `wireFieldEdits` over a painted list, with a
-// scripted client, because *correct in the module, dead at the call
-// site* is this repository's most repeated defect and a write is the
-// shape it takes.
-//
-// Run directly: `node internal/web/jstest/field_edit_test.mjs`.
-// internal/web/static_field_edit_test.go shells out to it too.
 
 import path from "node:path";
 import { register } from "node:module";

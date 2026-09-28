@@ -325,15 +325,6 @@ func TestViewerCannotCreateToken(t *testing.T) {
 // "any member may revoke any token", which shipped and was wrong: a
 // viewer could stop another designer's agent mid-session over a route
 // nothing in the interface even called.
-//
-// A key belongs to the person who created it. They retire it, and so
-// does the game's owner — a leaked key has to be stoppable by somebody
-// who is still here — and nobody else.
-//
-// A bare assertion on the status would pass even if the handler never
-// called RevokeAPIToken at all, so the token is minted over HTTP,
-// revoked over HTTP, and then used against a real route, which must
-// refuse it.
 func TestATokenIsRevokedByThePersonWhoMadeIt(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
@@ -857,15 +848,6 @@ func TestTokenCallerCannotManageMembers(t *testing.T) {
 // was actually evaluated — the exact conflation Task 10's authenticate
 // already drew a hard line against for the credential-resolution step,
 // now drawn the same way for the membership-resolution step.
-//
-// Session authentication itself must still succeed here, which is why
-// this needs two separate *pgxpool.Pool values against the *same*
-// database rather than the single shared pool
-// TestDatabaseErrorDuringBearerAuthenticationIsInternalError (auth_test.go)
-// closes wholesale: Identity keeps a live pool so the session cookie
-// resolves normally, while Projects' own pool — opened separately, at
-// the same connection string testutil.NewPool already migrated — is
-// closed before the request, so only the RoleOf lookup fails.
 func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

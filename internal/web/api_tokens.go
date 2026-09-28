@@ -103,10 +103,6 @@ type apiTokenResponse struct {
 
 // tokenScope says which question the listing answered, because the same
 // route answers two and a reader has to be told which.
-//
-// A person sees their own keys. The game's owner, and an instance admin,
-// see every key in the game — somebody has to be able to stop a leaked
-// one, and that somebody is whoever owns the game.
 const (
 	tokenScopeOwn  = "own"
 	tokenScopeGame = "game"
@@ -128,10 +124,6 @@ func apiTokenResponseFrom(t identity.APITokenSummary, callerID uuid.UUID) apiTok
 // seesEveryToken is the one rule, written once: the game's owner and an
 // instance admin see and may revoke every key in the game; everybody
 // else sees and may revoke their own.
-//
-// **An instance admin is included because an instance has to be
-// governable**: a person who has left the company still has an agent
-// with a key, and the owner of that game may have left with them.
 func seesEveryToken(caller Caller, scope ProjectScope) bool {
 	return caller.IsAdmin || roles.AtLeast(roles.Role(scope.Role), roles.Owner)
 }
@@ -193,11 +185,6 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, calle
 	// mid-session. It is the person who created a key who retires it —
 	// and the game's owner or an instance admin, because a leaked key
 	// has to be stoppable by somebody who is still here.
-	//
-	// The lookup is the listing, which is a handful of rows: a token id
-	// that names no row of this game falls through to the call below and
-	// keeps its no-op answer, unchanged, for the reason that convention
-	// exists.
 	if !seesEveryToken(caller, scope) {
 		rows, err := s.opts.Identity.ListAPITokens(r.Context(), scope.ProjectID)
 		if err != nil {

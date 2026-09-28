@@ -81,15 +81,6 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 // TestMigrateUpDownUp exercises the Down side of every migration, so a
 // broken rollback is caught here rather than mid-incident. It is the only
 // place in the codebase able to call migrateDown.
-//
-// migrateDown rolls back a single migration (the most recent one goose
-// hasn't already rolled back), so tearing down everything Migrate applied
-// means calling it once per migration file, not once. The count comes
-// from the embedded directory rather than from a literal: it used to be a
-// hand-written four, which meant every new migration made this test fail
-// in a way that looked like a broken rollback and was really a stale
-// number. A new migration still needs its own entry in Task 8's file
-// structure table; it no longer needs an edit here.
 func TestMigrateUpDownUp(t *testing.T) {
 	t.Parallel()
 	pool := newTestDatabase(t)
@@ -166,18 +157,6 @@ func TestMigrateRefusesToServeAgainstANewerSchema(t *testing.T) {
 // whose Down arm has to undo four different *kinds* of object: a column
 // with a check constraint, a column on a Core table, a plpgsql function
 // with twelve triggers hanging off it, and two tables.
-//
-// TestMigrateUpDownUp asserts that every Down arm *runs* and that a
-// re-up lands; it asserts nothing about what any single arm removed,
-// because it only checks that `users` is gone at the bottom. A Down arm
-// that dropped the tables and left the triggers behind would pass it and
-// would leave a database that fails on the next write with "function
-// bump_design_version() does not exist". A migration is the one thing in
-// this repository that is hard to take back, so its reversal is asserted
-// object by object.
-// analysisMigrationVersion is 0013's version, which is its filename's
-// number: the migration this test is about, named so that a later
-// migration cannot quietly become the subject.
 const analysisMigrationVersion = 13
 
 func TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt(t *testing.T) {

@@ -19,35 +19,6 @@ import (
 )
 
 // The seed that is gone, asserted on both wires.
-//
-// `views.layout_seed` was a column with no reader on either side: the
-// server validated it, stored it and handed it back, and the client's
-// layout engine is deterministic by construction — it sorts by entity
-// address before it lays anything out — so there was never a picture for
-// a seed to change. Migration 0012 dropped it and carries the argument,
-// including what a future stochastic engine would actually have to seed.
-//
-// What this file is for is the half a migration cannot state. A column
-// can go and the *wire* can keep taking the argument: a Go struct field
-// left behind, a property left in a hand-written schema, a sentence left
-// in a tool description an agent reads to learn the vocabulary. Each of
-// those is the same defect the removal was for — a knob that answers
-// nothing — moved one layer up, and the last one is the worst, because a
-// description is the only place an agent looks.
-
-// TestNoSurfaceAcceptsALayoutSeed drives views.upsert with a
-// `layout_seed` member on **both** surfaces and requires each to refuse
-// it rather than drop it.
-//
-// Both, in one test, on purpose. The recurring defect of this
-// sub-project is a rule carried down one path and not the other, and two
-// tests in two files is how that happens: the MCP surface refuses this
-// for free (the SDK infers `additionalProperties: false` from the Go
-// struct, so deleting the field was the whole fix) while the REST
-// surface had to be told, since encoding/json's default is to discard
-// what it does not recognise. A silently discarded argument is the same
-// lie one layer up — the caller is told its write succeeded *as sent*,
-// and it was not.
 func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)
@@ -115,17 +86,6 @@ func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
 // TestTheViewToolDescriptionNamesNoSeed reads views.upsert's description
 // off the real transport, which is where an agent learns what arguments
 // exist.
-//
-// A description is not documentation about the tool; for an agent it *is*
-// the tool. A column dropped from the schema and a member dropped from
-// the struct, with the prose still saying "layout_seed is for a client's
-// own deterministic layout", leaves every agent sending an argument that
-// is now refused — the removal made worse than not doing it, because the
-// only reader that ever had a stake was told the opposite.
-//
-// The schema is asserted too, in the same place: `layout_seed` must not
-// be a property of the input or of the output, so an agent inspecting
-// the tool rather than reading its prose learns the same thing.
 func TestTheViewToolDescriptionNamesNoSeed(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)
@@ -177,15 +137,6 @@ func schemaHasProperty(t *testing.T, schema any, name string) bool {
 
 // TestNoSourceFileNamesALayoutSeed is the grep the task asked for, run as
 // a test rather than by hand.
-//
-// A removal is not finished when the code compiles; it is finished when
-// the identifier cannot come back without something going red. The
-// survivors are named here one by one, and each is history rather than a
-// mechanism: migration 0008 declares the column because that is what it
-// did on the day it ran, migration 0012 drops it and carries the
-// argument, the design documents under docs/ record a decision that was
-// taken and then reversed, and the two test names in this file and in
-// internal/views spell the thing they are about.
 func TestNoSourceFileNamesALayoutSeed(t *testing.T) {
 	t.Parallel()
 	root := seedGrepRoot(t)
@@ -270,21 +221,6 @@ func seedGrepRoot(t *testing.T) string {
 
 // TestARequestBodyWithAnUnknownMemberIsRefusedByName pins the refusal
 // Task 17 had to add to make the sentence above true on the REST side.
-//
-// It lives in this file rather than beside the other REST view tests
-// because it is only here that it has a reason: nothing had asked the
-// browser surface to be strict until a member was removed from it, and
-// the removal is what turned "encoding/json drops what it does not know"
-// from a default nobody had looked at into a way of answering a caller
-// with a success it did not get.
-//
-// The member is *named*. A 400 saying "malformed JSON body" over a body
-// that parsed cleanly sends a caller looking for a syntax error it does
-// not have, and the misspelling that caused this — one letter, in a
-// field that then took its default — is exactly the mistake a name
-// resolves and a code does not. The name comes out of a message
-// encoding/json gives no type to, so this is also the test that would
-// see that parse break.
 func TestARequestBodyWithAnUnknownMemberIsRefusedByName(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)

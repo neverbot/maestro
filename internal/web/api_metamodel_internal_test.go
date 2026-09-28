@@ -25,15 +25,6 @@ import (
 // writeDomainError's own doc comment makes, rather than trusting it: for
 // every error either surface can be handed, the two must answer with the
 // same code, and the REST side adds only a status.
-//
-// A review found the claim was not true — there was no
-// projects.ErrProjectNotFound arm at all (unreachable through a route,
-// since requireProject resolves the game first, but the doc comment said
-// otherwise), and the retryable message quietly dropped the second
-// sentence Task 7 added, so a designer in a browser got weaker advice
-// than an agent got for the same failure. Comparing the two functions
-// directly is what stops the next divergence being written down as a
-// twin as well.
 func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 	t.Parallel()
 	srv := NewServer(stubOptions("test"))
@@ -186,11 +177,6 @@ func detailsOfResult(t *testing.T, result *mcp.CallToolResult) map[string]any {
 // forgotten on this surface: a code this function does not map falls to
 // mcpErrorFor's default arm and reaches an agent as internal_error,
 // which means "give up" for a failure the caller could have fixed.
-//
-// It asserts the code each one maps to as well as that it is not
-// internal_error, because "not internal_error" is satisfied by mapping
-// all four onto one code, which would lose the distinction the four
-// exist for.
 func TestEveryViewsSentinelHasAWireCode(t *testing.T) {
 	t.Parallel()
 	want := map[string]string{
@@ -339,20 +325,6 @@ func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
 
 // TestATimedOutViewKeepsItsAdviceOnBothSurfaces is the arm ordering,
 // asserted rather than commented.
-//
-// The error is built the way the domain builds it — wrapping the
-// *pgconn.PgError carrying 57014 — because that is the whole difficulty:
-// metamodel.IsRetryable admits it, so the retryable arm would catch it
-// too, with the right code and with the message replaced by a generic
-// contention sentence. An arm placed after that one is unreachable, and
-// a test that built a TimeoutError wrapping nothing would pass under
-// either order.
-//
-// The code stays `retryable` on purpose (internal/views/errors.go argues
-// why there is no fifth wire code); what this asserts is that the
-// message survives, because the elapsed budget and the three bounds to
-// lower are the only thing that helps once resending has stopped
-// working.
 func TestATimedOutViewKeepsItsAdviceOnBothSurfaces(t *testing.T) {
 	t.Parallel()
 	srv := NewServer(stubOptions("test"))

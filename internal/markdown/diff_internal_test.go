@@ -15,10 +15,6 @@ import (
 // the worst case this code admits actually cost", and the answer belongs
 // in the constant's comment where the next person changing the bound
 // will read it.
-//
-// The two sizes bracket the bound: at the limit is the most expensive
-// diff this package will ever compute line by line, and past it is the
-// coarse fallback, which must be cheap or the fallback is not one.
 func BenchmarkUnifiedDiff(b *testing.B) {
 	for _, lines := range []int{lcsLimit, lcsLimit + 1} {
 		b.Run(fmt.Sprintf("%d-lines-rewritten", lines), func(b *testing.B) {

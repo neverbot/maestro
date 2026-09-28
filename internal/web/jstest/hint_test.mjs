@@ -1,14 +1,4 @@
 // The hint: a word on screen and the sentence behind it.
-//
-// What is asserted here is the half a browser session cannot see
-// quickly and a `title` attribute never had: that the explanation is
-// reachable **without a pointer**, that Escape puts it away, and that
-// the sentence arrives as text rather than as markup. The look of the
-// panel is CSS and is held by internal/web/static_hint_test.go, which
-// reads the sheet.
-//
-// Run directly: `node internal/web/jstest/hint_test.mjs`.
-// internal/web/static_hint_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 

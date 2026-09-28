@@ -1,13 +1,4 @@
 // The images this game has uploaded, paged.
-//
-// A background belongs to a *view* — a `map` renderer is pointed at one
-// from the view itself — so nothing on this page places an image or
-// removes one. What it answers is the question a designer has once they
-// have uploaded three maps and cannot remember which is which: what is
-// in this game, how big it is, and what it looks like.
-//
-// The thumbnail is served by this instance, at the same route the canvas
-// draws from, so a page with no outbound route shows every image on it.
 
 import {
   DESTINATION_IMAGES,
@@ -35,15 +26,6 @@ export const NO_IMAGES_SENTENCE =
 
 // Where an uploaded image is served from: **the URL the server spelled**,
 // filtered through the one href rule this front end has.
-//
-// internal/web/api_view_assets.go says outright that the URL is the
-// server's to spell "rather than assembled by every client that wants to
-// draw one" — a token caller and a session caller must be told the same
-// address for one image — so this page reads it rather than rebuilding
-// it. What it does not do is trust it: `isDrawableHref`
-// (render/scene.js) is the same judge `map.js` asks before it draws a
-// background, and an href it refuses is an image this page leaves out
-// rather than an `<img src>` pointing anywhere at all.
 export function assetURL(asset) {
   const url = asset && typeof asset.url === "string" ? asset.url : "";
   return isDrawableHref(url) ? url : "";

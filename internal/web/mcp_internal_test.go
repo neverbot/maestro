@@ -88,11 +88,6 @@ func TestMCPHandlerRefusesASessionCaller(t *testing.T) {
 // failure over contention comes back as "retryable", not as
 // "internal_error", so an agent is told to send the same call again
 // rather than told the server broke.
-//
-// It also pins the two halves the decision depends on — that the code is
-// exactly the one metamodel.IsRetryable admits, and that a non-retryable
-// database error is still internal_error — because a mapping that
-// answered "retryable" to everything would pass a one-case test.
 func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
 	t.Parallel()
 	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())
@@ -136,15 +131,6 @@ func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
 
 // TestADomainCodeOutranksAContentionSQLSTATE closes review finding L2 on
 // this side of the boundary.
-//
-// `mcpErrorFor`'s doc comment argues at length that `IsRetryable` must
-// be checked *last* — a domain code is what a caller can act on, and
-// "resend unchanged" is the worst possible advice about a call that will
-// be refused again — and nothing pinned it: moving the arm to the front
-// of the switch left the whole suite green. The pairing test for
-// `failureFor` is TestABulkFailureNeverCarriesTheDatabasesOwnWords
-// (internal/metamodel), because the two switches state the same
-// ordering for the same reason and a change to one is a change to both.
 func TestADomainCodeOutranksAContentionSQLSTATE(t *testing.T) {
 	t.Parallel()
 	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())

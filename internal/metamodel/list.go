@@ -13,30 +13,6 @@ import (
 
 // RelatedFilter is the single hop of traversal this sub-project offers.
 // Transitive walks belong to the views query engine.
-//
-// **Direction is relative to the anchor**, which is the entity named by
-// EntityTypeKey and EntityKey: "outgoing" returns the entities the
-// anchor points at along this relation type, "incoming" returns the ones
-// that point at it. Both are required to be spelled exactly; see
-// ListEntities for why an unrecognised spelling is refused rather than
-// defaulted.
-//
-// **There is deliberately no "both".** An entity joined to the anchor by
-// two edges of one type, one each way, would appear twice in a listing
-// whose rows are entities, and collapsing the pair would throw away the
-// one thing the caller asked about — which way the edge runs. A caller
-// that wants the whole neighbourhood makes two calls and knows which
-// half each row came from. The views sub-project, whose rows are edges
-// rather than entities, is where an undirected walk belongs.
-//
-// **A self-loop appears once, and it is the anchor itself.** An edge
-// from an entity to itself satisfies exactly one arm of the query's join
-// in either direction, so the anchor comes back in its own neighbour
-// list, once, under both "outgoing" and "incoming". That is the honest
-// answer: the edge exists and it does point at that entity. Nothing here
-// filters the anchor out, because a caller asking "what does this
-// unlock" is owed the loop it declared, and the analysis sub-project is
-// where self-references are reported as a modelling problem.
 type RelatedFilter struct {
 	RelationTypeKey string
 	EntityTypeKey   string
@@ -54,30 +30,6 @@ const (
 )
 
 // EntityFilter narrows an entity listing.
-//
-// TypeKey and Invalid apply to both shapes of listing — a plain one and a
-// traversal — so neither is ever silently dropped: "which zones does
-// Elwynn connect to" and "which of them are invalid" are one question
-// with two clauses, and a filter that only worked on one path would
-// answer the other question without saying so.
-//
-// **Invalid is the row's own flag, and on a traversal it stays the row's
-// own flag**: it narrows the entities the hop reached, and it says
-// nothing about the edge each hop crossed. Since 0009 an edge carries the
-// same flag, so the question is worth answering rather than leaving
-// implicit — a traversal follows every edge of its relation type,
-// flagged or not, exactly as this listing returns every entity unless
-// asked otherwise. That is deliberately *not* what internal/views does,
-// and the two are not inconsistent: a view is a picture a designer will
-// trust, so it excludes flagged rows and flagged edges by default and
-// takes `include_invalid` to opt back in; a listing is a query, and its
-// default is "no opinion" on both tables. An agent that wants the edges
-// a schema edit broke asks ListRelations for them by name.
-//
-// Cursor is the NextCursor of a previous call. It belongs to the game
-// and the filter it was issued for and to no other, and it is a position
-// rather than a snapshot; EntityPage carries the whole contract, and it
-// is worth reading before paging a game that is being edited.
 type EntityFilter struct {
 	TypeKey string
 	Invalid *bool
@@ -92,12 +44,6 @@ type EntityFilter struct {
 	// part of the cursor's fingerprint, because a position in one order
 	// means nothing in another — carried across, it would page
 	// perfectly and return a stretch of rows nobody asked for.
-	//
-	// **It applies to the plain listing only.** A traversal is ordered by
-	// name and says so by refusing an order rather than accepting one it
-	// would not obey: ListEntitiesRelatedTo has a single sort key, and
-	// an order silently dropped on one of the two shapes of this call is
-	// the defect this package has already met once in the filters.
 	Order     string
 	RelatedTo *RelatedFilter
 	Cursor    string
@@ -108,68 +54,6 @@ type EntityFilter struct {
 // where every cursor in this package comes from, so the contract a
 // caller has to know is written here — RelationPage's cursor obeys the
 // same one, and so does the one a traversal issues.
-//
-// **NextCursor is set when the page came back full**, and empty
-// otherwise. That is one call more than strictly necessary on a listing
-// whose length is an exact multiple of the limit: the last full page
-// carries a cursor to an empty one. The alternative — reading limit+1 rows
-// and dropping the extra — costs a row on every page of every listing to
-// save that one call, so the empty page stands and TestListArea's "a full
-// final page carries a cursor to an empty one" case pins it. A caller
-// looping until NextCursor is empty is therefore correct, and must expect
-// to be handed an empty final page rather than treating one as an error.
-//
-// **A cursor is a position, not a snapshot, and this is the part that
-// bites.** It is the keyset position of the page's last row — (name, id)
-// for an entity listing, (created_at, id) for a relation one — so the
-// next page is "the rows after this position", never "skip this many
-// rows". What that buys is stability under concurrent editing: a row
-// deleted or inserted before the position does not slide the window, and
-// the row the cursor names need not still exist, because nothing
-// re-reads it.
-//
-// What it does not buy is a consistent view of the whole listing. The
-// sort key is mutable, so between two pages:
-//
-//   - a row renamed to sort *after* the position can be seen twice;
-//   - a row renamed to sort *before* it is never seen again by that
-//     listing, however many pages are still to come — it has moved
-//     behind the reader;
-//   - a row inserted before the position is likewise never seen.
-//
-// None of these is a bug and none of them is reported, so a caller that
-// needs a consistent whole re-reads the listing from no cursor rather
-// than trusting a paged walk taken while the game was being written.
-// ListRelations is the one listing this does not apply to, because
-// nothing edits created_at.
-//
-// **A cursor belongs to the listing that issued it**, and to no other:
-// the game, the filter and, for a traversal, the anchor and direction.
-// Every filter of a listing shares one sort order, so a cursor carried
-// across to another one would page perfectly and answer a different
-// question — the quest listing's position walking the zone listing and
-// returning zones, or one game's position walking another game's rows.
-// It therefore carries a fingerprint of the listing it came from and a
-// mismatch is refused as invalid_input at path `cursor`. Pass a cursor
-// back only to the call that produced it, with the same filter.
-//
-// **It is not a capability and it is not signed.** It is base64 of JSON; a
-// caller can decode it, rewrite the position and recompute the fingerprint
-// from values it already holds. That buys nothing, because the position
-// only ever becomes a `>` comparison inside a statement already filtered by
-// the caller's own project id — the worst a forged position does is skip
-// the caller's own rows, which TestListArea's "a forged cursor cannot reach
-// another games rows" case pins. The fingerprint is a consistency check
-// against a caller's own mistake, and it must not be relied on as a
-// security boundary. For the same reason it leaks nothing: the position is
-// the sort value and id of a row this same call just returned to this same
-// caller, and the fingerprint is a digest of the filter that caller
-// supplied.
-//
-// Cursor.Sort, for this listing, is the row's name — paging.Cursor
-// generalises Sort away from any one listing's sort key, and this is
-// the fact that generalisation abstracts over here. RelationPage's is
-// its row's created_at in RFC 3339; see that type.
 type EntityPage struct {
 	Entities   []dbq.Entity
 	NextCursor string
@@ -192,32 +76,6 @@ const (
 // the fingerprint that omitted the project id — one game's cursor
 // paging another game's rows — would have been fixed in one copy and
 // left standing in the other.
-//
-// What stays here is this package's own spelling of that API: six one-line
-// delegations, which the three listings and this package's in-package tests
-// (list_internal_test.go, relations_internal_test.go) both go through.
-// Keeping the names is what proves the extraction did not move the shared
-// code out from under the tests that pin it — dropping the project id from
-// a fingerprintOf call still reddens TestListArea's "a cursor from another
-// game is refused" case, and folding paging.Size's over-cap arm onto the
-// default still reddens TestAnEntityPageAsksForTooMuchAndGetsTheCap and
-// TestARelationPageAsksForTooMuchAndGetsTheCap — and it is why nothing in
-// internal/metamodel's tests changed for this extraction.
-//
-// **The contract a caller has to know is EntityPage's**, where a caller
-// can read it, and paging.Cursor's, which states it once for both
-// domains: what a position buys and does not buy, why a cursor cannot
-// be carried between listings, and why nothing signs it.
-//
-// A fingerprint here is over the *resolved* listing: the project id first,
-// then which listing it is, then the filter — the entity type id, the
-// invalid flag, and a traversal's relation type, anchor and direction.
-// Resolved and not as spelled, so two spellings of one key give one
-// fingerprint. The project id is first because without it two games'
-// unfiltered listings shared a fingerprint and one game's cursor paged the
-// other's rows from a position that meant nothing there: TestListArea's "a
-// cursor from another game is refused" case pins each of the three
-// listings.
 type cursor = paging.Cursor
 
 func pageSize(limit, def, max int32) int32 { return paging.Size(limit, def, max) }
@@ -230,18 +88,6 @@ func invalidFilterPart(invalid *bool) string { return paging.TriState(invalid) }
 
 // refuseCursor turns paging's message into this package's own error, at
 // the argument's own path.
-//
-// invalid_input, not a bare error: the cursor is the caller's own
-// argument, at a path, and the recovery is the caller's — page from a
-// cursor a previous call returned, or omit it. Left untyped it reaches
-// an agent as internal_error and reads as "the server is broken" over a
-// value the agent itself supplied.
-//
-// The messages live in internal/paging so that this domain and the
-// markdown domain — once Task 8 gives it a listing of its own — cannot
-// tell a caller two different things about one bad cursor; the *type*
-// is this domain's, because that is what internal/web's existing
-// invalid_input arm matches on.
 func refuseCursor(message string) error {
 	return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
 		Path: "cursor", Message: message,
@@ -265,32 +111,12 @@ func decodeCursor(s, fingerprint string) (cursor, error) {
 
 // ListEntities returns one page of a game's entities, either the plain
 // listing or the single hop RelatedTo asks for.
-//
-// **An unknown key in a filter is a not_found naming the key**, not an
-// empty page. Every key this filter carries — the entity type, and a
-// traversal's relation type and anchor — is resolved before the listing
-// runs, so a caller that mistyped `quesst` hears about `quesst` instead
-// of being told this game has no quests and going off to seed a second
-// copy of them.
-//
-// **A page is a position, not a snapshot.** Pages are keyset-ordered by
-// (name, id); EntityPage records what that means while the game is being
-// written underneath the caller, what it does not mean, and why a cursor
-// cannot be carried to another listing or another game.
 func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f EntityFilter) (EntityPage, error) {
 	limit := pageSize(f.Limit, defaultEntityPage, maxEntityPage)
 
 	// The type filter is resolved for both shapes of listing, so a
 	// traversal narrowed by entity type answers the question it was
 	// asked instead of dropping the clause.
-	//
-	// Bounded before the lookup runs, through rowKeyProblems -- the same rule
-	// UpsertEntityType checks a caller's key against before it is ever a row
-	// -- so a type_key holding an invalid UTF-8 byte is a named invalid_input
-	// rather than a bare "invalid byte sequence for encoding \"UTF8\""
-	// (SQLSTATE 22021) surfacing as internal_error over a value the caller
-	// itself supplied. TestListArea's "a type key filter is bounded before
-	// postgres sees it" case pins it.
 	var typeID *uuid.UUID
 	typePart := ""
 	var typeSchema []byte
@@ -368,13 +194,6 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 }
 
 // listRelated resolves the one-hop filter and pages its answer.
-//
-// The relation type and the anchor are resolved by key first, so a
-// mistyped one is a named not_found. That is also what makes the
-// listing's own project filter enough: an anchor id and a relation type
-// id that came out of this project cannot select another game's edges,
-// and the SQL comment records that the filters in the query itself are
-// defence in depth rather than the mechanism.
 func (s *Service) listRelated(ctx context.Context, projectID uuid.UUID, rel RelatedFilter,
 	typeID *uuid.UUID, typePart string, f EntityFilter, limit int32,
 ) (EntityPage, error) {
@@ -452,20 +271,6 @@ func pageOf(rows []dbq.Entity, limit int32, fingerprint string, order entityOrde
 }
 
 // The bounds this package's callers are allowed to state out loud.
-//
-// Every one of these mirrors an unexported constant a few lines from
-// where it is used. They are exported for one reason, and it is the rule
-// correction 24 established for MaxSearchQuery: **a bound a caller
-// cannot read is a bound a caller trips over.** The MCP tool
-// descriptions (internal/web/mcp_metamodel.go) are built with these
-// values interpolated rather than typed out, so a description cannot go
-// on promising a cap that moved.
-//
-// They are aliases and not the constants themselves because the
-// unexported names are what the code reads, and each of them lives
-// beside the listing whose bound it is; renaming them into an exported
-// block would move six constants away from the six arguments that
-// justify them.
 const (
 	// DefaultEntityPage and MaxEntityPage bound one page of ListEntities, in
 	// both of its shapes: a one-hop traversal is paged by the same pageSize,

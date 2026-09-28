@@ -1,18 +1,6 @@
 // The reading view: one document of one game, rendered, with the
 // entities it is attached to, its history, a comparison between two of
 // its versions and a revert.
-//
-// It shares app.js's helpers by importing them rather than repeating
-// them — one fetch wrapper, one 401 policy, one header — and app.js's
-// own page blocks are guarded on elements this page does not have
-// (#games, #login, #game-name), so importing it runs none of them.
-//
-// **This file is the one place in internal/web/static that inserts
-// server-supplied HTML into the DOM**, and setRenderedHTML below is the
-// only sink. app.js has none at all and must keep none:
-// TestAppScriptNeverWritesRawHTML pins that, and
-// TestTheDocumentScriptHasExactlyOneHTMLSink pins that this file has
-// exactly one and that it is fed from a rendered view.
 import {
   fallbackMessage,
   fetchAPI,
@@ -38,12 +26,6 @@ import {
 } from "./pages/page.js";
 
 // The empty state, in the page rather than in the shell.
-//
-// **It no longer teaches an API.** The shell's copy named the MCP tool
-// (`docs.links.add`) and the game's content routes to a reader whose
-// whole reason for being here is that they do not write code, which is
-// the one thing negativeState says a negative state never does. Who does
-// it is the useful half, and it is the half this says.
 export const NOT_ATTACHED_HEADING = "Attached to nothing";
 export const ATTACHES_IT = "attaches it to one";
 // A relative specifier, not "/static/app.js": the browser resolves it
@@ -59,12 +41,6 @@ export const ATTACHES_IT = "attaches it to one";
 // escaped, then wrapped in a classed <div>). Neither can carry a tag a
 // designer typed, which is why this page may insert them and why nothing
 // else on it may.
-//
-// The Content-Security-Policy on every response from this server
-// (default-src 'self', internal/web's securityHeaders) is a second line
-// and not the first: innerHTML never executes a <script> it inserts, but
-// an event-handler attribute would run without one, and the renderer not
-// emitting attributes at all is what actually stops that.
 function setRenderedHTML(el, html) {
   el.innerHTML = typeof html === "string" ? html : "";
 }
@@ -90,20 +66,6 @@ function showFailure(message) {
 
 // describeAuthor turns a version's author into a sentence a designer can
 // read.
-//
-// **author_label is the answer whenever the server gives one**, and it
-// is what this function was missing. VersionOutput used to carry only a
-// kind and an id, so a token could not be resolved at all — its label
-// lives on api_tokens and nothing published it — and every agent's work
-// read as "an agent", ten times over for ten versions by three agents.
-// The server resolves both kinds now, in one query per page, and a
-// revoked token still comes back named: revoking it changed what it may
-// do next, not who wrote this.
-//
-// The member map stays as the fallback for a user the server could not
-// name, which is the older of the two paths and still the right answer
-// there. A raw uuid never reaches the screen either way: a designer
-// reading a history does not know what one is.
 function describeAuthor(version, membersByID) {
   if (version.author_label) {
     return version.author_label;
@@ -162,27 +124,6 @@ function entityRow(link) {
 
 const titleEl = document.getElementById("doc-title");
 // --- Writing the document ---------------------------------------------
-//
-// The third write a person can make in this product, and the one whose
-// subject is the game's own prose. What it inherits from the entity's
-// rename is the whole of its behaviour under refusal: the edit is never
-// lost, and it never silently wins. What is its own is stated here.
-//
-// **It opens from the source, not from the page.** This page holds the
-// *rendered* HTML and rendering is not reversible; `GET /docs/one`
-// answers with the markdown the document is stored as, and that is what
-// the textarea is filled from.
-//
-// **A body the server cut is not editable.** `/docs/one` answers
-// `truncated: true` when a document is longer than the read cap, and
-// saving what came back would silently cut the document to the length of
-// the answer. That is refused, in a sentence, rather than offered.
-//
-// **`links` is omitted, and that is load-bearing.** internal/markdown's
-// own contract is that a `links` array replaces the whole attachment set
-// and omitting it preserves it, so an editor that sent `[]` because it
-// has no control for attachments would detach every entity the document
-// is attached to, quietly, on a save about a typo.
 
 export const EDIT_DOC_LABEL = "Edit";
 export const TRUNCATED_REFUSAL =
@@ -194,11 +135,6 @@ export const EDIT_CONFLICT =
 
 // wireDocEditor puts the Edit control where the read-only notice would
 // be, and swaps the rendered document for its source when it is pressed.
-//
-// It takes the version the page drew from, because that is what the
-// write states — the compare-and-set is against what the reader was
-// actually looking at, not against whatever the document is by the time
-// they press Save.
 function wireDocEditor(game, docPath, state) {
   const actions = document.getElementById("page-actions");
   const form = document.getElementById("doc-edit");
@@ -327,14 +263,6 @@ if (titleEl) {
   // server-side, and this page adds none. It is fetched for the game's
   // name and to confirm the slug reaches a game at all — not, since the
   // routes started taking slugs, to translate one address into another.
-  //
-  // It is fetched **before the header** and before the "no document
-  // asked for" branch, which it did not used to be: the header carries
-  // the game switcher now (app.js's renderHeader) and the switcher is
-  // this list. A reading view that skipped the fetch on its own error
-  // paths would be a page with no way off it, which is the exact defect
-  // the switcher exists to close — and this page has more error paths
-  // than any other in the product.
   const [who, games] = await Promise.all([fetchMe(), fetchGames()]);
   if (!games.ok && games.expired) {
     goToLogin();
@@ -374,14 +302,6 @@ if (titleEl) {
 // reading view, the member list (for the history's author names), the
 // game summary (for the caller's role, which decides whether a revert
 // button is offered at all) and the first page of history.
-//
-// The reading view comes first and its failure is the page's failure:
-// there is nothing worth showing beside a document that could not be
-// read.
-// `game` is the **slug**, not the row: every fetch below addresses the
-// game by slug. The name comes in beside it because the trail says the
-// game's name and reading it off a slug string gave an empty first
-// crumb — found by opening the page.
 async function renderDocument(game, docPath, gameName) {
   const titleEl = document.getElementById("doc-title");
   const metaEl = document.getElementById("doc-meta");
@@ -495,16 +415,6 @@ function fillEntities(links, role) {
 }
 
 // loadMembers maps a user id to a display name.
-//
-// It is the *fallback* for describeAuthor now that the server resolves
-// author_label itself, and it is kept rather than deleted because the
-// server answers no label for a user it could not resolve, where this
-// page can still know the name from the member list it loads anyway.
-//
-// A failure is not the page's failure: the history still renders, with
-// "a former member" where a name would have been, which is the same
-// sentence a departed author gets and is honest in both cases — the page
-// genuinely does not know who that id is.
 async function loadMembers(game) {
   const result = await fetchAPI(`/api/games/${game}/members`);
   const byID = new Map();
@@ -522,14 +432,6 @@ async function loadMembers(game) {
 
 // loadRole reads the caller's own role off the game summary, which is
 // the only place this instance publishes it to a browser.
-//
-// **The role decides what is offered, never what is allowed.** A viewer
-// is refused a revert by registerContentRoute (internal/web/server.go)
-// on every request, whatever this page renders; hiding the button only
-// stops offering an action the server will refuse. An unreadable summary
-// therefore falls back to showing the button — the server is the check,
-// and a page that hid every action whenever a side request failed would
-// be lying about what the reader may do.
 async function loadRole(game) {
   const result = await fetchAPI(`/api/games/${game}/summary`);
   if (!result.ok) {
@@ -541,12 +443,6 @@ async function loadRole(game) {
 // renderHistory fills the version list, one page at a time, and wires
 // the compare form's two pickers and each row's revert button as it
 // goes.
-//
-// currentVersion is the document's own version, and it is what every
-// revert sends as expected_version: a revert is a compare-and-set like
-// any other write, so if somebody else saved while this page was open
-// the server answers version_conflict and the page says so rather than
-// overwriting them.
 async function renderHistory(game, docPath, currentVersion, membersByID, role) {
   const listEl = document.getElementById("doc-history");
   const errorEl = document.getElementById("doc-history-error");
@@ -713,25 +609,6 @@ function historyRow(game, docPath, currentVersion, version, membersByID, role) {
 
 // describeComparison names the three things a rendered diff cannot say
 // for itself, and says nothing at all otherwise.
-//
-// A `coarse` comparison is the whole document replaced because the two
-// versions were too large to compare line by line; without the sentence
-// it reads as a change nobody made. And two identical versions produce a
-// unified diff of nothing but its own file headers, which renders as two
-// grey lines and looks like a page that failed to load rather than like
-// an answer.
-//
-// The third is a comparison that spans a deletion, and it is the one
-// this function got *wrong* rather than merely left unsaid until the
-// prose sub-project's end-to-end run: a tombstone version carries the
-// body the document had when it was deleted, so the unified diff between
-// the last live version and the tombstone is empty, and this function
-// answered "These two versions are identical" about a comparison whose
-// whole content is that the document was deleted. The deletion is
-// checked before the emptiness for exactly that reason. from_deleted and
-// to_deleted come from the server (DocComparisonOutput), because the
-// page cannot tell a tombstone from an unchanged version by looking at
-// the diff.
 function describeComparison(comparison) {
   if (comparison.coarse) {
     return (
@@ -752,13 +629,6 @@ function describeComparison(comparison) {
 }
 
 // hasChangedLines reports whether a unified diff says anything at all.
-//
-// A diff of two identical versions is nothing but its own `---`/`+++`
-// file headers, and the page **drew it**: a bordered box holding two
-// grey lines, under a sentence that had just said the versions are
-// identical. The box is the second statement, and it contradicted the
-// first by existing. This predicate is what both the sentence and the
-// box now ask, so they cannot disagree.
 export function hasChangedLines(unified) {
   const text = typeof unified === "string" ? unified : "";
   return text.split("\n").some(

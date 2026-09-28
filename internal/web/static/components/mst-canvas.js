@@ -1,71 +1,4 @@
 // The canvas: pan, zoom, the SVG emitter and the drag layer.
-//
-// **The emitter is deliberately dumb.** One scene mark becomes one SVG
-// element, with the attributes render/scene.js's MARK_ATTRIBUTES names
-// and nothing else. It has no opinion about colour, about absence or
-// about truncation: those were decided in palette.js (Task 1) and in
-// scene.js's banner stack (Task 4), and they travel in the mark. That
-// separation is what makes the six renderers testable without a browser
-// and this emitter testable without a renderer, and it is what the whole
-// sub-project's verification rests on. If something here wants to decide
-// what a mark means, the decision belongs in the mark.
-//
-// Dumb is not the same as a passthrough. A passthrough is how `onload`,
-// `style` and `href` arrive on an element built from data, so the
-// contract is an allowlist per kind: a field the map does not name does
-// not reach the DOM, and the emitter is judged by that map rather than
-// by the caller's discipline.
-//
-// **The hostile name, in a different context.** The text twin's answer
-// (Task 5) was that Lit escapes and our job is placement, asserted by a
-// scanner that finds where each value is bound. That argument does not
-// transfer here, and this file does not reuse it: there is no framework
-// on this path at all. `createElementNS`, `setAttribute` and
-// `textContent` never parse markup, so nothing is escaped because
-// nothing is ever re-parsed — the property is *no parsing*, not *correct
-// escaping*. What SVG adds that HTML text position did not have is three
-// hazards of its own, and each is closed by construction:
-//
-//   1. Element and attribute **names** never come from data. Both are
-//      looked up in scene.js's frozen maps by the mark's kind; a mark
-//      cannot name an element and cannot invent an attribute.
-//   2. `<foreignObject>` re-enters the HTML parser and `<script>`,
-//      `<use>` and `<a>` bring script or navigation into a picture.
-//      None is in MARK_ELEMENTS, and internal/web/static_canvas_test.go
-//      fails on the day one is spelled in this file.
-//   3. `href` is the one attribute a browser *resolves* rather than
-//      draws. scene.js's isDrawableHref admits same-origin absolute
-//      paths and nothing else, and the emitter drops what it refuses.
-//
-// A game's own words reach the DOM through `textContent` on a `<text>`
-// element and through no other path — textContent assigns character
-// data, so markup in a node's name is characters in a label. The
-// harness asserts it against a node named with a script tag, and
-// asserts the complement: that no attribute value anywhere in the
-// emitted tree contains a `<`.
-//
-// **Paint order is a correctness property.** SVG paints in document
-// order, so the five layers are five sibling groups in LAYER_ORDER and
-// a mark's layer decides which one it lands in — not the order the
-// renderer happened to push it. A label under its own node is a label
-// nobody can read; a dragged node under the graph it is crossing is a
-// drag a designer loses.
-//
-// **The drag layer is the one performance-shaped decision here** (spec
-// §8.2: a drag stays at 60fps at 1000 nodes). On `beginDrag` the
-// dragged nodes, their labels and the edges whose *both* endpoints are
-// dragged move onto a detached layer; a move then writes **one**
-// transform for the whole body, plus one endpoint pair for each edge
-// that leaves the selection — an edge with one end moving cannot be
-// translated, it has to be reshaped. Nothing else in the tree is
-// touched, and the harness counts exactly that against a 200-node
-// fixture, where a full re-render is unmissable.
-//
-// This component is not a LitElement, and that is deliberate: it holds
-// no declarative template at all. Lit's contract is "describe the tree
-// and it will be reconciled", which is precisely what the drag budget
-// above forbids, and a component that re-rendered its tree to move four
-// nodes would be a correct Lit component and a broken canvas.
 
 import {
   COMMON_ATTRIBUTES,
@@ -140,12 +73,6 @@ export function translateFor(dx, dy) {
 }
 
 // --- The classes the shell wears -------------------------------------
-//
-// The diagram is full-bleed and the chrome floats over it (spec §2.6):
-// the 68ch measure `styles.css` sets is for reading surfaces, and a
-// diagram inside a centred column of prose width is a diagram nobody can
-// use. The classes are exported so the harness asks for them by identity
-// rather than by matching a string it also wrote.
 export const CLASS_ROOT = "canvas full-bleed";
 export const CLASS_SURFACE_HOST = "surface-host";
 // What the box that takes the keyboard is called. The drawing inside it
@@ -220,20 +147,6 @@ svg.surface text { paint-order: stroke; }
 
 // emitScene turns a scene into an SVG tree, and returns the index the
 // canvas navigates it by.
-//
-//   root   — the `<svg>`.
-//   world  — the one group pan and zoom transform.
-//   layers — Map from a layer name to its group, in LAYER_ORDER.
-//   nodes  — Map from a mark's key to `{shapes, labels}`; a node's box
-//            and its label share the key, which is the entity's address.
-//   edges  — every mark carrying a `source` and a `target`, with its
-//            element, so the drag layer can find what is incident
-//            without ever querying the DOM.
-//   labels — every label element with the base size it was authored at,
-//            which is what the zoom band re-derives from.
-//   skipped — marks of a kind the contract does not name. Returned
-//            rather than thrown or silently dropped: a renderer that
-//            invented a kind should see the number.
 export function emitScene(scene, options = {}) {
   const doc = options.document || globalThis.document;
   const marks = Array.isArray(scene) ? scene : Array.isArray(scene && scene.marks) ? scene.marks : [];
@@ -313,24 +226,6 @@ export function emitScene(scene, options = {}) {
 
 // hatchPattern is the one paint server this emitter defines: the texture
 // palette.js's tail is painted with.
-//
-// **A tail painted a flat colour is a ninth colour**, which is the whole
-// of what the tail exists not to be — see palette.js's HATCH_FILL for
-// the finding. A hatch is a difference of *kind*, so it survives a
-// reader who cannot tell two of the eight hues apart, and it survives
-// both themes because its two colours are tokens.
-//
-// It is emitted unconditionally, once per drawing, rather than only when
-// some mark uses it: a `<defs>` costs nothing to a renderer that draws
-// no tail, and a definition emitted conditionally is a fill that
-// resolves to nothing the first time a condition is wrong — and an
-// unresolved paint server draws an **invisible** shape, with no error
-// anywhere.
-//
-// `userSpaceOnUse` and not `objectBoundingBox`: the stripes are in the
-// drawing's own coordinates, so two tail nodes of different sizes wear
-// the same texture rather than the same *number* of stripes, which is
-// what makes it read as one material.
 function hatchPattern(doc) {
   const defs = doc.createElementNS(SVG_NS, "defs");
   const pattern = doc.createElementNS(SVG_NS, "pattern");
@@ -412,25 +307,6 @@ export function buildShell(doc) {
 
 // adoptCanvasStyles puts CANVAS_CSS on a shadow root as a **constructible
 // stylesheet**, and there is no `<style>` element fallback on purpose.
-//
-// A `<style>` element built in script is *inline style* to a
-// Content-Security-Policy, and this product's policy is `default-src
-// 'self'` with no style hash and no 'unsafe-inline'. A browser therefore
-// refuses to apply it — `style.sheet` comes back null — and refuses in
-// the same silent way it refuses an unhashed import map: the element is
-// in the shadow tree, its textContent is intact, `querySelector` finds
-// it, and the only symptom is that none of the rules are in effect. That
-// is what this component shipped until Task 15 mounted a view and read
-// `shadowRoot.querySelector("style").sheet` in a real browser: null, the
-// host laid out `static` rather than `absolute`, and the surface drawn
-// at an SVG's default 300x150 instead of filling the frame.
-//
-// `adoptedStyleSheets` is not inline style and no policy governs it,
-// which is also why every Lit component beside this one was unaffected —
-// `static styles` takes exactly this path. A fallback that appended a
-// `<style>` when constructible sheets are missing would be a mechanism
-// nothing reads: under this policy it cannot work, so a shadow root
-// without `adoptedStyleSheets` is left unstyled and honest about it.
 export function adoptCanvasStyles(shadow) {
   if (!shadow || !Array.isArray(shadow.adoptedStyleSheets)) return null;
   if (typeof CSSStyleSheet !== "function") return null;
@@ -554,19 +430,6 @@ export class MstCanvas extends HTMLElement {
   }
 
   // beginDrag detaches the body being moved.
-  //
-  // Three sets come out of it, and the third is the one that costs
-  // anything per frame:
-  //
-  //   carried  — the dragged nodes' shapes and labels, plus every edge
-  //              whose two endpoints are both in the selection. All of
-  //              them ride one transform, so a move writes nothing on
-  //              any of them.
-  //   reshaped — the edges with exactly one endpoint in the selection.
-  //              These cannot be translated: one end is standing still.
-  //              Each gets its moving endpoint pair rewritten per move.
-  //   missing  — keys the scene has no element for, returned rather than
-  //              ignored so a caller dragging a shelved node finds out.
   beginDrag(keys) {
     if (!this.tree) return { carried: [], reshaped: [], missing: [] };
     const dragged = new Set(Array.isArray(keys) ? keys : [keys]);
@@ -620,9 +483,6 @@ export class MstCanvas extends HTMLElement {
   // dragBy moves the body. `dx`/`dy` are **world** units — the caller
   // divides a pointer delta by the zoom, because the drag layer is
   // inside the world group and shares its scale.
-  //
-  // What this writes, per move: one transform, and one endpoint pair per
-  // edge that leaves the selection. Nothing else.
   dragBy(dx, dy) {
     if (!this.drag) return null;
     this.drag.dx += Number.isFinite(dx) ? dx : 0;
@@ -683,14 +543,6 @@ export class MstCanvas extends HTMLElement {
   }
 
   // adjustGround moves and scales the background alone.
-  //
-  // The nodes hold still, which is the whole of *adjust ground* being a
-  // mode: a designer aligning an image to a graph is moving one of the
-  // two things, and an interface that moved both would be asking them to
-  // do it by feel. It reaches the image layer directly rather than
-  // through the drag layer, because the ground is not a body of marks
-  // with incident edges — it is one element, and there is nothing to
-  // detach it from.
   adjustGround(change) {
     if (!this.tree) return null;
     const move = change && typeof change === "object" ? change : {};
@@ -797,43 +649,6 @@ function numberOf(element, attribute) {
 customElements.define("mst-canvas", MstCanvas);
 
 // --- The write on drop -----------------------------------------------
-//
-// The first of Task 14's two writes, and the reason this component
-// gained anything after the drag layer above.
-//
-// **A drag is one intention, so it is one write.** Nothing is sent while
-// the pointer is down: a write per frame is sixty calls, sixty rows and
-// sixty events fanned out to every other browser looking at this view,
-// for one gesture whose only durable fact is where the node ended up. A
-// multi-selection is written by the same rule — one call carrying every
-// node — and the arrow keys are the keyboard path *to that same call*
-// rather than a second write path, because two write paths are two
-// chances to differ.
-//
-// **A dragged node is written pinned.** That is what a drag means: a
-// human put it there. Unpinning is a separate, explicit act, and in
-// `manual` mode it has no visible effect until the position is cleared
-// too — so the menu offers the clear beside it and says so, because a
-// control that appears to do nothing is worse than one that is absent.
-//
-// **Coordinates are the game's, not the screen's.** A pointer delta is
-// divided by the zoom in `worldDelta` before it reaches anything, and
-// the model this writes from is the composition's own coordinates —
-// which is what the layout composed against. A canvas that wrote screen
-// pixels would drift every saved arrangement by whatever viewport the
-// designer happened to have.
-//
-// **A refused write reverts.** The nodes go back to where they were and
-// the server's own sentence is banded. The alternative is the one
-// outcome a shared design tool may not produce: a screen that disagrees
-// with the database indefinitely, with nothing on it saying so.
-//
-// **Concurrency is last-writer-wins, and the menu says so.**
-// `set_positions` carries no `expected_version` and does not advance the
-// view's version, which is the right trade for a coordinate and the one
-// place in this product where a write silently loses. The one write here
-// that *is* version-checked is the structural one — switching a view out
-// of `auto` — because that changes what everybody else sees.
 
 import { addressOf } from "../address.js";
 import { MODE_MIXED, normaliseMode, readsPositions, snapsPositions } from "../positions.js";
@@ -880,12 +695,6 @@ export const ACTION_UNDO = "undo";
 // the answer, and RUN_ANYWAY_LABEL sits in the component beside it
 // because it names a button. Everything below is the same kind of thing
 // — what this control will do, and what it will not.
-//
-// Three of them exist because the behaviour they describe is invisible.
-// Unpinning in `manual` mode changes no pixel until the position is
-// cleared; undo has one level and no server behind it; a position write
-// loses silently to a concurrent one. Each is a thing a designer would
-// otherwise learn by watching nothing happen.
 export const REASON_AUTO_NO_DRAG =
   "This view lays itself out automatically, so nothing on it can be dragged: " +
   "a position saved here would never be read back.";
@@ -904,12 +713,6 @@ export const NOTE_LAST_WRITER_WINS =
   "you are moving it, the later drop wins and nothing warns either of you.";
 
 // The reason a drawing nobody can see offers no writes.
-//
-// It is the same sentence REASON_AUTO_NO_DRAG is: a write whose result
-// is not on screen is not offered, and the designer is told why rather
-// than left to watch nothing happen. Below tablet width the view page
-// falls back to the twin (spec §9), and this is what the arrangement
-// says while it does.
 export const REASON_NOT_DRAWN =
   "The drawing is not shown at this width, so nothing on it can be moved: a " +
   "position written here would land on a picture nobody can see. The table " +
@@ -925,14 +728,6 @@ export function snapTo(value, snap) {
 }
 
 // worldDelta turns a pointer delta into a game delta.
-//
-// **This function is what stops a screen coordinate ever being written.**
-// A drag ends inside a pan-and-zoom transform; the number of pixels the
-// pointer travelled is a fact about this browser's viewport and about
-// nothing else. Divided by the zoom it becomes a distance in the space
-// the layout composed against, which is the space `view_positions`
-// holds. The pan does not appear here at all, and correctly so: a
-// translation cancels out of a difference.
 export function worldDelta(dx, dy, zoom) {
   const k = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   return {
@@ -942,10 +737,6 @@ export function worldDelta(dx, dy, zoom) {
 }
 
 // arrangementMenu is the menu as data: what it says and what it offers.
-//
-// Pure, so the whole of "a viewer gets the sentence without the button"
-// is one assertion over a returned object rather than a walk of a DOM
-// that might merely have failed to render.
 export function arrangementMenu({ mode, role, canUndo, drawn, selected } = {}) {
   // A canvas that is not on screen refuses first and for every mode: the
   // fallback below tablet width is not "the drawing is smaller", it is
@@ -968,9 +759,6 @@ export function arrangementMenu({ mode, role, canUndo, drawn, selected } = {}) {
   // `clearPositions` each begin by returning null on an empty list: a
   // control that answers a click with nothing teaches that the screen is
   // broken. Disabled with a reason is the honest state.
-  //
-  // `destructive` marks the one with no undo — the notes beside it say
-  // so in words, and the canvas arms it for a second click.
   const nothingSelected = !(selected > 0);
   const actions = [
     { id: ACTION_UNPIN, label: LABEL_UNPIN, disabled: nothingSelected },
@@ -981,26 +769,10 @@ export function arrangementMenu({ mode, role, canUndo, drawn, selected } = {}) {
 }
 
 // Arrangement is the drag, the selection, the keyboard and the write.
-//
-// It holds the *model* — one record per node, in game coordinates — and
-// the canvas holds the drawing. Every path through it ends in `commit`,
-// which is the single place a position is sent, so "one drag is one
-// write" and "the arrow keys write the same shape" are properties of the
-// construction rather than of two implementations agreeing.
 export class Arrangement {
   constructor({ canvas, client, viewKey, row, mode, snap, role, nodes, drawn } = {}) {
     this.canvas = canvas;
     // Whether the picture this arranges is on screen at all.
-    //
-    // **This is a gate on the writing path and not a style.** Below
-    // tablet width the view page hides the canvas and the twin becomes
-    // the content (spec §9); hiding it with CSS alone would leave every
-    // write armed, and a keyboard reader tabbing the twin could still
-    // nudge a node on a drawing nobody can see — a position written
-    // against a picture with no observer, which is exactly the shape
-    // `auto` refuses a drag for. So it is read by `draggable` and by
-    // `mayWrite`, which between them guard every path in this class that
-    // reaches the client.
     this.drawn = drawn !== false;
     this.client = client;
     this.viewKey = viewKey;
@@ -1043,12 +815,6 @@ export class Arrangement {
   }
 
   // setDrawn arms or disarms the whole writing path in one place.
-  //
-  // Both gates above, and therefore all six writes: `pointerDown`,
-  // `nudge` and `commit` go through `draggable`, and `unpin`,
-  // `clearPositions` and `switchToMixed` go through `mayWrite`. An
-  // in-flight drag is dropped rather than committed — a drag whose drop
-  // nobody would see is not a gesture that finished.
   setDrawn(drawn) {
     this.drawn = drawn !== false;
     if (!this.drawn && this.drag) {
@@ -1115,11 +881,6 @@ export class Arrangement {
   }
 
   // pointerDown starts a drag, or refuses one.
-  //
-  // In `auto` it returns null and writes nothing, which is the whole of
-  // "dragging is disabled there": the menu carries the sentence saying
-  // why, because a silently inert canvas is the write-a-row-nothing-reads
-  // defect wearing a mouse.
   pointerDown(address, point) {
     if (!this.draggable || !this.mayWrite) return null;
     if (!this.selection.has(address)) this.select(address);
@@ -1224,11 +985,6 @@ export class Arrangement {
   }
 
   // commit is the only place a position is written.
-  //
-  // `drawn` is what the canvas has *already* moved — the drag layer bakes
-  // its offset into the coordinates on drop — so `place` writes the
-  // residual and never the whole delta twice. On every other path it is
-  // zero, which is what lets the keyboard and the mouse share this.
   async commit(targets, options = {}) {
     if (!this.draggable || !this.mayWrite || targets.length === 0) return null;
     const before = targets.map((t) => {

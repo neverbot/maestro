@@ -26,29 +26,6 @@ import (
 // an agent and a designer actually would — over the MCP tools and the
 // REST routes the reading view calls, never through markdown.Service —
 // and then reads all of it back.
-//
-// **Why that distinction is the whole point.** The metamodel
-// sub-project shipped a relation's field values write-only for nine
-// review rounds: they were accepted, validated, stored, and returned by
-// no read path on either surface, because every round verified that
-// writing worked and none asked whether anything could recover it. It
-// was found by using the product end to end. So the assertions below
-// are weighted towards reading: after a conflict, a merge, an ordinary
-// edit, a human's write, a revert, a delete and a resurrection, the
-// document still has to hand back the frontmatter key it started with.
-//
-// **The fixture is shaped, not large.** Fifteen entities across three
-// types, and sixteen documents chosen so that every shape the domain
-// supports is exercised by content rather than by an assertion bolted
-// onto a fixture that did not need it: a document attached to nothing
-// (the game bible — zero entities is the case the link table exists
-// for), one attached to two (the lore of why the Defias hate Stormwind,
-// attached to the faction and to the city), twelve quest scripts so a
-// listing has something to page and a path_prefix has a strict subset to
-// select, one deleted and resurrected so a version line carries a
-// tombstone in its middle, and one long enough to run past the search
-// index bound so that "stored, readable, and not findable" is a fact
-// this suite states rather than a footnote in a comment.
 
 const (
 	// The twelve quest scripts, and the one the script below is about.
@@ -915,11 +892,6 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 // process, and this drives them the way an agent's client actually does
 // — over the mounted MCP transport, with a bearer token, reading the
 // conflict's `details` off the wire rather than off a Go error.
-//
-// That distinction has bitten this repository before: a domain error
-// with no arm in mcpErrorFor lands on the default arm and reaches an
-// agent as internal_error, which no in-process test that inspects the
-// Go error can see.
 func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	t.Parallel()
 	w := newProseWorld(t)

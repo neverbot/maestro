@@ -133,15 +133,6 @@ type GamesListOutput struct {
 // mirroring one already-reviewed piece of production logic below) and
 // its risk is nil, since nothing calls it but tests that are themselves
 // asserting what a Caller may do, not what constructs one.
-//
-// This mirrors resolveBearerCaller (auth.go) rather than calling
-// identity.UserByID a second time to learn IsAdmin: ResolveAPIToken's own
-// row already carries UserIsAdmin (see APITokenSummary's doc comment in
-// tokens.go), so a second round trip here would reintroduce exactly the
-// per-request lookup Task 9 removed from the hot path. Keeping this in
-// sync with resolveBearerCaller is deliberate: a caller resolved from the
-// same token by either function must be identical, and there is now
-// exactly one field mapping to keep in sync instead of two.
 func CallerForToken(ctx context.Context, ids *identity.Service, token string) (Caller, error) {
 	summary, err := ids.ResolveAPIToken(ctx, token)
 	if err != nil {
@@ -205,14 +196,6 @@ func MCPWhoami(ctx context.Context, deps MCPDeps, caller Caller) (WhoamiOutput, 
 // owns by a different route, and including one reached by an instance
 // admin's token — before ever touching the Projects service; see
 // requireScope's own doc comment for why an admin gets no exemption.
-//
-// The wire registration (addScopedTool, below) never lets projectID here
-// be anything other than the caller's own resolved binding — an agent
-// cannot use this function's projectID parameter as a lookup key for an
-// arbitrary game the way the plan's original games.get shape would have
-// let it. requireScope's own check is kept regardless, as defence in
-// depth and because this function is tested directly, without going
-// through the wire wrapper, precisely to confirm that invariant here.
 func MCPGamesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID) (GameOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
 		return GameOutput{}, err
@@ -264,14 +247,6 @@ type ScopedArgs struct {
 	// Game is the game's slug, as a confirmation and never as a
 	// selector: the caller's game comes from its token binding, and this
 	// says which game the caller *believes* it is working in.
-	//
-	// **It was `project_id` and took a uuid.** It changed with the REST
-	// routes, in the same change and for the same reason: a game is
-	// addressed by its slug now, and leaving one field on one surface
-	// still demanding a uuid would have made this the only place in the
-	// product where a caller had to learn one — the rule established and
-	// not carried one step. The uuid is still in every answer; it is
-	// simply not what a caller types.
 	Game *string `json:"game,omitempty"`
 }
 
@@ -283,26 +258,6 @@ func (a ScopedArgs) requestedGame() *string { return a.Game }
 // string names no game at all and is therefore the caller's own
 // malformed argument, and any other spelling that is not the game the
 // caller is working in is a scope violation.
-//
-// It is a shared function rather than two matching switches because the
-// REST mirror claims to enforce "the rule ScopedArgs states", and a
-// review found it enforcing a different one: it reported an unparseable
-// id as scope_violation ("names a different game than the URL", which is
-// false — it names none), and accepted an empty string outright. Each
-// surface still writes its own message: "this token is bound to another
-// game" is true of a token and meaningless to a designer with a session
-// cookie. The decision is shared; the wording is local.
-//
-// **The comparison folds case**, matching projects_slug_key and matching
-// the path segment on the REST routes: a caller that confirmed "Azeroth"
-// while working in "azeroth" has confirmed the right game, and refusing
-// it would make this field harder to satisfy than the address beside it.
-//
-// Where the uuid version of this had three shapes — absent, unparseable,
-// wrong — a slug has two, because there is no spelling of a slug that is
-// malformed rather than simply wrong. The empty string is kept as its
-// own refusal for the reason the review that added it gave: silently
-// accepting `""` is how the field stops being a confirmation at all.
 func statedGameProblem(stated *string, boundSlug string) string {
 	if stated == nil {
 		return ""
@@ -342,31 +297,6 @@ type gamesGetInput struct{ ScopedArgs }
 // relation by id registers through this and receives an
 // already-resolved, already-checked project id, never a bare Caller it
 // could forget to scope-check itself.
-//
-// Every tool registered here is recorded in s.mcpScopedTools, which is
-// what TestEveryMCPToolGoesThroughAddScopedTool checks the *served* tool
-// list against: it connects a real client, calls ListTools, and fails if
-// the server exposes a tool this function never saw. That is the MCP
-// half of TestEveryGameScopedRouteGoesThroughRequireProject (server_test.go)
-// and it exists for the same reason — the Go type system cannot stop
-// someone calling mcp.AddTool directly, and a tool registered that way
-// would answer with no scope check at all.
-//
-// handler's signature deliberately does not take a Caller: if it needs
-// more than the resolved project id (whoami needs the caller's own user
-// id and admin flag, for instance), it reads CallerFrom(ctx) itself —
-// ctx still carries it, since addScopedTool already required a valid
-// token caller to reach this point — but the *scope* decision is never
-// its own to make; that already happened before handler was called.
-//
-// On success, handler's Out value is returned as-is; addScopedTool
-// registers the tool with the SDK's Out type parameter fixed to `any`
-// and passes the caller-visible output schema and structured value
-// through by hand (see newMCPServer's tool definitions, which set
-// mcp.Tool.OutputSchema explicitly) rather than letting AddTool infer
-// one from Out — the mechanism that lets a hand-written schema validate
-// correctly regardless of what Go type the domain function actually
-// returns.
 func addScopedTool[In scopedInput, Out any](s *Server, srv *mcp.Server, deps MCPDeps, tool *mcp.Tool, handler func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in In) (Out, error)) {
 	if s.mcpScopedTools == nil {
 		s.mcpScopedTools = map[string]bool{}
@@ -431,13 +361,6 @@ func readOnlyTool() *mcp.ToolAnnotations {
 // tools this task adds, each registered through addScopedTool so game
 // isolation is enforced in exactly one place regardless of how many
 // tools this file eventually holds.
-//
-// Built once in NewServer, not per request: mcp.NewStreamableHTTPHandler
-// accepts a getServer function precisely so the same *mcp.Server instance
-// can be returned for every request (its own doc comment says so) — there
-// is no per-caller state on this value to isolate between requests, since
-// every tool handler reads its Caller from the request context, never
-// from anything captured in the closure below.
 func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "maestro", Version: s.opts.Version}, nil)
 	deps := s.deps()
@@ -533,30 +456,6 @@ func (s *Server) newMCPServer() *mcp.Server {
 // framing at all — it cannot discover the protocol version, the tool
 // list or anything else about the server's capabilities by probing this
 // route without a token.
-//
-// authenticate resolves the Caller once, at the start of every HTTP
-// request, exactly as it does for every other route (see its own doc
-// comment); it is not evaluated again for the rest of that request's
-// lifetime. That is not a gap specific to this handler: newMCPServer is
-// mounted with StreamableHTTPOptions.Stateless, so — unlike Task 14's SSE
-// stream, which the plan called out as needing an explicit bounded
-// lifetime for exactly this reason — every single tool call an agent
-// makes is its own independent POST to /mcp, gated by this same
-// mcpHandler and re-authenticated by authenticate from scratch. A token
-// revoked between two tool calls blocks the next call immediately; there
-// is no long-lived connection here for a revoked token to keep working
-// under.
-//
-// maxMCPRequestBodyBytes bounds the body this handler will let the SDK's
-// own transport read, the same decodeJSONBody discipline api_auth.go's
-// doc comment describes applied explicitly here rather than left to the
-// SDK's own internal default (StreamableHTTPOptions.MaxRequestBodyBytes,
-// currently 4MiB) to define on our behalf. It is deliberately far larger
-// than maxAuthRequestBodyBytes: a bulk upsert (the metamodel plan's
-// atomic/partial writes over many entities at once) needs real headroom,
-// not the 16KiB a login form needs — but it is still a fixed, named
-// bound an operator can find and change in one place, not an implicit
-// library default.
 const maxMCPRequestBodyBytes = 4 << 20 // 4 MiB
 
 func (s *Server) mcpHandler() http.Handler {
@@ -581,19 +480,6 @@ func (s *Server) mcpHandler() http.Handler {
 }
 
 // --- Hand-written output schemas ---
-//
-// Every schema below is written by hand rather than inferred by the SDK
-// from the Go output type. This is not a style preference: the SDK
-// validates against the *marshalled JSON* of a tool's output (see
-// WhoamiOutput's own doc comment), and its own reflection-based inference
-// gets that JSON shape wrong for any type whose marshalling comes from a
-// method (uuid.UUID's MarshalText, here) rather than its literal Go
-// structure — a mismatch that surfaces only when the tool is actually
-// called, never at registration, and that this task's own end-to-end
-// test caught the hard way (see this task's plan corrections). Writing
-// the schema by hand sidesteps the inference entirely; it is validated
-// against the JSON either way, so a hand-written "string" for a
-// uuid.UUID field is exactly as correct as the JSON it produces.
 
 func stringSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "string"} }
 func boolSchema() *jsonschema.Schema   { return &jsonschema.Schema{Type: "boolean"} }

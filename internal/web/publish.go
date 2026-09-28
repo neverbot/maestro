@@ -20,29 +20,6 @@ import (
 // internally (Service.withTx, projects.go and identity.go) before
 // returning, "the service call returned nil" and "the write is durable"
 // are the same moment here for any single write.
-//
-// That is not, however, a guarantee about the *order* two different
-// writes are announced in. Seq is assigned at publish time
-// (realtime.Hub.Publish), not at commit time, and there is a real window
-// between a handler's transaction committing and its call to s.publish
-// reaching the hub's lock — nothing serializes two concurrent handler
-// goroutines' publish calls to happen in the same order their
-// transactions committed in. Two concurrent role changes for the same
-// member can therefore commit in one order and publish in the other, and
-// this produces no gap at all (both events exist, both got a Seq, both
-// were "supposed" to happen) — sseSawGap (events.go) has nothing to
-// detect here, because nothing was dropped. A payload that told a client
-// "this member's role is now X" could therefore tell it the wrong X,
-// stably, with no signal anything is wrong. eventMemberUpdated's own doc
-// comment below is this file's answer: carry no field whose value could
-// itself go stale from reordering, only the identity of what changed,
-// and let the client re-ask the database (which has no such race — a
-// second write always physically follows a first) for the current truth.
-//
-// A future service that owns its own *realtime.Hub reference directly
-// (the metamodel plan's entity.* and relation.* events, per Options.Hub's
-// own doc comment in server.go) is free to publish from its own layer
-// instead; this package's choice does not bind that one.
 const (
 	// eventGameDeleted fires once, from handleDeleteGame, after
 	// projects.Delete returns successfully. Every subscriber of the
@@ -74,29 +51,6 @@ const (
 	// operation (its own doc comment explains why) — so this one event
 	// kind covers both a new member appearing and an existing one's role
 	// changing.
-	//
-	// The payload carries only user_id — never role. A quality review
-	// caught this file's first version doing the opposite (carrying the
-	// new role directly, so a client could patch its own list without a
-	// round trip) and named the real hazard: this file's own package doc
-	// comment above explains why two concurrent role changes for the
-	// same member can publish in the opposite order their transactions
-	// committed in, with no gap for sseSawGap to catch. A payload
-	// carrying a role could therefore leave a client displaying a role
-	// the database no longer agrees with, silently and stably. Carrying
-	// only the identity of what changed turns this event into an
-	// invalidation, not a patch: the client's only correct reaction is
-	// "re-fetch this member (or the whole list) over REST", the same
-	// re-fetch every other kind in this file already expects a client to
-	// fall back on for anything this stream cannot safely tell it
-	// directly.
-	//
-	// HumanOnly is true: handleListMembers, the REST endpoint this event
-	// otherwise mirrors, is gated by requireHumanCaller — a token caller
-	// cannot list members over REST at all, so a token subscriber must
-	// not learn about membership churn over this stream either. MinRole
-	// is still empty: among *human* subscribers, this is exactly as open
-	// as handleListMembers itself (every member, viewer included).
 	eventMemberUpdated = "member.updated"
 
 	// eventMemberRemoved fires from handleRemoveMember after
@@ -129,18 +83,6 @@ const (
 	// page stays live, and must keep polling GET .../tokens (or refetch
 	// on its own schedule) for that one list if a viewer-facing UI wants
 	// it current at all.
-	//
-	// HumanOnly is also true, and here it is not redundant with MinRole:
-	// resolveProjectScope (api_projects.go) always grants a token caller
-	// roles.Editor, which satisfies MinRole editor on its own — a
-	// quality review found exactly this gap live, an agent's token
-	// receiving another agent's token.minted event, hint and label
-	// included, over a stream the minting token's own bearer could not
-	// have read the equivalent listing through (handleListTokens is
-	// itself gated by requireHumanCaller). HumanOnly closes that
-	// specifically; MinRole alone cannot express "no token caller,
-	// regardless of role" (see realtime.Event.HumanOnly's own doc
-	// comment).
 	eventTokenMinted  = "token.minted"
 	eventTokenRevoked = "token.revoked"
 
@@ -182,20 +124,6 @@ const (
 	// out of internal/identity — see RedeemInvite's own doc comment for
 	// why that shape was chosen over giving identity.Service a *realtime.Hub
 	// field.
-	//
-	// MinRole roles.Owner and HumanOnly true, matching
-	// eventInviteCreated/eventInviteRevoked exactly: a pending invite
-	// disappearing because it was redeemed is exactly as owner-only a
-	// fact as a pending invite disappearing because it was revoked, and
-	// handleListProjectInvites' own owner-only gate does not
-	// distinguish the two either — a redeemed invite simply stops
-	// appearing (RevokeInvite/RedeemInvite share no separate "redeemed"
-	// listing state; inviteResponse's own doc comment explains the
-	// related `revoked` computed field). The payload carries only the
-	// invite's id, like eventInviteRevoked: enough for an owner's
-	// pending-invite list to drop the row, nothing about the new
-	// member's role (that arrives, separately, as eventMemberUpdated's
-	// own invalidation on the same publish call).
 	eventInviteRedeemed = "invite.redeemed"
 )
 

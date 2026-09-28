@@ -1,44 +1,4 @@
 // A word on screen and the sentence behind it.
-//
-// **Why this exists at all.** This product puts short, load-bearing
-// words in places where a whole sentence will not fit: "Read-only" in a
-// page head, a verdict on an analysis row, a renderer's knob. Until now
-// the sentence behind such a word went into a `title` attribute, which
-// is three separate failures at once: the browser decides when to show
-// it (about a second, and never on a keyboard), it renders in the
-// operating system's own chrome rather than in this identity, and a
-// reader on a touch screen never sees it. The product already had the
-// words; what it had nowhere to put was the explanation.
-//
-// **It is not a Lit element**, for mst-canvas.js's and mst-save-as.js's
-// reason: everything it renders is a sentence written in this repository
-// or a server's own prose, and building with `createElement` and
-// `textContent` means nothing on this path can parse markup. There is no
-// template, so there is nothing for Lit to be good at here.
-//
-// **Hover is the convenience; focus is the contract.** A hint that only
-// answers a pointer is a hint a keyboard reader never gets, so the
-// trigger is focusable, the panel opens on focus, and Escape closes it
-// while the focus stays where the reader put it. The panel carries
-// `role="tooltip"` and the trigger `aria-describedby`, which is why both
-// live inside this shadow root: an IDREF does not cross the boundary, so
-// a panel rendered in light DOM beside the trigger could not be named by
-// it.
-//
-// **The panel is a surface, not a box drawn on the page.** Paper over
-// the page's ground, a hairline, the small radius and `--shadow-2` —
-// the same chrome every floating thing in this product uses, stated
-// once here so two of them never disagree about how a sheet on the desk
-// looks.
-//
-// Usage, and the trigger is whatever is slotted in:
-//
-//     const hint = doc.createElement("mst-hint");
-//     hint.setAttribute("text", "An agent writes this; nothing here does.");
-//     hint.append(badge);
-//
-// `align="end"` puts the panel's right edge against the trigger's, which
-// is what a hint anchored near the right edge of the page needs.
 
 import { adoptControlStyles } from "./control-styles.js";
 

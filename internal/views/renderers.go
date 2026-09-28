@@ -13,37 +13,6 @@ import (
 )
 
 // This file is the renderer catalogue.
-//
-// **It describes a contract, not an appearance.** What a `graph` looks
-// like — its palette, its node shapes, its typography, its density, its
-// empty state, the affordances a designer clicks — is sub-project 5's and
-// /impeccable's, and nothing here decides any of it. What lives here is
-// what a renderer *consumes*, what it can be told, and **what a query has
-// to produce for a view to be saveable against it**, so that views.upsert
-// refuses a broken view when it is written rather than leaving a designer
-// to discover an empty picture when they open it (spec §5.1).
-//
-// Three rules this file holds itself to, each of them a failure this
-// sub-project has already made once:
-//
-//   - **A knob nothing reads is a lie.** renderer_params is a free jsonb
-//     blob on the wire and must not be one in practice: a typo'd
-//     `rank_dircetion` that is stored, returned and silently ignored
-//     forever is the most expensive shape of bug this project has. Every
-//     parameter here is declared with a kind, every kind has a checker, and
-//     TestRenderersArea's "every declared parameter is checked not just
-//     stored" case drives every parameter of every renderer through a wrong
-//     value and requires a refusal that names it.
-//   - **The catalogue is closed and names itself back.** An unknown
-//     renderer is refused with the six spellings, an unknown parameter with
-//     the ones this renderer declares.
-//   - **A requirement is judged against the *saved* query.** Not against a
-//     run: `include_fields` is a per-run option, so a column that would
-//     only exist when a caller asks for it is not a column a saved view may
-//     name.
-
-// The six renderer names, as constants so that Task 11's storage, Task
-// 15's tool surface and this package's own tests spell them once.
 const (
 	RendererGraph    = "graph"
 	RendererLayered  = "layered"
@@ -61,11 +30,6 @@ const (
 type ParamKind string
 
 // The parameter kinds.
-//
-// The three that read the query — kindSlot, kindNumberField and
-// kindAxisField — are the reason CheckRenderer takes a *Resolved at all:
-// "is this a legal value" and "can this query produce it" are different
-// questions with different recoveries, and this file answers both.
 const (
 	// kindBool, kindNumber, kindCount and kindText are values judged on
 	// their own shape and nothing else.
@@ -117,11 +81,6 @@ type RendererParam struct {
 }
 
 // Renderer is one entry of the fixed catalogue.
-//
-// **This describes a contract, not an appearance** — see this file's
-// header. What lives here is what a renderer consumes and what it can be
-// told, so that views.upsert can refuse a view whose query cannot feed
-// the renderer it names.
 type Renderer struct {
 	Name string
 	// Consumes is the envelope this renderer reads, in the catalogue's
@@ -135,57 +94,13 @@ type Renderer struct {
 	Params []RendererParam
 	// RequiresDoc is what Requires enforces, in prose, printed under this
 	// renderer in the generated description.
-	//
-	// **The header of that description promises "what a query has to
-	// produce for a view to be saveable", and for one round the body said
-	// it for no renderer.** An agent read the parameters and nothing
-	// told it that nested needs edges of contain_via, that map's x_field
-	// is refused in manual mode, or that a timeline axis has to be
-	// declared identically across the whole scope — the half of the
-	// contract a query is actually written against.
-	//
-	// It is a second place the same rule is written, which is the risk
-	// this file refuses everywhere else, so it is guarded the way the
-	// parameter table is: TestEveryRequirementIsDocumentedAndEveryDoc
-	// HasARequirement asserts both directions, and a Requires added,
-	// changed or deleted with this line left alone is a failing test
-	// rather than a sentence that has quietly started to lie.
 	RequiresDoc string
 	// Requires is checked against a *resolved* query at upsert time. It
 	// returns the problems that make this query unfeedable to this
 	// renderer, each addressed by its own pointer, or nothing.
-	//
-	// **It returns problems rather than the plan's single string**, and
-	// the reason is this package's own rule: every refusal it makes is
-	// addressed by a JSON pointer, because an agent that is told
-	// "/renderer_params/x_field" knows which of seven parameters to
-	// rewrite and no amount of prose gets it there as reliably. A bare
-	// sentence would have been the one refusal in this sub-project with
-	// no address.
 	Requires func(rc *rendererCheck) []metamodel.FieldError
 	// ReadsBackground says whether this renderer draws a background
 	// image, and is the one source for that fact.
-	//
-	// **The background is a column of the view, not a renderer
-	// parameter**, and that is a correction rather than an accident of
-	// naming. The catalogue carried background_asset_id, background_scale
-	// and background_offset as `map` parameters while 0008_views.sql
-	// carried the same three as columns, which is two stores for one
-	// value and therefore a drift waiting to be found. The columns win
-	// and the parameters are gone: only a column can carry
-	// FOREIGN KEY (background_asset_id, project_id) into view_assets,
-	// which is what refuses another game's image, and only a column can
-	// carry ON DELETE SET NULL, which is what detaches every view's
-	// background when the image is deleted. A uuid in a jsonb blob gets
-	// neither, and a deleted asset would leave a dangling id in every map
-	// view in the game.
-	//
-	// So this flag is what assets.go's SetBackground reads to apply this
-	// file's first rule — a stored value no renderer reads is a lie a designer
-	// will believe — to a value stored one table over. TestAssetsArea's "only
-	// a renderer that draws a background accepts one" case drives every
-	// renderer in this catalogue through that setter, so the flag cannot
-	// disagree with what the product actually does.
 	ReadsBackground bool
 }
 
@@ -205,19 +120,6 @@ func RendererReadsBackground(name string) bool {
 // movedParams names the parameters this catalogue used to declare and
 // where they went, so that the refusal is a direction rather than a dead
 // end.
-//
-// It changes the *wording* of a refusal and never the decision: a name
-// in here is not a parameter of any renderer, so it is refused by the
-// unknown-parameter arm exactly as any other misspelling is, and adding
-// a name here cannot make one acceptable. That is the same ordering
-// assets.go's svgLooking follows for the same reason.
-//
-// The three below moved from renderer_params to columns of the view (see
-// Renderer.ReadsBackground). An agent working from the spec's own §5.1
-// table, or from a saved document written before the change, will send
-// one; being told "map takes coordinate_source, x_field, y_field, snap"
-// and nothing else leaves it with no idea a background is still
-// possible.
 var movedParams = map[string]string{
 	"background_asset_id": backgroundMoved,
 	"background_scale":    backgroundMoved,
@@ -541,22 +443,6 @@ func RendererNames() []string {
 
 // RendererCatalogue is the whole table, in its declared order, for a
 // caller that has to *offer* the catalogue rather than check against it.
-//
-// It exists because the "Save as" dialog (interface Task 16) lets a
-// designer change the renderer a copied query is drawn with, and a
-// dialog that carried its own list of six names, their parameters and
-// their admitted spellings would be a second copy of this table with a
-// date on it — the drift RendererDescription is generated to prevent,
-// re-made in JavaScript where no Go test can see it. So the browser
-// reads this, over internal/web's own route, and offers exactly what
-// CheckRenderer will accept.
-//
-// The entries are copies: Requires is a func the caller must not hold,
-// and Values is copied so an offering surface cannot edit the spellings
-// this package admits. Nothing here is a promise about *appearance* —
-// see this file's header — and a caller that needs a sentence about what
-// a knob does to a picture writes that sentence where the picture is
-// drawn.
 func RendererCatalogue() []Renderer {
 	out := make([]Renderer, 0, len(renderers))
 	for _, r := range renderers {
@@ -580,14 +466,6 @@ func RendererCatalogue() []Renderer {
 
 // RendererParamKind is one parameter's declared kind, as the wire spells
 // it, or false when this catalogue has no such parameter.
-//
-// It exists for a guard that lives outside this package:
-// internal/web/static_render_test.go joins a renderer module's controls
-// to the catalogue, and a control's *kind* is as much a part of that
-// contract as its name is. The kind never reaches the generated
-// description — that prints a phrase written for an agent — so the join
-// cannot be made over the prose, and retyping the kinds in the test
-// would be the third spelling this file exists to prevent.
 func RendererParamKind(renderer, param string) (string, bool) {
 	r, ok := rendererByName[renderer]
 	if !ok {
@@ -670,18 +548,6 @@ func (p RendererParam) kindPhrase() string {
 
 // CheckRenderer judges a renderer name, its parameters and the query they
 // are saved with, and is what views.upsert calls (Task 11).
-//
-// **Two codes, because the recoveries differ.** query_invalid is "fix
-// this argument": an unknown renderer, an unknown parameter name, a value
-// of the wrong shape. renderer_requirements is "pick another renderer, or
-// change the query": a well-formed value this query cannot feed — a slot
-// the projection does not declare, a coordinate field that is not a
-// number, a containment relation the query draws no edges of.
-//
-// Shape problems win when both are present, and every problem of the
-// winning class comes back at once: an agent fixing a typo'd parameter
-// name has not yet learned anything from being told, in the same breath,
-// that a different parameter names a slot its query lacks.
 func CheckRenderer(name string, params map[string]any, r *Resolved) error {
 	renderer, ok := rendererByName[name]
 	if !ok {
@@ -802,24 +668,10 @@ type rendererCheck struct {
 	drawn    map[uuid.UUID]bool
 	// st is the saved view's dependency index when this check is a *run*
 	// of a stored view rather than a save, and nil when it is a save.
-	//
-	// A save has no recorded past — the caller is writing the document
-	// now — so the type-naming parameters resolve by key, exactly as they
-	// did before staleness existed. A run resolves them by id first,
-	// through the same two methods every other reference in this package
-	// goes through, which is what lets a renamed type keep its parameter
-	// working and report the spelling instead of losing the type.
 	st *staleness
 }
 
 // rendererPointer addresses one renderer parameter of a saved view.
-//
-// **It is not a pointer into the query document**, which every other
-// pointer in this package is, and it does not have to be: a view's
-// renderer and its parameters are stored beside the query rather than
-// inside it, and CheckRenderer has always refused a bad parameter at this
-// same address. A staleness diagnostic reported here is therefore
-// addressed exactly where the repair is made.
 func rendererPointer(p RendererParam) string {
 	return pointer("renderer_params", p.Name)
 }
@@ -828,32 +680,12 @@ func rendererPointer(p RendererParam) string {
 // type of this game, and therefore a dependency of the view exactly as a
 // type named in the query is: deleting the type breaks the view, and a
 // rename has to be carried by an id rather than by the spelling.
-//
-// It is a map from kind to the ref kind it records, rather than a switch
-// inside the two functions that need it, because those two — the refs a
-// save writes and the resolution a run performs — must agree about which
-// parameters are references. A kind added to one and not the other is a
-// parameter whose type deletion reports nothing, which is the defect Task
-// 12's finding 2 already fixed once for @type operands. TestRenderersArea's
-// "every type naming parameter kind is a recorded reference" case asserts
-// the membership against the checkers that consult the catalogue.
 var typeNamingKinds = map[ParamKind]string{
 	kindRelationType: KindRelationType,
 }
 
 // rendererTypeRefs is the dependency index a view's renderer parameters
 // contribute, written beside the query's own by the same transaction.
-//
-// It is read for its ids: without a row here, a run of a saved view whose
-// relation type was renamed resolves the parameter by key, finds nothing,
-// and reports the type *missing* — refusing a view whose picture the
-// rename did not change. With one, the id resolves and the run reports
-// the spelling, which is what the query's own references have always
-// done.
-//
-// It is called after CheckRenderer, so every parameter it looks at has
-// already been judged: a key that resolves to nothing here is a parameter
-// the check refused, and the view is not being written at all.
 func rendererTypeRefs(name string, params map[string]any, cat *Catalogue) []TypeRef {
 	renderer, ok := rendererByName[name]
 	if !ok || cat == nil {
@@ -883,25 +715,6 @@ func rendererTypeRefs(name string, params map[string]any, cat *Catalogue) []Type
 // rendererStaleness resolves a saved view's renderer parameters against
 // the game as it stands now, and answers with the pointers a run cannot
 // act on.
-//
-// **This is the fourth position that turns a key into a declared thing**,
-// after the closures resolveInto hands itself, the projection's own scope
-// and an edges[] entry's inherited relation types — and, until this, the
-// one position none of them covered. CheckRenderer was called only from
-// the upsert, so a run said nothing about a parameter whose type or field
-// had moved, and the rename diagnostic's own repair instruction —
-// re-save with the new spelling — was refused at a pointer the designer
-// had never been told about, with advice that would recreate the type
-// they had just renamed away from.
-//
-// It runs **the same checkers** the save runs, over the run's catalogue
-// and this view's dependency index, and keeps only the faults that carry
-// a diagnostic code. That is what stops it being a second implementation
-// of the rules: a shape fault, a slot this query does not declare and a
-// key `project.fields` does not carry are all real refusals of a save and
-// none of them is something the game did, so a run reports none of them.
-// The rename diagnostics are emitted by the resolution itself, inside
-// kindRelationType, exactly as every other position emits its own.
 func rendererStaleness(st *staleness, r *Resolved, name string,
 	params map[string]any,
 ) []string {
@@ -983,11 +796,6 @@ func (rc *rendererCheck) anyEdgeLabelled() bool {
 
 // drawnRelationTypes are the relation types this query actually draws
 // edges of.
-//
-// It reads both spellings of an edges[] entry, because they are equally
-// good ways to draw a containment edge and a check that saw only `via`
-// would refuse a legitimate view: the `from_step` spelling draws exactly
-// the relations its step walked, so its types are that step's.
 func (rc *rendererCheck) drawnRelationTypes() map[uuid.UUID]bool {
 	if rc.drawn != nil {
 		return rc.drawn
@@ -1014,12 +822,6 @@ func (rc *rendererCheck) drawnRelationTypes() map[uuid.UUID]bool {
 
 // declaredTypesOf lists the declared types a field key has across the
 // entity types this query draws, deduplicated and in declaration order.
-//
-// An empty answer means one of two things and the caller has to know
-// which: nothing in scope declares the key, or the scope cannot judge —
-// a traverse step with no to_type reaches entities of any type, so no
-// schema applies. projectionScope.declares draws the same line and this
-// reads the same flags rather than a second copy of the rule.
 func (rc *rendererCheck) declaredTypesOf(key string) []metamodel.FieldType {
 	if rc.scope.open || rc.scope.unresolved {
 		return nil
@@ -1322,19 +1124,6 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 const MaxColumns = 64
 
 // column judges one column reference against what the envelope carries.
-//
-// **The rule is the envelope, not the database.** A node comes back with
-// its identity, the projection's attrs and — only when a run asks for
-// include_fields — its declared fields. include_fields is a per-run
-// option and a saved view cannot turn it on, so a column naming a
-// declared field key is legal exactly when project.fields asked for that
-// key. Anything else is a column that would be blank in the picture and
-// nowhere in the answer, and the recovery is named in the refusal.
-//
-// The @-built-ins it admits are the ones Node actually carries: @name,
-// @key and @type. @invalid and @created_at are legal in a *predicate*,
-// where they compare against columns of the row, and they are not in the
-// envelope, so a table cannot draw them.
 func (rc *rendererCheck) column(v any) paramFaults {
 	name, ok := v.(string)
 	if !ok {
@@ -1369,23 +1158,6 @@ func (rc *rendererCheck) column(v any) paramFaults {
 // requireCarried is the *saved query* half of every parameter that names
 // a declared field key, and it is one function because the rule is one
 // rule.
-//
-// **A node comes back with its identity and the projection's attrs, and
-// with declared fields only when a run asks for include_fields.**
-// include_fields is a per-run option (RunRequest) and a saved view cannot
-// turn it on, so a parameter naming a declared field key is legal exactly
-// when project.fields asked for that key. Anything else is read from a
-// member the envelope does not carry.
-//
-// It lives here rather than inside column() because column() was where
-// the rule was first written and the *only* place it was enforced:
-// axis_field, axis_end_field, x_field, y_field and rank_by all checked
-// the schema and never the projection, so a timeline saved with an axis
-// the run would not carry drew every node at the origin and a map in
-// fields mode had no coordinates at all — the exact failure this file
-// exists to refuse, reached through five parameters that had each been
-// written as if the rule were column()'s alone. Duplication is why it
-// drifted, so there is now one copy and six callers.
 func (rc *rendererCheck) requireCarried(key string) paramFaults {
 	for _, carried := range rc.r.Projection.Fields {
 		if carried == key {
@@ -1443,12 +1215,6 @@ func fieldKeyValue(v any) (string, paramFaults) {
 // a declared field key, and every such parameter goes through it: the key
 // has to be usably declared where this query draws, **and** the saved
 // query has to carry it.
-//
-// The second half was the one that went missing. column() had it and no
-// other field-key parameter did, so a timeline could be saved with an
-// axis_field the run would never carry — every node at the origin — and a
-// map in fields mode with neither coordinate. Two halves of one rule in
-// one function is what stops that happening a third time.
 func (rc *rendererCheck) requireFieldKey(key string, admitted ...metamodel.FieldType) paramFaults {
 	if faults := rc.requireDeclaredAs(key, admitted...); faults != nil {
 		return faults
@@ -1459,30 +1225,6 @@ func (rc *rendererCheck) requireFieldKey(key string, admitted ...metamodel.Field
 // requireDeclaredAs is the schema half of a field-key parameter: the key
 // has to be declared on **every** type this query draws, and every one of
 // them has to declare it the same, usable way.
-//
-// The failures it refuses are all one failure — the silent-empty picture
-// this language refuses everywhere else — reached by four routes:
-//
-//   - A key nothing in scope declares is a typo, answered with an axis
-//     every node sits at the origin of.
-//   - A key some types declare and others do not is the same picture for
-//     the types that do not: the quests are placed and the regions
-//     vanish, and what is left looks right. **Declaring the key nowhere
-//     is the rarer mistake**; drawing two types and remembering only one
-//     of them is the common one, and this arm is the one that catches it.
-//   - A key declared `number` on quests and `enum` on regions passes "is
-//     it number or enum" while having no single axis to draw at all.
-//   - An enum declared with the same options in another order is a second
-//     axis wearing the first one's name, because an enum axis *is* its
-//     option sequence.
-//
-// This is deliberately stricter than projectionScope.declares, which
-// admits a key declared on at least one type in scope: a projection slot
-// that finds nothing on some nodes leaves those nodes without an
-// attribute, which a renderer can draw honestly, and an axis that finds
-// nothing has nowhere to put them. That sentence is the whole reason the
-// "declared on every type" arm exists, and for one round it was a
-// sentence the code did not keep.
 func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.FieldType) paramFaults {
 	if rc.scope.unresolved {
 		// The missing type is already a reported problem, and adding "and
@@ -1561,14 +1303,6 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 		// below — "declared nowhere" and "declared on some" — would
 		// refuse a key the untyped step was written to reach. The
 		// permission costs what projectionScope.open records it costing.
-		//
-		// **It stops here and not one line earlier.** The loop above has
-		// already run, so a key a *named* type declares unusably is still
-		// refused: `tags` is list<text> on `quest`, `quest` is written
-		// right there in `from`, and "nothing can judge it" was never
-		// true of that. The projection's justification for the wider
-		// permission — a node carrying no attribute is still drawable —
-		// does not transfer to an axis, which has nowhere to put it.
 		return nil
 	}
 	switch {

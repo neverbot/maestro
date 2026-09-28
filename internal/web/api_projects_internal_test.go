@@ -20,24 +20,6 @@ import (
 // projects.ErrProjectNotFound branch — the one Task 22 added after
 // finding the race handleChangeRole's own comment had predicted was
 // falling into a generic 500.
-//
-// It is an internal test on purpose. That branch cannot be reached
-// through the router: requireProject re-resolves membership on every
-// request, and the membership row cascades away with the project, so a
-// second DELETE through ServeHTTP is refused with 403 long before
-// handleDeleteGame runs — which is exactly what
-// TestDeletingGameTwiceIsIdempotent (api_projects_test.go) pins, and
-// exactly why a Task 22 review could replace this branch's condition
-// with `if false` and watch the whole internal/web suite stay green.
-//
-// The real interleaving the branch exists for is narrower than "delete
-// twice": requireProject's membership lookup and handleDeleteGame's own
-// ByID call are two separate round trips, and a concurrent delete that
-// commits *between* them leaves this handler holding a perfectly valid
-// ProjectScope for a project row that no longer exists. That is what
-// this test reconstructs — the handler is called directly with the
-// scope requireProject resolved a moment earlier, against a project
-// deleted in the gap.
 func TestDeleteGameMapsProjectNotFoundTo404(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

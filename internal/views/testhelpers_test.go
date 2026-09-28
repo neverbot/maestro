@@ -25,18 +25,6 @@ type game struct {
 }
 
 // area is one database shared by every claim in a test file.
-//
-// The unit of isolation in this package is the project, not the
-// database: every query, view and position is scoped by project_id, and
-// the pair of games below exists precisely so a missing scope shows up.
-// So a claim needs its own *games*, which cost a few writes, and not its
-// own *database*, which costs a migrated template copy and a connection
-// pool. One area per file, a fresh pair of games per claim.
-//
-// A claim that changes the schema — the ALTER TABLE ones that install a
-// constraint to make a commit fail — still takes its own database
-// through newGame: that alteration is not scoped by project and would be
-// seen by every other claim sharing the area.
 type area struct{ pool *pgxpool.Pool }
 
 func newArea(t *testing.T) area {
@@ -59,11 +47,6 @@ func newGame(t *testing.T) (*game, *game) {
 // gamesIn seeds classes, quests and zones with the relations the spec's
 // §3.1 example walks: available_to (quest -> class), requires
 // (quest -> quest), takes_place_in (quest -> zone).
-//
-// It seeds **two** games and returns both. The second is not decoration:
-// every isolation test in this package needs a second game with the same
-// keys in it, and a fixture that seeds one game lets a missing project
-// filter pass every test in the file.
 func gamesIn(t *testing.T, pool *pgxpool.Pool) (*game, *game) {
 	t.Helper()
 	// The slugs carry a suffix because a database now holds many pairs
@@ -111,16 +94,6 @@ func (g *game) seed(t *testing.T) {
 	// "a field declared two ways names each type with its own declaration"
 	// case and TestResolveArea's "enum options are compared as a set not a
 	// sequence" case need and no other fixture type provides:
-	//
-	//   - region declares min_level as an enum where quest declares it a
-	//     number, and rank with quest's three options in another order —
-	//     the same set, so a comparison over it is unambiguous.
-	//   - faction declares rank with a genuinely different option set, so
-	//     a value legal on one really is illegal on the other.
-	//
-	// Neither declares min_level absent-but-comparable on a type already used
-	// by TestResolveArea's "a field must be declared the same way on every
-	// type a step reaches" case, which still leans on zone declaring nothing.
 	regionLevel := metamodel.Field{Key: "min_level", Type: metamodel.FieldEnum,
 		Options: []string{"low", "high"}}
 	shuffledRank := metamodel.Field{Key: "rank", Type: metamodel.FieldEnum,
@@ -210,13 +183,6 @@ func mustParse(t *testing.T, doc string) *Query {
 }
 
 // newUser and newToken build the two actors a write can record.
-//
-// They exist because internal/views has its own copies of the two audit
-// columns and its own composite foreign keys over them, and a test that
-// wants to see either filled needs a users row and an api_tokens row
-// that really exist — the columns are foreign keys, so a made-up uuid is
-// refused rather than stored. The inserts are the minimum each table
-// admits; nothing in this package reads any other column of either.
 func newUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID

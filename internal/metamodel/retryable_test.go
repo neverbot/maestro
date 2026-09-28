@@ -14,13 +14,6 @@ import (
 // TestIsRetryableNamesTheFourContentionStatesAndNothingElse pins Task
 // 7's third decision: which database failures an agent is told to resend
 // unchanged.
-//
-// The four admitted here share exactly one property — the identical
-// call, resent unchanged, may succeed — and that property, not the
-// cause, is what a caller has to act on. Everything else stays
-// internal_error, which is the honest report for a fault nobody planned
-// for and, deliberately, the report a *caller-fixable* fault must never
-// get: those already have their own codes.
 func TestIsRetryableNamesTheFourContentionStatesAndNothingElse(t *testing.T) {
 	for _, tc := range []struct {
 		code string

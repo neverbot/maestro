@@ -1,59 +1,8 @@
 // The row every list in this product is made of.
-//
-// **It lives here, above both of its callers, because it has two.** It
-// was a function in pages/page.js, which the seven page modules import;
-// then the game picker in app.js needed the same row and hand-built its
-// own instead — a second implementation of one shape, which design.md
-// asks to be reported as a defect rather than tolerated. app.js cannot
-// import pages/page.js (that module imports app.js), so the shape moved
-// to a module with no imports of its own and both sides take it from
-// here. pages/page.js re-exports it, so no page module changed.
-//
-// **Every string goes in through textContent**, without exception: a
-// label is a designer's own words, a key is what an agent sent, and
-// neither is markup this product ever interprets. `href` turns the label
-// into a link and is built by the address functions in pages/page.js, so
-// a row can only ever point at a slug address.
-
-// row builds one line of a catalogue: a label, a key in mono, a count,
-// and the one flag that ever asks a designer to do something.
-//
-// **Every string on it goes in through textContent**, without exception:
-// a label is a designer's own words, a key is what an agent sent, and
-// neither is markup this product ever interprets. `href` turns the label
-// into a link and is built by the address functions above, so a row can
-// only ever point at a slug address.
-// **Every row emits the same number of cells, always.** A row that
-// appended a span only when it had something to put in it produced
-// sibling grids with different track counts, and sibling grids share
-// nothing: the column header sat 18px to the right of the values it
-// named, two rows with different key lengths disagreed with each other,
-// and the `faction` header's box overlapped the `x` column's. A header
-// over the wrong column is worse than no header, because it is
-// confidently wrong.
-//
-// The fix is a fixed shape — name, key, three content cells, count —
-// and `subgrid` on the row so every one of them takes its widths from
-// the list rather than from itself. Three because that is what the
-// catalogue shows; an empty cell costs an `auto` track that collapses to
-// nothing.
 export const CATALOGUE_CELLS = 3;
 
 // nextCursorOf reads a listing answer's cursor, and is the one place
 // this front end decides what "there is more" means.
-//
-// **An empty string is not a cursor.** Six pages wrote
-// `typeof body.next_cursor === "string" ? body.next_cursor : null`, and
-// every server listing answers `next_cursor: ""` when the page is the
-// last one — so `""` passed the test, the pager stayed on screen, and
-// pressing it re-fetched the first page and appended it again: two
-// images became four, under a count that then said "4 images". Seen in
-// a browser on the images list, which is the one listing that had never
-// been rendered with a row in it.
-//
-// It lives here, beside `row`, for the reason `row` does: every module
-// that draws a listing already imports this one, and `pages/page.js`
-// cannot be imported by `app.js` or by `doc.js`.
 export function nextCursorOf(body) {
   const cursor = body && typeof body.next_cursor === "string" ? body.next_cursor : "";
   return cursor === "" ? null : cursor;
@@ -61,11 +10,6 @@ export function nextCursorOf(body) {
 
 // countLabel spells a count with the right noun, so "1 entities" never
 // reaches a designer's screen.
-//
-// It lives here rather than in pages/page.js for the reason `row` does:
-// **app.js needs it too** — the picker counts games — and page.js
-// imports app.js, so importing it back would close a cycle. page.js
-// re-exports it, so the seven page modules are unaffected.
 export function countLabel(count, singular, plural) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -77,11 +21,6 @@ export function countLabel(count, singular, plural) {
 // are meaningful precisely because the shape is fixed: every row emits
 // the same cells in the same order, so a cell always sits under the
 // heading that names it.
-//
-// `markTable` is what a page calls on the list element itself, because
-// the list is in the shell's HTML and these functions only build its
-// children. A `ul` with `role="table"` must hold rows and nothing else,
-// which is already true of every catalogue in this product.
 export function markTable(listEl, label) {
   if (!listEl) return;
   listEl.setAttribute("role", "table");
@@ -90,14 +29,6 @@ export function markTable(listEl, label) {
 
 // markTables marks every catalogue on a page, and is what the pages
 // actually call.
-//
-// It is one sweep over the shell rather than a call beside each list
-// because the roles below are **not optional once a row carries one**:
-// `role="row"` is only meaningful inside a table, and a row role in a
-// plain list is worse than no role at all. Every catalogue in this
-// product is the same fixed-shape grid, so every one of them is a table
-// — and a sweep cannot be the thing somebody forgets when they add the
-// next screen.
 export function markTables(doc) {
   const lists = doc && typeof doc.querySelectorAll === "function"
     ? doc.querySelectorAll("ul.catalogue")
@@ -177,25 +108,6 @@ export function row(doc, spec) {
 // header is a number a reader has to guess at**: the quests catalogue
 // shipped `ash 210 350` per row with nothing saying which was the region,
 // which the reward and which the requirement.
-//
-// It is the same grid as a row, so the two line up without either knowing
-// the other's widths, and it carries no link: a heading is not a
-// destination.
-//
-// **A heading is not a destination and may still be a control.** A
-// column the listing can be ordered by carries a button — `spec.sort`
-// names the order it sets, `spec.sorted` the order the listing is
-// currently in, and `spec.onSort` is called with the order to ask for.
-// The button is a button and not a link because it changes what is being
-// shown rather than where the reader is, and because a link would put a
-// sort in the browser's history between a reader and the page they came
-// from.
-//
-// A column with no `sort` renders exactly what it did before: the only
-// orders that exist are the ones the server has a statement for, and a
-// header that looked sortable and was not would be worse than a plain
-// one. `fields` cannot be ordered yet, and their headings say nothing
-// about it rather than offering a control that refuses.
 export function headerRow(doc, spec) {
   const item = doc.createElement("li");
   item.className = "catalogue-head";
@@ -256,15 +168,6 @@ function headCell(doc, text, className, order, spec) {
 
 // markSort states, on the heading itself, which way the listing is
 // sorted.
-//
-// **`aria-sort` and not only the button's name.** The button says what
-// pressing it would do, which is the right thing for a control and the
-// wrong thing for a reader asking "how is this table ordered?" — a
-// screen reader announces `aria-sort` when the column is reached, so the
-// two answers are both available and neither depends on seeing an arrow.
-// A column that can be sorted and is not says "none", which is a
-// different statement from a column that cannot be sorted at all and
-// carries no attribute.
 function markSort(cell, spec, order) {
   if (!order) return;
   const sorted = typeof spec.sorted === "string" ? spec.sorted : "";

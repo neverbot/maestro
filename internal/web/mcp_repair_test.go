@@ -54,13 +54,6 @@ func seedRepairable(t *testing.T, svc *metamodel.Service, game uuid.UUID) {
 
 // requireDomainFieldError asserts a refusal is the domain's own
 // invalid_input at one path with one message.
-//
-// It is not requireMCPFieldError: a tool core returns the domain error
-// unwrapped and mcpErrorFor (the transport layer) is what turns it into
-// an *MCPError, so a direct call sees the *metamodel.ValidationError.
-// The REST half of the same refusal, where the mapping to a status and
-// a wire code *is* exercised, is in TestTheRESTMirrorRepairsToo below;
-// this pins the path and the wording a caller acts on.
 func requireDomainFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Helper()
 	var invalid *metamodel.ValidationError

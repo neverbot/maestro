@@ -1,40 +1,5 @@
 // The text twin: two tables that are the accessible content of every
 // view, the five graphical ones included.
-//
-// The canvas beside it is `aria-hidden` — an SVG hairball with ARIA
-// roles sprinkled over it is navigable by nobody, and pretending
-// otherwise is worse than not pretending (interface design spec §8.1) —
-// so this is not a compromise version of the view. It *is* the view, for
-// a screen reader, for a keyboard, and for a designer on a screen
-// narrower than a tablet (§9). It is always in the DOM: never built on
-// demand, never behind a toggle that could be off when it is needed.
-//
-// It is also the keyboard path into the canvas. Every node row is
-// focusable, focusing one selects its node, and the selection travels as
-// a DOM event so the canvas can highlight what the reader is standing
-// on without this component knowing a canvas exists.
-//
-// **This file writes no sentences.** Every word — each caption, each
-// column heading, the em dash of an absent slot, the note on an endpoint
-// the query did not draw — comes out of render/twin.js, which is a pure
-// function a Node harness reads and a mutation turns red. The rule is
-// held mechanically by TestEveryComponentSpeaksOnlyItsModelsWords
-// (internal/web/static_frame_test.go), exactly as it is for the frame.
-//
-// **Every game string arrives as text.** The names, keys, types and
-// projected values below are the game's words and a game's words are
-// hostile input: this repository has already shipped one stored
-// cross-site scripting defect. They reach the DOM as *interpolated
-// values in child position* of a Lit template, which Lit renders into
-// Text nodes, and they never appear in a template's static HTML. This
-// file reaches for no markup sink of any kind — internal/web's
-// HTML-sink perimeter (static_sinks_test.go) reads it, and
-// TestNoOwnModuleReachesForARawHTMLDirective refuses the Lit-shaped
-// spellings the perimeter's DOM-shaped list would not catch. The
-// harness asserts the placement itself:
-// internal/web/jstest/twin_test.mjs walks the emitted template, finds
-// every binding's position in the static markup, and fails if a game
-// string is interpolated anywhere but into a text node.
 
 import { LitElement, css, html, nothing, unsafeCSS } from "lit";
 
@@ -116,13 +81,6 @@ export class MstTwin extends LitElement {
   // The shared control vocabulary is a fetched sheet rather than a
   // string, so it cannot be spread into `static styles`; `CONTROL_CSS`
   // there is only the two rules a page stylesheet cannot express.
-  //
-  // **`firstUpdated` and not `connectedCallback`**: Lit builds the
-  // render root on its first update, so a call from connectedCallback
-  // adopts into `undefined` and does nothing at all — silently, because
-  // adoptControlStyles answers null for a root it cannot dress. Which is
-  // exactly the shape of defect this repository keeps recording: correct
-  // in the module, dead at the call site.
   firstUpdated() {
     adoptControlStyles(this.renderRoot);
   }

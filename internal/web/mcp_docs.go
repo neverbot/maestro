@@ -18,72 +18,6 @@ import (
 
 // This file is the prose half of the game-content surface: the tools an
 // agent uses to write, read, version and attach a game's documents.
-//
-// **Every exported MCPDocs* function starts with requireScope and
-// delegates to an unexported core of the same name.** The cores exist
-// for the REST mirror, and the split is exactly where the two surfaces
-// differ and nowhere else: requireScope asks "is this token bound to
-// this game", which a session caller cannot answer, and requireProject
-// asks the equivalent question of a session. One implementation of every
-// tool, two admission checks. TestEveryDocsToolRefusesAnotherGamesToken
-// (mcp_docs_test.go) drives every one of them at a game the caller's own
-// *user* owns and its *token* is not bound to, and it is driven from the
-// registered tool list rather than from a hand-written one, so a twelfth
-// tool added tomorrow is covered without editing it.
-//
-// **No input type here is a domain type.** markdown.WriteInput carries
-// an Actor, and an Actor is the audit record of who wrote this row;
-// accepting it off the wire would let an agent name any user or token it
-// liked as the author of its writes. actorOf (mcp_metamodel.go) builds
-// it from the authenticated caller and nothing else.
-//
-// **Documents are addressed by path and never by id.** There is no
-// by-id tool and no id argument anywhere in this file. A path is the
-// stable handle an agent re-seeds against and the thing a designer says
-// out loud; an id would be a second address for one row, and the only
-// thing it would buy is a way to reach a document whose path you do not
-// know, which is what docs.list is for.
-//
-// **expected_version is a *int32 on every tool that takes one, and a
-// nil one is refused as invalid_input at its own path.** The refusal
-// itself lives in the domain (markdown.WriteInput, DeleteInput and
-// RevertInput each check it and report at `expected_version`), not here;
-// what this file owes is the pointer, because the SDK's own input-schema
-// validation is the natural place to make a field required and it
-// reports a missing required field as plain prose with no code
-// (addScopedTool's doc comment records that exception). A pointer plus
-// the domain's own check gives an agent a code it can branch on.
-// TestADocsWriteWithoutAnExpectedVersionIsInvalidInputAtItsOwnPath pins
-// it through this surface.
-
-// --- Inputs ---
-
-// DocsWriteInput is the argument shape of docs.write.
-//
-// **Kind is a pointer, not a plain string.** markdown.WriteInput.Kind
-// used to be a plain string too, and every edit that omitted it silently
-// erased the document's kind — fixed there by making it a *string where
-// nil preserves and any value, including "", sets. `omitempty` on a
-// plain string cannot carry that distinction across JSON: an absent
-// field and an explicit `"kind":""` unmarshal to the same Go zero value.
-// A pointer does — omitted decodes to nil, `"kind":""` decodes to a
-// pointer at "" — so this field must stay a pointer for the same reason
-// ExpectedVersion is one, and this handler passes it through to
-// WriteInput.Kind unconverted.
-//
-// **Links is `*[]DocsLinkInput`, and the pointer is load-bearing for
-// the same reason.** `omitempty` on a plain slice omits an empty one, which
-// would collapse "detach everything" back into "say nothing" — the single
-// most destructive thing this tool could do quietly, in the silent
-// direction. markdown pins the distinction on a stand-in of this exact
-// shape (TestLinksArea's "omitting links and sending an empty array are
-// different on the wire" case , internal/markdown/links_test.go) and
-// TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType
-// (mcp_docs_internal_test.go) re-pins the claim against this real type.
-// `"links": null` decodes to nil and therefore *preserves*, the same as
-// omitting the field; docs.write's description says so in words, because an
-// agent sending null meaning "detach" otherwise gets the opposite with
-// nothing to notice by.
 type DocsWriteInput struct {
 	ScopedArgs
 	Path            string           `json:"path"`
@@ -104,17 +38,6 @@ type DocsLinkInput struct {
 
 // DocsWriteManyInput is the argument shape of docs.write_many: a mode
 // and a list of writes.
-//
-// **It is a second tool rather than a mode of docs.write**, which is the
-// opposite of the choice entities.upsert made ("one entity is a batch of
-// one, which is why there is no separate single-row tool"). The reason
-// is what the two answer with. docs.write answers with the whole
-// document — body, frontmatter, attachments — and a version conflict on
-// it carries the current body to merge onto; neither survives being
-// multiplied by four hundred, so a batch answers with a report of paths,
-// ids and versions instead. Two answers that different are two tools,
-// and collapsing them would have meant one tool whose answer shape
-// depended on how many items it was handed.
 type DocsWriteManyInput struct {
 	ScopedArgs
 	Mode  string               `json:"mode,omitempty"`
@@ -123,12 +46,6 @@ type DocsWriteManyInput struct {
 
 // DocsWriteItemInput is one write of a batch: DocsWriteInput without the
 // two things that cannot mean anything in a batch.
-//
-// It carries no `game`, because the batch states the game once, and
-// no include_current, because a batch failure is an index, a key, a code
-// and a message with nowhere for a body to travel — see
-// markdown.WriteMany. Every other argument, including expected_version,
-// is per item and means exactly what it means on docs.write.
 type DocsWriteItemInput struct {
 	Path            string           `json:"path"`
 	Content         string           `json:"content"`
@@ -168,10 +85,6 @@ type DocsDeleteInput struct {
 }
 
 // DocsMoveInput changes one document's path.
-//
-// `from` and `to` are two paths and not a path plus a name: a move
-// changes the whole address, so `lore/duskwood` to `zones/duskwood/lore`
-// is one call and not a rename plus a reparent.
 type DocsMoveInput struct {
 	ScopedArgs
 	From            string `json:"from"`
@@ -236,13 +149,6 @@ type DocsLinksListInput struct {
 }
 
 // DocsLinkAddInput attaches one document to one entity, in a role.
-//
-// **This is a different type from DocsLinkRemoveInput below, not the
-// same struct reused for both tools.** markdown.LinkRemove's argument
-// (markdown.UnlinkInput) does not read a role at all — the link's key is
-// (document, entity), so there is no second link under another role for
-// one to choose between — and an input schema that still asked for it
-// would tell a caller otherwise, with nothing to correct the belief.
 type DocsLinkAddInput struct {
 	ScopedArgs
 	Path       string `json:"path"`
@@ -264,24 +170,6 @@ type DocsLinkRemoveInput struct {
 // --- Outputs ---
 
 // DocumentOutput is one document in full.
-//
-// Body is the raw markdown, exactly as it was written: MCP always gets
-// the raw body, and the rendered HTML is a REST-only affordance for the
-// browser.
-//
-// Truncated and BodyLength are set together from one condition (headOf)
-// so they cannot disagree. A caller that ignores them and treats a
-// truncated body as the document is the failure this pair exists to
-// prevent, which is why Truncated is not omitempty: false is a
-// statement.
-//
-// **Deleted is derived from the row and is false on every answer any
-// tool in this file can give today.** docs.read does not find a
-// soft-deleted document (markdown.Read refuses it), and docs.write and
-// docs.revert both resurrect one. The field is here because it is the
-// row's own state and a caller reading it should not have to infer it
-// from which tool answered; no test claims it is ever true, because
-// through this type nothing makes it true.
 type DocumentOutput struct {
 	ID          uuid.UUID       `json:"id"`
 	Path        string          `json:"path"`
@@ -308,15 +196,6 @@ type DocumentOutput struct {
 
 	// LinksTruncated says the attachments above are one page and not the
 	// whole set: ask docs.links.list, which pages.
-	//
-	// It is not omitempty, because false is a statement — "these are all
-	// of them" is the fact a caller acts on, and an absent key would read
-	// the same as a client that forgot to look. Reaching it takes more
-	// than markdown.MaxLinkPage attachments on one document, which is a
-	// taxonomy rather than a document (MaxLinksPerWrite says so at a
-	// lower number); the field is here because a listing that silently
-	// stops at a bound is the defect this pair exists to prevent, not
-	// because the case is common.
 	LinksTruncated bool `json:"links_truncated"`
 }
 
@@ -334,14 +213,6 @@ type DocumentSummaryOutput struct {
 
 	// CreatedAt, UpdatedAt, CreatedBy and UpdatedBy are what make "what
 	// changed lately" answerable from one call.
-	//
-	// **They cost nothing new to publish and everything to withhold.**
-	// The columns have been on documents since the schema landed and on
-	// this listing's select list since it was written; withholding them
-	// meant the first question a designer opens a game bible to ask —
-	// what moved this week, and who moved it — took a docs.history call
-	// per document, fifty for a page of fifty. That is the shape of an
-	// answer nobody asks for twice.
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 	CreatedBy *AuthorOutput `json:"created_by,omitempty"`
@@ -350,31 +221,6 @@ type DocumentSummaryOutput struct {
 
 // AuthorOutput is who wrote something, in the one shape every answer on
 // this surface uses for that fact.
-//
-// **Kind and Label are both here and neither replaces the other.** Kind
-// ("user" or "token") is what tells a designer's edit from an agent's,
-// and it is machine-readable; Label is the name a page prints. A client
-// that had only the kind would render "an agent" ten times for ten
-// versions written by three agents, which is what the reading view did
-// before this type existed, and one that had only the label could not
-// tell a person from a token with the same name.
-//
-// **A revoked token still comes back with its label**, which is decided
-// rather than incidental — ResolveAuthors' own comment carries the
-// argument: revoking a token changes what it may do next, not who wrote
-// the prose, and this surface's tokens listing already includes revoked
-// rows for exactly that reason.
-//
-// The whole object is absent — a nil *AuthorOutput — when the row
-// records nobody, which is what both audit columns being NULL means and
-// what ON DELETE SET NULL leaves behind when a user or a token is really
-// gone. A client says what it says about that; the reading view's
-// existing answer is "a former member". An object with a kind naming
-// nothing would be worse than no object.
-//
-// Label is omitempty because "present and nameless" is a third case: the
-// row names somebody this server could not resolve. A client falls back
-// to its own wording there rather than printing an empty name.
 type AuthorOutput struct {
 	Kind  string     `json:"kind"`
 	ID    *uuid.UUID `json:"id,omitempty"`
@@ -393,11 +239,6 @@ func authorOutput(a markdown.Author) *AuthorOutput {
 
 // DocsWriteManyOutput is what a batch of writes answers with: what
 // landed and what did not.
-//
-// Count is len(Written) and is built where both are assembled so the two
-// cannot disagree, exactly as EntitiesUpsertOutput's is. Both slices are
-// emitted as arrays even when empty — "the batch reported no failures"
-// and "the batch reported nothing" must not look the same.
 type DocsWriteManyOutput struct {
 	Count   int                      `json:"count"`
 	Written []markdown.DocumentWrite `json:"written"`
@@ -413,25 +254,11 @@ type DocsListOutput struct {
 }
 
 // VersionOutput is one row of a history: metadata, no body.
-//
-// AuthorKind is "user" or "token" and AuthorID is the corresponding id.
-// The pair is what makes "rewritten by the lore agent" and "rewritten by
-// Ana" distinguishable in a history view without a synthetic user per
-// agent — and it is *why* the version table carries two nullable author
-// columns rather than one. Both are empty on a version whose author is
-// no longer on file.
 type VersionOutput struct {
 	Version int32 `json:"version"`
 
 	// Path is the address this version was written at, which a moved
 	// document's older versions do not share with it.
-	//
-	// **It is not omitempty and it is required in the schema**, because
-	// a client reading a history has to be able to tell "this version was
-	// written here" from "this server did not say". It is also the only
-	// thing that makes the version a move appends legible as a move: that
-	// row's title, summary and message are its predecessor's and its path
-	// is not.
 	Path       string     `json:"path"`
 	Title      string     `json:"title"`
 	Summary    string     `json:"summary,omitempty"`
@@ -443,19 +270,6 @@ type VersionOutput struct {
 
 	// AuthorLabel is the name that goes with the pair above: a user's
 	// display name, a token's label.
-	//
-	// **Without it a history is a list of uuids.** The pair said which
-	// *kind* of author wrote a version and gave an id that nothing on
-	// this surface could resolve — there was no read path from a token id
-	// to its label at all, though the label exists and the tokens listing
-	// already returns it — so the reading view called every token "an
-	// agent", and a designer looking at ten versions by three agents saw
-	// "an agent" ten times.
-	//
-	// It is omitempty, and empty means two different things that a client
-	// tells apart by the pair beside it: with no author_kind, the version
-	// records nobody; with one, it records somebody this server could not
-	// name.
 	AuthorLabel string `json:"author_label,omitempty"`
 }
 
@@ -469,16 +283,6 @@ type DocsKindCountOutput struct {
 }
 
 // DocsKindsOutput is a game's document-kind vocabulary with its totals.
-//
-// **Kinds is never nil**, so a game with no kinds yet marshals as [] and
-// not null — the rule every listing on this surface follows.
-//
-// Documents and Unkinded are both outside the list because neither is a
-// kind. Unkinded in particular is a count with no filter behind it:
-// there is no spelling of docs.list's `kind` that selects the documents
-// carrying none, so publishing it as a catalogue row would offer a value
-// that does nothing. Published as a total, it is the number that tells a
-// designer how much of the game is still unfiled.
 type DocsKindsOutput struct {
 	Kinds     []DocsKindCountOutput `json:"kinds"`
 	Documents int64                 `json:"documents"`
@@ -506,21 +310,6 @@ type DocsVersionOutput struct {
 }
 
 // DocsDiffOutput is one unified diff, computed on read.
-//
-// Coarse says the two versions were too large to compare line by line
-// and the answer is "the whole body was replaced". It is on the wire
-// because a client cannot tell the difference from the diff itself, and
-// would otherwise render "everything changed" for two versions that
-// differ by a word.
-//
-// FromDeleted and ToDeleted say whether either endpoint is a tombstone, and
-// they are on the wire for a reason the unified text cannot supply: a
-// tombstone carries the body the document had when it was deleted, so a
-// diff spanning a deletion is empty and reads as "nothing changed".
-// markdown.DiffResult's own comment carries the argument, and
-// TestDiffArea's "a diff across a tombstone says which side is deleted"
-// case pins it there; TestDocumentsEndToEnd asserts both of them on this
-// type. Neither is omitempty: false is a statement about a live version.
 type DocsDiffOutput struct {
 	Path        string `json:"path"`
 	FromVersion int32  `json:"from_version"`
@@ -534,14 +323,6 @@ type DocsDiffOutput struct {
 // LinkedDocumentRef is one document an entity is attached to: the
 // mirror image of LinkedRef (mcp_search.go), which is one entity a
 // document is attached to.
-//
-// **It is not DocumentSummaryOutput**, and the difference is not
-// cosmetic: markdown.DocumentLink carries a path, a title, a kind and a
-// role and nothing else, so answering with a summary shape would put a
-// zero Version and a false Deleted on the wire for every row — two
-// fields that read as facts about the document and would be neither
-// read from it nor true of it. Only the columns the join actually
-// selects are published.
 type LinkedDocumentRef struct {
 	ID    uuid.UUID `json:"id"`
 	Path  string    `json:"path"`
@@ -553,17 +334,6 @@ type LinkedDocumentRef struct {
 // DocsLinksOutput answers the join from whichever side was asked, and is
 // also what the two write tools answer with, so a caller reads the
 // resulting set back on the same call that changed it.
-//
-// The two arrays are never both populated: Documents is set for an
-// entity-side question and Entities for a document-side one. Both are
-// non-nil, so an empty answer marshals as [] rather than null.
-//
-// NextCursor and Truncated are set together, from one condition, so they
-// cannot disagree — the pair DocsListOutput carries, and here for the
-// same reason: this answer is a page, and a page nobody knows is a page
-// is a wrong answer that reads as a right one. The cursor belongs to the
-// side it was issued for, and the two sides refuse each other's
-// (markdown.documentLinksFingerprint).
 type DocsLinksOutput struct {
 	Entities   []LinkedRef         `json:"entities"`
 	Documents  []LinkedDocumentRef `json:"documents"`
@@ -604,11 +374,6 @@ func docsWrite(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.
 }
 
 // MCPDocsWriteMany implements docs.write_many.
-//
-// The mode string is passed through as the agent wrote it rather than
-// folded onto the default when it is not recognised, for the reason
-// MCPEntitiesUpsert gives: reading a typo as "partial" would silently
-// land rows a caller asked to have rolled back.
 func MCPDocsWriteMany(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
 	in DocsWriteManyInput) (DocsWriteManyOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
@@ -758,12 +523,6 @@ func documentSummaryOf(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 
 // documentAudit resolves one document row's two audit pairs to labels,
 // in one round trip.
-//
-// **The order of the two actors is the whole contract here** — created
-// first, updated second — and it is unpacked in the same order it is
-// packed, three lines apart, so the pairing cannot drift. The listing
-// does the same thing over fifty rows (markdown.Service.List) and states
-// the same rule.
 func documentAudit(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	row dbq.Document) (created, updated *AuthorOutput, err error) {
 	authors, err := deps.Markdown.Authors(ctx, projectID, []markdown.Actor{
@@ -1043,16 +802,6 @@ func docsLinkRemove(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 
 // includeCurrent reads the docs.write / docs.revert argument, defaulting
 // to true.
-//
-// **The default lives here, on the wire, and not in
-// markdown.WriteInput.** An agent that does not know about the argument
-// is exactly the agent that most needs the current body handed to it on
-// a conflict — a second round trip costs it a turn and a slice of its
-// context window — so the useful behaviour is the default. The Go zero
-// value stays false so that a domain caller never gets a 200 KB body it
-// did not ask for by forgetting a field.
-// TestIncludeCurrentDefaultsToTrueOnTheWireAndIsHonouredWhenFalse pins
-// both halves.
 func includeCurrent(v *bool) bool {
 	if v == nil {
 		return true
@@ -1079,14 +828,6 @@ func linkTargetsOf(in *[]DocsLinkInput) *[]markdown.LinkTarget {
 
 // documentWithLinks builds the full answer for one document row,
 // including the entities it is attached to.
-//
-// The links are read on every write and every read rather than left to
-// docs.links.list, because an attachment set that can only be seen
-// through a second tool is an attachment set nobody looks at — the
-// write-only-field class of defect this project has already shipped
-// once.
-// TestEveryDocumentFieldSurvivesARoundTripThroughTheTools reads them
-// back off a write.
 func documentWithLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	row dbq.Document, headOnly bool) (DocumentOutput, error) {
 	// The cap rather than the default: a document's own answer carries
@@ -1183,15 +924,6 @@ func linkedRefsOf(links []markdown.EntityLink) []LinkedRef {
 // caller indexing into the answer should not have to test for null
 // first, and "no frontmatter" and "an empty frontmatter" are the same
 // document.
-//
-// **The empty branch is unreachable through this server today** and is
-// kept deliberately, which is why no test pins it: the column is
-// jsonb NOT NULL DEFAULT '{}' and the domain writes `{}` for a document
-// with no frontmatter, so every row reaching here is at least two bytes
-// long. It exists because the alternative to a branch that costs
-// nothing is a nil RawMessage marshalling as `null` the first time
-// anything hands this function a zero value — a row read by a query
-// that does not select the column, say.
 func frontmatterOf(raw []byte) json.RawMessage {
 	if len(raw) == 0 {
 		return json.RawMessage(`{}`)
@@ -1200,13 +932,6 @@ func frontmatterOf(raw []byte) json.RawMessage {
 }
 
 // headOf builds the preview a head_only read answers with.
-//
-// A head is the first previewBytes of the body, cut back off any rune
-// the bound splits — a partial rune is invalid UTF-8, which would make
-// the whole answer unencodable — together with the true body length, so
-// a caller can decide whether to fetch the rest.
-// TestAHeadOnlyReadSaysHowMuchItLeftOut pins the cut, the flag and the
-// length, over a body whose runes straddle the bound.
 func headOf(body string) (preview string, truncated bool, length int) {
 	length = len(body)
 	if length <= previewBytes {
@@ -1220,25 +945,11 @@ func headOf(body string) (preview string, truncated bool, length int) {
 }
 
 // previewBytes bounds a head_only body.
-//
-// 2 KiB is a screenful: enough for an agent to tell whether this is the
-// document it wanted, small enough that listing ten heads costs less
-// than reading one script.
 const previewBytes = 2 << 10
 
 // --- Registration ---
 
 // addDocsTools registers the prose tools on srv.
-//
-// Every one goes through addScopedTool, so the caller's game binding is
-// the only scope any of them can act in — see that function's own doc
-// comment and TestEveryMCPToolGoesThroughAddScopedTool, which fails if a
-// tool ever reaches the served list any other way.
-//
-// **The descriptions interpolate the domain's own constants and never
-// type the numbers out.** A bound an agent reads in a description and a
-// bound the server enforces have to be the same number, and the only way
-// to guarantee that is for there to be one of them.
 func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "docs.write",
@@ -1619,11 +1330,6 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 }
 
 // --- Hand-written output schemas ---
-//
-// Written by hand for the reason mcp.go's own schema block gives: the
-// SDK validates a tool's output against its marshalled JSON, and its
-// reflection-based inference gets that JSON wrong for any type whose
-// marshalling comes from a method — uuid.UUID and time.Time here.
 
 func integerSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "integer"} }
 
@@ -1655,13 +1361,6 @@ var documentOutputSchema = &jsonschema.Schema{
 
 // authorOutputSchema is AuthorOutput's wire shape, shared by every
 // answer that names who wrote something.
-//
-// **A function and not a var**, like integerSchema and stringSchema
-// beside it and unlike the row schemas above: the SDK requires a tool's
-// output schema to form a tree, so one shared pointer used for both
-// created_by and updated_by panics at registration. It is caught the
-// moment a server is built (TestEveryMCPToolGoesThroughAddScopedTool),
-// which is why this is a note rather than a hazard.
 func authorOutputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:     "object",

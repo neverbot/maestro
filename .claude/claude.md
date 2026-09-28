@@ -196,7 +196,12 @@ became a readme. They are process, not product.
   Implementation plans: `.superpowers/plans/YYYY-MM-DD-<topic>.md`.
 - **Record a correction where the decision lives**, not in a commit
   message: a commit message is read once, and the code beside it is
-  read by whoever changes the area next.
+  read by whoever changes the area next. **A doc comment states the
+  contract and the one non-obvious reason, and stops.** The account of
+  how a decision was reached goes in `.superpowers/`. This has a
+  measured ceiling — `internal/style` fails a package over 32% comment
+  — because prose was the one thing here under no deletion pressure:
+  the source was 58.7% comment, 1.4 MB of it, with nothing red.
 - Throwaway artefacts (screenshots, probe pages, scratch dumps) go in
   `.scratch/`, which is git-ignored. Never in `.claude/` (read-only
   context) and never at the repo root.
@@ -228,6 +233,11 @@ defect during the build.
   place it applies before you stop.
 - **A mechanism nothing reads is a lie.** No knob without a reader, no
   signal nobody consumes, no cap whose overflow nothing detects.
+- **An assertion is one line.** `internal/assert` states the expectation
+  — `assert.Must(t, got == want, "…")` — rather than guarding a failure
+  with an `if`. The exception is a message only legal on failure
+  (`rows[0]` where the claim is that there is one row), since arguments
+  are evaluated either way; those keep their block.
 - **Prose about code is code, and rots the same way.** Doc comments,
   tool descriptions and the skill bundle have each shipped statements
   contradicting the code with nothing red anywhere. Check a claim

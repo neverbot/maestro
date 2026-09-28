@@ -2,39 +2,6 @@
 // internal/web/static/render/table.js, over the cell vocabulary it
 // shares with the text twin (internal/web/static/render/twin.js) and the
 // controls every renderer declares (render/controls.js).
-//
-// What this layer covers that no Go test can, and what is this
-// renderer's alone.
-//
-// **That an absent value and the empty string stay two answers, in the
-// one renderer where a reader meets them side by side.** An absent value
-// is an em dash and the empty string is a blank cell, and the pair of
-// tests is the assertion: a renderer that wrote `""` for both passes
-// either one alone. This is internal/views/execute.go's own distinction,
-// preserved end to end, and a table is the last place it could be thrown
-// away.
-//
-// **That a page count is never a content count.** views.run has no
-// cursor — a page of a graph is not a graph — so `page_size` pages the
-// rows the client already holds and the pager says `capped` when the
-// answer itself hit its cap. Both fixtures are asserted, because the
-// word appearing always is the same defect as the word appearing never.
-//
-// **That sorting asks the server for nothing**, over a stubbed global
-// `fetch` that counts, for the reason `nested`'s expansion does: a
-// renderer that grew a client would pass a check that only read its
-// imports.
-//
-// **That a number column sorts as numbers.** Comparing the text would
-// put 10 before 9, which is a wrong answer that looks like a right one
-// in the renderer designers use most.
-//
-// **That `color_by` is neither offered nor honoured.** §4.7: a slot
-// another renderer would colour is a column here, which is the honest
-// form of the same information.
-//
-// Run directly: `node internal/web/jstest/render_table_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
 import { UNSET_LABEL } from "../static/palette.js";
@@ -520,10 +487,6 @@ check("theTableAndTheTwinDescribeTheSameAnswer", () => {
   }
 
   // **The three deliberate differences.**
-  //
-  // Columns: the twin shows every slot in its own order because it
-  // describes the answer; this shows what the view declared, in that
-  // order, because a designer chose it.
   assertDeepEqual(result.columns.map((c) => c.key), ["zone", BUILTIN_NAME], "the view's columns, in its order");
   assert(
     twin.nodes.columns.some((column) => column.key === "level"),

@@ -2,37 +2,6 @@
 // internal/web/static/render/graph.js and the drawing vocabulary it
 // shares with the five renderers that follow it
 // (internal/web/static/render/marks.js and render/controls.js).
-//
-// What this layer covers that no Go test can.
-//
-// **That the picture and the text twin describe the same answer.** Task
-// 5 built the twin before any renderer precisely so that each renderer
-// task could assert this, and a picture and a twin that disagree is the
-// defect that ordering exists to catch. `theTwinAndTheSceneAgreeOn
-// NodeCount` joins the two over one envelope.
-//
-// **That an absence is marked as many times as it happened.** A node
-// missing its colour slot is unfilled *and* dashed; a node missing its
-// size slot takes the smallest box; a node missing both gets both, and
-// the check that says so is the one that would fail if some future
-// "unknown" treatment collapsed two facts into one.
-//
-// **That a size is an area.** Getting this wrong is invisible — the
-// picture looks fine and every comparison in it is wrong by a square —
-// so the arithmetic is asserted numerically, in both halves: the mapping
-// itself, and the boxes a fixture comes out with.
-//
-// **That `group_by` draws and `cluster_by` does not.** They are the pair
-// a designer trips over, so "draws nothing" is asserted as *no mark
-// attributable to it* and, in the layout harness, as *the arrangement
-// moved* — because "draws nothing" must not decay into "does nothing".
-//
-// This harness needs no DOM: a scene is plain data. It is
-// internal/web/jstest/canvas_test.mjs that turns marks into elements,
-// and the two meet at render/scene.js's contract.
-//
-// Run directly: `node internal/web/jstest/render_graph_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
 import { UNSET_LABEL, legendFor } from "../static/palette.js";
@@ -569,11 +538,6 @@ check("stubsLeaveTheirGroupEnclosure", () => {
   // enclosure of that node's group — which is *why* an enclosure is a
   // hairline and not a filled panel, and which is asserted here as a
   // property of the drawing rather than of a lucky arrangement.
-  //
-  // The stub's node is deliberately in the **middle** of a five-node
-  // group: a node at the edge of its own enclosure is one a stub of any
-  // length at all escapes, and a fixture like that would hold for a
-  // renderer that ignored the enclosure entirely.
   const envelope = envelopeOf(
     [
       node("a", { label: "Alpha", zone: "elwynn" }),

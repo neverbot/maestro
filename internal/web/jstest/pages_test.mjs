@@ -1,23 +1,6 @@
 // The harness for the seven page modules Task 15 put on seven routes:
 // internal/web/static/pages/{home,views,view,types,catalogue,entity,assets}.js
 // and the plumbing they share, pages/page.js.
-//
-// **What it holds has no Go counterpart and could not have one.** Every
-// route in this product serves a static shell and resolves nothing
-// server-side, so a handler test can prove a shell is served and can
-// prove nothing about what the shell then does — whether the home costs
-// one call or one per type, whether a game with no views is offered a
-// button that leads nowhere, whether an entity page shows the fields its
-// type declares and its entity does not carry, whether a node click
-// costs a designer their arrangement. All of those are properties of
-// these modules and of nothing else.
-//
-// It replaces internal/web/jstest/game_summary_test.mjs, whose subject
-// moved: the game home is `pages/home.js` now, and its checks are the
-// four at the end of this file, unchanged in substance.
-//
-// Run directly: `node internal/web/jstest/pages_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { register } from "node:module";
 import path from "node:path";
@@ -86,14 +69,6 @@ function assertEqual(actual, expected, message) {
 }
 
 // --- The DOM stub -----------------------------------------------------
-//
-// It is the stub the game-summary harness used, plus what a page needs
-// that a catalogue did not: listeners a test can fire, attributes an
-// address can be read off, and a parent chain the address walk climbs.
-//
-// **Nothing in it can interpret a string as markup.** A stub with an
-// innerHTML setter would let a regression through by emulating one, so
-// anything found in a rendered subtree got there through textContent.
 function fakeElement(tag = "div") {
   const el = {
     tagName: tag,
@@ -277,11 +252,6 @@ const GAME = { id: "1e9d6b0c-4f7a-4a9e-8a5b-2c1d3e4f5a6b", slug: "azeroth", name
 
 // mount installs a document holding only the ids the shell under test
 // declares, and a fetch that answers from a routing table.
-//
-// `routes` is a list of [predicate, answer] pairs, tried in order. An
-// unmatched URL is a 404 whose message names it, so a page that asked
-// for something nobody expected fails loudly rather than rendering a
-// plausible blank.
 function mount({ ids, pathname, search = "", routes = [], games = [GAME] }) {
   const elements = {};
   for (const id of SHELL_IDS) elements[id] = ids.includes(id) ? fakeElement() : null;
@@ -802,11 +772,6 @@ check("theCatalogueSaysWhichColumnsItIsNotShowing", async () => {
 });
 
 // --- The relation type's own page -------------------------------------
-//
-// It exists because a relation type had no screen at all: the Catalogue
-// listed them as rows that hovered like links and went nowhere, so what
-// an edge may join, what a walk makes of it and what its fields are
-// could be read nowhere in the interface.
 
 check("aRelationTypeSaysWhatItJoinsAndWhatAWalkMakesOfIt", async () => {
   const { endpointSentence, roleSentence, ANY_TYPE, NO_ROLE, NO_TRAITS } = await load("relation-type");
@@ -1224,19 +1189,6 @@ check("aNodeClickOpensThePanelAndDoesNotNavigate", async () => {
 
 // **The twin's selection reaches the arrangement, and it goes through
 // `wire`.**
-//
-// twin_test.mjs asserts mst-twin dispatches `mst-select` "under the name
-// a canvas will listen for", and for four tasks nothing listened for it:
-// a reader could tab through the twin, watch the rows mark themselves,
-// move to the canvas and find the arrow keys moved nothing and wrote
-// nothing. Measured in a browser on the seeded game before the fix —
-// focusing the *Wanted: Hogger* row set `mst-twin.selected`, one
-// ArrowRight left the node's x at 287 and sent zero writes — which is the
-// whole keyboard path of spec §8.1, gone.
-//
-// So this check drives `wire` and not the listener, for save_as_test's
-// reason: a check that called the handler directly would stay green with
-// the one binding line deleted, which is the exact defect being closed.
 check("theTwinsSelectionReachesTheArrangementAtItsCallSite", async () => {
   const dom = mount({ ids: ["entity-panel"], pathname: "/g/azeroth/v/world", routes: [] });
   const { wire } = await load("view");
@@ -1282,25 +1234,6 @@ check("theTwinsSelectionReachesTheArrangementAtItsCallSite", async () => {
 
 // **Below tablet width the drawing goes and the writing path goes with
 // it — and this check drives the page, not the controller.**
-//
-// The plan's Step 10 was left unbuilt for a reason worth keeping: hiding
-// the canvas with CSS alone leaves `Arrangement` believing it may write,
-// so a keyboard reader who tabs the twin — which is *still on screen*,
-// because it is now the whole view — can nudge a node on a drawing
-// nobody can see. writes_test.mjs holds the controller's half; this is
-// the call site, and the two halves together are the property.
-//
-// It asserts the conjunction on purpose: **the canvas is hidden AND the
-// keydown wrote nothing.** A CSS-only fallback satisfies the first and
-// fails the second; a `setDrawn` that nothing calls satisfies the second
-// only because the first never happened. Deleting either the
-// `applyWidth` call from `draw`/`watchWidth` or the `setDrawn` line
-// inside `applyWidth` turns this red.
-// **The builder's door exists only where the builder can hold what is
-// behind it** (builder spike §4). The check is against the stored bytes,
-// on the page, every time — and when they say more than the builder can
-// hold, the product says so in words rather than offering a control it
-// knows would drop a clause.
 check("aViewOpensInTheBuilderOnlyWhenItsQueryRoundTrips", async () => {
   const dom = mount({ ids: ["view-builder"], pathname: "/g/azeroth/v/world", routes: [] });
   const { sayBuilderDoor, OPEN_IN_BUILDER } = await load("view");
@@ -1557,18 +1490,6 @@ check("anEmptyGameGetsItsEmptyStatesAndNotTwoBlankLists", async () => {
 });
 
 // --- The first sight of a picture -------------------------------------
-//
-// A view opens fitted, and the reason these checks exist is that the
-// first version of the fit *looked* correct and did nothing. It measured
-// the canvas in the same turn that put the frame on the page, got a
-// 0x0 box because the frame had not laid out yet, computed no fit, and
-// then recorded the view as fitted — so every view in this product
-// opened at the origin at 1x and no test anywhere disagreed. Found by
-// mounting a view in a browser and reading `canvas.view` afterwards.
-
-// fakeCanvas is a canvas that measures nothing until it is allowed to.
-// `sizes` is the sequence getBoundingClientRect answers with, which is
-// how a frame that has not laid out yet is spelled.
 function fakeCanvas(sizes) {
   const remaining = sizes.slice();
   let last = remaining[remaining.length - 1];
@@ -1605,19 +1526,6 @@ check("aViewOpensFittedEvenWhenTheFrameHasNotLaidOutYet", async () => {
 
 // **The fit has to happen when the canvas has a size, and the canvas has
 // no size until the window's width has decided there is a picture.**
-//
-// This is the call site, and the call site was the bug. `fitOnce` was
-// called at the end of `drawPicture`, which runs *before* `draw`'s
-// `finally` — and `watchWidth` applies the width once at mount, when
-// `state.pictured` is still false, so the canvas is `hidden` for the
-// whole of the first draw. A hidden element measures 0x0, the fit
-// answered null twice and reported false, and every view opened at the
-// origin at 1x: on a real 105-node view, 48 nodes drawn outside a
-// 1392x571 clip with no scrollbar and no notice.
-//
-// The three checks above hold `fitOnce` itself and stayed green through
-// all of it, which is this repository's standing failure: correct in the
-// module, dead at the call site.
 check("theFitWaitsForTheWidthToDecideThereIsAPicture", async () => {
   const view = await load("view");
   const canvas = fakeCanvas([{ width: 800, height: 600 }]);
@@ -1700,13 +1608,6 @@ check("aSceneWithNoPlaceableMarksIsNotFitted", async () => {
 });
 
 // --- The ground a map draws over --------------------------------------
-//
-// A view's `background_asset_id` is written by views.set_background and
-// read by the map renderer, and between them sits this page, which is
-// the only thing that mounts a renderer. It passed no asset at all: the
-// scene got an entry with an empty href, which is how this page spells
-// "the image is gone", so a correctly placed background drew nothing and
-// banded nothing. Found by opening a map view over an uploaded image.
 
 const ASSET = { id: "a1", url: "/api/games/azeroth/view-assets/a1", width: 1200, height: 800 };
 
@@ -1772,15 +1673,6 @@ check("aGroundThatIsGoneIsAnHrefTheRendererCanBand", async () => {
 });
 
 // --- The axis a timeline lays out against ------------------------------
-//
-// The same shape of hole as the ground above, in the other direction: an
-// axis is a *declaration* the game holds, the envelope carries values,
-// and render/timeline.js says so in its own comment — with no
-// declaration it has only a number axis, and on a number axis every enum
-// value is off-axis. So a championship over six declared stages drew one
-// tick reading "0" and piled all eighty-two of its events into the "no
-// value" region, which is a picture the renderer draws on purpose and
-// therefore says nothing about. Found by opening one.
 
 const TIMELINE_ROW = {
   renderer: "timeline",

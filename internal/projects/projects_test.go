@@ -618,27 +618,6 @@ func TestByIDRoundTrips(t *testing.T) {
 // of its last two owners, never zero. Every other test in this file
 // drives RemoveMember/SetRole from a single goroutine, so this is the
 // only one that would notice the invariant breaking under a race at all.
-//
-// It does NOT demonstrate that CountOwnersForUpdate's FOR UPDATE lock is
-// what makes this safe, and its comment used to claim exactly that — a
-// claim a quality review disproved directly: stripping FOR UPDATE from
-// CountOwnersForUpdate and running this test roughly eighty times
-// produced zero failures. The invariant is defended in two independent
-// layers — this package's row lock, and migration 0002's constraint
-// trigger, which re-checks "does this project still have an owner" at
-// commit time regardless of any lock — and the trigger alone already
-// serializes the two-goroutine race this test drives, because only one
-// of two concurrent transactions can be the second to reach its deferred
-// commit-time check. Dropping either layer alone will not turn this test
-// red; both would have to go missing at once for that. What the lock
-// still buys, independent of correctness, is failing fast inside this
-// package with a typed ErrLastOwner instead of the transaction aborting
-// on a raw trigger exception — worth keeping as deliberate defence in
-// depth, not because this test proves it load-bearing.
-//
-// Five runs, two goroutines each racing to remove one of a project's two
-// owners: exactly one must succeed and the other must see ErrLastOwner,
-// every time, and the project must never end up with zero owners.
 func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 	t.Parallel()
 	for run := 0; run < 5; run++ {
@@ -690,12 +669,6 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 // (both goroutines call RemoveMember) nor any SetRole test alone
 // exercises: one goroutine removing owner A while a second demotes owner
 // B to viewer, concurrently, against the same two-owner project.
-// CountOwnersForUpdate's row lock and migration 0002's constraint
-// trigger both apply identically regardless of which of the two methods
-// is doing the counting or the demoting, so the same invariant —
-// exactly one of the two must win, the project never ends up with zero
-// owners — has to hold across the mix, not just within either method on
-// its own.
 func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *testing.T) {
 	t.Parallel()
 	for run := 0; run < 5; run++ {
@@ -792,9 +765,6 @@ func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) 
 // back door: memberships.user_id is ON DELETE CASCADE, so deleting a
 // user row deletes their memberships underneath this package entirely,
 // with none of SetRole's or RemoveMember's own guards ever running.
-// identity.Service has no DeleteUser yet (Task 8's corrections note this
-// is latent until one lands), so the delete is issued directly here to
-// simulate one.
 func TestDeletingSoleOwnerUserIsBlockedByDatabase(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -908,12 +878,6 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 // foreign keys migration 0001 already declares, and migration 0002's
 // last-owner trigger has an escape hatch built for exactly this
 // statement (see Service.Delete's own doc comment).
-//
-// This is also the escape hatch's own regression guard: project here has
-// exactly one member, its owner, so if that escape hatch ever stopped
-// recognising this statement, the trigger would raise on the cascaded
-// membership delete and svc.Delete below would fail loudly with a raw
-// constraint-violation error instead of quietly returning nil.
 func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -1008,8 +972,6 @@ func TestAnEmptySlugIsDerivedFromTheName(t *testing.T) {
 	assert.Should(t, first.Slug == "cronicas-de-valdivia", "slug = %q, want the name's own address", first.Slug)
 
 	// **A second game of the same name resolves rather than refusing.**
-	// The person never typed an address, so an error about one would be
-	// about a word they have not seen.
 	second, err := svc.Create(ctx, "", "Crónicas de Valdivia", user.ID)
 	assert.Must(t, err == nil, "second Create: %v", err)
 	assert.Should(t, second.Slug == "cronicas-de-valdivia-2", "second slug = %q, want the next free number", second.Slug)

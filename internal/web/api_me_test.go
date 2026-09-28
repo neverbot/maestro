@@ -14,9 +14,6 @@ import (
 // The account screen says who you are, and the header says it instead of
 // a bare "Sign out". Both read this response, and before this test
 // /api/me answered a user id and a boolean: two facts that name nobody.
-//
-// Mutation: delete either assignment in handleMe and this fails naming
-// the missing field.
 func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 	t.Parallel()
 	srv, ids, _ := newTestServer(t)
@@ -72,16 +69,6 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 
 // TestMeAnswersATokenCallerTheAddressOfItsGame pins the other half of the
 // same repair.
-//
-// `skill.md` §1 tells an agent to call whoami and take the game's
-// **address** from the answer, because every route on both surfaces is
-// addressed by slug. The MCP tool answers `project_slug`; this mirror
-// answered a `project_id` and nothing else, so an agent that followed
-// the bundle's first instruction over REST could not address its second
-// call. A mirror that answers a different question from the tool it
-// mirrors is not a mirror.
-//
-// Mutation: remove the project block from handleMe and this fails.
 func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
@@ -120,9 +107,6 @@ func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
 // address and a name, and neither is part of what the key opens: a token
 // caller's answer is exactly what it was before the account screen
 // existed.
-//
-// Mutation: drop the `!caller.IsToken()` guard in handleMe and this fails
-// naming the field a token was told.
 func TestMeTellsATokenCallerNothingAboutThePerson(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)

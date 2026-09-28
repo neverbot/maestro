@@ -75,10 +75,6 @@ func TestThereIsNoRegexOperator(t *testing.T) {
 // vocabulary, and the value-shape table — and an operator that reaches
 // one of them without reaching the others is an operator whose value is
 // judged by the zero value of `valueShape`, silently, as a scalar.
-//
-// Both directions are asserted: a row added to the table with no shape
-// fails here, and a shape declared for a spelling no type admits fails
-// here too.
 func TestAnOperatorCannotBeHalfAdded(t *testing.T) {
 	for op := range knownOperators {
 		if _, ok := shapeOf[op]; !ok {
@@ -338,10 +334,6 @@ func TestAPredicateTreeIsBounded(t *testing.T) {
 // TestAPredicateTreeIsBoundedByItsNodeCount is the other half of the
 // tree bound: a wide tree is as expensive as a deep one, and 200
 // conditions in one `all` is a query nobody wrote by hand.
-//
-// The problem is reported **once**, at the predicate's own root, rather
-// than once per sibling past the cap: a caller that sent 500 conditions
-// does not need 300 copies of the same sentence.
 func TestAPredicateTreeIsBoundedByItsNodeCount(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(`{"v":1,"from":[{"type":"quest","where":{"all":[`)
@@ -387,12 +379,6 @@ func TestAPredicateTreeIsBoundedByItsNodeCount(t *testing.T) {
 // about the hand-off Task 2's review recorded: MaxPredicateDepth bounds
 // the predicate *tree*, and a `value` is an `any` that the tree bound
 // never looks inside.
-//
-// Without this the only bound on a value is encoding/json's own, at ten
-// thousand, which reports at pointer "" in the decoder's wording and says
-// nothing about the language. The elements of a list are the case the
-// shape checks miss entirely: `in` counts its list and never looks into
-// it.
 func TestAPredicateValueHasItsOwnDepthBound(t *testing.T) {
 	parseFails(t, `{"v":1,"from":[{"type":"quest","where":`+
 		`{"field":"tags","op":"in","value":[["a"]]}}]}`,
@@ -523,22 +509,6 @@ func TestEveryLimitIsJudgedAgainstItsOwnCap(t *testing.T) {
 // TestNoDocumentTypeCarriesCallerTextInAByteSlice verifies, rather than
 // assumes, the claim Task 3 inherited: everything added under the text
 // walk is bounded by construction.
-//
-// It lives here rather than beside the walk because the question is not
-// about the walk's own behaviour — TestEveryStringInAQueryIsBounded pins
-// that over the twenty-seven positions the document has — but about the
-// *shapes* later tasks are allowed to add. walkStrings visits a
-// json.RawMessage by decoding it and skips every other byte slice
-// deliberately, because a plain []byte decodes from base64 and its bytes
-// are not a string the caller wrote. That rule is stated in a comment and
-// was pinned by nothing: a field declared []byte anywhere in the document
-// would be caller text the bound never sees, and the walk would report
-// nothing at all rather than failing.
-//
-// The graph is walked over reflect.Type, so it covers every type
-// reachable from Query whether or not a test document happens to populate
-// it, which is what makes it a guard for the fourteen tasks that add
-// types under this walk rather than a restatement of today's shapes.
 func TestNoDocumentTypeCarriesCallerTextInAByteSlice(t *testing.T) {
 	rawMessage := reflect.TypeOf(json.RawMessage(nil))
 	seen := map[reflect.Type]bool{}
@@ -605,17 +575,6 @@ func TestNoDocumentTypeCarriesCallerTextInAByteSlice(t *testing.T) {
 // the projection guard that a hardcoded list cannot be: it asks
 // Projection itself which of its members are attribute references, and
 // refuses one that projectionAttrs does not name.
-//
-// TestEveryProjectionAttributeIsChecked above drives five *known* names
-// through ParseQuery, which proves the five that exist are checked and
-// nothing about a sixth — a member added to Projection with no line in
-// projectionAttrs leaves that test, and the whole suite, green while the
-// reference reaches the compiler unchecked. Task 9 adds projection
-// attributes. This is what fails for it.
-//
-// The walk is over reflect.Type, like
-// TestNoDocumentTypeCarriesCallerTextInAByteSlice, so it covers a shape
-// no test document populates.
 func TestEveryProjectionAttributeReferenceHasALineInTheTable(t *testing.T) {
 	named := map[string]bool{}
 	for _, attr := range projectionAttrs {
@@ -653,10 +612,6 @@ func TestEveryProjectionAttributeReferenceHasALineInTheTable(t *testing.T) {
 // drives three known names, so a fourth *int added to Limits without a
 // line in checkLimits is a limit nothing bounds and nothing notices.
 // Task 12 adds limits.
-//
-// It drives each member ParseQuery rather than reading checkLimits, so
-// what it pins is the observable behaviour — an over-cap limit is
-// refused — rather than the shape of the function that produces it.
 func TestEveryLimitInTheDocumentIsJudged(t *testing.T) {
 	limits := reflect.TypeOf(Limits{})
 	intPtr := reflect.TypeOf((*int)(nil))
@@ -729,9 +684,6 @@ func TestEveryPredicateInAStepIsChecked(t *testing.T) {
 // 4096, so removing any one of these three lines leaves a 4000-character
 // key legal in that position alone — a narrowing of one rule in one
 // place, which is exactly the kind of drift no other test sees.
-//
-// The `field` inside a predicate is pinned by
-// TestAFieldKeyIsAFieldKeyOrASigil above; these are the other three.
 func TestEveryFieldKeyLengthIsBoundedWhereverOneIsWritten(t *testing.T) {
 	over := strings.Repeat("a", maxFieldKeyLen+1)
 	at := strings.Repeat("a", maxFieldKeyLen)
@@ -871,15 +823,6 @@ func TestAParameterDefaultIsBoundedLikeAValue(t *testing.T) {
 // open question Tasks 8 and 9 left to Task 15: an empty `all` or `any`
 // has no truth value a document can have meant, so it is refused rather
 // than given one.
-//
-// The refusal was already in the parser and only `{"all":[]}` at a
-// selector's `where` was pinned. That is not the position the question
-// was asked about: `combine` compiles an empty list to `true`, which is
-// the identity of `all` and the wrong identity of `any`, and since Task
-// 8 the same `true` can be an `edge_where`, where it prunes nothing and
-// the walk follows every edge — the widest possible reading of "follow
-// edges satisfying none of these". So both spellings are driven at every
-// predicate position the language has.
 func TestAnEmptyCombinatorIsRefusedAtEveryPositionThatTakesOne(t *testing.T) {
 	for _, tc := range []struct{ doc, at string }{
 		{`{"v":1,"from":[{"type":"quest","where":{"all":[]}}]}`, "/from/0/where/all"},
@@ -922,12 +865,6 @@ func TestAnEmptyCombinatorIsRefusedAtEveryPositionThatTakesOne(t *testing.T) {
 // it exists for the same reason: the text an agent reads is the contract,
 // and a hand-written paragraph beside a table is a paragraph that will be
 // wrong the first time the table moves.
-//
-// It parses the generated text back into a type→operators map and
-// compares it with operatorsByType in **both** directions. One direction
-// alone is half a guard: a row printed and not declared is an operator an
-// agent will send and this package will refuse, and a row declared and
-// not printed is an operator no agent will ever find.
 func TestTheOperatorDescriptionIsGeneratedFromTheTable(t *testing.T) {
 	text := OperatorDescription()
 	printed := map[metamodel.FieldType][]Operator{}

@@ -2,15 +2,6 @@
 // the real, unmodified module and asserts over the plain data it
 // returns. No DOM stub is needed here and none is provided — palette.js
 // is pure, and this file is the first place that purity is spent.
-//
-// What this covers that no Go test can: the identity's central mechanical
-// rule (a hue belongs to a value's text, not to its rank in the result),
-// and the envelope guarantee the legend has to carry forward (a slot that
-// found nothing is absent, not empty, so *not set* and *the empty string*
-// are two rows).
-//
-// Run directly: `node internal/web/jstest/palette_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import {
   DATA_SLOTS,

@@ -50,19 +50,6 @@ const hoggerContent = "---\ntitle: The Fall of Hogger\n" +
 
 // TestEveryDocumentFieldSurvivesARoundTripThroughTheTools is the test
 // this whole task is organised around.
-//
-// It writes one document carrying every field the surface accepts —
-// path, content with frontmatter, kind, message, links with roles — and
-// then reads every one of them back through docs.read, docs.list,
-// docs.history, docs.read_version and docs.links.list. A field that goes
-// in and does not come out fails here.
-//
-// It is not a smoke test and it is not redundant with the domain tests:
-// the domain tests prove the service stores things, and this proves the
-// *surface* hands them back. A relation's field values were stored
-// correctly, and unreadable through either surface, for nine review
-// rounds, because everything verified that writing worked and nothing
-// asked whether it could be read back.
 func TestEveryDocumentFieldSurvivesARoundTripThroughTheTools(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -246,13 +233,6 @@ func TestADocsWriteWithoutAnExpectedVersionIsInvalidInputAtItsOwnPath(t *testing
 // among its field problems. Every negative test in this project asserts
 // the specific code and the specific path, not merely that something
 // went wrong.
-//
-// It handles both error shapes this surface produces, because the two
-// are genuinely different and a caller cannot tell them apart: a refusal
-// the *domain* made is a metamodel.ValidationError carrying the
-// ErrInvalidInput sentinel, and a refusal internal/web made about an
-// argument it parsed itself is an *web.MCPError carrying the same wire
-// code and the same {"fields":[{"path","message"}]} details shape.
 func assertInvalidInputAt(t *testing.T, err error, path string) {
 	t.Helper()
 	assert.Must(t, err != nil, "no error at all, want invalid_input naming %q", path)
@@ -414,10 +394,6 @@ func TestAHeadOnlyReadSaysHowMuchItLeftOut(t *testing.T) {
 // a hand-written one: a docs tool with no entry in the table below fails
 // this test, so a thirteenth tool added tomorrow is covered without anybody
 // remembering to edit it.
-//
-// The game it calls at is one the caller's own *user* owns and the
-// caller's own *token* is not bound to, which is the case requireScope
-// exists for — an instance admin gets no exemption either.
 func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -568,15 +544,6 @@ func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 // TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt drives the
 // three findings of the audit run over the real transport, in the JSON a
 // client parses.
-//
-// **The point is the sweep, not any one field.** The domain records who
-// and when on every write and the surface returned none of it, so
-// answering "what changed lately" — the first question a designer opens
-// a game bible to ask — cost one docs.history call per document. Each
-// of the three answers below is one place that fact was dropped: the
-// document itself, a row of a listing, and an entry of a history. The
-// fourth is the conflict, which echoed the body to merge onto and not
-// who wrote it.
 func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -678,11 +645,6 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 
 // TestTheLinkListingPagesOnBothSides drives docs.links.list over the
 // real transport with a limit and a cursor, from each end of the join.
-//
-// It exists because a paging cursor no test replays is not shipped: the
-// wire names — next_cursor, truncated — and the refusal of a cursor
-// carried to the other side are what a client actually depends on, and
-// none of them is visible from the domain's own test.
 func TestTheLinkListingPagesOnBothSides(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -802,14 +764,6 @@ func firstLinkCursor(t *testing.T, session *mcp.ClientSession) string {
 // TestTheBatchToolSeedsSeveralDocumentsInOneCall drives docs.write_many
 // the way a seeding agent does — over the real transport, out of the
 // JSON a client parses — and reads every field of its answer back.
-//
-// The fixture is four items with one bad one in the middle, for the
-// reason markdown's own batch test gives: a smaller one cannot tell
-// partial from atomic. What this test adds over that one is the wire —
-// that count, written and failed arrive as an agent sees them, that
-// written's path/id/version are true of the stored document, and that
-// the batch's own answer is what a follow-up edit can be built from
-// without a read.
 func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -927,15 +881,6 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	// A tool description is documentation an agent acts on, so an empty
 	// one is a tool nobody can use correctly; this is the only place the
 	// *served* text is looked at at all.
-	//
-	// The %! check below is a backstop and not the primary guard: every
-	// format string here is a constant, so `go vet` (which `make check`
-	// runs) already rejects a mismatched argument list at build time —
-	// the fmt.Sprintf-arity mutation for this file was refused by the
-	// compiler's vet pass, not by this assertion. It is kept for the
-	// case vet cannot see, a format string that stops being constant,
-	// and it is honest to say it has never been the thing that caught
-	// one.
 	for _, tool := range tools.Tools {
 		if !strings.HasPrefix(tool.Name, "docs.") {
 			continue
@@ -1094,18 +1039,6 @@ func writeDoc(t *testing.T, f metamodelFixture, path, body string, links ...web.
 
 // TestTheListingTellsTombstonesApartFiltersAndPages pins the four claims
 // docs.list's own description makes and that nothing was asserting.
-//
-// It exists because four separate mutations of docsList survived the
-// whole package: publishing Deleted false for every row, ignoring
-// IncludeDeleted, ignoring the entity filter, and never setting
-// NextCursor or Truncated. The round-trip test above touches three of
-// those, and could not fail on any of them: its fixture holds exactly
-// one document, so a filter that does nothing returns the same one row
-// as a filter that works, a page that never fills cannot be truncated,
-// and nothing in it is ever deleted. **A one-row fixture proves nothing
-// about a filter.** This one holds three documents across two entities,
-// one of them a tombstone, which is the smallest fixture in which each
-// of those four behaviours has an observably different wrong answer.
 func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -1224,12 +1157,6 @@ func TestAHistoryPageSaysWhenThereIsMore(t *testing.T) {
 
 // TestADiffTooLargeToCompareSaysCoarseOnTheWire pins the one field of
 // docs.diff a client cannot reconstruct from the answer.
-//
-// docs.diff's description tells a client to read coarse before it
-// renders, because a coarse answer says "the whole body was replaced"
-// about two versions that may differ by a word. Nothing asserted the
-// field: every other diff assertion compares small bodies, where coarse
-// is false either way.
 func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -1280,12 +1207,6 @@ func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
 // on docs.write's kind *and* on docs.list's kind filter, and
 // MaxMessageLen, refused on docs.write, docs.delete and docs.revert but
 // named only on docs.delete.
-//
-// An undisclosed bound is a refusal an agent can only discover by
-// tripping it, and it costs a whole round trip on a call that has
-// already composed the prose it meant to save. The numbers are read from
-// the domain's own constants rather than typed out, so this cannot pass
-// against a description quoting a stale number.
 func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -1330,12 +1251,6 @@ func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 // TestADeletedDocumentIsNotAnAddressForTheLinkTools pins the behaviour
 // the two descriptions above now disclose: docs.links.list by the path
 // of a soft-deleted document answers not_found rather than an empty set.
-//
-// It is the one refusal of this surface that reads like a bug from the
-// caller's side — the document is still there, and every version of it is
-// still readable — so it has to be both said and pinned. The domain pins
-// its own half (TestLinksArea's "a deleted document is not an address for
-// links" case); this is the wire code an agent actually receives.
 func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)

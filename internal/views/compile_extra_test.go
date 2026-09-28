@@ -52,11 +52,6 @@ func TestCompileExtraArea(t *testing.T) {
 	// validity flag and its timestamps — 0004_metamodel.sql plus 0009 — so
 	// @name and @key compile to columns Postgres does not have, and without
 	// this refusal the whole view fails with a SQL error instead of a pointer.
-	//
-	// **@invalid moved from the refused list to the controls**, and that is
-	// 0009: an edge now carries the same flag an entity does, so "the edges a
-	// schema edit broke" is a picture the language can draw. Leaving it
-	// refused would have made the flag visible on half the graph.
 	t.Run("an edge predicate admits only the builtins a relation has", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, name := range []string{"@name", "@key"} {
@@ -122,18 +117,6 @@ func TestCompileExtraArea(t *testing.T) {
 	// drawn as nothing" case is the decision Task 4 left to the compiler:
 	// @type is compared against the id a row actually holds, and a key this
 	// game does not declare is a refusal, not a picture with nothing in it.
-	//
-	// **Task 12 moved where the refusal is raised, and this test moved with
-	// it.** Task 6 left the operand as text and let the compiler look it up,
-	// recording that @type contributed no TypeRef and that the decision was
-	// Task 11 and 12's. It is a dependency like any other — the compiler
-	// refuses the whole view when the key names nothing — so leaving it out
-	// of view_refs meant deleting the type reported that it broke nothing,
-	// and renaming it broke a view every other reference would have carried
-	// through by id. So resolution refuses it now, at the same pointer, and
-	// lists it; the compiler's own lookup stays for the hand-built *Resolved
-	// and for a value a run binds to a parameter, which resolution cannot
-	// see.
 	t.Run("a misspelled type name is refused rather than drawn as nothing", func(t *testing.T) {
 		g, _ := a.games(t)
 		err := resolveOnly(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],

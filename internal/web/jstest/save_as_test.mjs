@@ -3,33 +3,6 @@
 // clicks arrive through, driven against the real
 // internal/web/static/client.js over a stubbed fetch whose every request
 // body is kept as **text**.
-//
-// What this layer covers that no Go test can.
-//
-// **That the copied query is the source's, byte for byte.** This is the
-// whole reason the dialog was allowed to exist: a human alone cannot
-// write a query in this product, there is no builder, and the moment
-// this dialog edits one stage of a query it is a builder with none of a
-// builder's design. The property is therefore about *the bytes that
-// leave the browser*, and the instrument is the raw body string the
-// stubbed fetch was handed — not a decoded object, which would forgive
-// a re-serialisation that reordered or dropped something. On the server
-// the column is jsonb and normalises anyway, so the only place this can
-// be checked at all is here.
-//
-// **That an illegal key costs no request.** The evidence is a *count of
-// requests*, which does not exist on the server: by the time
-// internal/web sees anything, a request that should not have been made
-// and one that should are the same request.
-//
-// **That the renderer list is the server's.** The fixture serves a
-// catalogue this front end has never heard of, and the chooser offers
-// it. A dialog that offered six hard-coded names would pass every check
-// that read only the real catalogue, and would drift the first time the
-// server's table changed.
-//
-// Run directly: `node internal/web/jstest/save_as_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { register } from "node:module";
 import path from "node:path";
@@ -64,12 +37,6 @@ function assertEqual(actual, expected, message) {
 }
 
 // --- The DOM stub -----------------------------------------------------
-//
-// Small, local and with no helpful defaults, for svg_dom.mjs's stated
-// reason: a stub that starts a flag where the assertion wants it makes a
-// test pass on its own. `getAttribute` answers null for an attribute
-// nobody set, and there is no innerHTML in either direction, so anything
-// found in a rendered subtree got there through textContent.
 function fakeElement(tag) {
   const el = {
     tagName: tag,
@@ -360,13 +327,6 @@ function optionsOf(select) {
 // --- The checks -------------------------------------------------------
 
 // The one this whole task turns on.
-//
-// The assertion is on the request's **text**: the body must carry
-// `"query":` followed by the source document's own serialisation,
-// character for character. A decoded comparison would forgive a
-// document that had been taken apart and put back together — which is
-// exactly what a query builder does, and exactly what this dialog is
-// forbidden to be.
 check("theQueryDocumentIsCopiedByteForByte", async () => {
   const { dialog, writes } = harness();
   await dialog.show();
@@ -522,13 +482,6 @@ check("theDialogSaysTheQueryIsUnchanged", async () => {
 });
 
 // The opening binding is an address and never a stage of the query.
-//
-// This is the correction the module's header records: a declared
-// parameter's default lives *inside* the query document, so editing one
-// is editing the document — which the check above forbids. What a
-// designer can be given is the binding the copy opens with, and that
-// travels in the URL exactly as it does for every other view in this
-// product.
 check("theOpeningBindingIsCarriedInTheAddressAndNotInTheQuery", async () => {
   const { dialog, writes } = harness();
   await dialog.show();
@@ -551,9 +504,6 @@ check("theOpeningBindingIsCarriedInTheAddressAndNotInTheQuery", async () => {
 });
 
 // The wiring: a designer's clicks and keystrokes reach the dialog.
-//
-// Task 15's finding was that a controller nothing drove is a controller
-// nobody has, and this is the same seam one task later.
 check("aDesignersClicksAndKeystrokesReachTheDialog", async () => {
   const { dialog, writes } = harness();
   wireSaveAs(dialog);
@@ -583,12 +533,6 @@ check("aDesignersClicksAndKeystrokesReachTheDialog", async () => {
 });
 
 // --- It is a dialog, and now it behaves like one ----------------------
-//
-// **These checks are why this harness gained a body.** It had none, so
-// `openDialog` answered null, the panel rendered where it always had,
-// and every check above passed with the dialog never opening once — the
-// exact shape of defect this directory exists to catch, in the harness
-// itself.
 
 check("openingDrawsThePanelInsideTheSharedDialog", async () => {
   const { dialog } = harness();
@@ -623,14 +567,6 @@ check("escapeClosesItAndThePanelComesBack", async () => {
 });
 
 // The call site.
-//
-// **This is the check the first round of mutation was missing.** Every
-// check above drives `wireSaveAs` directly, so commenting out its one
-// call in `wire` — the whole difference between a dialog a designer can
-// open and a dialog nobody can — left them all green. That is this
-// repository's most repeated defect, named at the call site: correct in
-// the file, dead on the wire, nothing in between. So this one goes
-// through `wire` itself, which is what the view page really calls.
 check("theViewPageWiresTheDialogAtItsCallSite", async () => {
   const { dialog } = harness();
   const surface = fakeElement("div");

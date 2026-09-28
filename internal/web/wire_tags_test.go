@@ -26,41 +26,6 @@ import (
 
 // The wire-tag guards: **a domain type that crosses the wire spells its
 // members the way the tools document them.**
-//
-// This package's standing habit is to project a domain row into a
-// tagged `…Output` type before it goes out, so the vocabulary an agent
-// reads is decided in one file. A handful of places skip the projection
-// and hand a domain type straight to the encoder — mcp_views.go's
-// runOutput does it for the whole of views.Result, and several bulk
-// outputs embed a domain slice as a tagged field. For those, Go's
-// default field naming *is* the wire spelling, and Go's default is the
-// Go field name.
-//
-// That is not a hypothetical. `internal/views.Position` shipped with no
-// tags: a run answered `EntityType`/`EntityKey`/`X`/`Y`/`Pinned` while
-// views.set_positions took, and every tool description documented,
-// `entity_type`/`entity_key`/`x`/`y`/`pinned`. A client reading the
-// documented spelling found no stored position in any envelope — not an
-// error, not an empty list with a reason, but a view that looks exactly
-// like one nobody has ever arranged. The interface's layout composer
-// read both spellings as a workaround rather than being able to trust
-// one.
-//
-// A type with no tags is invisible from any one call site, which is how
-// that one survived a whole sub-project and its review rounds. So it is
-// swept rather than spot-checked: TestEveryDomainTypeOnTheWireIsTagged
-// walks the type graph of every root below, and
-// TestEveryDomainTypeOnTheWireIsAKnownRoot keeps the root list from
-// falling behind the code.
-
-// wireDomainRoots is every type from outside package web that reaches
-// the encoder, keyed by the qualified name the source spells it with.
-//
-// `views.Result` is here by hand and is the one that has to be: it is
-// not the type of any tagged field, because runOutput takes it apart
-// into a map and puts its members in one at a time. Everything else is
-// a tagged field's type, and the companion test below fails if the code
-// grows one this map does not name.
 var wireDomainRoots = map[string]reflect.Type{
 	// The run envelope. runOutput spreads this into a map, so every
 	// member of it is a wire value under its own Go-decided name.
@@ -101,11 +66,6 @@ var domainPackages = map[string]bool{
 
 // TestEveryDomainTypeOnTheWireIsTagged walks each root's type graph and
 // requires every exported field to say what it is called on the wire.
-//
-// The walk is what makes this a sweep rather than a spot check: a type
-// reached only as the element of a slice of a member of a root is
-// checked exactly as the root is, because that is how far a client
-// reads.
 func TestEveryDomainTypeOnTheWireIsTagged(t *testing.T) {
 	t.Parallel()
 	assert.Must(t, len(wireDomainRoots) != 0, "no roots: this guard swept nothing")
@@ -178,10 +138,6 @@ func walkWireType(t *testing.T, path string, typ reflect.Type, seen map[reflect.
 // TestEveryDomainTypeOnTheWireIsAKnownRoot reads this package's own
 // source for a tagged field whose type comes from a domain package, and
 // fails if wireDomainRoots does not name it.
-//
-// Without it the sweep above is a list somebody has to remember to
-// extend — which is the failure it exists to close, one level up: a rule
-// established correctly and not carried one step along.
 func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
 	t.Parallel()
 	found := map[string]string{}

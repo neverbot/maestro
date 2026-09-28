@@ -16,13 +16,6 @@ import (
 
 // The bounds on a saved view's own prose, and the vocabulary of its
 // layout mode.
-//
-// The two lengths are internal/metamodel's, deliberately: a view's name
-// is the same kind of value as a type's label — one line in a picker,
-// ordered by a listing — and its description is the same kind of value
-// as a type's description. Matching them means a designer does not meet
-// two different caps for the same shape of text in two places of one
-// product.
 const (
 	// MaxViewNameLen bounds `name`. A name is required: ListViewsPage
 	// orders by it, so an unnamed view sorts to the front of every list a
@@ -39,17 +32,6 @@ const (
 
 // The three layout modes, which are a closed contract with the client
 // and are checked here as well as by 0008_views.sql's CHECK.
-//
-// **Checked in Go rather than left to the CHECK**, for the reason every
-// bound in this sub-project is checked before Postgres sees it: a
-// constraint violation comes back as `new row for relation "views"
-// violates check constraint (SQLSTATE 23514)`, untyped, over a value the
-// caller itself supplied, and reaches an agent as internal_error. What
-// the CHECK is for is a write path that does not come through here.
-//
-// What each mode means is a contract with the *client* and no server
-// code reads the value beyond validating and returning it;
-// 0008_views.sql states the three meanings where the column is declared.
 const (
 	LayoutAuto   = "auto"
 	LayoutManual = "manual"
@@ -83,51 +65,9 @@ const noVersion int32 = -1
 
 // createExpectedVersion is the `expected_version` that spells "this view
 // must not exist yet".
-//
-// It is 0 because this surface took internal/markdown's convention for
-// the wire rather than internal/metamodel's absent-means-create — see
-// ViewInput.ExpectedVersion — and it is named rather than written as a
-// bare `0` in UpsertView, where the literal would read as a version
-// number and is in fact the opposite of one: no stored view is ever at
-// version 0, so this value can only mean "I am creating".
 const createExpectedVersion int32 = 0
 
 // ViewInput is one saved-view upsert, addressed by its key.
-//
-// Query is the document **as the caller wrote it** and that is what gets
-// stored: a rename never rewrites it (Task 12), so what is read back is
-// what was written. Semantically, not byte for byte — the column is jsonb,
-// which normalises whitespace, collapses duplicate keys and reorders an
-// object's keys, so a read-back compares decoded values and TestViewsArea's
-// "a view is read back with every field it was saved with" case does
-// exactly that. It is parsed and resolved before anything is stored, and
-// the refs written beside it are the ones that pass returned — see
-// UpsertView, which is where the difference between a parsed query and a
-// resolved one is spent.
-//
-// RendererParams is a free map judged entirely by CheckRenderer: an
-// unknown name is refused, and every declared one is judged by its
-// kind's checker. That is also what bounds it — a caller cannot store a
-// megabyte under a name no renderer takes — so this package applies no
-// second size rule of its own.
-//
-// ExpectedVersion must match the stored version when the view already
-// exists; a nil ExpectedVersion against an existing view is a conflict,
-// not an overwrite, and a non-nil one against a view that is *not* there
-// is a metamodel.RemovedError rather than a creation — the whole
-// argument is at metamodel.EntityTypeInput and metamodel.RemovedError
-// and is not restated here. On creation there is nothing to match, and
-// the field is still passed as the guard on the DO UPDATE, because a
-// caller that believes it is creating may be racing a creator.
-//
-// LayoutMode is optional: an empty mode is DefaultLayoutMode.
-//
-// There is no layout seed, and there is deliberately no field for one.
-// A seed column existed on views for a force-directed layout that would
-// have needed one to keep a saved view recognisable; the engine that
-// shipped is deterministic, no reader ever appeared, and migration 0012
-// dropped it — that migration is where the argument lives, and what a
-// future seed would have to seed.
 type ViewInput struct {
 	Key             string
 	Name            string
@@ -141,16 +81,6 @@ type ViewInput struct {
 }
 
 // ViewFilter narrows a view listing.
-//
-// Renderer is an exact match on the stored renderer name and is empty
-// for "every renderer". It is deliberately not resolved or folded: a
-// renderer name is one of a fixed catalogue of lower-case identifiers
-// this package itself writes, not a game's own key, so there is no
-// second spelling for a fold to reconcile.
-//
-// Cursor is the NextCursor of a previous call. It belongs to the game
-// and the filter it was issued for and to no other, and it is a position
-// rather than a snapshot; paging.Cursor carries the whole contract.
 type ViewFilter struct {
 	Renderer string
 	Cursor   string
@@ -158,14 +88,6 @@ type ViewFilter struct {
 }
 
 // ViewPage is one page of saved views plus the cursor for the next.
-//
-// **NextCursor is set when the page came back full**, and empty
-// otherwise, so a caller looping until it is empty is correct and must
-// expect a final empty page rather than treating one as an error. The
-// rest of the contract — what a position buys under concurrent editing,
-// why a cursor cannot be carried to another listing or another game, and
-// why nothing signs it — is paging.Cursor's, stated once for every
-// domain that pages. Cursor.Sort, for this listing, is the view's name.
 type ViewPage struct {
 	Views      []dbq.View
 	NextCursor string
@@ -193,42 +115,6 @@ type ViewDependency struct {
 }
 
 // UpsertView creates or replaces a saved view, addressed by its key.
-//
-// **Four passes, each answering with its own code, in the order a caller
-// can act on them**, which is the order this package already refuses a
-// query in (ParseQuery's structural pass, then its limits, then
-// resolution): the row's own arguments, then the query document, then
-// its resolution against this game's vocabulary, then the renderer
-// against the resolved query. A caller whose name is empty and whose
-// query names a type this game does not have hears about the name
-// first — every pass but the first needs a document that parsed, and a
-// FieldError list carries one code.
-//
-// **What is stored is what resolution returned, never what ParseQuery
-// alone returned**, and this is the task where the difference is spent.
-// A parsed query is structurally bounded and semantically unjudged: no
-// key names anything, no operator is known to suit its field, and a
-// parameter default is not yet known to be a scalar of its declared
-// type. Storing one would be storing a document with no guarantee that
-// it answers any question — and view_refs, which is computed from the
-// *resolved* form, would have nothing to be computed from. So Resolve
-// runs before the write and its Refs are what the transaction writes.
-//
-// **CheckRenderer is called rather than its rules restated.** A view
-// that passes save-time checking and cannot then be drawn is the failure
-// the renderer catalogue exists to prevent, and Task 10 found that
-// failure three times in one file because a rule had been written once
-// and copied. There is one caller of that check and this is it.
-//
-// **That "one caller" is a property Task 14 has to keep.** The check
-// takes the query and the parameters together, and this upsert is the
-// only write path over both, so there is no partial update that could
-// change a renderer parameter against a query the check never saw and
-// leave a stored view undrawable. views.set_background is the second
-// write path Task 14 adds: it may write the three background columns,
-// which no renderer rule reads, and it must not grow into a setter for
-// renderer parameters without calling CheckRenderer against the stored
-// query — that is the moment this invariant would be lost.
 func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewInput) (dbq.View, error) {
 	problems := metamodel.RowKeyProblems(pointer("key"), in.Key)
 	problems = append(problems, viewNameProblems(in.Name)...)
@@ -327,17 +213,6 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			// through the front door, the state the setter refuses.
 			// The refusal there even named this call as the way to
 			// change the renderer.
-			//
-			// It is a refusal rather than a silent clear for the reason every write
-			// in this package refuses rather than repairs: a designer who spent an
-			// afternoon placing a world map must not lose it to an agent editing the
-			// query, and the repair — clear the background first — is one call the
-			// message names. TestAssetsArea's "changing the renderer away from map
-			// is refused while a background is attached" case drives it.
-			//
-			// It sits after the version check, so a caller that is also
-			// stale hears the version first, which is the order this
-			// whole branch exists to fix.
 			if existing.BackgroundAssetID != nil && !RendererReadsBackground(in.Renderer) {
 				return &metamodel.ValidationError{
 					Code: metamodel.CodeInvalidInput,
@@ -362,29 +237,6 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			// the designer's deletion. The note said internal/metamodel's
 			// type upsert had byte-identical structure and filed it as a
 			// backlog item.
-			//
-			// It is closed here **and** there, in one change, for the
-			// reason the note itself gives: two upserts of one shape
-			// answering the same question two ways is the second contract
-			// this repository would then be paying for. What a view loses
-			// to a resurrection is its own: view_positions and
-			// view_assets key into views(id), so a new id silently
-			// discards every node a designer dragged and the background
-			// image behind them, and view_refs goes with the row.
-			// metamodel.RemovedError carries the whole argument, and the
-			// markdown asymmetry it must not be harmonised with.
-			//
-			// **Zero is exempt, and it is the one difference from
-			// internal/metamodel's four upserts.** This surface adopted
-			// internal/markdown's convention rather than the metamodel's:
-			// `expected_version: 0` is how a caller spells "this view must
-			// not exist yet" (ViewInput.ExpectedVersion, and the
-			// `views.upsert` description), so a 0 reaching this branch is
-			// a creation claim that has just been proved right, not a
-			// claim about a row. Every other value is a claim about a row
-			// that is not there. The metamodel takes nil for the same
-			// meaning and reads 0 as an impossible version, which is why
-			// this exemption is written here and not shared.
 			if in.ExpectedVersion != nil && *in.ExpectedVersion != createExpectedVersion {
 				return &metamodel.RemovedError{
 					Subject: "view",
@@ -436,26 +288,6 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 		// told the spelling" case held an ExpectedVersion equal to the version
 		// the winning creator landed on, passed both the locked read and the
 		// guard, and updated a row it never saw under a spelling it never sent.
-		//
-		// That writer is now turned away at the locked read, because a
-		// version claim against a row that is not there is a
-		// metamodel.RemovedError rather than a creation — so the only
-		// calls reaching this statement either matched a row this
-		// transaction holds FOR UPDATE or claimed nothing at all and pass
-		// noVersion, which can insert their own spelling or lose to the
-		// index but never update a stranger's row. conflictOnViewKey is
-		// what the loser of *that* race meets, and its respelling arm is
-		// still exercised. This is exactly the position internal/markdown
-		// records for the same check, reached here by the same rule.
-		// **The refs are rewritten inside this transaction**, against the
-		// row this statement just wrote. Outside it they would drift from
-		// the query they index, which is the one thing they exist not to
-		// do: a view whose query landed and whose refs did not would
-		// report, on the next type deletion, that nothing broke.
-		// The renderer's own type references travel with the query's.
-		// Without them a run of this view resolves a renamed relation
-		// type at its parameter by key, finds nothing, and reports a type
-		// missing that the rename left standing.
 		refs := make([]TypeRef, 0, len(resolved.Refs))
 		refs = append(refs, resolved.Refs...)
 		refs = append(refs, rendererTypeRefs(in.Renderer, in.RendererParams, resolved.Cat)...)
@@ -472,13 +304,6 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 
 // writeRefs replaces one view's dependency index with the list the
 // resolve pass produced.
-//
-// Delete-then-insert rather than a diff: the list is small (one entry
-// per type reference in one query), the pointers move whenever the
-// document's shape moves, and a diff would be a second place that
-// decides what a reference is. The unique index on (view_id, pointer) is
-// what makes a duplicate a refusal rather than a silent second row, so
-// nothing here swallows one.
 func writeRefs(ctx context.Context, q *dbq.Queries, projectID, viewID uuid.UUID,
 	refs []TypeRef,
 ) error {
@@ -531,13 +356,6 @@ func conflictOnViewKey(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 
 // ViewByKey loads one view by its key, matched without regard to case,
 // as every key in Maestro is.
-//
-// A missing key is named rather than reported as a bare sentinel,
-// because the caller supplied this key and it is the one thing it can
-// act on. **ViewByID deliberately keeps the bare sentinel**: a caller
-// addressing a row by id already holds the id it sent, and there is no
-// second argument for it to tell apart — the same split
-// internal/metamodel draws between EntityTypeByKey and EntityTypeByID.
 func (s *Service) ViewByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.View, error) {
 	row, err := s.q.GetViewByKey(ctx, dbq.GetViewByKeyParams{ProjectID: projectID, Key: key})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -562,11 +380,6 @@ func (s *Service) ViewByID(ctx context.Context, projectID, id uuid.UUID) (dbq.Vi
 }
 
 // ViewRefs is one view's dependency list as stored, in document order.
-//
-// It reads by view id, and the id is scoped by the same project filter
-// every other statement in this domain carries: a ref list is a
-// description of a game's own vocabulary and a leaked view id is not
-// authority to read it.
 func (s *Service) ViewRefs(ctx context.Context, projectID, viewID uuid.UUID) ([]dbq.ViewRef, error) {
 	rows, err := s.q.ListViewRefs(ctx, dbq.ListViewRefsParams{
 		ProjectID: projectID, ViewID: viewID,
@@ -579,19 +392,6 @@ func (s *Service) ViewRefs(ctx context.Context, projectID, viewID uuid.UUID) ([]
 
 // ViewsDependingOn answers "which views does this type hold up, and
 // where in each query", for one entity type or one relation type.
-//
-// **It must be asked before the type is deleted.** ON DELETE SET NULL is
-// what makes a ref row survive its type — with its key text intact, so
-// Task 12 can say what the query used to name — and the same SET NULL
-// empties the column this lookup matches on. Asked afterwards it finds
-// nothing and reports that nothing broke, which is a wrong answer rather
-// than an error; the deletion that wants the list asks inside its own
-// transaction, before the delete.
-//
-// kind is KindEntityType or KindRelationType. An unknown one is a
-// programming error rather than a caller's, and is refused rather than
-// answered with an empty list, which would read as "nothing depends on
-// it".
 func (s *Service) ViewsDependingOn(ctx context.Context, projectID uuid.UUID,
 	kind string, typeID uuid.UUID,
 ) ([]ViewDependency, error) {
@@ -619,10 +419,6 @@ func (s *Service) ViewsDependingOn(ctx context.Context, projectID uuid.UUID,
 }
 
 // ListViews returns one page of a game's saved views.
-//
-// **A page is a position, not a snapshot**; paging.Cursor records what
-// that means while the game is being edited underneath the caller, and
-// ViewPage records what a cursor is set for.
 func (s *Service) ListViews(ctx context.Context, projectID uuid.UUID, f ViewFilter) (ViewPage, error) {
 	limit := paging.Size(f.Limit, defaultViewPage, maxViewPage)
 	fingerprint := viewListingFingerprint(projectID, f)
@@ -658,37 +454,12 @@ func (s *Service) ListViews(ctx context.Context, projectID uuid.UUID, f ViewFilt
 }
 
 // viewListingFingerprint digests the listing a cursor was issued under.
-//
-// **The project id is first and the domain discriminator is second**,
-// and neither is decoration. Without the project id two games'
-// unfiltered listings share a fingerprint, and one game's cursor pages
-// the other's rows from a position that means nothing there — the defect
-// internal/paging's package comment records, which was fixed in one
-// listing and left standing in another. Without "views", a cursor from
-// this listing and one from the metamodel's entity listing over the same
-// game and an empty filter would be interchangeable, and each would page
-// the other perfectly and answer a different question.
-//
-// It is asserted compositionally as well as behaviourally, by
-// TestListArea's "the view listing fingerprint is project id first and
-// carries its domain" case, because the behavioural test can pass without
-// the project id whenever another part discriminates — here the renderer
-// filter does — and that is exactly how the original defect survived its
-// first test.
 func viewListingFingerprint(projectID uuid.UUID, f ViewFilter) string {
 	return paging.Fingerprint(projectID.String(), "views", f.Renderer)
 }
 
 // refuseViewCursor turns paging's message into this package's own error,
 // at the argument's own path.
-//
-// invalid_input rather than a bare error: the cursor is the caller's own
-// argument and the recovery is the caller's — page from a cursor a
-// previous call returned, or omit it. Left untyped it would reach an
-// agent as internal_error over a value the agent itself supplied. The
-// *sentence* lives in internal/paging so that this domain and the two
-// that already page cannot tell a caller three different things about
-// one bad cursor.
 func refuseViewCursor(message string) error {
 	return &metamodel.ValidationError{
 		Code:   metamodel.CodeInvalidInput,
@@ -699,14 +470,6 @@ func refuseViewCursor(message string) error {
 // RemoveView deletes a view, and with it the positions a human dragged
 // and the refs the upsert wrote: both key into views with ON DELETE
 // CASCADE, so this is one statement rather than three.
-//
-// It takes no expected version, and that is a decision. A view is
-// derived content — the query is stored, the picture is not — so the
-// cost of removing one somebody else had just edited is one re-upsert
-// from a document the caller already holds, while requiring a version
-// would make every removal a read-then-write a designer has to retry
-// against churn they do not care about. The metamodel makes the same
-// choice for its own removals.
 func (s *Service) RemoveView(ctx context.Context, projectID uuid.UUID, key string) error {
 	row, err := s.ViewByKey(ctx, projectID, key)
 	if err != nil {
@@ -733,13 +496,6 @@ func (s *Service) RemoveView(ctx context.Context, projectID uuid.UUID, key strin
 }
 
 // paramsOrEmpty keeps a nil map out of the column.
-//
-// encoding/json renders a nil map as `null`, and `null::jsonb` is a
-// legal jsonb value that is not an object: every later reader — Task
-// 15's tool, a renderer reading its parameters back — would then have to
-// handle two spellings of "no parameters". The same rule Task 6 applied
-// to an empty result envelope, applied to the one column of this domain
-// that can be empty.
 func paramsOrEmpty(params map[string]any) map[string]any {
 	if params == nil {
 		return map[string]any{}
@@ -749,12 +505,6 @@ func paramsOrEmpty(params map[string]any) map[string]any {
 
 // viewNameProblems bounds the one string on a view that a listing
 // depends on.
-//
-// Empty is refused, for the reason internal/metamodel refuses an empty
-// label: ListViewsPage orders by name, so an unnamed view sorts to the
-// front of every list a designer sees and identifies itself by nothing.
-// A key is not a substitute — the key is the handle, the name is what a
-// human reads.
 func viewNameProblems(name string) []metamodel.FieldError {
 	if name == "" {
 		return []metamodel.FieldError{{
@@ -785,20 +535,6 @@ func layoutModeProblem(mode string) string {
 // judgement, for the two pieces of prose a view carries. The judgement
 // is shared so that Maestro does not grow a seventh copy of the scan;
 // only the wording and the allowance are decided here.
-//
-// **The length is metamodel.LengthProblem's judgement, not a second
-// one**, for the same reason the control-character scan is CheckText's.
-// It counts runes: this check used to count bytes, which made a view
-// named in Spanish cap at 100 characters where a type labelled in
-// Spanish caps at 200 — two different caps for the same shape of text in
-// two places of one product, which is precisely what the constants above
-// say they exist to prevent. Matching numbers were never the point on
-// their own; the unit has to match too.
-//
-// allowParagraphs is the one asymmetry: a description is free-form prose
-// a designer writes about a picture and a newline in it is their own
-// paragraph break, while a name is rendered as one line in a picker and
-// a newline there is refused exactly like any other control character.
 func checkStorableText(value string, max int, allowParagraphs bool) string {
 	if problem := metamodel.LengthProblem(value, max); problem != "" {
 		return problem

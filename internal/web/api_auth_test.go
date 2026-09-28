@@ -144,12 +144,6 @@ func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
 // a guess that was never actually evaluated — so the outage would go on
 // locking people out for a further minute after the database itself had
 // already recovered.
-//
-// Closing the pool after minting a real account forces Authenticate's
-// GetUserByEmail to fail with a genuine connection error, not
-// pgx.ErrNoRows, the same technique
-// TestDatabaseErrorDuringSessionAuthenticationIsInternalError already
-// uses for the authentication middleware (auth_test.go).
 func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -720,21 +714,6 @@ func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
 }
 
 // TestRegisterWithExpiredInviteReportsExpired.
-//
-// **This test used to sleep, and the sleep was the bug.** It minted an
-// invite with a one-millisecond TTL and slept ten milliseconds, so the
-// assertion held only while the database server's clock was no more than
-// nine milliseconds behind this process' — a margin nothing bounds, and
-// one the two containers a real deployment runs in have no reason to
-// respect. Under load it failed, and the failure looked like the
-// registration path accepting an expired invite.
-//
-// The invite is now expired by *statement*, on the same clock every
-// expiry check uses, with an hour of margin instead of nine
-// milliseconds. Nothing here waits for anything, and the production
-// half of the same defect — expires_at written from Go's clock and
-// judged against Postgres' — is fixed in identity.sql rather than
-// papered over here.
 func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
 	t.Parallel()
 	srv, ids, _, pool := newTestServerWithPool(t)
@@ -1026,16 +1005,6 @@ func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
 // TestARefusalNamesEveryUnknownMemberAtOnce pins the promise
 // reference/errors.md makes to an agent: "every refusal on this surface
 // reports every problem it can see at once".
-//
-// It was true for missing required fields and false for unknown ones:
-// `encoding/json`'s DisallowUnknownFields stops at the first it meets,
-// so a body with three wrong field names cost three round trips — the
-// exact pattern that page warns against, in the surface the page is
-// about. Found by giving the bundle to an agent with no other context
-// and watching what it did.
-//
-// Mutation: drop the `unknownMembers` call in decodeJSONBodyLimit and
-// this fails with one field where it wants three.
 func TestARefusalNamesEveryUnknownMemberAtOnce(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)

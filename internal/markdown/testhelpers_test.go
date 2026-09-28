@@ -17,14 +17,6 @@ import (
 )
 
 // area is one database shared by every claim in a test file.
-//
-// Documents are scoped by project, and every claim here seeds its own
-// game, so the database is the one thing they can share: a migrated
-// template copy and a connection pool per claim bought isolation this
-// package already had from project_id. A claim that changes the schema —
-// the ALTER TABLE ones that force a commit to fail — still takes a
-// database of its own through newService, because an altered table is
-// not scoped by project.
 type area struct{ pool *pgxpool.Pool }
 
 func newArea(t *testing.T) area {

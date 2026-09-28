@@ -1,25 +1,4 @@
 // The harness for the query builder's emitter.
-//
-// Three properties, and each of them is the reason a line of the design
-// spec exists:
-//
-//   - **What the sentence says is what the document says.** A clause
-//     stack emits the query a designer read aloud, including the parts
-//     they did not type: the linear chain's `from`, the set names, and
-//     the `all` a second condition on one line becomes.
-//   - **A pointer lands on a clause.** `views.validate` answers with a
-//     JSON pointer, and the map returned beside the document is the only
-//     thing that turns that pointer back into the line that wrote it
-//     (§5). The pointer for a lone condition and for one of two is not
-//     the same pointer, which is exactly the case a map built by hand
-//     gets wrong.
-//   - **The door closes by itself** (§4). A document the builder cannot
-//     hold is refused rather than approximated, and the refusal comes
-//     from the round trip rather than from a list of shapes somebody
-//     remembered to write down.
-//
-// Run directly: `node internal/web/jstest/compose_test.mjs`.
-// internal/web/static_compose_test.go shells out to it too.
 
 let failures = 0;
 function check(what, got, want) {
@@ -35,8 +14,6 @@ const { compose, decompose, roundTrips, canonicalJSON, V, TOO_MUCH, CLAUSE_FROM,
   await import("../static/query/compose.js");
 
 // --- The sentence the language was designed around --------------------
-//
-// "the quests a Mage can reach between level 20 and 30, coloured by zone"
 
 const SENTENCE = [
   { kind: CLAUSE_FROM, id: "a", type: "quest" },
@@ -233,14 +210,6 @@ check("a changed value is not a round trip",
   false);
 
 // --- What the real parser says about what it emits ---------------------
-//
-// Every property above is about this module in isolation, and this
-// module's whole output is a document a Go parser reads. `--emit` prints
-// the documents composed above, one per line, and
-// internal/web/static_compose_test.go feeds each of them to
-// views.ParseQuery: a builder whose sentence emits a document the server
-// refuses is the "correct in the module, dead at the call site" defect
-// with a JSON document in the middle.
 if (process.argv.includes("--emit")) {
   for (const document of EMITTED) console.log(JSON.stringify(document));
   process.exit(failures > 0 ? 1 : 0);

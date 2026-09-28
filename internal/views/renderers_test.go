@@ -249,13 +249,6 @@ func TestRenderersArea(t *testing.T) {
 	// carries" case is this file's third rule — a requirement is judged
 	// against the *saved* query — applied to every parameter that names a
 	// declared field key, and not only to the one it was first written on.
-	//
-	// A node comes back with its identity and the projection's attrs;
-	// declared fields only when a run asks for include_fields, which is a
-	// per-run option no saved view can turn on. A timeline saved with an
-	// axis_field the query does not carry has no axis at all: every node at
-	// the origin. A map in fields mode has no coordinates. Both were accepted
-	// while `columns` alone enforced the rule.
 	t.Run("a field key parameter names a field the saved query carries", func(t *testing.T) {
 		g, _ := a.games(t)
 		carrying, bare := resolveFor(t, g, carryingQuery), resolveFor(t, g, questQuery)
@@ -403,17 +396,6 @@ func TestRenderersArea(t *testing.T) {
 	// TestRenderersArea's "snap is read in manual mode and refused in fields"
 	// case is the "read by nothing" rule on the last map parameter that is
 	// still a renderer parameter.
-	//
-	// **The background knobs used to be tested here and are not renderer
-	// parameters any more.** background_asset_id, background_scale and
-	// background_offset were declared in this catalogue *and* carried as
-	// columns on views by 0008_views.sql — two stores for one value. The
-	// columns won (only a column can carry the composite foreign key that
-	// refuses another game's image, and the ON DELETE SET NULL that detaches a
-	// deleted one), the parameters are gone, and the same rule is applied to
-	// the columns by assets.go's SetBackground: TestAssetsArea's "a background
-	// knob with no background is refused" case is where that half of this test
-	// went.
 	t.Run("snap is read in manual mode and refused in fields", func(t *testing.T) {
 		g, _ := a.games(t)
 		quests := resolveFor(t, g, carryingQuery)
@@ -649,26 +631,6 @@ func TestRenderersArea(t *testing.T) {
 		assert.Must(t, errors.As(err, &qe), "expected a *QueryError, got %v", err)
 		assert.Must(t, len(qe.Fields) == 5, "expected all five problems in one pass, got %v", qe.Fields)
 		// And in a stable order rather than the map's, which has none.
-		//
-		// **The mechanism, measured rather than assumed.** The previous
-		// version of this comment claimed three keys survive an unsorted
-		// implementation one run in six and five one in a hundred and twenty,
-		// as though Go permuted a map's keys. It does not: a small map is
-		// iterated from a random start slot, so what comes back is a
-		// *rotation* of the literal's insertion order, not a permutation.
-		// Measured on this toolchain over 10,000 rebuilds of the literal
-		// below, five keys give five distinct orders and 0 of 10,000 came
-		// back already sorted — because the literal happens to begin with a
-		// key that is not first alphabetically. The same five keys written
-		// alphabetically came back sorted 4,984 times in 10,000. **The key
-		// count is irrelevant, and the guard was standing on the order
-		// somebody happened to type.**
-		//
-		// So the order is asserted deterministically instead: the same call
-		// twenty times over, every run identical and every run equal to the
-		// sorted expectation. Reordering the literal cannot break it and
-		// cannot silently weaken it, and no database is touched per
-		// iteration.
 		want := []string{
 			"/renderer_params/arrows",
 			"/renderer_params/cluster_by",
@@ -825,15 +787,6 @@ func TestRenderersArea(t *testing.T) {
 	// TestRenderersArea's "every requirement is documented and every doc has a
 	// requirement" case is the guard F6 asks for, and it is bidirectional for
 	// the reason every other guard over this table is.
-	//
-	// The generated description promises, in its own first sentence, to say
-	// what a query has to produce for a view to be saveable against each
-	// renderer — and for one round it said it for none of them. Worse than
-	// the omission is the drift it left open: a Requires could be added,
-	// changed or deleted and no generated sentence would change and no test
-	// would notice, in the half of the contract a query is actually written
-	// against. So a renderer that checks the query has to say what it checks,
-	// and a renderer that says it checks something has to check it.
 	t.Run("every requirement is documented and every doc has a requirement", func(t *testing.T) {
 		documented := 0
 		for _, r := range renderers {
@@ -874,10 +827,6 @@ func TestRenderersArea(t *testing.T) {
 	// stored, returned and read by nothing — which is the defect this whole
 	// file exists to refuse, reached through the one door none of the other
 	// guards watch.
-	//
-	// Divergence is not forbidden, it is declared: a name that genuinely means
-	// two things goes in the exception list with a reason, and this test then
-	// stops asserting about it.
 	t.Run("a parameter name carries one kind across the catalogue", func(t *testing.T) {
 		// Empty on purpose. Nothing in this catalogue needs to diverge, and a
 		// name added here needs a sentence saying why an agent should expect
@@ -966,10 +915,6 @@ func TestRenderersArea(t *testing.T) {
 	// description is one no agent will find, and a sentence naming a knob that
 	// does not exist is one every agent will send and this package will
 	// refuse.
-	//
-	// It is bidirectional, the way the operator table's guard is: the
-	// description is parsed back into renderers and parameters and compared
-	// with the table both ways.
 	t.Run("every renderer declares its parameters and the description is generated from them", func(t *testing.T) {
 		for _, r := range renderers {
 			switch {
@@ -1114,12 +1059,6 @@ func TestRenderersArea(t *testing.T) {
 	// run performs. A kind in one and not the other is a parameter whose type
 	// deletion reports nothing and whose rename reports the type missing — the
 	// defect Task 12's finding 2 fixed once already, for `@type` operands.
-	//
-	// The second arm is behavioural rather than a second list: a checker that
-	// answers "this game has no such type" is a checker that turns a key into
-	// a declared type, whatever its kind is called, and every one of those is
-	// a reference. It is asked with a string naming nothing, which is the one
-	// input every such checker refuses.
 	t.Run("every type naming parameter kind is a recorded reference", func(t *testing.T) {
 		g, _ := a.games(t)
 		r := resolveFor(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -1145,19 +1084,6 @@ func TestRenderersArea(t *testing.T) {
 	// TestRenderersArea's "the renderer description names nothing only this
 	// repository knows" case keeps the catalogue's prose readable by its
 	// actual audience.
-	//
-	// `map`'s Doc said the coordinates were "the ones designers dragged
-	// (Task 13's positions)", and the generated description really carried
-	// it: an agent reading that description has no plan, no task numbering
-	// and no way to find out what Task 13 is, so the parenthesis was noise
-	// at best and a dead reference at worst. It came from Task 10 and
-	// survived a rewrite of the sentence around it, which is why this is a
-	// sweep rather than a fix.
-	//
-	// The list is of things that only make sense inside this repository: a
-	// plan task, a spec section, a Go file, a migration, a numbered review
-	// finding. The description may name tools, parameters, renderers and
-	// wire codes — everything a caller can act on — and nothing else.
 	t.Run("the renderer description names nothing only this repository knows", func(t *testing.T) {
 		description := RendererDescription()
 		for _, forbidden := range []string{

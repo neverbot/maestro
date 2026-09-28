@@ -1,18 +1,4 @@
 // The Catalogue destination: what this game declared.
-//
-// It is the same two catalogues the home's middle lane shows, from the
-// same single call, and that is deliberate rather than duplication: the
-// lane is a summary a designer glances at and this page is where they
-// come to read it, with room for the counts and the flags. Both are
-// built from GET /summary, so a game with four hundred thousand
-// entities renders exactly as fast as one with four.
-//
-// An entity type is a link to its own catalogue of entities; a relation
-// type is a link to its own page, which says what it may join, what the
-// analysis engine makes of it and what its edges carry. There is still
-// no page *of edges* — an edge is read beside the entity it touches —
-// and that is a different thing from the type's own declaration, which
-// until now could be read nowhere.
 
 import {
   DESTINATION_CATALOGUE,

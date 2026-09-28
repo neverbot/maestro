@@ -1,23 +1,4 @@
 // The picker: one control over a game's own vocabulary.
-//
-// **This is the reusable half of the query builder**, and it is built
-// before the builder for the reason the builder's own spec gives: the
-// four pickers are "the real work", and three other screens want them
-// too — the route step list, the Draw clause's `color_by`, and the
-// frame's "start from this room".
-//
-// It exists because a person choosing "available to" from a list cannot
-// misspell `available_to`, and a misspelled key is the single most
-// common way a hand-written query fails. So the control never takes a
-// key as free text: it takes a **choice** from what the game declared,
-// and the key it answers with is the one the game wrote.
-//
-// It is a plain custom element rather than a Lit one, deliberately:
-// nothing here re-renders from a model, it is a `<details>` around a
-// filtered list, and adding Lit's module graph to a control that closes
-// on a click would be paying for a framework by the byte. It adopts the
-// shared control stylesheet like everything else, so it looks like the
-// products' other controls rather than like itself.
 
 import { CONTROL_CSS, adoptControlStyles } from "./control-styles.js";
 
@@ -172,9 +153,6 @@ export function adoptPickerStyles(shadow) {
 // fetches into options. It is exported and pure so the mapping is
 // testable without a DOM: what a picker offers is a property of the
 // game's vocabulary, not of a component.
-//
-// `label` falls back to the key, because a type declared without one is
-// still a type a person has to be able to choose.
 export function optionsFrom(rows, options = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const mapped = list
@@ -277,11 +255,6 @@ export class MstPicker extends HTMLElement {
 
   // ask is the debounced call to the source, and it is the only place a
   // searching picker fetches.
-  //
-  // **The answer that comes back is used only if it is still the answer
-  // to the question on screen.** A person typing "gno" then "gnoll"
-  // starts two calls, and the slower one landing last would fill the
-  // menu with matches for a word they have already finished typing.
   ask() {
     if (this.timer !== null) this.clearTimer(this.timer);
     const asked = this.query;

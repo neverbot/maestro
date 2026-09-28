@@ -1,16 +1,4 @@
 // The Views destination: every saved view of this game, paged.
-//
-// A row is a link, and it is a link **by slug** — a view is addressed by
-// its key on every surface of this product, and a URL a designer can
-// send a colleague is the whole reason Task 3 put parameter binding in
-// the query string.
-//
-// A game with no views at all gets the product's one piece of
-// onboarding, from `pages/page.js` so that this page and the home lane
-// cannot come to say two different things: what a view is, who may make
-// one here — which depends on the reader's role, because the builder
-// arrived and a viewer's write is still refused — and a link to the
-// documentation that teaches an agent the half the builder cannot hold.
 
 import {
   DESTINATION_VIEWS,

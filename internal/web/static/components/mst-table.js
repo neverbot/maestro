@@ -1,27 +1,4 @@
 // The painter for the `table` renderer.
-//
-// **It is a file Task 15 did not name, and its absence was a mechanism
-// nothing read.** Five of the six renderers answer with marks and the
-// canvas emits them; `table` answers with columns, rows, groups, a sort
-// and a pager — a model with no painter anywhere in the plan. Until this
-// file existed the most-used renderer in the catalogue could be run,
-// sorted, grouped and paged, and could not be put on a screen.
-//
-// It is the twin's shape carried one step along: `render/table.js` is
-// the pure function from an envelope to a table and **this file writes
-// none of its words**. Every string below is an interpolation of the
-// model — a column's label, a cell's text, a group's caption, the
-// pager's sentence — which is what
-// TestEveryComponentSpeaksOnlyItsModelsWords (internal/web/
-// static_frame_test.go) reads the templates for. The two exceptions are
-// the two *controls*: a header is a button and needs a name for what
-// pressing it does, which is not a fact about the answer.
-//
-// **Sorting is client-side and issues no call.** The server returned
-// everything the answer has — views.run has no cursor, because a page of
-// a graph is not a graph — so re-sorting is a re-render of rows already
-// in hand, and a table that fetched to sort would be asking a question
-// it already had the answer to.
 
 import { LitElement, css, html, nothing, unsafeCSS } from "lit";
 
@@ -151,13 +128,6 @@ export class MstTable extends LitElement {
   // The shared control vocabulary is a fetched sheet rather than a
   // string, so it cannot be spread into `static styles`; `CONTROL_CSS`
   // there is only the two rules a page stylesheet cannot express.
-  //
-  // **`firstUpdated` and not `connectedCallback`**: Lit builds the
-  // render root on its first update, so a call from connectedCallback
-  // adopts into `undefined` and does nothing at all — silently, because
-  // adoptControlStyles answers null for a root it cannot dress. Which is
-  // exactly the shape of defect this repository keeps recording: correct
-  // in the module, dead at the call site.
   firstUpdated() {
     adoptControlStyles(this.renderRoot);
   }

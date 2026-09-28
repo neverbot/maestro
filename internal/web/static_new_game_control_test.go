@@ -14,22 +14,6 @@ import (
 // every other kind of test: the JavaScript sets an attribute and the
 // browser draws a glyph, and nothing in between fails when either rule
 // is deleted.
-//
-// The two defects it holds, both found by a person looking at the
-// screen:
-//
-//   - **On an account with no games the summary had nothing to do but
-//     undo.** Creating a game is the only action that screen offers, and
-//     the control above the form only put the form away. app.js marks
-//     the disclosure `data-only-action` in that one branch;
-//     `display: none` is what makes the mark mean something, and it
-//     takes the summary out of the tab order too, so the control cannot
-//     be reached and then shut on a screen with nothing else on it.
-//   - **Over a list the control stays, and it has to say which way it
-//     goes.** A "+ New game" that was still "+" once it had opened the
-//     form read as a button that had stopped working. Open, it is a
-//     minus, off `details[open]` — the browser's own state rather than a
-//     second copy of it that can go stale.
 func TestTheCreateGameDisclosureIsWhatEachScreenNeeds(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")

@@ -17,16 +17,6 @@ import (
 
 // TestWriteUnmappedErrorClassifiesContention pins the shared tail every
 // REST handler in this package ends with.
-//
-// **This test constructs its errors rather than provoking them, and that
-// is all it claims.** It proves the mapping — that each of the four
-// SQLSTATEs metamodel.IsRetryable admits leaves here as 503 `retryable`
-// and that anything else is still a 500 — and it proves nothing about
-// whether a real request can reach it.
-// TestAGameDeletionDeadlockedByAContentWriteIsRetryable
-// (api_admin_contention_test.go) is the one that answers reachability:
-// it stages a genuine deadlock between a cascading game deletion and a
-// concurrent content write, and reads the status off the real handler.
 func TestWriteUnmappedErrorClassifiesContention(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -88,14 +78,6 @@ var gameAdministrationFiles = []string{
 // failure this repository repeats most often, and the exact shape of the
 // original defect: the retryable arm existed, correctly, in one place,
 // and half the REST surface never got it.
-//
-// Every 500 written by these files must either sit behind an
-// IsRetryable classification (writeUnmappedError itself, and
-// handleRoot's own HTML-shaped version of it) or be one of the two call
-// sites that deliberately refuse the sweep, which say so in the words
-// this test looks for: an IssueSession failure *after* the mutation the
-// request asked for already committed, where "send the same request
-// again" is advice that cannot work.
 func TestNoGameAdministrationHandlerAnswersAnUnclassifiedServerFault(t *testing.T) {
 	t.Parallel()
 	for _, name := range gameAdministrationFiles {

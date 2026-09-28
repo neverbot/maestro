@@ -12,31 +12,9 @@ import (
 )
 
 // frag is a piece of statement text this package wrote itself.
-//
-// It is a *defined* type over string, and that is the whole point: an
-// untyped constant such as "SELECT " converts to it implicitly, while a
-// `string` variable — which is what every caller value in this package is —
-// does not. `b.write(set.Name)` therefore does not compile, and turning a
-// caller's value into statement text requires spelling `frag(...)`, which
-// is one grep and one review comment away from being caught.
-// TestCompileArea's "the only string to fragment conversions are the ones
-// named here" case reads every non-test file of this package and refuses a
-// conversion outside the five helpers below, so the guard is a test rather
-// than a habit.
 type frag string
 
 // builder is the only thing in this package that appends to a statement.
-//
-// **It has no method that takes a caller's value as text**, and that is
-// the whole design: bind() returns the placeholder and puts the value in
-// the argument slice, write() takes a fragment, and a fragment is either a
-// literal this file wrote or the output of bind. There is deliberately no
-// writef with a %s a value could reach — a single fmt.Sprintf with a caller
-// value in it is the injection this repository's only runtime-built SQL
-// could have, and the way to not have it is to make it unspellable rather
-// than to remember not to write it. TestCompileArea's "no caller value ever
-// reaches the statement text" case is the behavioural assertion; the frag
-// type and its own test are the construction.
 type builder struct {
 	sql  sqlText
 	args []any
@@ -68,23 +46,6 @@ func (b *builder) bind(v any) frag {
 
 // adopt splices the statement internal/graph wrote for one bounded walk
 // into this one, and returns its CTE bodies as a fragment.
-//
-// **It is the one route by which text this package did not write becomes
-// statement text**, and it is narrow on purpose: it takes a graph.Walk
-// rather than a string, so the only thing it can convert is
-// graph.WalkCTE's own output. What that output contains beyond graph's
-// own literals is the seed and the edge predicate this builder handed it,
-// both already fragments, and its values are bind arguments.
-//
-// **The renumbering.** WalkCTE numbers its arguments from $1 and puts the
-// project id there, which is where this statement already keeps it, so
-// $1 maps onto $1 and everything above it moves to the end of this
-// builder's argument list. The identity of $1 is *checked* rather than
-// trusted: a walk compiled for another project, or a builder whose $1 is
-// not the project id, would otherwise emit `project_id = $1` filters
-// against some unrelated value — the wrong-answer-without-an-error class
-// this project keeps producing, and here it would be a wrong answer about
-// which game a picture came from.
 func (b *builder) adopt(w graph.Walk) (frag, error) {
 	sql, args := graph.WalkCTE(w)
 	if len(b.args) == 0 || b.args[0] != any(w.ProjectID) {
@@ -324,16 +285,6 @@ func (c *compiler) fieldsOf(alias frag) frag {
 // invalidFilter is the clause that keeps rows the metamodel flagged as no
 // longer fitting their schema out of a picture, unless the document asked
 // for them.
-//
-// **It applies to relations as well as to entities**, and it did not
-// before 0009 gave edges an `invalid` column. `include_invalid` is one
-// switch over the whole picture, so a document that excludes half-migrated
-// quests must not go on drawing the half-migrated edges between them: a
-// step that draws an edge whose fields no longer validate is exactly the
-// wrong picture this language exists to guard against, and it is worse on
-// an edge than on a node, because an edge is what a reader reads a
-// *relationship* off. Every place this compiler names the `relations`
-// table now carries the clause, on the same switch.
 func (c *compiler) invalidFilter(alias frag) frag {
 	if c.r.Query.IncludeInvalid {
 		return ""
@@ -353,18 +304,6 @@ func (c *compiler) invalidFilterEdge(alias frag) frag {
 }
 
 // selector emits one seed set:
-//
-//	s0 (id, set_name) AS (
-//	    SELECT e.id, $n::text
-//	    FROM entities e
-//	    WHERE e.project_id = $1 AND e.entity_type_id = $k AND e.invalid = false
-//	      AND lower(e.key) = ANY($m::text[]) AND (…)
-//	)
-//
-// **The set name travels as a bind parameter**, not as SQL text, and so
-// do the keys — which is what makes TestCompileArea's "no caller value ever
-// reaches the statement text" case pass on a key that is perfectly legal.
-// The compiler cannot tell a legal key from a crafted one and does not try.
 func (c *compiler) selector(i int) (frag, error) {
 	set := c.r.Sets[i]
 	name := cteName(seedPrefix, i)
@@ -402,20 +341,6 @@ func (c *compiler) selector(i int) (frag, error) {
 }
 
 // step emits one traversal of exactly one hop:
-//
-//	t0 (id, set_name, from_id, via_relation) AS (
-//	    SELECT far.id, $n::text, near.id, r.id
-//	    FROM s0 near
-//	    JOIN relations r ON r.project_id = $1 AND … AND (edge predicate)
-//	    JOIN entities far ON far.id = … AND far.project_id = $1 AND …
-//	    WHERE (node predicate)
-//	)
-//
-// A step deeper than one hop is **not** emitted here: it goes through
-// walk() and internal/graph, which owns the recursion, its project
-// filter, its path guard and its depth bound. Emitting it here as a
-// second, hand-written recursion is the drift internal/graph was
-// extracted to prevent.
 func (c *compiler) step(i int) (frag, error) {
 	step := c.r.Steps[i]
 	name := cteName(stepPrefix, i)
@@ -501,12 +426,6 @@ func (c *compiler) invalidEdgeInWalk() frag {
 }
 
 // walkDirection maps this language's direction onto internal/graph's.
-//
-// It is a translation rather than a cast even though the three strings
-// are equal, because graph.WalkCTE **panics** on a direction it does not
-// know — rightly, since a direction it defaulted would answer a walk
-// backwards — and a panic is not how this package refuses a document.
-// The refusal is the one hop() gives, with the same pointer.
 func walkDirection(i int, d string) (graph.Direction, error) {
 	switch d {
 	case DirectionOut:
@@ -523,44 +442,6 @@ func walkDirection(i int, d string) (graph.Direction, error) {
 
 // walk emits a step of more than one hop, as the two CTEs
 // graph.WalkCTE produces plus one of this compiler's own reading them:
-//
-//	t0_w      the recursion
-//	t0_w_out  the depth bound, the ordering and the row cap
-//	t0        this step's own row shape, its output filters and its depth
-//
-// **Which filter goes inside the recursion and which outside is the whole
-// design of this function**, and the two are not interchangeable:
-//
-//   - edge_where is a condition on the relation each hop walks, so it is
-//     handed to graph.Walk as EdgePredicate and prunes the recursion. A
-//     relation the document excluded is a relation the walk must not
-//     follow; filtering it out of the *output* instead would still return
-//     every node reachable behind it.
-//   - to_type, where and the invalid-row exclusion are conditions on the
-//     entity a hop reached, and they are applied here, outside. A walk
-//     that pruned on them could not pass *through* a node of another type
-//     to reach one of the right type, which is a picture the language
-//     promises: "quests three steps up the prerequisite chain" does not
-//     stop at the zone in the middle.
-//
-// TestTraverseArea's "an edge where filters the hops a walk follows" case
-// and TestTraverseArea's "a walk draws only its destination type and only
-// valid rows" case are the two sides.
-//
-// **The depth is absolute**, counted from the seed selector rather than
-// from this step's own start, which is what makes Stats.MaxDepthReached
-// answerable for a step that reads from another step. The walk counts
-// from its own seed, so the seed row's own depth is added back: path[1]
-// is the id the walk started from (Postgres arrays are 1-based).
-//
-// The from-set is grouped by id before that join, taking each seed's
-// shortest depth. **Only the golden file observes it** — removing the
-// grouping is red on testdata's expected statement and green everywhere
-// else — and that is recorded rather than dressed up as a correctness
-// guard: no behavioural test moves, because capOf deduplicates by id with
-// ORDER BY id, rank, depth and therefore keeps the shallowest row of a
-// node reached at two depths anyway. What it stops is this CTE holding
-// one row per *spelling* of its seed, which is work and not an answer.
 func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 	step := c.r.Steps[i]
 	direction, err := walkDirection(i, step.Step.Direction)
@@ -629,36 +510,12 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 		// extra hop is dropped below and never reaches the picture; what
 		// it buys is the difference between "the chain ends here" and "the
 		// bound stopped here", which a designer cannot see any other way.
-		//
-		// **It is the widest level of the walk, and it costs about what
-		// the whole walk below it costs.** Measured on this project's
-		// Postgres, an eight-entity clique walked `any` at depth 1..4,
-		// best of twenty-one runs: 36.1 ms as emitted, 18.3 ms with this
-		// line reading Depth.Max — a factor of 1.97 on a dense graph,
-		// because a breadth-first level of a clique is bigger than every
-		// level before it put together. That is the price of the flag,
-		// and it is stated here rather than left for a designer to
-		// discover on a slow view: a one-hop step is not probed at all
-		// (see Truncated.Depth) precisely because the same argument runs
-		// the other way there. The probe's own predicate is free beside
-		// it — the honest "is anything past the bound *new*" test below
-		// measured 36.1 ms against 34.8 ms for the bare "is there a row
-		// past the bound" it replaced, inside the run-to-run spread.
 		MaxDepth: step.Step.Depth.Max + 1,
 		// Four times the node cap, so a pathological branching factor
 		// cannot build a giant intermediate before the outer limit
 		// applies. Four rather than one because a walk legitimately
 		// visits a node at several depths before the outer DISTINCT
 		// collapses them.
-		//
-		// **The overflow row this asks for is read**, below, and it has
-		// to be: internal/graph emits LIMIT MaxRows + 1 precisely so a
-		// caller can tell a full walk from a truncated one, and a walk
-		// row is an edge traversal, so four times the node cap can
-		// collapse to far fewer nodes than the node cap — a picture
-		// short of content with the node and the edge cap both unfired.
-		// A cap whose overflow signal nothing reads is silent content
-		// loss, which is this plan's worst failure mode.
 		MaxRows: maxRows,
 	}
 	if graph.ReadFrom(walk) != string(outName) {
@@ -679,16 +536,6 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 	// its depth bound. The predicate below asks for a node **or an edge**
 	// past the bound that is not already inside it, which is the thing a
 	// designer reads the flag as meaning.
-	//
-	// It reads the *recursion* rather than the wrapper, on both sides of
-	// the comparison, because the wrapper applies MinDepth and the row
-	// cap: a node the walk passed through below MinDepth is a node it
-	// found, and re-finding it one hop past the bound is not new content.
-	//
-	// A relation is never null at a depth above zero, so the NOT IN over
-	// via_relation is safe; the inner filter spells the exclusion anyway,
-	// because a single null in a NOT IN list makes the whole test
-	// unknowable and that is a flag stuck false.
 	c.probes = append(c.probes, sprintf(`EXISTS (
         SELECT 1 FROM %[1]s deep
         WHERE deep.depth > %[2]s
@@ -770,48 +617,6 @@ const walkTruncatedKind frag = "walk_truncated"
 // capOf is the body both collection points carry: the arms, deduplicated
 // by id, ordered the way the result is, and cut at one row more than the
 // cap.
-//
-// **The extra row is how truncation is detected rather than inferred.**
-// With a plain LIMIT n, a result of exactly n rows and a graph that
-// happens to hold n are the same answer, so the flag could only ever be a
-// guess. With n + 1, the collection point that came back full says so by
-// arriving one row over, and Run trims it.
-//
-// **The DISTINCT ON is what makes `max_nodes` a cap on nodes rather than
-// on rows**, and it is here rather than only in Go because the LIMIT is
-// here. UNION collapses two *identical* rows, but the same entity drawn
-// by two `nodes` entries differs in set_name and rank, so it survives as
-// two rows; before this, a graph of three quests declared as two
-// overlapping sets arrived as six rows and was reported truncated at a
-// cap of three — with the identical three nodes coming back either way.
-// Counting rows never *under*-reported, so no truncated result was ever
-// called complete, but an over-report is a designer told their picture is
-// partial when it is whole, and the trim in Go could then also deliver
-// fewer nodes than the cap allowed.
-//
-// The dedupe keeps `ORDER BY id, rank`: the lowest rank per id, which is
-// the same "first entry that claimed it" rule the Go deduplication in
-// execute.go applies, so the two cannot disagree about which set a node
-// belongs to. The outer ordering is the one the final statement applies
-// (rank, then id), and it has to be here as well as there: without it the
-// rows the LIMIT keeps are whichever Postgres produced first, so a
-// truncated result would drop a different arbitrary third of the graph on
-// every run.
-//
-// Row count and node count are now the same number, which is what lets
-// execute.go read `rows > cap` as an exact answer in both directions.
-//
-// **`ORDER BY all_rows.id, all_rows.rank, all_rows.depth` names no
-// attribute, and that is only harmless because of a property of the
-// projection.** The dedupe therefore does not say which row's attrs or
-// ambiguity flag survives — but every projection lateral is anchored
-// solely on `e.id` and returns exactly one row (project.go, relatedHop),
-// so all the candidate rows for one id carry identical attrs and an
-// identical flag and the choice cannot be observed. Change either side —
-// a lateral that reads something other than the node's id, or a lateral
-// that may return more than one row — and this ORDER BY has to name the
-// attributes too, or the picture starts depending on which duplicate
-// Postgres produced first.
 func (c *compiler) capOf(arms frag, limit int) frag {
 	return sprintf(`    SELECT capped.*
     FROM (
@@ -978,16 +783,6 @@ func (c *compiler) edge(i int) (frag, error) {
 
 // leafScope is what a predicate is being compiled against: the alias its
 // leaves address, and whether that alias is a relation.
-//
-// The distinction is not cosmetic. A relation has no key and no name —
-// 0004_metamodel.sql gives it an id, a type, two endpoints, its fields
-// and its timestamps, and 0009 adds its validity flag and its version —
-// so @name and @key have no column to compile against on an edge.
-// Resolution refuses them there (fieldScope.edge), and this is the second
-// half of the same rule, for a *Resolved a Go caller built by hand.
-//
-// @invalid was on that refused list until 0009 gave relations the
-// column; fieldScope.edge carries the argument for why it moved.
 type leafScope struct {
 	alias frag
 	edge  bool
@@ -1018,28 +813,6 @@ func (c *compiler) predicate(sc leafScope, p *ResolvedPredicate) (frag, error) {
 }
 
 // combine is `all` and `any` over their children.
-//
-// **The empty list is refused by the parser, so this arm is unreachable
-// from any document, and Task 15 settled it there rather than here.**
-// Tasks 8 and 9 left the question open: an empty list compiles to `true`
-// under both spellings, which is the identity of `all` and the *wrong*
-// identity of `any`, and since Task 8 the same `true` can be an
-// `edge_where`, where "follow edges satisfying none of these" would
-// become "follow every edge" and prune nothing. The settlement is the one
-// those tasks pointed at — refuse it outright — and it turned out to be
-// already made: checkPredicate's own `children` refuses an empty
-// combinator at its own pointer, with the argument the open question
-// wanted ("an empty combinator has no truth value, and guessing one would
-// silently widen or narrow the query"). What was missing was the record
-// and the assertion; TestAnEmptyCombinatorIsRefusedAtEveryPositionThatTakesOne
-// pins both spellings at every predicate position, including the
-// edge_where the identity element would have mattered most in.
-//
-// The `true` stays as defence in depth, for the reason Compile keeps its
-// other refusals: Compile is exported and takes a *Resolved a Go caller
-// may have built by hand, and `true` is the arm that draws everything
-// rather than nothing — the safe direction for a value no document can
-// produce.
 func (c *compiler) combine(sc leafScope, children []ResolvedPredicate, sep frag) (frag, error) {
 	if len(children) == 0 {
 		return "true", nil
@@ -1115,14 +888,6 @@ func (c *compiler) withParam(leaf *ResolvedLeaf) (*ResolvedLeaf, error) {
 
 // operand builds the left-hand side of a leaf, for a built-in column or
 // for a declared jsonb field.
-//
-// **The type guard comes before the cast, always.** internal/metamodel
-// marks an entity invalid when a schema change makes its values not fit
-// and leaves the values in place (MarkEntitiesOfTypeInvalid), so a field
-// declared `number` today may hold a string written yesterday. Without
-// jsonb_typeof the cast raises SQLSTATE 22P02 and the whole view fails on
-// one stale row — which is exactly the row include_invalid exists to let
-// a designer look at.
 func (c *compiler) operand(sc leafScope, leaf *ResolvedLeaf) (operandOf, error) {
 	if leaf.Field.Builtin {
 		column, err := builtinColumn(sc, leaf.Field.Key)
@@ -1203,22 +968,6 @@ func columnOfBuiltin(name string) frag {
 }
 
 // typeLeaf compiles @type.
-//
-// **A row holds its type as an id, so eq, neq and in compile against
-// entity_type_id and a key that names no declared type is refused** —
-// not answered with an empty picture. Task 4 left this decision here and
-// recorded both halves of it: the alternative, comparing the key as text,
-// turns `@type eq "qeust"` into a view that draws nothing and says
-// nothing, which §3 calls the most expensive failure mode this language
-// has. The refusal is raised by the compiler rather than by resolution,
-// so a caller that wants to catch it before running has to compile —
-// which views.validate does.
-//
-// The pattern operators cannot be answered by an id, so they compile
-// against the type's key through a scalar subquery, project-filtered like
-// every other table reference here. @type still contributes no TypeRef:
-// whether a value is a structural dependency is view_refs' question, and
-// Task 11 owns it.
 func (c *compiler) typeLeaf(sc leafScope, leaf *ResolvedLeaf) (frag, error) {
 	var column, table frag = "entity_type_id", "entity_types"
 	lookup := func(key string) (uuid.UUID, bool) {
@@ -1381,11 +1130,6 @@ func (c *compiler) compare(op operandOf, leaf *ResolvedLeaf) (frag, error) {
 // sqlComparison maps the six scalar comparisons onto their operators and
 // **refuses anything else**, because an operator that reached here
 // without a comparison is a compiler bug rather than a caller's mistake.
-//
-// It returns an error rather than panicking: Compile is exported, takes a
-// *Resolved a Go caller may have built by hand, and a panic in a query
-// engine reached from an MCP tool takes the process with it. The message
-// says which of the two it is.
 func sqlComparison(op Operator) (frag, error) {
 	switch op {
 	case OpEq:
@@ -1424,14 +1168,6 @@ func lengthComparison(op Operator) Operator {
 // with ESCAPE '\\' in the emitted pattern saying which character escapes
 // — and, when glob is set, mapping `*` and `?` onto their LIKE
 // equivalents *as it goes*.
-//
-// One pass rather than chained replacers, because the chained version was
-// wrong: it escaped the caller's characters and then ran a second
-// replacer that turned every `\%` back into a bare `%`, undoing the
-// escape it had just written. `matches "50%"` came out as the pattern
-// `50%` — a prefix match on "50" — and `matches "a_b"` as `a_b`, matching
-// any character between the a and the b. A single pass cannot undo its
-// own work, because it never looks at a character it already wrote.
 func escapeLike(s string, glob bool) string {
 	var out strings.Builder
 	out.Grow(len(s) + 4)

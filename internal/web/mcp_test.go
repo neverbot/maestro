@@ -143,17 +143,6 @@ func TestMCPGamesGetReturnsTheCallersOwnGame(t *testing.T) {
 // asserted its slug, useful coverage but not of the not-found branch its
 // own name claimed to test; that coverage is kept above as
 // TestMCPGamesGetReturnsTheCallersOwnGame.
-//
-// Reaching this branch through MCPGamesGet needs a caller whose own
-// binding *is* the missing id: a real token cannot be minted for one
-// (api_tokens' foreign key on project_id refuses it, and Projects has no
-// delete method yet — Task 17), so this constructs the Caller directly
-// rather than through CallerForToken. Caller's own doc comment
-// (auth.go) asks callers to go through newTokenCaller/newSessionCaller
-// instead of a struct literal; both are unexported, and this is the one
-// place in this package's tests that needs a caller whose scope names a
-// project id no database row will ever back, which no constructor this
-// package exports can produce.
 func TestMCPGamesGetReportsNotFoundForAMissingProject(t *testing.T) {
 	t.Parallel()
 	_, ids, projSvc := newTestServer(t)

@@ -82,13 +82,6 @@ func TestAConflictErrorWithoutIncludeEchoesTheVersionAndItsAuthorAndNoProse(t *t
 	// include_current: false is what a caller writing a 200 KB document
 	// sends to stop the echo, so the *prose* fields must be absent, not
 	// merely empty.
-	//
-	// **The author and the timestamp survive it**, deliberately, and this
-	// test is where that decision is pinned: they are two short strings
-	// and they are the pair that decides whether the caller merges or
-	// asks — a version an agent wrote two seconds ago is a retry and one
-	// a designer wrote this morning is a conversation. See
-	// ConflictError.Author.
 	writer := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	when := time.Date(2026, 9, 2, 10, 30, 0, 0, time.UTC)
 	details := (&markdown.ConflictError{

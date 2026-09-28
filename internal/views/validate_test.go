@@ -19,11 +19,6 @@ func TestValidateArea(t *testing.T) {
 	// yes" case is the reason ValidateResult is not an empty struct: a
 	// validator whose success carries nothing tells a caller only that it may
 	// proceed.
-	//
-	// Both members are asserted against a document that states neither: the
-	// query names its types at three pointers and declares no `limits`
-	// block, so Refs is something only the resolve pass knows and Limits is
-	// the defaults a caller would otherwise have to look up.
 	t.Run("validate answers what it learned rather than merely yes", func(t *testing.T) {
 		g, _ := a.games(t)
 		got, err := g.views.Validate(context.Background(), g.projectID, ValidateRequest{
@@ -44,12 +39,6 @@ func TestValidateArea(t *testing.T) {
 	// one of them would tell an agent a document is fine and then have
 	// views.run refuse it, which is worse than no validator: the loop would
 	// close on the wrong answer.
-	//
-	// The last two are the ones that make compiling non-negotiable. A depth
-	// beyond the walk's shape and an `@type` operand bound to a *parameter*
-	// are refused by the compiler and by nothing before it — resolution
-	// rewrites an `@type` operand it can see, and it cannot see a value the
-	// run binds.
 	t.Run("validate refuses what a run would refuse", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -185,18 +174,6 @@ func TestValidateArea(t *testing.T) {
 	// is the whole claim StaleViews makes: the boolean is exact even though
 	// the pass never reads view_refs, because the dependency index changes
 	// *which* diagnostic a run gives and never whether there is one.
-	//
-	// The four cases are the four the index could plausibly have separated:
-	// a view nothing touched, a view whose type was renamed (which a run
-	// resolves by id and still calls stale), a view whose type was deleted
-	// and re-declared under the same key (which resolves by key and is not
-	// stale), and a view whose field was dropped from a schema — the case a
-	// flag computed from view_refs alone would have called clean, because a
-	// field is not a reference.
-	//
-	// The run is asked the same question in the same test, so the two cannot
-	// drift: the flag is compared against whether RunView refuses or reports
-	// a diagnostic, not against a second list of expectations.
 	t.Run("the stale flag agrees with what a run reports", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()

@@ -1,20 +1,4 @@
 // Renders the game home page over a summary a *real* server produced.
-//
-// pages_test.mjs beside this one proves the page renders *a* summary,
-// and invents the numbers it renders. This one is handed the JSON that
-// GET /api/games/{game}/summary actually answered for the seeded game in
-// seed_e2e_test.go, so the two halves of the claim — the server counted
-// the game correctly, and the page shows what the server counted — are
-// checked against the same numbers for once. A page that dropped a type,
-// mis-summed a total or rendered a count as "[object Object]" would pass
-// every fixture-driven check and fail here.
-//
-// Task 15 moved the page it drives: the game home is
-// static/pages/home.js now and its catalogue is the middle of three
-// lanes. The claim this file makes is unchanged.
-//
-// Usage: `node internal/web/jstest/seeded_game_page_test.mjs <summary.json>`.
-// internal/web/seed_e2e_test.go writes the file and shells out to it.
 
 import { readFileSync } from "node:fs";
 
@@ -64,13 +48,6 @@ function fakeElement(tag = "div") {
     },
     // attributes, and the two accessors the chrome needs since the game
     // switcher started marking the current game with aria-current.
-    //
-    // The stub refuses a non-string and answers null — never "" — for an
-    // attribute nobody set, following svg_dom.mjs: a stub that answers
-    // the empty string makes "unset" and "set to nothing" the same
-    // value, and a test asserting on that cannot tell an implementation
-    // that marked the current game from one that marked every game with
-    // nothing. The stub must never be the reason a test passes.
     attributes: {},
     setAttribute(name, value) {
       if (typeof value !== "string") {

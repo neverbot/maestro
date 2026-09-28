@@ -39,12 +39,6 @@ func TestCheck(t *testing.T) {
 	// TestARouteThatHoldsReportsOkForEveryStepAndNamesItsSeedSet is **the
 	// negative half of this whole task**, and it is the one most likely to
 	// pass for the wrong reason.
-	//
-	// Five `ok`s is what a check that did nothing at all would answer if
-	// `ok` were the zero value, so this test asserts the counts beside the
-	// verdicts: how many steps were checked, how many edges were walked, and
-	// what the engine understood the start set to be. An empty walk cannot
-	// satisfy all four. TestTheZeroVerdictIsNotOk closes the other end.
 	t.Run("a route that holds reports ok for every step and names its seed set", func(t *testing.T) {
 		g := a.gated(t)
 		chain := []string{"tutorial", "hogger", "defias", "deadmines", "vancleef"}
@@ -81,11 +75,6 @@ func TestCheck(t *testing.T) {
 
 	// TestTheZeroVerdictIsNotOk pins that the verdict type has no meaningful
 	// zero.
-	//
-	// It is the cheapest guard in this task and it is not decoration:
-	// declaring "the zero value is invalid" buys nothing unless something
-	// refuses it, so this drives the encoder, which is the last place that
-	// can. A step left unfilled must not reach a caller as a proof.
 	t.Run("the zero verdict is not ok", func(t *testing.T) {
 		var zero Verdict
 		assert.Must(t, zero != VerdictOK, "the zero verdict is ok, so a step nothing filled in reads as proved")
@@ -108,10 +97,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestADeletedStepEntityIsMissingEntityAndKeepsItsKey.
-	//
-	// Three assertions, because three separate things have to hold: the
-	// verdict, the position, and the tombstone key the step kept when its
-	// entity went.
 	t.Run("a deleted step entity is missing entity and keeps its key", func(t *testing.T) {
 		g := a.gated(t)
 		for _, key := range []string{"tutorial", "hogger"} {
@@ -142,10 +127,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestAStepThatIsNotReachableYetIsUnmetPrerequisiteAndNamesItsBlockers.
-	//
-	// **The control is the step before it.** A check that failed everything
-	// would report the same verdict on the last step, so the assertion that
-	// step 1 is `ok` is what makes the assertion about step 2 mean anything.
 	t.Run("a step that is not reachable yet is unmet prerequisite and names its blockers", func(t *testing.T) {
 		g := gatedRouteGame(t, a)
 		g.upsert(t, blockedRoute(steps("tutorial", "hogger", "deadmines")))
@@ -166,12 +147,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestABrokenStepIsStillASeedForTheStepsAfterIt.
-	//
-	// This is the half of the incremental closure a naive implementation
-	// gets wrong in the other direction: one gap early in a long route must
-	// not cascade into "every step after it is broken too", because the
-	// question each step answers is "given the seeds and every step before
-	// me", not "given the seeds and every step before me that held".
 	t.Run("a broken step is still a seed for the steps after it", func(t *testing.T) {
 		g := gatedRouteGame(t, a)
 		g.upsert(t, blockedRoute(steps("tutorial", "deadmines", "hogger")))
@@ -188,10 +163,6 @@ func TestCheck(t *testing.T) {
 
 	// TestAStepThatViolatesAnOrderingRelationIsOutOfOrder, with the control
 	// that the same two steps swapped are entirely ok.
-	//
-	// The control is what makes this about the *order* rather than about the
-	// existence of the edge: without it, a check that reported out_of_order
-	// whenever an ordering edge touched a route would pass.
 	t.Run("a step that violates an ordering relation is out of order", func(t *testing.T) {
 		g := a.gated(t)
 		g.declareRelationType(t, "follows", "", []string{"ordering"})
@@ -225,10 +196,6 @@ func TestCheck(t *testing.T) {
 	// TestTheVerdictsAreOrderedMostActionableFirst drives a step that
 	// qualifies for out_of_order *and* for unmet_prerequisite, and asserts
 	// the first of the two Verdicts declares.
-	//
-	// It exists because an order that is only a comment is an order the next
-	// edit reverses. A fault in the route the caller just wrote outranks a
-	// claim about the game's content.
 	t.Run("the verdicts are ordered most actionable first", func(t *testing.T) {
 		g := a.gated(t)
 		g.declareRelationType(t, "follows", "", []string{"ordering"})
@@ -267,13 +234,6 @@ func TestCheck(t *testing.T) {
 	// TestARouteWhoseTypeWasRenamedIsStillOkAndSaysTheKeyMoved is the other
 	// half of the rename rule, and it is the assertion that carries
 	// internal/metamodel/rename.go's lesson one step along.
-	//
-	// A rename moves the catalogue row and nothing else: the stored step
-	// still spells the old key, resolution falls to the by-id path, and the
-	// route is **healthy**. Reporting it as broken would fail a game for a
-	// cosmetic change, which is the failure views' staleness design exists
-	// to avoid. So both halves are asserted here: the verdict is `ok`, and
-	// the diagnostic beside it names both spellings.
 	t.Run("a route whose type was renamed is still ok and says the key moved", func(t *testing.T) {
 		g := a.gated(t)
 		for _, key := range []string{"tutorial", "hogger"} {
@@ -316,11 +276,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestARouteChecksUnderItsOwnStoredParamsAndNotTheCallersDefaults.
-	//
-	// `params` existing and being ignored at check time is the
-	// write-only-field defect in its route-shaped form, and this is the test
-	// for it: a route stored with `gate: "all"` is checked from a caller
-	// that passed nothing at all, and must get the stricter answer.
 	t.Run("a route checks under its own stored params and not the callers defaults", func(t *testing.T) {
 		g := a.gated(t)
 		for _, key := range []string{"north", "south", "keep"} {
@@ -362,14 +317,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestCheckingARouteBumpsNothingAndLeavesTheDesignVersionAlone.
-	//
-	// `routes` is deliberately not one of the four tables 0013's triggers
-	// watch, and it must not be: a check that marked every route in the game
-	// stale -- including the one it had just checked -- would be a mechanism
-	// that invalidates its own output.
-	//
-	// **Mutation:** add the design-version triggers to `routes`. This is the
-	// only test that would notice.
 	t.Run("checking a route bumps nothing and leaves the design version alone", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "tutorial")
@@ -397,17 +344,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestAWriteDuringACheckLeavesTheRouteStaleRatherThanFreshlyGreen.
-	//
-	// The design version a verdict records is read **before** the walk. Read
-	// after it, a metamodel write that committed while the walk was running
-	// would be stored as a design this verdict had seen, and the route would
-	// read `checked` against content it never looked at -- a stale green,
-	// which is the one failure the two clocks on this row exist to prevent.
-	//
-	// The write is landed through Service.beforeWalk, which is the only way
-	// to observe *when* a value was read: from outside, a check that read
-	// the counter late is indistinguishable from a correct check on a quiet
-	// game.
 	t.Run("a write during a check leaves the route stale rather than freshly green", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "tutorial")
@@ -444,19 +380,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestCheckingAFiveHundredStepRouteStaysInsideOneBudget.
-	//
-	// MaxRouteSteps is 500, so this is the longest route the product admits,
-	// and the claim check.go makes about it is that a route that holds costs
-	// exactly one walk however long it is. Measuring instead of arguing is
-	// the third thing the views sub-project named among what actually caught
-	// defects, so the wall time is recorded here rather than asserted:
-	//
-	//	measured 2026-09-06, one throwaway database on a laptop:
-	//	~0.4s for the whole test including seeding 500 entities, of which
-	//	the check itself was under 30ms.
-	//
-	// What is asserted is what a slower machine cannot change: it completes
-	// inside the statement budget, and it does it in one walk.
 	t.Run("checking a five hundred step route stays inside one budget", func(t *testing.T) {
 		g := a.gated(t)
 		items := make([]metamodel.EntityInput, 0, MaxRouteSteps)
@@ -488,11 +411,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestCheckingARouteInAGameThatDeclaredNothingRefusesRatherThanProvingIt.
-	//
-	// routes.check is one of the three analyses that walk edges, and all
-	// three refuse an undeclared game: an engine with no edge it is allowed
-	// to follow must not answer that a progression holds. The orphan
-	// aggregate is the deliberate exception and says so in its own file.
 	t.Run("checking a route in a game that declared nothing refuses rather than proving it", func(t *testing.T) {
 		g := a.game(t)
 		g.declareEntityType(t, "quest")
@@ -535,11 +453,6 @@ func TestCheck(t *testing.T) {
 	})
 
 	// TestTheStoredVerdictIsTheOneTheCheckReturned.
-	//
-	// last_check is the only thing this sub-project caches, and a cache
-	// nothing reads back is a mechanism nothing reads. This drives the whole
-	// round trip: check, read the route, decode the blob, and find the same
-	// per-step answer.
 	t.Run("the stored verdict is the one the check returned", func(t *testing.T) {
 		g := gatedRouteGame(t, a)
 		g.upsert(t, blockedRoute(steps("tutorial", "hogger", "deadmines")))
@@ -560,14 +473,6 @@ func TestCheck(t *testing.T) {
 
 	// TestCheckingARoutePublishesItsVerdictSummary, with the gating and the
 	// payload shape events.go decided for it.
-	//
-	// **The payload is the summary and never the per-step list**, which is
-	// asserted here rather than left to the comment that decided it:
-	// publication order is not commit order, so a client that rendered the
-	// steps out of an event would eventually render the older of two checks.
-	// The subscription is a viewer's and not an owner's, because the gating
-	// claim is that a viewer hears this and a subscription at owner would
-	// pass whatever MinRole said.
 	t.Run("checking a route publishes its verdict summary", func(t *testing.T) {
 		g := gatedRouteGame(t, a)
 		hub := realtime.NewHub()

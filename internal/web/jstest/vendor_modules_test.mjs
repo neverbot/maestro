@@ -2,28 +2,6 @@
 // map out of a shipped shell, resolves every specifier the way a browser
 // would, imports the file that specifier names, and asserts the module
 // exports the names this front end is about to import from it.
-//
-// What this covers that internal/web/static_vendor_test.go cannot. The
-// Go guards are arithmetic over bytes — the hash matches, the size fits,
-// the map is the same in every shell, the server serves the path. None
-// of that says the bytes *parse as an ES module*, that the module
-// evaluates without a build step or a shim, or that it exports the
-// identifiers the import map exists to hand out. A hash pins which file
-// was vendored; only an import says the file works.
-//
-// The one behavioural assertion here is deliberate rather than
-// incidental. @dagrejs/dagre's ESM build is self-contained: it bundles
-// its own copy of @dagrejs/graphlib and re-exports it. So the `Graph`
-// this repository vendors separately as graphlib.mjs is a *different
-// constructor* from the one inside dagre.mjs, and dagre.layout() only
-// accepts it because dagre reads a graph structurally rather than by
-// instanceof. That is an upstream implementation detail the layout code
-// (Task 6) will depend on completely, and it is exactly the sort of
-// thing a minor-version bump changes in silence — so it is asserted
-// here, against the real vendored pair, rather than assumed.
-//
-// Run directly: `node internal/web/jstest/vendor_modules_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";

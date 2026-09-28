@@ -25,27 +25,6 @@ const sweepEvery = 1024
 // Limiter counts failed attempts per key inside a rolling window. It lives
 // in process memory: a restart forgives everyone, which is acceptable for
 // login throttling on a self-hosted instance.
-//
-// A key is lower-cased and trimmed of surrounding whitespace before it is
-// recorded or checked, so a caller does not have to pre-normalize an email
-// address itself: "Bob@x.test", "bob@x.test" and " bob@x.test " share one
-// budget. This must match whatever normalization the downstream lookup
-// applies — Authenticate lower-cases and trims the email it looks up, so
-// keying the login limiter on the raw, unnormalized address would still be
-// wrong today were it not for this; a caller keying on something Authenticate
-// does not normalize the same way must not assume this helps.
-//
-// This is the only normalization Limiter performs — it does not make an
-// attacker-controlled key safe to use alone. Keying solely by an attempted
-// email lets one attacker exhaust a legitimate user's budget from many
-// source IPs; keying solely by source IP lets an attacker who can rotate
-// IPs bypass the limit while still hammering one target; keying by a
-// secret the caller is trying to protect (an invite token, an API key)
-// hands the attacker an endless stream of fresh keys, since every guess is
-// by definition a new value — that budget caps nothing. Choosing a key
-// that is both stable for a legitimate user and expensive for an attacker
-// to rotate (the client's source IP, typically) is the caller's
-// responsibility, not this type's.
 type Limiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
@@ -87,16 +66,6 @@ func (l *Limiter) Allowed(key string) bool {
 
 // Record charges one attempt against key. Callers call this only on the
 // failure path of whatever Allowed is guarding.
-//
-// The two used to be one method: Allow both decided and charged in the
-// same call, so a caller had to charge optimistically before attempting
-// the guarded operation and then call Reset to refund on success. Any
-// early return between the charge and the Reset — for instance, a login
-// that authenticates correctly but then fails to issue a session — spent a
-// legitimate user's budget for no reason. Splitting the decision (Allowed)
-// from the recording (Record) removes the refund path entirely: success
-// never charges anything in the first place, because nothing is charged
-// until Record is explicitly called on failure.
 func (l *Limiter) Record(key string) {
 	key = normalizeKey(key)
 
@@ -133,9 +102,6 @@ func (l *Limiter) maybeSweepLocked(cutoff time.Time) {
 }
 
 // sweepLocked drops every key whose most recent attempt predates cutoff.
-// Callers must hold l.mu. It exists so that a key which is only ever
-// touched once (see the package doc on Limiter) is eventually forgotten
-// even though nothing ever calls Allowed or Record for it again.
 func (l *Limiter) sweepLocked(cutoff time.Time) {
 	for key, times := range l.attempts {
 		if len(times) == 0 || !times[len(times)-1].After(cutoff) {
@@ -152,11 +118,6 @@ func normalizeKey(key string) string {
 }
 
 // filterAfter returns the subset of times strictly after cutoff.
-//
-// It filters in place by writing into the front of times's own backing
-// array, which is safe here because the write index (len(kept)) never
-// overtakes the read index (the loop's position in times): kept only ever
-// holds entries the loop has already consumed.
 func filterAfter(times []time.Time, cutoff time.Time) []time.Time {
 	kept := times[:0]
 	for _, t := range times {

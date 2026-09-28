@@ -1,31 +1,5 @@
 // maestro-demo writes one game into a running instance's database: the
 // game this repository's screens need in order to be *seen*.
-//
-// **Why this exists, and it is not convenience.** Three defects in this
-// product were found the first time a screen was ever rendered with data
-// in it — the images list (81px rows against a 36px token, a size in the
-// wrong track), the orphan verdict ("1 entity *are* connected to
-// nothing"), and the whole unreachable grouping, which had never drawn
-// at all. Each was found by hand-seeding a game into the dev container,
-// and none of those games was in the repository, so the next person met
-// the same empty instance and the same unrendered screens.
-//
-// So the demo game is code, and it contains exactly the cases that have
-// been getting through: a prerequisite cycle, an entity reachable only
-// behind it, one connected to nothing, a type declaring more fields than
-// a catalogue draws, a type with enough rows to page, a document with
-// two versions, an uploaded image, and a saved view.
-//
-// **It writes through the domain, not over the wire.** Every write goes
-// through internal/metamodel, internal/markdown and internal/views —
-// the same code the MCP tools call — so a demo that this product would
-// refuse cannot be written, and a schema change that breaks it breaks
-// the build rather than the fixture.
-//
-// It is **not** in the image: the Dockerfile builds ./cmd/maestro and
-// nothing else. It is a development tool, run against a development
-// database, and it says so if it is pointed at one that already holds
-// the game it is about to write.
 package main
 
 import (
@@ -92,12 +66,6 @@ func run(ctx context.Context) error {
 
 // seed is the demo itself, separated from the flags so this repository's
 // own test can run it against a throwaway database.
-//
-// **That test is the point of the separation.** The header above claims
-// a demo this product would refuse cannot be written, because every
-// write goes through the domain; the test is what makes the claim
-// checkable, and what turns a schema change that breaks the fixture into
-// a red build rather than a surprise the next time somebody seeds.
 func seed(ctx context.Context, pool *pgxpool.Pool, owner, slug string) (string, error) {
 	// The demo is written into a schema this binary does not migrate. A
 	// migration is the server's to run, and a demo tool that quietly
@@ -122,10 +90,6 @@ func seed(ctx context.Context, pool *pgxpool.Pool, owner, slug string) (string, 
 	// holding vocabulary and content and nothing else, under the slug a
 	// re-run wanted. The half-game then looked like a demo and read as a
 	// product with an empty images list.
-	//
-	// So a failure takes the game with it. Best effort, and said out loud
-	// when even that fails, because the alternative is a person deleting
-	// a half-seeded game by hand without being told there is one.
 	if err := fill(ctx, pool, game.ID, ownerID); err != nil {
 		if undo := who.Delete(ctx, game.ID); undo != nil {
 			return "", fmt.Errorf("%w (and the half-written game %s could not be removed: %v)",
@@ -157,10 +121,6 @@ func fill(ctx context.Context, pool *pgxpool.Pool, game, ownerID uuid.UUID) erro
 }
 
 // userIDByEmail resolves the account the game will belong to.
-//
-// It reads the row directly rather than going through internal/identity,
-// which offers no lookup by email that is not part of a login or an
-// admin promotion — and a demo tool has no business calling either.
 func userIDByEmail(ctx context.Context, pool *pgxpool.Pool, email string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := pool.QueryRow(ctx,
@@ -472,11 +432,6 @@ func writeViews(ctx context.Context, saved *views.Service, game uuid.UUID, owner
 // writeImage uploads one background, because the images list is a screen
 // that only exists when something is in it — and the first time it was
 // rendered with a row, three separate things about it were wrong.
-//
-// The picture is drawn here rather than committed: a PNG in the
-// repository is bytes this project would answer for, and a flat
-// rectangle is enough for a list that shows a thumbnail, a size and a
-// filename.
 func writeImage(ctx context.Context, saved *views.Service, game uuid.UUID, owner uuid.UUID) error {
 	// Bands rather than a flat fill: a thumbnail of one colour is
 	// indistinguishable from a thumbnail that failed to load, which is

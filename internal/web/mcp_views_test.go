@@ -135,9 +135,6 @@ func int32Of(v int32) *int32 { return &v }
 // A tool that stored six values and returned four would leave four of
 // them write-only *on this surface* while the domain's own test stayed
 // green.
-//
-// All of them are set to non-default values, because a field that takes
-// the default cannot tell a stored value from a hard-wired one.
 func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T) {
 	t.Parallel()
 	f := newViewsFixture(t)
@@ -282,12 +279,6 @@ func TestAnAssetIsReadBackThroughTheToolWithItsDecodedShape(t *testing.T) {
 // a hand-written one: a views tool with no entry in the table below fails
 // this test, so an eleventh tool added tomorrow is covered without
 // anybody remembering to edit it.
-//
-// **views.run appears twice**, once with a saved key and once with an
-// inline query, because the two take different paths to the same
-// execution — RunView reads a stored document and its dependency index,
-// Run resolves one that arrived in the call — and a scope check on one
-// path says nothing about the other.
 func TestEveryViewsToolRefusesAnotherGamesToken(t *testing.T) {
 	t.Parallel()
 	f := newViewsFixture(t)
@@ -513,17 +504,6 @@ func TestAnInlineRunCarriesNoPositionsMemberAndASavedOneAlwaysDoes(t *testing.T)
 // TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated is the
 // guard Task 10's finding 12 asked this task for, and it reads what an
 // agent reads rather than what this package could have written.
-//
-// **The renderer half must be the catalogue's own generated text,
-// verbatim.** A hand-written paragraph about a renderer is a paragraph
-// that goes false the first time a parameter moves, and the agent finds
-// out by being refused at a pointer nobody showed it. The same argument
-// holds for the operator table, which *is* the query language's contract.
-//
-// It also carries Task 14's rule one step along: the description must
-// name nothing only this repository knows. That test lives in
-// internal/views for the renderer text; the tools' own prose is written
-// here and had never been swept.
 func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 	t.Parallel()
 	f := newViewsFixture(t)
@@ -586,14 +566,6 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 	// Nothing only this repository knows, on every views tool. Task 14
 	// swept the renderer catalogue for exactly this and the tools' own
 	// prose is written one layer up, where the same mistake is available.
-	//
-	// **Patterns and not substrings**, which is the correction a review
-	// round made after the first version of this guard was measured: a
-	// list of the literals that happened to have leaked ("Task 1",
-	// "Task 6", "§5") catches those and the numbers they are prefixes
-	// of, and lets through every task number and section nobody had
-	// leaked yet. A guard against a *kind* of mistake has to describe
-	// the kind.
 	repositoryOnly := []struct {
 		what  string
 		re    *regexp.Regexp
@@ -639,11 +611,6 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 // marshals to `null` — so a client reading a view back would have two
 // spellings of "no parameters" to handle, which is the exact thing the
 // storage rule exists to prevent.
-//
-// It needs a view with **no** parameters, which is why it is its own
-// test: the read-back sweep saves two of them, and a map that is
-// unmarshalled into is allocated on the way, so that fixture cannot see
-// this at all.
 func TestAViewWithNoRendererParametersReadsBackAsAnObjectAndNotNull(t *testing.T) {
 	t.Parallel()
 	f := newViewsFixture(t)
@@ -694,22 +661,6 @@ func TestTheListingFlagsAStaleViewAndNotAHealthyOne(t *testing.T) {
 
 // --- The arguments a description promises and the transport has to
 // carry ---
-//
-// Each of the four tests below was written because dropping one
-// documented argument on the way into the domain left the whole web
-// suite green. The domain tests every one of these behaviours; what
-// nothing asserted is that the argument an agent sends *arrives*, which
-// is the only thing this layer can be wrong about and the failure a
-// caller would meet as a knob that silently does nothing.
-
-// TestARunCarriesItsStalePolicyAndReportsWhatItPruned drives on_stale
-// through the tool, and it is two claims in one because the two are
-// unobservable apart: best_effort has to reach RunView, and what
-// best_effort learned has to reach the caller.
-//
-// The control is the same view run with no policy at all, which is
-// refused — so an answer cannot pass here by being empty, and the
-// policy is what makes the difference rather than the query.
 func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
 	t.Parallel()
 	f := newViewsFixture(t)
@@ -790,17 +741,6 @@ func TestARunCarriesItsIncludeFieldsFlag(t *testing.T) {
 
 // TestValidateJudgesTheRendererAndTheParametersTheCallSent is the tool's
 // own reason to exist, asserted on the wire.
-//
-// views.validate's description says naming a renderer "is the only way a
-// renderer parameter can be judged". That is a promise about two
-// arguments arriving, and both were droppable: without the renderer the
-// domain skips the check entirely, and without the parameters it judges
-// a call nobody made — the map renderer's default mode requires nothing,
-// so an empty map validates whatever the caller sent.
-//
-// The verdict flips on the parameters alone, with the renderer fixed,
-// which is what makes this a test of the binding rather than of the
-// catalogue.
 func TestValidateJudgesTheRendererAndTheParametersTheCallSent(t *testing.T) {
 	t.Parallel()
 	f := newViewsFixture(t)

@@ -26,14 +26,6 @@ import (
 // TestAnInvalidUTF8ByteIsRefusedBeforeItBecomesAReplacementCharacter, and
 // this test uses the fault that does survive a decode to prove that the
 // *walk* reaches every position.
-//
-// It is spelled as the six-character JSON escape rather than as a raw
-// byte, because a raw control character inside a JSON string *is* a
-// syntax error — the JSON scanner refuses every byte below 0x20, and only
-// those — so the document would be refused before the walk ran and this
-// test would be exercising the decoder rather than the bound. A raw 0xff
-// is not a syntax error, which is why the encoding needs its own check on
-// the raw bytes. controlChar below is the same character after the decode.
 const badChar = `\u0001`
 
 // controlChar is what badChar decodes to, for the tests that build a Go
@@ -262,21 +254,6 @@ type embeddingHost struct {
 // types under this walk's promise that a walk cannot forget a field, and
 // sharing a common struct across them is the most natural refactor there
 // is.
-//
-// The test asserts three things at once, and the first is what makes the
-// other two mean anything:
-//
-//  1. **All three strings are really members of the decoded document.**
-//     The decode is done here rather than assumed, so if encoding/json
-//     ever stops promoting an unexported type's exported fields this test
-//     says so rather than quietly pinning a walk of something nobody can
-//     write.
-//  2. Both promoted strings are bounded.
-//  3. Both are reported **at the container's own pointer** — `/named`'s
-//     neighbours, not `/EmbeddedExported/promoted_visible`. The pointer is
-//     the whole product of a QueryError: an agent that gets one knows
-//     which member to rewrite, and an embedded type's Go name is not a
-//     member it can find.
 func TestAnEmbeddedTypesPromotedFieldIsBounded(t *testing.T) {
 	var host embeddingHost
 	doc := `{"promoted_hidden":"a` + badChar + `","promoted_visible":"b` + badChar +
@@ -316,11 +293,6 @@ func TestAnEmbeddedTypesPromotedFieldIsBounded(t *testing.T) {
 // again. Nothing uses one today; Task 3's predicate values and Task 11's
 // stored documents are both natural places for one to appear, and it
 // would silently reopen the class.
-//
-// The second half of the test states the other side of the rule the
-// walk's comment carries: a plain []byte is *not* caller text, because it
-// decodes from base64 rather than from a string the caller wrote, and it
-// is not walked.
 func TestADeferredRawMessageIsBounded(t *testing.T) {
 	type deferredDoc struct {
 		Raw   json.RawMessage `json:"raw"`

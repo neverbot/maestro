@@ -23,11 +23,6 @@ import (
 // INSERT because the entity must be a real row with a real search
 // vector — a fixture written by hand bypasses the application-computed
 // column and Task 9's search test would silently find nothing.
-//
-// A repeated type declaration comes back as a version conflict (the
-// metamodel refuses an upsert against an existing row that carries no
-// expected version) and is ignored: the helper's job is "make sure this
-// type is there", and every call after the first has already done it.
 func newEntityOfType(t *testing.T, entities *metamodel.Service, game uuid.UUID,
 	typeKey, label, key, name string,
 ) {
@@ -69,26 +64,6 @@ func TestLinksArea(t *testing.T) {
 	// TestLinksArea's "a resurrected document keeps its id and its links" case
 	// pins the *asymmetry* between this domain and internal/metamodel, from
 	// the side that has to stay different.
-	//
-	// internal/metamodel refuses a version claim against a row that is not
-	// there (metamodel.RemovedError), because its removals are hard: the row
-	// that comes back carries a new id and every relation, position,
-	// saved-view reference and attachment that named the old one goes on
-	// naming nothing. This domain deliberately does **not** adopt that rule
-	// for a deleted path, and the reason is exactly what this test asserts:
-	// the tombstone is the same row, so a write to the path continues the
-	// document — same id, same links, history unbroken — and nothing a
-	// caller would mourn is lost.
-	//
-	// **It is here to stop the two being harmonised.** A reader who notices
-	// that markdown accepts a claim the metamodel refuses will look for the
-	// reason, and the reason is a behaviour, not a paragraph: turning this
-	// test red is what a "consistency" fix would do first.
-	//
-	// It also pins the half the two domains *do* share: a claim against a path
-	// this game has never had is refused here too (TestDocumentsArea's
-	// "expecting a version of a document that does not exist is not found"
-	// case), so the two agree wherever the row is gone in every sense.
 	t.Run("a resurrected document keeps its id and its links", func(t *testing.T) {
 		svc, entities, _, pool := a.service(t)
 		ctx := context.Background()
@@ -555,34 +530,6 @@ func TestLinksArea(t *testing.T) {
 	// on the wire" case is the half of that distinction Go's type system alone
 	// does not carry. It also pins a third shape, `"links":null`, decided the
 	// same way an omitted field is: both preserve.
-	//
-	// The domain says "nil preserves, empty replaces with nothing"; a field
-	// tagged as a plain slice would collapse both into one value on the way
-	// in, and a plain slice with omitempty would collapse them on the way
-	// out — the exact failure Task 3's review found for `kind`, which had to
-	// be chased from the service onto the wire after the fact. Pointer plus
-	// omitempty is the shape that survives both directions, and this test
-	// pins it here, in the domain that defines the meaning, rather than
-	// waiting for Task 10 to define it again.
-	//
-	// The struct below deliberately mirrors Task 10's DocsWriteInput field:
-	// Links is a `*[]DocsLinkInput`, tagged `json:"links,omitempty"`. When
-	// that type lands, this test stays: it is the statement of what the tag
-	// has to be.
-	//
-	// **This pins a stand-in, not the real thing.** `wireWrite` is declared
-	// right here, in this file, because this package cannot import
-	// internal/web. Nothing here forces the real type to keep this shape — a
-	// `Links` declared as a plain `[]DocsLinkInput`, or without `omitempty`,
-	// would leave this test green while the wire behaviour it documents is
-	// gone, which is `kind`'s defect one layer up. **The claim is re-pinned
-	// against the real type by
-	// TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType
-	// (internal/web/mcp_docs_internal_test.go)**, which asserts
-	// DocsWriteInput.Links is exactly `*[]DocsLinkInput` tagged
-	// `json:"links,omitempty"` and decodes the same three shapes through
-	// it. Neither test replaces the other: this one owns the meaning, that
-	// one owns the declaration.
 	t.Run("omitting links and sending an empty array are different on the wire", func(t *testing.T) {
 		type wireWrite struct {
 			Path  string                 `json:"path"`
@@ -893,20 +840,6 @@ func TestLinksArea(t *testing.T) {
 	// another games link" case drives the statement directly, for the reason
 	// its twin in internal/metamodel (TestRelationsArea's "upsert relations
 	// conflict path cannot write another games edge" case) records.
-	//
-	// 0007_documents.sql's two composite foreign keys make a cross-game link
-	// impossible to *insert*: the row's project_id must agree with the
-	// document's and with the entity's. They check nothing on the conflict
-	// path. The target is (document_id, entity_id), which names no project;
-	// project_id is not in the SET list, so the stored row keeps its own and
-	// every key stays satisfied. Measured before the guard existed: one game
-	// rewrote the role on another game's link and was handed that game's row
-	// back.
-	//
-	// No caller here can reach it — both call sites resolve the document and
-	// the entity by key inside the project first — which is the same status
-	// the position write's guard has in internal/views, and the same
-	// decision: the guard stays, and it is asserted by driving the statement.
 	t.Run("upsert document links conflict path cannot write another games link", func(t *testing.T) {
 		svc, entities, _, pool := a.service(t)
 		ctx := context.Background()
@@ -953,13 +886,6 @@ func TestLinksArea(t *testing.T) {
 	// pins the three things a page has to get right: every row is seen exactly
 	// once and in the listing's order, a full final page carries a cursor to
 	// an empty one, and the cursor cannot be carried anywhere else.
-	//
-	// **The last part is this listing's own hazard rather than an inherited
-	// one.** The two sides of the join answer the same question from two
-	// ends, take the same LinksFilter, and sort on two different columns —
-	// an entity key one way, a document path the other — so a cursor carried
-	// across would compare a path against a key and answer nonsense. Nothing
-	// but the fingerprint stops it.
 	t.Run("a documents attachments page and the cursor belongs to its own side", func(t *testing.T) {
 		svc, entities, _, pool := a.service(t)
 		ctx := context.Background()
@@ -1104,14 +1030,6 @@ func TestLinksArea(t *testing.T) {
 // withTx's callback differs from the correct placement only by the commit
 // that follows, and every other failure LinkAdd can produce returns from
 // the callback before that statement runs.
-//
-// The technique is TestNoDeletionIsAnnouncedWhenTheDeleteCannotCommit's,
-// unchanged but for the table: a deferred foreign key from
-// document_links.id to projects.id is satisfied by nothing — a link's id
-// is not a project id — but being DEFERRABLE INITIALLY DEFERRED it is
-// checked at COMMIT and not before, so the INSERT succeeds and only the
-// commit fails. It hangs off document_links because that is LinkAdd's
-// only INSERT.
 func TestNoLinkIsAnnouncedWhenTheAttachmentCannotCommit(t *testing.T) {
 	svc, entities, hub, pool := newService(t)
 	ctx := context.Background()

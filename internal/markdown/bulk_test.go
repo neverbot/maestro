@@ -29,14 +29,6 @@ func TestBulkArea(t *testing.T) {
 	// TestBulkArea's "a batch lands the good documents and reports the rest"
 	// case is the partial mode's whole contract, and its fixture is
 	// deliberately four items with the bad one *in the middle*.
-	//
-	// A two-item batch cannot tell partial from atomic: with the failure
-	// last, "everything before it landed" is also what atomic would leave if
-	// it did not roll back, and with the failure first there is nothing
-	// before it. Four items with the third one failing distinguishes both
-	// directions — rows before the failure are kept and rows after it are
-	// still attempted — and the fourth item is what proves the loop did not
-	// stop.
 	t.Run("a batch lands the good documents and reports the rest", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -129,12 +121,6 @@ func TestBulkArea(t *testing.T) {
 	// case is the decision WriteMany's doc comment argues: a batch is a list
 	// of claims about versions, and a claim that turned out wrong is that
 	// item's failure and not the batch's.
-	//
-	// It also pins the half that is easy to lose: the conflict comes back
-	// with the version to merge onto and *without* the current body. The
-	// item below asks for the echo — IncludeCurrent true — and a batch
-	// failure has nowhere to put one, which is why the batch tool offers no
-	// such argument.
 	t.Run("a batch reports a stale version claim at its own index", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -269,20 +255,6 @@ func TestBulkArea(t *testing.T) {
 
 	// TestBulkArea's "a document batch is bounded by the same ceiling" case is
 	// the third kind's half of metamodel.MaxBulkItems.
-	//
-	// The bound lives in metamodel.BulkUpsert, which this domain's batch
-	// reaches from outside that package, so nothing in internal/metamodel's
-	// own tests can prove documents are bounded — and documents are the
-	// batch writer that shipped most recently, on the same shared machinery,
-	// in the same sub-project the missing bound was found in. That is
-	// precisely the shape of defect this repository keeps producing: a rule
-	// established correctly at two of its three call sites. Here is the
-	// third.
-	//
-	// The items are valid, unlike the metamodel-side fixture's: a document
-	// needs no declared parent, so the cheapest way to make the assertion
-	// mean something is to check that a batch which would otherwise have
-	// landed 501 documents landed none.
 	t.Run("a document batch is bounded by the same ceiling", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()

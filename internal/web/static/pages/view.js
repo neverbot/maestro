@@ -1,31 +1,4 @@
 // One saved view, drawn.
-//
-// This is the page every task from 4 to 14 was building for, and it
-// mounts rather than decides: the frame owns every negative state
-// (Task 4), the twin is the accessible content of the answer (Task 5),
-// the budget owns giving up on a layout (Task 6), the canvas owns the
-// drawing, the pan, the zoom and the drag layer (Task 7), the six
-// renderers own what a picture looks like (Tasks 8–13), and the
-// arrangement and the ground panel own the two writes (Task 14).
-//
-// **What is new here is that any of it happens at all.** Task 14's
-// controllers were driven by a harness and by nothing else — no pointer
-// reached `Arrangement.pointerDown`, no key reached `nudge`, no button
-// reached `MstGround.commit`. Every one of them is wired to a real event
-// below, which is what turns a tested mechanism into a product.
-//
-// **A view is a URL.** The key is a path segment and every bound
-// parameter is a `p.` pair in the query string, so a parameterised view
-// is a link a colleague can be sent and a designer can edit in the
-// address bar. client.js's `readParams`/`writeParams` spell both ends of
-// that, so the bar, the link and the address agree by construction.
-//
-// **The layout runs in a worker and the page is where a rejection
-// lands.** budget.js supervises the deadline and the canvas places the
-// band; the *throw* was left to "the page that calls the worker", which
-// is this one — a worker that failed is not a worker that was slow, and
-// offering a longer budget for an exception offers to wait longer for
-// the same throw.
 
 import {
   BAND,
@@ -95,24 +68,10 @@ export const WORKER_URL = "/static/layout/worker.js";
 
 // The band a *failed* layout wears, and the one thing on this page that
 // is neither the server's sentence nor the frame's.
-//
-// budget.js deliberately declines this path: its own sentence explains a
-// deadline, and dressing an exception as one would offer a longer wait
-// for the same throw. So the band carries the engine's own message,
-// unmodified, exactly as a refusal carries the server's — this page
-// composes the heading and never the reason.
 export const BANNER_LAYOUT_FAILED = "layout_failed";
 export const LAYOUT_FAILED_HEADING = "The layout engine failed; nodes are arranged in a grid.";
 
 // The two notices the stream produces that no other surface owns.
-//
-// The frame's model is built from an envelope or a refusal, and neither
-// of these is either: "somebody changed this view's query" and "somebody
-// deleted this view" are facts about the *stream*, and Task 4's rule —
-// a page invents no negative state — is about the three states of an
-// answer. These are the page's, they are two sentences, and the picture
-// is left exactly as it is under both: **nothing is swapped under a
-// designer and nothing is auto-navigated**, for any role.
 export const NOTICE_QUERY_CHANGED =
   "Somebody changed this view's query. What is on screen is the answer to the old one; reload to run the new one.";
 export const NOTICE_VIEW_REMOVED = "This view has been deleted. What is on screen is the last answer it gave.";
@@ -148,29 +107,6 @@ const SCENES = {
 
 // mapComposition is the composition a `manual` map reads, and it exists
 // because the map renderer was never given one.
-//
-// **The branch it feeds had been dead on the wire since Task 11.**
-// render/map.js's own header promises that on a map which *has* a saved
-// arrangement, a node new to it "is placed by the client, drawn with a
-// hollow anchor, and counted — *12 new nodes were placed
-// automatically*". `coordinatesFor` reads that from `options.layout`,
-// LAYOUT_REQUESTS above names only `graph` and `layered`, and the SCENES
-// entry for `map` used to pass `{background, axis, zoom}` and no layout
-// at all — so `placementsOf(options.layout)` was empty on every real
-// page and the exception could not fire. render_map_test.mjs passed a
-// composition by hand and proved the module; nothing proved the call.
-// Measured in a browser before the fix, on a map with four pinned rows
-// and twelve quests added afterwards: twelve shelf chips, zero hollow
-// anchors, and `scene.automatic` 0, so the band never appeared.
-//
-// It is composed here on the main thread rather than through the worker
-// because a map is not a graph: nothing about it wants dagre. What a
-// node with no stored row needs is *a* coordinate near the arrangement,
-// which is exactly `gridFallback` fitted by `compose` against the pins.
-//
-// `fields` maps get none, and that is not an optimisation: there the
-// game states every coordinate, `coordinatesFor` never looks at a
-// composition, and handing one over would be a placement nothing reads.
 export function mapComposition(envelope, row, params = {}) {
   if (params && params[PARAM_COORDINATE_SOURCE] === COORDINATES_FIELDS) return null;
   const nodes = (Array.isArray(envelope && envelope.nodes) ? envelope.nodes : [])
@@ -233,22 +169,6 @@ export function backgroundOf(row, asset) {
 // backgroundAssetFor resolves a view's `background_asset_id` to the asset
 // row that carries the URL and the pixel size, which is what
 // backgroundOf needs and what the view row does not have.
-//
-// **Nothing did this, and the symptom was a background that silently was
-// not there.** A view's three background columns are written by
-// views.set_background and read by the `map` renderer, and this page —
-// the only thing that mounts a renderer — passed `undefined` as the
-// asset on every draw, so backgroundOf answered an entry with an empty
-// href on every view that named a ground. An empty href is how this page
-// spells "the image is gone", so a correctly placed background drew
-// nothing and said nothing about it. Found by opening a map view with
-// two hundred pins over an uploaded image (Task 15).
-//
-// It is resolved by paging the asset listing rather than by fetching the
-// asset itself: `GET …/view-assets/{id}` answers the image *bytes*, and
-// the width and height a renderer needs live only in the listing.
-// `previous` short-circuits the walk, so a redraw of a view whose ground
-// has not changed costs nothing.
 export async function backgroundAssetFor(client, row, previous) {
   const id = row && typeof row === "object" ? row.background_asset_id : null;
   if (typeof id !== "string" || id === "") return null;
@@ -293,24 +213,6 @@ export function typeKeysOf(row) {
 
 // axisDeclarationFor is the `{type, options}` the `timeline` renderer
 // lays its axis out from.
-//
-// **Nothing supplied it, and an enum axis silently became a number
-// one.** render/timeline.js's axisFor is explicit that the declaration
-// "arrives from the caller because it is not in the envelope": the
-// answer carries the values a query found and an axis is what the *type*
-// says exists, which is how a declared option with no node still gets a
-// tick. With no declaration axisFor has only a number axis to fall back
-// on, and on a number axis every enum value is off-axis — so a
-// championship over six declared stages drew four lanes, one tick
-// reading "0", and all eighty-two of its events piled into the "no value
-// for stage" region to the left of the origin. Nothing said so, because
-// "this node has no value on this axis" is a picture the renderer draws
-// on purpose. Found by opening a timeline (Task 15).
-//
-// The declaration is looked for across every type the query puts in
-// scope and the first one found wins, which is sound because the
-// renderer catalogue refuses to save a timeline whose axis_field is not
-// declared identically by all of them (internal/views/renderers.go).
 export async function axisDeclarationFor(client, row, params, previous) {
   const view = row && typeof row === "object" ? row : {};
   if (String(view.renderer ?? "") !== RENDERER_TIMELINE) return null;
@@ -337,12 +239,6 @@ export async function axisDeclarationFor(client, row, params, previous) {
 // --- The layout ------------------------------------------------------
 
 // layoutWith runs one attempt in a worker against budget.js's deadline.
-//
-// The worker is created per attempt and terminated on the timeout path,
-// because `terminate()` is the only thing that actually stops a
-// synchronous dagre run. A **throw** is caught here and banded with the
-// engine's own message: this is the path budget.js leaves to the page
-// that calls the worker, and this is that page.
 export async function layoutWith(request, options = {}) {
   const makeWorker = options.makeWorker || ((url) => new Worker(url, { type: "module" }));
   const budgetMs = Number.isFinite(options.budgetMs) ? options.budgetMs : LAYOUT_BUDGET_MS;
@@ -470,10 +366,6 @@ export async function viewPage(opened, options = {}) {
 
 // sayBuilderDoor puts either the way into the builder or the reason
 // there is none in the line under the view's own name.
-//
-// Never a control that refuses: a person who presses "Open in the
-// builder" and is told no has been offered something the product knew it
-// could not do. Either the link is there, or the sentence is.
 export function sayBuilderDoor(doc, slug, row) {
   const el = doc.getElementById("view-builder");
   if (!el) return null;
@@ -577,15 +469,6 @@ async function run(state, options) {
 // frame's model and the canvas.
 // draw is a picture followed, always, by the width the window actually
 // has.
-//
-// The fallback is re-applied in a `finally` rather than at the three
-// places `drawPicture` returns, and that is the whole reason this
-// wrapper exists: `drawPicture` builds a *new* `Arrangement` on every
-// draw and sets `canvas.hidden` from the renderer, so a redraw arriving
-// while the window is narrow — a stream re-read, a parameter change —
-// would put the drawing back and hand a designer a freshly armed
-// writing path. Every exit from a draw goes through the fallback,
-// including the ones that threw.
 async function draw(state, envelope, error, options) {
   try {
     return await drawPicture(state, envelope, error, options);
@@ -749,23 +632,9 @@ async function drawPicture(state, envelope, error, options) {
 // The width a view page stops drawing at (spec §9: "layouts respond
 // down to tablet width; below it, view pages fall back to the text twin
 // and the writing interactions are disabled rather than shrunk").
-//
-// 48rem and not 768px: the whole of what makes a picture usable at a
-// width is how much text fits beside it, so a reader who has turned
-// their font size up reaches the fallback sooner, which is the right
-// direction. Measured before this existed, on the seeded thousand-quest
-// instance at a 600px viewport: the canvas drew at 536px with every
-// writing interaction live.
 export const NARROW_QUERY = "(max-width: 47.99rem)";
 
 // What the page says while it is not drawing.
-//
-// **The picture is not removed silently.** A canvas that vanished with
-// no sentence would be indistinguishable from a view that answered
-// nothing, which is the one thing this front end's negative states exist
-// to keep apart. It is the page's own sentence and not the frame's: the
-// frame speaks only its model's words, and "this window is narrow" is a
-// fact about the window rather than about the answer.
 export const NOTICE_TOO_NARROW =
   "This window is too narrow to draw the picture, so this view is shown as its " +
   "table below. The table is the same answer. Arranging the picture is off " +
@@ -781,19 +650,6 @@ export function narrowNotice(state) {
 }
 
 // applyWidth is the fallback, and it is two halves.
-//
-// The first half is that the twin becomes the content: the drawing goes,
-// the ground panel goes with it (placing a background is an alignment
-// against a picture, and there is no picture), and a sentence says so.
-//
-// **The second half is the one that matters, and it is why this is a
-// function rather than a media query.** Hiding the canvas in CSS leaves
-// `Arrangement` believing it may write: the twin is still on screen and
-// still focusable, its rows still select nodes, and one arrow key would
-// then write a position against a drawing nobody can see — the same
-// half-truth `auto` mode refuses a drag for. `setDrawn(false)` disarms
-// every write in that class, and jstest/writes_test.mjs fails if a
-// hidden canvas still accepts a nudge.
 export function applyWidth(state, narrow) {
   const fell = narrow === true;
   state.narrow = fell;
@@ -820,11 +676,6 @@ export function applyWidth(state, narrow) {
 }
 
 // watchWidth binds the fallback to the viewport and applies it once.
-//
-// The media query list is injectable for the harness's sake: a Node
-// stub has no `matchMedia`, and a fallback that could only be driven by
-// resizing a real window is a fallback with no test — which is how the
-// step this closes went four tasks unbuilt in the first place.
 export function watchWidth(state, options = {}) {
   const media = options.media
     || (typeof globalThis.matchMedia === "function" ? globalThis.matchMedia(NARROW_QUERY) : null);
@@ -873,15 +724,6 @@ export function boundsOf(marks) {
 }
 
 // fitView is the pan and zoom that puts a whole answer on the screen.
-//
-// **A first view opens fitted, and that is a mounting decision this page
-// owns.** A scene's coordinates are the game's, the canvas's view starts
-// at the origin at 1x, and a five-hundred-node graph laid out from (0,0)
-// to (12000, 9000) would open showing its top-left corner — a designer's
-// first sight of their own game would be four boxes and a lot of ground.
-// It is applied once, on the first draw of a view: every later draw keeps
-// whatever the designer panned to, because moving a picture somebody is
-// reading is the thing this whole sub-project refuses to do.
 export function fitView(bounds, width, height) {
   if (!bounds || !(width > 0) || !(height > 0)) return null;
   const margin = 1 + 2 * FIT_MARGIN;
@@ -909,22 +751,6 @@ async function settleLayout(frame) {
 }
 
 // fitOnce fits a canvas to a scene and **answers whether it did**.
-//
-// The answer is the whole of why this is a function. The first version
-// of this fit measured once and set `fitted = true` whatever came back,
-// so on the first draw of a page — the only draw that was ever going to
-// be fitted — it measured a canvas the frame had not laid out yet, got
-// 0x0, computed no fit, and marked the view fitted anyway. The picture
-// opened at the origin at 1x, which is exactly what the fit exists to
-// prevent, and nothing anywhere said so: `fitView` returning null is
-// indistinguishable from a fit that was not wanted. Found by mounting
-// the first real view and reading the canvas's `view` afterwards.
-//
-// So: measure, and if the box has no size, let the frame lay out and
-// measure again. If it still has none — a hidden tab, a canvas in a
-// collapsed panel — the caller is told `false` and the *next* draw tries
-// again, because a view that is never fitted is a bug and a view fitted
-// on the second draw is a view a designer never saw unfitted.
 export async function fitOnce(canvas, marks, options = {}) {
   const bounds = boundsOf(marks);
   if (!bounds || !canvas || typeof canvas.setView !== "function") return false;
@@ -972,12 +798,6 @@ function nodesOfScene(scene, layout) {
 
 // wire is where a pointer, a key and a button reach the two controllers
 // Task 14 built and nothing drove.
-//
-// **A click is not a drag, and the difference is a threshold.** A drag
-// starts on the first pointer movement past DRAG_THRESHOLD_PX and not on
-// the button going down: `Arrangement.pointerUp` is the write, so a page
-// that began a drag on every press would send a position write for every
-// click that merely opened a panel.
 export const DRAG_THRESHOLD_PX = 3;
 
 export function wire(doc, panelEl, slug, client, state) {
@@ -1021,27 +841,6 @@ export function wire(doc, panelEl, slug, client, state) {
   });
 
   // The twin's selection, arriving here.
-  //
-  // **This listener is the fourth sighting of this sub-project's own
-  // recurring defect and was found in a browser, not by a harness.**
-  // mst-twin.js dispatches `mst-select` when a row takes focus, its
-  // header says "the selection travels as a DOM event so the canvas can
-  // highlight what the reader is standing on", and twin_test.mjs asserts
-  // the event goes out "under the name a canvas will listen for" — and
-  // nothing in the product listened for it. The consequence was the
-  // whole keyboard path of spec §8.1: a reader could tab through the
-  // twin and watch the rows mark themselves, then move to the canvas and
-  // find the arrow keys moved nothing and wrote nothing, because
-  // `Arrangement.selection` was still empty. Measured before the fix, on
-  // the seeded game: focusing the *Wanted: Hogger* row set
-  // `mst-twin.selected`, one ArrowRight on the focused surface left the
-  // node's `x` at 287 and sent zero writes.
-  //
-  // It is bound on the frame element rather than on the twin: the event
-  // is `composed`, so it crosses the frame's shadow boundary, and the
-  // twin is rebuilt on every draw while the frame is not — a listener on
-  // the twin would be a listener on whichever twin happened to exist
-  // when the page was wired.
   state.frame.addEventListener(SELECT_EVENT, (event) => {
     const node = event && event.detail ? event.detail : null;
     if (!node || typeof node.type !== "string" || typeof node.key !== "string") return;
@@ -1068,12 +867,6 @@ export function wire(doc, panelEl, slug, client, state) {
 
   // The arrangement menu. Delegated on the panel host, which survives a
   // redraw, so a menu rebuilt after a write is still wired.
-  //
-  // **An action with no undo asks twice**, in the button's own label and
-  // not in a modal: the notes beside it say "saved positions keep no
-  // history and there is no undo on the server", and a single click was
-  // all that stood between a designer and that sentence being about
-  // them. The same arming the person menu's sign-out uses.
   let armed = null;
   const disarm = () => {
     if (armed === null) return;
@@ -1130,12 +923,6 @@ export function wire(doc, panelEl, slug, client, state) {
   });
 
   // Pan and zoom, the canvas's own two transforms.
-  //
-  // **The wheel asks for a modifier, and the page keeps its scroll.**
-  // It used to `preventDefault()` every wheel event over the canvas, so
-  // on a page 7000px tall the one gesture a reader makes to move down it
-  // did nothing but zoom, from the origin rather than from the pointer.
-  // A modifier is the convention every map in every browser uses.
   surface.addEventListener("wheel", (event) => {
     if (!event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
@@ -1150,10 +937,6 @@ export function wire(doc, panelEl, slug, client, state) {
   // reason that was survivable is that the fit above now starts every
   // view showing the whole answer. A reader who zooms in still needs to
   // get to the rest of it.
-  //
-  // It is the same press the drag above tracks — a press that began on a
-  // node moves the node, a press that began on nothing moves the view —
-  // so the two can never both be running.
   surface.addEventListener("pointermove", (event) => {
     if (press === null || press.address !== null || press.dragging) return;
     if (state.ground && state.ground.placing) return;
@@ -1173,18 +956,6 @@ export function wire(doc, panelEl, slug, client, state) {
 
 // mountSaveAs puts the dialog in the shell's own hole, which is
 // **outside** the frame.
-//
-// It is a named function rather than three lines inside `mount` so that
-// a harness can drive it, and it is separate from `wireSaveAs` because
-// the two answer different questions: where the dialog is, and whether
-// anything reaches it.
-//
-// Where it is, is the point. `mst-view-frame` wraps the drawing in an
-// `aria-hidden` div because the text twin is the accessible content of
-// the answer; anything appended to the frame is slotted into that
-// wrapper, so a focusable control put there is one a keyboard can reach
-// and a screen reader will never announce. The dialog therefore has a
-// hole of its own in view.html and is never appended to the frame.
 export function mountSaveAs(doc, saveAs) {
   const root = doc.getElementById("save-as-root");
   if (!root || !saveAs) return null;
@@ -1197,12 +968,6 @@ export function mountSaveAs(doc, saveAs) {
 }
 
 // wireSaveAs is the dialog's three buttons and its four kinds of field.
-//
-// It is exported because it is the whole of what makes the dialog a
-// product rather than a mechanism: internal/web/jstest/save_as_test.mjs
-// drives a designer's clicks and keystrokes through this function, which
-// is the seam Task 15's finding was about — a controller that works and
-// that no gesture reaches is a controller nobody has.
 export function wireSaveAs(saveAs) {
   if (!saveAs || !saveAs.root || typeof saveAs.root.addEventListener !== "function") return null;
   saveAs.root.addEventListener("click", async (event) => {
@@ -1296,14 +1061,6 @@ export async function openPanel(doc, panelEl, slug, client, address) {
 }
 
 // receive acts on one decision the stream produced.
-//
-// A re-read of the *picture* is the client's own: it coalesces forty
-// events into one call and hands the answer back through `onAnswer`, so
-// this page redraws and never re-asks — asking here as well would be two
-// runs for one event. A vocabulary rename re-reads the saved **row**
-// without running it, which is exactly what that event means. A change
-// to the query, and a deletion, are banded and change no pixel of the
-// picture.
 function receive(state, verdict) {
   if (verdict.decision === REREAD && verdict.target === TARGET_VIEW) {
     return state.client.readView(state.key).then((answer) => {

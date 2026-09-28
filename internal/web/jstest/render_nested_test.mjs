@@ -2,38 +2,6 @@
 // internal/web/static/render/nested.js, over the drawing vocabulary it
 // shares with the other five (internal/web/static/render/marks.js,
 // render/controls.js) and the frame's own bands (render/scene.js).
-//
-// What this layer covers that no Go test can, and what is this
-// renderer's alone.
-//
-// **That a drawing depth is not a fetch boundary.** `max_depth` holds
-// children back from the picture; every one of them is already in the
-// envelope. A renderer that treated the bound as a fetch boundary would
-// make one parameter mean two things and would put a network round trip
-// behind a disclosure triangle. The chip's count is asserted, and so is
-// the number of fetches an expansion makes: zero, over a stubbed global
-// `fetch` that counts.
-//
-// **That a root and an orphan of the cap do not look alike.** "This
-// thing is top-level" and "this thing's parent did not fit" are two
-// statements, and both are drawn at the top level. They are in **one**
-// fixture, because a test with one of each in separate fixtures passes
-// for an implementation that treats them identically.
-//
-// **That a containment cycle terminates and says so.** A contains B
-// contains A is data the metamodel permits, and the failure mode without
-// a repeat check is a stack overflow rather than a wrong picture — which
-// is exactly why the check has a test rather than a comment. The
-// repeated box carries the glyph and the frame names both ends.
-//
-// **That colour tints the header and never the box**, at every level,
-// because a nest of four fills has no legible text in it.
-//
-// **That the twin describes the answer and not the drawing**: it lists
-// every node, including the ones the depth bound held back.
-//
-// Run directly: `node internal/web/jstest/render_nested_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
 import { UNSET_LABEL } from "../static/palette.js";
@@ -150,12 +118,6 @@ function headerOf(result, key) {
 // is inside that one.
 // contains is the geometric claim the whole renderer is about: this box
 // is inside that one, with **clearance on every side**.
-//
-// Strictly inside, and not merely not-overflowing: a child flush against
-// its container's border reads as a box that escaped, and a check
-// written as `<=` passes for a renderer that drew the nest with no
-// padding at all — the shape of the fixture-at-the-edge mistake Task 8
-// found in its own stub test.
 function contains(outer, inner) {
   return (
     inner.x > outer.x &&
@@ -215,9 +177,6 @@ check("beyondMaxDepthACountChipExpandsWithoutARerun", () => {
 check("aTopLevelNodeAndAnOrphanOfTheCapDoNotLookAlike", () => {
   // Both in one fixture, because two fixtures would pass for an
   // implementation that drew them identically.
-  //
-  //   zone/root  — a real root: no containment edge leaves it.
-  //   zone/lost  — contained in something the node cap left out.
   const envelope = envelopeOf(
     [node("root"), node("lost"), node("child")],
     [inside("child", "root"), inside("lost", "gone")],

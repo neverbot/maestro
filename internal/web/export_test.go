@@ -76,13 +76,6 @@ func (s *Server) ToolDescriptionsForTest() map[string]string {
 // enumerates the shells on disk against it and then drives a real
 // request at each pattern: a shell added without a route must fail there
 // rather than 404 in a browser.
-//
-// It is keyed by pattern and not by file because a file is not a key: the
-// picker shell (index.html) is served at "/" and at "/games", one of them
-// a dispatching shortcut and the other deliberately not, and a map keyed
-// by file could only remember one of the two — silently dropping the
-// route the browser bug this shape was written for actually needed
-// tested.
 func ShellRoutesForTest() map[string]string {
 	out := make(map[string]string, len(shellRoutes))
 	for _, shell := range shellRoutes {

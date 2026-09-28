@@ -12,14 +12,6 @@ import (
 )
 
 // TestExactlyOneNewWireCodeShips is the count as an assertion.
-//
-// The plan's whole argument about this package's error vocabulary is
-// that it adds **one** code, having refused three candidates because
-// each named a recovery an existing code already names. A second
-// sentinel appearing here without that argument being made again is the
-// standing defect — a rule established correctly and not carried one
-// step along — and this is what makes adding one cost a deliberate edit
-// to a test that says why.
 func TestExactlyOneNewWireCodeShips(t *testing.T) {
 	assert.Must(t, len(Sentinels()) == 1, "Sentinels() = %v, want exactly one. This sub-project adds one wire "+
 		"code, semantics_undeclared, because its recovery — declare something about "+
@@ -35,14 +27,6 @@ func TestExactlyOneNewWireCodeShips(t *testing.T) {
 }
 
 // TestNoTimeoutCodeShips pins the refusal by name.
-//
-// internal/views faced this exact choice and refused `query_timeout`:
-// SQLSTATE 57014 is already in metamodel's retryableSQLStates and
-// already maps to `retryable`, whose recovery is "change nothing and
-// resend". Adding an `analysis_timeout` here would be the recurring
-// defect in its purest form, and the argument is in errors.go rather
-// than only in a plan nobody reads at edit time — so the assertion is
-// that the argument is *there*, as well as that the code is not.
 func TestNoTimeoutCodeShips(t *testing.T) {
 	for _, sentinel := range Sentinels() {
 		assert.Must(t, !strings.Contains(sentinel.Error(), "timeout"), "this package answers with %q: a timed-out analysis is `retryable`, "+
@@ -57,14 +41,6 @@ func TestNoTimeoutCodeShips(t *testing.T) {
 }
 
 // TestLimitExceededIsOneValueAcrossBothDomains.
-//
-// It asserts the **identity** and not the spelling, because spelling is
-// exactly what a second errors.New("limit_exceeded") would get right: it
-// would print the same, satisfy no errors.Is against the other package's
-// name, miss internal/web's single arm and reach an agent as
-// internal_error. That is the trap metamodel.ValidationError.Is's own
-// comment describes, and one value in the package both domains already
-// depend on is what closes it.
 func TestLimitExceededIsOneValueAcrossBothDomains(t *testing.T) {
 	if !errors.Is(ErrLimitExceeded, views.ErrLimitExceeded) {
 		t.Fatal("analysis.ErrLimitExceeded and views.ErrLimitExceeded are two values; " +
@@ -148,11 +124,6 @@ var codeValues = map[string]string{
 }
 
 // TestTheUndeclaredRefusalCarriesTheCatalogueAsDataAndAsProse.
-//
-// The prose is what a human reads in a log; the details payload is what
-// a client renders. Both are built in the domain so the MCP surface and
-// the REST mirror cannot disagree about what this refusal carries — the
-// shape markdown.ConflictError.Details established.
 func TestTheUndeclaredRefusalCarriesTheCatalogueAsDataAndAsProse(t *testing.T) {
 	err := &UndeclaredError{
 		Types: []TypeReport{

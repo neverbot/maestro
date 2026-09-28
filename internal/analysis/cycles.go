@@ -16,31 +16,6 @@ import (
 // A prerequisite cycle report is **the walk internal/graph already
 // emits, read for its closing hops**, and nothing about the traversal is
 // new here.
-//
-// That is worth stating rather than implying, because the property this
-// file rests on was a correction to that package and is invisible from
-// the outside: graph.WalkCTE **returns the hop that closes a cycle,
-// exactly once, with closed = true, and does not expand from it**. An
-// earlier shape suppressed the row rather than the recursion, so an
-// n-cycle came back with n-1 of its n edges and a self-loop came back
-// with none -- which made the one thing this engine exists to find the
-// one thing that walk could not show. This file reads `closed`, `path`
-// and `rel_path` and reconstructs nothing.
-//
-// The reliance is asserted and not merely written down:
-// TestTheCycleReportReadsTheWalksClosingHopRatherThanReconstructingIt
-// runs graph.WalkCTE directly over one of these fixtures and holds the
-// finding's edge ids against the closing row's own rel_path tail, so a
-// future "optimisation" that rebuilt cycles from consecutive node pairs
-// is red rather than subtly wrong on exactly the fixture that matters --
-// two gating relation types between one pair of entities.
-//
-// The one thing this file needed that the walk did not have is
-// CarryRelationPath (Task 4): `path` carries node ids, and a cycle's
-// edges cannot be recovered from consecutive node pairs where it matters
-// most.
-
-// CyclesInput is one prerequisite-cycle report's arguments.
 type CyclesInput struct {
 	// EntityTypes narrows what is **seeded**; empty means every entity
 	// type of the game. IgnoreEntityTypes removes types from whatever
@@ -84,27 +59,12 @@ type CycleNode struct {
 }
 
 // CycleEdge is one edge of a cycle.
-//
-// **RelationType is the field this whole widening of internal/graph was
-// for.** The first thing a designer does with a reported loop is ask
-// whether the type should have been declared gating at all: the clearest
-// real false positive is mutual exclusion -- "choosing the Horde locks
-// the Alliance" as two `requires_not` edges -- which is a legitimate
-// two-cycle in a type that reads like a prerequisite, and whose fix is a
-// trait declaration rather than a change to the content. A finding that
-// named only the entities would send that designer to rewrite a game.
 type CycleEdge struct {
 	RelationID   uuid.UUID `json:"relation_id"`
 	RelationType string    `json:"relation_type"`
 }
 
 // Cycle is one loop, canonicalised.
-//
-// Entities are in cycle order and Edges runs with them: **edge i joins
-// entity i to entity (i+1) mod n**. That is the invariant rotation is
-// most likely to break, so it is stated here and asserted against the
-// database rather than against the walk's own row --
-// TestACycleAndItsEdgesRotateTogether.
 type Cycle struct {
 	Entities []CycleNode `json:"entities"`
 	Edges    []CycleEdge `json:"edges"`
@@ -112,19 +72,6 @@ type Cycle struct {
 }
 
 // CyclesResult is the whole report.
-//
-// **The two lists are separate and that is the finding, not a
-// formatting choice.** A containment loop -- a zone inside a zone inside
-// the first -- is a hierarchy that is not one; a prerequisite loop is a
-// gate nobody can open. Different sentence, different fix, different
-// list. TestAContainmentLoopIsReportedSeparatelyFromAPrerequisiteLoop
-// builds one of each.
-//
-// **EdgesWalked is what makes the negative half real.** An empty Cycles
-// list means one of two entirely different things -- the game is acyclic,
-// or the walk followed no edge at all -- and a report carrying only the
-// findings is the same JSON in both cases. Every count here exists for
-// that reason and for no other.
 type CyclesResult struct {
 	Cycles            []Cycle `json:"cycles"`
 	ContainmentCycles []Cycle `json:"containment_cycles"`
@@ -150,19 +97,6 @@ type CyclesResult struct {
 }
 
 // Cycles answers "where do this game's prerequisites loop".
-//
-// **Capped hard and not paginated**, which is a decision rather than an
-// omission: a design with more than a thousand distinct prerequisite
-// cycles has one problem, not a thousand, and paging through them helps
-// nobody. `max_results` defaults to DefaultMaxResults, refuses above
-// MaxMaxResults, and sets Truncated when it bites.
-//
-// Findings are ordered **shortest first**, and that is not cosmetic
-// either. graph.WalkCTE truncates with ORDER BY depth, so a truncated
-// walk is a connected prefix of the nearest hops; reporting the shortest
-// cycles first means a truncated answer holds the *most fixable* loops
-// rather than an arbitrary scatter of them.
-// TestATruncatedCycleReportKeepsTheShortestCycles pins it.
 func (s *Service) Cycles(ctx context.Context, projectID uuid.UUID, in CyclesInput) (
 	CyclesResult, error,
 ) {
@@ -234,11 +168,6 @@ type loop struct {
 
 // cycleWalk runs one walk and returns the cycles its closing hops
 // carried, canonicalised and deduplicated, shortest first.
-//
-// It adds this walk's counts into the shared result rather than
-// returning them, because the two walks are one report: a designer told
-// "seven edges were walked" wants the number for the run and not for the
-// half of it that happened to find nothing.
 func (s *Service) cycleWalk(ctx context.Context, projectID uuid.UUID, name string,
 	considered []uuid.UUID, sem Semantics, in CyclesInput, out *CyclesResult,
 	invalid map[uuid.UUID]bool,
@@ -346,16 +275,6 @@ LEFT JOIN relations r ON r.id = w.via_relation AND r.project_id = $1`
 func graphRowCap(w graph.Walk) int { return w.MaxRows }
 
 // cycleFromClosedRow turns one closing hop into a cycle.
-//
-// A closed row's `path` ends with a node it already contains -- that is
-// what `closed` means -- and `rel_path` runs one shorter and in step:
-// rel_path[i] is the edge from path[i] to path[i+1]. So the cycle is the
-// segment of path from the first occurrence of the repeated node to the
-// end, and its edges are the corresponding tail of rel_path.
-//
-// A self-loop arrives as path [a a] and comes back as one node and one
-// edge, which is a length-1 cycle and is **reported rather than
-// filtered**: it is always a bug and always cheap to fix.
 func cycleFromClosedRow(path, relPath []uuid.UUID) (loop, bool) {
 	if len(path) < 2 || len(relPath) != len(path)-1 {
 		// A row shaped like nothing this walk emits. Skipped rather than
@@ -384,17 +303,6 @@ func cycleFromClosedRow(path, relPath []uuid.UUID) (loop, bool) {
 
 // rotate is canonicalisation: the smallest entity id comes first, and
 // **the edge sequence rotates with it**.
-//
-// A four-node cycle is discovered from four starting points and would
-// otherwise be reported four times; rotating and then deduplicating on
-// the node sequence is what makes it one finding. The edge rotation is
-// the step that gets skipped, because a report that rotated only the
-// nodes still looks right -- the entities are all there, in a legal
-// order -- and every edge then names the wrong pair.
-// TestACycleAndItsEdgesRotateTogether is red under exactly that
-// mutation for every cycle longer than one, and stays green on
-// self-loops, which is the discrimination that proves it tests rotation
-// rather than existence.
 func rotate(l loop) loop {
 	if len(l.nodes) < 2 {
 		return l
@@ -425,10 +333,6 @@ func loopKey(nodes []uuid.UUID) string {
 
 // describe turns cycles of ids into findings a designer reads: entity
 // type and key for every node, relation type key for every edge.
-//
-// The relation rows are read back through this package's own statement
-// rather than taken from the walk, because the walk hands back ids and
-// the type of an edge is what the finding is *for*.
 func (s *Service) describe(ctx context.Context, projectID uuid.UUID, sem Semantics,
 	loops []loop,
 ) ([]Cycle, error) {
@@ -491,32 +395,6 @@ func (s *Service) describe(ctx context.Context, projectID uuid.UUID, sem Semanti
 // cycleSemantics splits a game's resolved reading into the two graphs
 // this analysis checks, and it is the one place this file decides what a
 // cycle is *of*.
-//
-// The prerequisite graph carries every type that orders anything --
-// `prerequisite_of` (followed backwards, as everywhere in this engine),
-// `unlocks`, `ordering`, and a bare `acyclic`. That last is the trait's
-// whole reason for existing: a `variant_of` declared `{acyclic}` and
-// nothing else gates no progression at all, and a loop in it is still a
-// finding. It is also the entry most likely to be quietly dropped from
-// this set, which is why TestAnAcyclicOnlyTypeWithNoGatingIsStillChecked
-// exists.
-//
-// Two kinds are excluded, each for its own reason:
-//
-//   - `symmetric`. A cycle over an adjacency is meaningless -- two zones
-//     that connect to each other are a map, not a loop -- and reporting
-//     one would fill the report of every connected game with findings
-//     nobody can act on. TestASymmetricTypeProducesNoCycleFindings pins
-//     it, with a `requires` loop over the same nodes as its control, so
-//     a walk that found nothing at all cannot pass.
-//   - `annotation`. The type is declared inert and no analysis follows
-//     its edges.
-//
-// `containment` gets its **own** graph, walked in its stored direction.
-// A type carrying containment is not also in the prerequisite graph even
-// if it carries `acyclic` beside it: it would then be reported twice for
-// one loop, in two lists whose whole point is that they are different
-// findings.
 func cycleSemantics(sem Semantics) (gating, containment Semantics) {
 	gating = Semantics{ByType: map[uuid.UUID]TypeSemantics{}}
 	containment = Semantics{ByType: map[uuid.UUID]TypeSemantics{}}

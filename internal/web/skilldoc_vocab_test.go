@@ -17,13 +17,6 @@ import (
 
 // The fourth closed vocabulary: the error codes a game-content tool can
 // answer with.
-//
-// Its guard lives here rather than in internal/skill because its source
-// of truth is a delimited region of internal/web/auth.go and
-// internal/web imports internal/skill, so the dependency has exactly one
-// direction. internal/skill/vocab_test.go names this test as the checker
-// for vocab:error_codes and fails if the fence disappears, so neither
-// half can go quiet on its own.
 
 const (
 	errorCodeRegionBegin = "// vocab:error_codes begin"
@@ -78,24 +71,6 @@ func TestBundleErrorCodesMatchTheSurface(t *testing.T) {
 
 // TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn takes the
 // judgement out of the region's membership.
-//
-// "The codes a game-content tool can return" is a sentence somebody has
-// to keep true, and nobody does. So it is derived instead: every error
-// code this package puts on the MCP wire is parsed out of the source —
-// the first argument of mcpErrorResult and of NewMCPError, and the Code
-// field of every &MCPError literal — and that set must equal the region,
-// in both directions.
-//
-// A code moved into the region that no tool produces fails here; so does
-// a new MCP refusal whose code was declared outside it, which is the
-// direction that would otherwise ship an agent an error the bundle never
-// documents.
-//
-// Both spellings are collected because both occur: mcp.go names the
-// constant, and mcp_metamodel.go's invalidInput writes the string
-// "invalid_input" straight into the literal. Reading only the constants
-// would have missed the second and reported invalid_input as a region
-// member nothing produces.
 func TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn(t *testing.T) {
 	t.Parallel()
 	region := errorCodesInRegion(t)
@@ -167,14 +142,6 @@ func constantAssignment(line string) (name, value string, ok bool) {
 
 // mcpEmittedErrorCodes parses every non-test Go file of this package and
 // returns the error code *values* that reach the MCP wire.
-//
-// It reads the calls and the literals, not a list somebody maintains,
-// which is what makes the region's membership derived rather than
-// remembered. A code named by a constant is resolved through this
-// package's own errCode* declarations; a code written as a bare string
-// is taken as it is; a code that is neither — `domainErr.Code`, the
-// pass-through in mcpErrorFor — carries no new value and is skipped,
-// since whatever built that MCPError is itself in this scan.
 func mcpEmittedErrorCodes(t *testing.T) []string {
 	t.Helper()
 	values := errorCodeConstantValues(t)

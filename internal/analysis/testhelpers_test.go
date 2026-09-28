@@ -25,14 +25,6 @@ type game struct {
 
 // area is one throwaway database, shared by every claim asserted about
 // one area of this package.
-//
-// **The database is the expensive thing, and a project is not.** Every
-// test used to take its own: a hundred and eighteen databases for a
-// hundred and eighteen claims, each one a file copy of a migrated
-// template. Every query this package runs is scoped by project id, so
-// two projects in one database cannot see each other — which makes the
-// database shareable and the project the unit of isolation it already
-// was.
 type area struct {
 	pool *pgxpool.Pool
 }
@@ -52,9 +44,6 @@ func (a area) game(t *testing.T) game {
 // gameIn seeds the fixture into a pool the caller chose: an area's
 // database for a claim that shares one, a fresh one for a claim that
 // needs a world of its own.
-//
-// The hub is nil: nothing in this package's own tests subscribes, and
-// internal/web is where publication is asserted end to end.
 func gameIn(t *testing.T, pool *pgxpool.Pool) game {
 	t.Helper()
 	slug := "azeroth-" + uuid.NewString()[:8]
@@ -223,14 +212,6 @@ func (g game) invalidate(t *testing.T, relTypeKey string) {
 
 // route writes one route with the given steps, **through the product's
 // own writer**.
-//
-// It used to insert the two tables by hand, because the route CRUD was a
-// later task. It is not any more, and a fixture that wrote rows the
-// product's own writer would have refused is a fixture testing a game
-// that cannot exist -- the same reason declareEntityType, entity and
-// edge all go through internal/metamodel. Task 5's seed-route tests
-// therefore now run against routes an agent could actually have
-// authored.
 func (g game) route(t *testing.T, key string, steps []SeedRef) {
 	t.Helper()
 	in := RouteInput{Key: key, Name: key, ExpectedVersion: new(int32)}

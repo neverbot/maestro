@@ -282,11 +282,6 @@ func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
 // being a mirror that compiles and is never called: two surfaces, one
 // core each, and the browser's route is the half a mirror most easily
 // gets wrong.
-//
-// It drives both renames through HTTP and asserts what the tool asserts
-// — the row keeps its id and picks up the new key — plus the two
-// refusals whose status codes are this surface's own addition: a taken
-// destination is 400 invalid_input, and a stale version is 409.
 func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -467,12 +462,6 @@ func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
 // surface has to decide that the MCP surface never faced: a token is
 // editor-equivalent by construction, but a session caller's role is real
 // and a viewer must not be able to write a game's content.
-//
-// It drives *every* write route the server actually registered, read
-// back from the routing table rather than typed out here, because the
-// hand-written version of this test covered three of the eight and a
-// review stripped the check from five handlers without failing anything.
-// A write route added tomorrow appears in this table on its own.
 func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -561,11 +550,6 @@ func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 }
 
 // The order the catalogue's column headers set, read off a URL.
-//
-// It is asserted here and not only in internal/metamodel because that is
-// where this product's most repeated defect lives: a parameter correct
-// in the domain and never wired at the call site, with every unit test
-// green. The mirror is the call site a person's browser uses.
 func TestTheOrderReachesTheListingThroughTheURL(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -958,12 +942,6 @@ func TestTheInvalidFilterIsTriStateAndRefusesAnythingElse(t *testing.T) {
 // code; and an empty confirmation is not the same as no confirmation —
 // the MCP surface refuses it, and accepting it here made the field's
 // presence mean nothing.
-//
-// The field is `game` and takes a slug since the routes started taking
-// one. A slug has no malformed spelling the way a uuid did — anything
-// that is not this game's name is simply another game's — so the
-// bad_request arm is now the empty string alone, which is the arm this
-// test was written to protect in the first place.
 func TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -1096,18 +1074,6 @@ func TestASeedSizedBatchIsAccepted(t *testing.T) {
 // through to an ordinary listing — which answers a caller who asked for
 // one entity's neighbours with every entity in the game, the exact
 // failure that function's comment argues against.
-//
-// It also pins the completeness refusal itself, and the parity claim
-// that refusal exists to make true. The MCP tool's schema marks all four
-// parts required (RelatedToInput carries no omitempty on any field), so
-// an agent sending three of them is refused by the SDK's validator,
-// named property by named property, before the core is ever called. REST
-// used to reach the domain instead and answer whatever the domain's
-// resolution order happened to produce — three of the four permutations
-// at related_to.direction, and the fourth as `not_found: no relation
-// type ""`, which names a lookup the caller never asked for. The two
-// surfaces refuse the same four requests now, for the same reason and
-// at the same paths.
 func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -1161,15 +1127,6 @@ func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testi
 // applied to the value it reads: a parameter the caller wrote is a
 // parameter the caller meant, so it must carry exactly one value and
 // that value must say something.
-//
-// Both halves were live holes. `?invalid=true&invalid=false` took the
-// first and dropped the second silently; `?invalid=true&invalid=garbage`
-// answered 200 and never saw the garbage at all — the one remaining path
-// on which an unrecognised spelling of `invalid` was accepted, which is
-// exactly what refusing it existed to close. `?invalid=` read as absent
-// and answered with both rows, while this same surface refuses an empty
-// `project_id` on the ground that an empty confirmation confirms
-// nothing. An empty filter filters nothing, by the same argument.
 func TestARepeatedOrEmptyQueryParameterIsRefused(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -1476,9 +1433,6 @@ type relationsPage struct {
 // read surface 0009's flag needs. A designer looking at a game summary
 // that says "3 no longer fit" has to be able to click through to them,
 // and the entity listing has taken `?invalid=` since it shipped.
-//
-// All three states are exercised, because a route that dropped the
-// parameter on the floor would satisfy any one of them alone.
 func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
@@ -1523,11 +1477,6 @@ func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
 
 // TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated is the edge twin
 // of TestTheGameSummaryCountsTheRowsASchemaEditInvalidated.
-//
-// The totals line is the assertion that matters: `totals.invalid` is what
-// the home page renders as "N no longer fit their type", and before 0009
-// it could only ever count entities, so a game whose every broken row was
-// an edge told its designer there was nothing to fix.
 func TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)

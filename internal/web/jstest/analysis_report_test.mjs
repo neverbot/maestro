@@ -1,27 +1,5 @@
 // The harness for the analysis reports' three sentences: the verdict, the
 // run line and the gate line, in internal/web/static/pages/analysis.js.
-//
-// What this layer covers that no Go test can. All three are pure
-// functions of the engine's own envelope, and every defect they have
-// shipped was a *reading* defect: a field that is not on the wire, a
-// count labelled with the wrong noun, a verdict assembled so that the
-// half saying "nothing is wrong" was the only half that could survive.
-// The server was right every time. Driving them directly, with the
-// envelope the engine really sends, is the only place those can go red.
-//
-// Run directly: `node internal/web/jstest/analysis_report_test.mjs`.
-// internal/web/static_analysis_report_test.go shells out to it too.
-
-// The module graph reaches app.js, which binds the sign-in shell's own
-// form at module scope, so the host needs a document that answers
-// getElementById before the import runs. It needs nothing else: the
-// three functions under test are pure, and a stub that could do more
-// would be a second, worse browser.
-
-// pages/page.js defines the read-only notice's hint component when it
-// loads, and a custom element's class needs these two globals to exist
-// before it is declared. Neither is what this file checks; they are here
-// so importing a page does not fail on the platform being absent.
 globalThis.HTMLElement ??= class {};
 globalThis.customElements ??= { define() {}, get: () => undefined };
 

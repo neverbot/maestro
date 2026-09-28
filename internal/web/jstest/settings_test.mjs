@@ -1,22 +1,4 @@
 // The game's settings, both halves of it.
-//
-// **What this file is written against.** The three token routes have
-// existed since Task 12 and nothing in the interface called them, so a
-// designer who cannot write a line of a game's content by hand also had
-// no way to hand an agent the token that would. The Agents tab is the
-// crossing, and the properties that matter are not visual:
-//
-//   - the command carries this instance's own origin and the token, and
-//     the token is in a header and never in a URL;
-//   - a viewer is not offered a mint the server refuses, and is still
-//     shown the list they may revoke from;
-//   - the clear token is rendered once, by the one function that ever
-//     receives it;
-//   - revoking asks first, in the row, with the token's own name beside
-//     it.
-//
-// Run directly: `node internal/web/jstest/settings_test.mjs`.
-// internal/web/static_settings_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 
@@ -361,11 +343,6 @@ check("mintingAsksTheServerAndShowsWhatItAnswered", async () => {
 });
 
 // --- Whose keys ------------------------------------------------------
-//
-// The same listing answers two questions, and the screen has to say
-// which one it is showing: a list that silently means "yours" to one
-// reader and "everybody's" to another is a list somebody revokes the
-// wrong row from.
 
 check("aMemberIsToldTheseAreTheirOwnKeys", async () => {
   const world = mount({ tokens: [{ id: "t1", label: "my laptop", token_hint: "a1b2", mine: true }] });
@@ -440,14 +417,6 @@ check("theTabsDefaultToTheGameAndFollowAPress", async () => {
 });
 
 // --- The People tab ---------------------------------------------------
-//
-// **The half of a game that is not its content.** A game is a set of
-// people with standings, and until this tab existed the only way to give
-// somebody one was an instance-wide invitation plus a database. The
-// properties asserted here are the refusals, because every one of them
-// is a rule the server also holds and the screen must not contradict:
-// only a manager may change a standing, nobody may change their own, and
-// a game keeps one manager.
 
 const PEOPLE_IDS = [
   "members",

@@ -53,30 +53,6 @@ func testGetenv(env map[string]string) func(string) string {
 // waitForRunningServer polls /healthz and watches run() at the same
 // time, and it exists because the version that only polled reported the
 // wrong thing.
-//
-// run() is started in a goroutine whose only output is the done
-// channel. When it fails at startup — a port taken between reserveAddr
-// closing its listener and run() binding it, a migration that will not
-// apply, a database that refuses the connection — it returns
-// immediately and that error sits in the channel unread, while the
-// poller spends its whole budget dialling a port nobody is listening
-// on and then reports "server never became healthy: connection
-// refused". That sentence is true and it names a symptom: it is what
-// *the test* saw, not what went wrong. Two runs of the full suite were
-// diagnosed from it as a timeout, which is the one thing it does not
-// prove.
-//
-// Selecting on both means a failed start is reported as itself, and a
-// genuinely slow start is still reported as a timeout — and the two
-// stop being indistinguishable.
-// **Only this function may fail the test, and it runs on the test's own
-// goroutine.** The poller used to call t.Fatalf from the goroutine it
-// was spawned in, which testing documents as not allowed: Goexit ends
-// the poller and the test keeps going, so a timed-out start printed
-// "server never became healthy" and then failed a second time on the
-// first request against the server that was never up. Two failures, one
-// cause, and the second one names the wrong thing — the same confusion
-// the done-channel select above was added to end.
 func waitForRunningServer(t *testing.T, base string, done chan error, deadline time.Duration) {
 	t.Helper()
 	ready := make(chan error, 1)
@@ -145,14 +121,6 @@ func startRunningServer(t *testing.T) (base string, cancel context.CancelFunc, d
 
 	base = "http://" + addr
 	// **Thirty seconds, and it is not a claim about how fast this starts.**
-	// It was five, which is a speed assertion nobody meant to make: under
-	// `go test -race ./...` every package runs at once, and a start that
-	// creates a database, applies every migration and hashes the first
-	// admin's password with argon2id took longer than that on a loaded
-	// machine — reported, correctly and uselessly, as "server never
-	// became healthy". A start that is genuinely broken still fails
-	// immediately through the done channel above; this budget only has
-	// to outlast a slow one.
 	waitForRunningServer(t, base, done, 30*time.Second)
 	return base, cancel, done
 }
@@ -264,12 +232,6 @@ func TestRunServesMigratesAndBootstraps(t *testing.T) {
 //     and cancels the server's context at essentially the same instant,
 //     asserting every one of them still completes with 200 rather than a
 //     transport-level failure — the property this bug actually broke.
-//
-// The DB pool (internal/db/pool.go) caps MaxConns at 10, so a burst well
-// above that count guarantees several requests are genuinely still
-// waiting on — or holding — a pool connection at the moment shutdown
-// begins, rather than relying on wall-clock timing alone to create the
-// overlap.
 func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 	base, cancel, done := startRunningServer(t)
 
@@ -497,18 +459,6 @@ func TestStartPruneLoopSweepsImmediatelyAtStartup(t *testing.T) {
 // covers the wiring in run() itself: that this binary builds a metamodel
 // service, hands it to web.NewServer, and therefore actually serves the
 // game-content MCP tools an agent needs.
-//
-// internal/web's own tests all build their Server directly, with a
-// metamodel service they construct themselves, so every one of them would
-// keep passing if the line in main.go that supplies one were deleted —
-// newMCPServer would simply register the Core three and say nothing.
-// This test connects to the real binary's real endpoint with a real
-// token and asks for the tool list.
-//
-// It also seeds one entity through it, because a tool that appears in the
-// list and cannot reach a database is a different failure with the same
-// symptom in a list-only assertion: the *pool* the metamodel service
-// holds has to be the same live one the rest of the process uses.
 func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 	base, cancel, done := startRunningServer(t)
 	defer func() {

@@ -12,13 +12,6 @@
 // submit handler the way a browser would, and asserts the token it
 // sends is the one that was in the URL — not a reimplementation of the
 // logic that could make, and hide, the same mistake again.
-//
-// Run directly: `node internal/web/jstest/invite_redemption_test.mjs`
-// (from the repository root, or any other directory — the import below
-// is relative to this file). Exits 0 and prints "OK" on success; exits
-// 1 with a diagnostic on failure. internal/web/static_appjs_invite_test.go
-// shells out to this file so `go test ./internal/web/...` exercises it
-// too, skipping cleanly if `node` is not on PATH.
 
 const TOKEN = "test-invite-token-abc123";
 const EMAIL = "designer@example.test";

@@ -10,23 +10,6 @@ import (
 )
 
 // **Every module this repository ships must parse as a module.**
-//
-// `node --check` does not answer that question: it parses a file as a
-// script, where a stray backtick inside a template literal is often
-// still valid, so it has said "fine" three times over a file the browser
-// refused outright. Each time the symptom was the same and took the same
-// twenty minutes to trace: a comment written inside a Lit `css` or
-// `html` template used backticks around an identifier, closed the
-// template, and broke the whole module graph — every harness failing
-// with `Unexpected identifier 'h1'`, and the page rendering three
-// quarters of itself in a browser.
-//
-// `node --input-type=module --check` reads the same bytes as a module
-// and refuses them, which is what a browser does.
-//
-// Mutation: put backticks around a word in a comment inside any `css` or
-// `html` template in internal/web/static/components and this fails
-// naming the file and the line.
 func TestEveryModuleParsesAsAModule(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {

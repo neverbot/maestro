@@ -1,19 +1,6 @@
 // One entity type's catalogue: every entity of it, in the order the
 // listing returns them, paged over the cursor that listing already
 // issues.
-//
-// **It says out loud that it is a catalogue and not a view**, because it
-// is deliberately close in appearance to the `table` renderer and is a
-// different thing: a table is a saved query answered by the view engine,
-// with a projection, parameters and a renderer; this is every row of one
-// declared type, in whichever order its headings were last pressed,
-// answering nothing. A designer who mistook one for the other would
-// think a filter had been applied when none had.
-//
-// It pages over the **existing** cursor and does not invent one: the
-// listing issues `next_cursor` whenever a page came back full, so the
-// page that reports the end is the empty one after the last row, which
-// is why the button stays until the server stops sending a cursor.
 
 import {
   DESTINATION_CATALOGUE,
@@ -60,19 +47,6 @@ export const NOTHING_OF_THIS_TYPE_SENTENCE = "An agent writes them; nothing on t
 // fifty a press is eighteen presses, each after scrolling to a button
 // that has moved further down the page — measured on the seeded
 // thousand-creature type, and the reason this is not just a number.
-//
-// The first page stays small because most visits end there: a designer
-// opening a type to check one row should not wait for five hundred. Past
-// that, somebody pressing "show more" has said they are reading the
-// whole thing, and the cheapest thing this product can do for them is
-// stop asking. 50, then 200, then 500 — the server's own cap
-// (metamodel.MaxEntityPage) — walks a thousand rows in four presses.
-//
-// It is not infinite scroll, and that is a decision rather than an
-// omission: this product's readers "read more than they click"
-// (docs/product.md), a list that loads under the scroll takes the page
-// footer away from them, and a keyboard or a screen reader has nothing
-// to activate.
 export const PAGE_SIZES = [50, 200, 500];
 
 export function nextPageSize(fetched) {
@@ -89,11 +63,6 @@ export const SEARCH_LIMIT = 50;
 
 // hiddenColumnsSentence says which declared fields the lane is not
 // showing, and where they can be read.
-//
-// It is exported and pure so the harness can read the sentence itself:
-// the three-column cap is deliberate, and what was wrong was the
-// silence, so the assertion worth holding is about the words rather than
-// about the element.
 export function hiddenColumnsSentence(declared, shown, typeLabel) {
   const names = declared.slice(shown).map((field) => field.label || field.key).filter((name) => name !== "");
   if (names.length === 0) return "";

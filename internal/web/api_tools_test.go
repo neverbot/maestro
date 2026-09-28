@@ -20,11 +20,6 @@ import (
 // recovered four of the seven analysis traits by grepping the genre
 // templates for literals and never found `ordering`, `acyclic` or
 // `annotation` at all.
-//
-// This route is what makes `reference/analysis.md`'s "read it before you
-// need it" true on both surfaces, and this test is what keeps it true:
-// the closed vocabulary is compared against `metamodel.AnalysisTraits`,
-// which is the one place it is authoritative.
 func TestTheToolDescriptionsAreReadableOverREST(t *testing.T) {
 	t.Parallel()
 	// The full server: a server built without the content services

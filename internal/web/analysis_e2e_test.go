@@ -25,20 +25,6 @@ import (
 
 // The analysis engine end to end, over **two games that share not one
 // vocabulary key**.
-//
-// That second game is not decoration and not a courtesy to the racing
-// genre: genericity is the product, and every isolation assertion below
-// runs against a game whose entity types, relation types and traits have
-// nothing in common with the first. A code path that special-cased
-// "quest" would pass every test in internal/analysis and fail here.
-//
-// Everything is driven through the tools an agent calls. The refusals in
-// TestTheAnalysisRefusalsHoldOverTheTransport go over the mounted MCP
-// endpoint itself, because a refusal that only exists in Go is a refusal
-// no client has ever met.
-
-// twoGames is the fixture: one MMORPG-shaped game, one racing career,
-// one server, one token each.
 type twoGames struct {
 	srv   *web.Server
 	deps  web.MCPDeps
@@ -125,14 +111,6 @@ func newTwoGames(t *testing.T) *twoGames {
 // mmoQuestChain is the eight quests a route walks, in order, each
 // unlocking the next. It is the progression the later tests break in
 // three different ways.
-//
-// The green baseline is not a test of its own: it is the opening
-// assertion of TestATypoFixMakesARouteStaleAndAReCheckMakesItGreen,
-// which refuses to go on unless the route is green the moment it is
-// first checked. That is deliberate rather than an omission — a
-// standalone happy-path test would assert the same call and then be
-// the one test nobody reads when a break test starts failing, whereas
-// folded in it is a precondition every one of those runs re-proves.
 var mmoQuestChain = []string{
 	"q-tutorial", "q-hogger", "q-westfall", "q-defias",
 	"q-deadmines", "q-vancleef", "q-stormwind", "q-duskwood",
@@ -467,11 +445,6 @@ func orphanKeys(orphans []analysis.Orphan) map[string]bool {
 // --- Step 3: the four analyses, each asserted on both halves ---
 
 // TestTheFourAnalysesFindWhatIsWrongAndNotWhatIsNot.
-//
-// Each of the four is asserted twice: on what it must find, and on what
-// it must **not**. The second half is where every one of these
-// analyses is most easily wrong, because a walk that followed one edge
-// too many produces a longer list that still contains the right answer.
 func TestTheFourAnalysesFindWhatIsWrongAndNotWhatIsNot(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -548,11 +521,6 @@ func TestTheFourAnalysesFindWhatIsWrongAndNotWhatIsNot(t *testing.T) {
 
 // TestTheNegativeHalvesAreCountedAndNotMerelyEmpty is the table from the
 // plan's own preamble, asserted in one place.
-//
-// **An empty findings list is what a broken engine returns too.** So
-// every clean answer here is asserted twice: empty, *and* over a
-// non-zero count of work actually done. A walk that started nowhere and
-// found nothing produces the first and never the second.
 func TestTheNegativeHalvesAreCountedAndNotMerelyEmpty(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -686,11 +654,6 @@ func (w *twoGames) mintFor(t *testing.T, project uuid.UUID, label string) web.Ca
 // --- Step 2 (assertion): genericity is the product ---
 
 // TestTheSameEngineAnalysesAnMMORPGAndARacingCareer.
-//
-// The two games share **not one vocabulary key**: `quest` against
-// `race`, `requires` against `next_race`, `takes_place_in` against
-// `contains`. Both produce findings, through the same call, and nothing
-// in the engine distinguishes them.
 func TestTheSameEngineAnalysesAnMMORPGAndARacingCareer(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -732,17 +695,6 @@ func TestTheSameEngineAnalysesAnMMORPGAndARacingCareer(t *testing.T) {
 // --- Step 5: the design counter, end to end ---
 
 // TestATypoFixMakesARouteStaleAndAReCheckMakesItGreen.
-//
-// The counter is **coarse and that is accepted**: any write anywhere in
-// the game moves it, so fixing one word in one entity's name marks every
-// route stale. The alternative is a per-route dependency set maintained
-// on every write, which is wrong the moment a *new* relation makes a
-// previously irrelevant entity relevant — and a staleness signal that is
-// subtly wrong is worse than one that is bluntly right, because
-// re-checking is cheap and believing a stale green is not.
-//
-// The acceptance is asserted as behaviour here rather than left in a
-// comment, which is the difference between a decision and an intention.
 func TestATypoFixMakesARouteStaleAndAReCheckMakesItGreen(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -827,15 +779,6 @@ func TestDeletingAStepsEntityLeavesATombstoneAndAStaleRoute(t *testing.T) {
 // --- Step 7: renaming a type a route names ---
 
 // TestRenamingQuestToMissionLeavesTheRouteHealthyAndTheTraitsIntact.
-//
-// **This is the decision-taken-since-the-spec carried all the way to the
-// surface.** internal/metamodel/rename.go moves the catalogue row and
-// nothing else; a route step keeps spelling the old key, resolves by id,
-// and is still `ok`. Three things are asserted together, because the
-// rename lesson is only carried if all three hold: the verdict, the
-// diagnostic beside it, and that the traits on `requires` — which live on
-// a different row entirely — were not touched, so cycles still finds the
-// three-cycle afterwards.
 func TestRenamingQuestToMissionLeavesTheRouteHealthyAndTheTraitsIntact(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -881,12 +824,6 @@ func TestRenamingQuestToMissionLeavesTheRouteHealthyAndTheTraitsIntact(t *testin
 
 // TestTheAnalysisRefusalsHoldOverTheTransport drives every refusal this
 // sub-project owes through the mounted MCP endpoint.
-//
-// **Over the transport and not through Go calls**, because a refusal
-// that has only ever been produced by a direct call is a refusal no
-// client has met: it has never crossed an input schema, and an argument
-// the schema rejects first never reaches the code that would refuse it
-// with a message a caller can act on.
 func TestTheAnalysisRefusalsHoldOverTheTransport(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -996,11 +933,6 @@ func TestTheAnalysisRefusalsHoldOverTheTransport(t *testing.T) {
 }
 
 // TestAnAnalysisWithTheWrongGamesTokenIsAScopeViolationEvenForAnAdmin.
-//
-// **An instance admin is not exempt from a token's binding.** That is
-// the invariant requireScope exists for, and this is the analysis
-// surface's own instance of it — driven over the transport, with the
-// racing game's token pointed at the MMORPG's slug.
 func TestAnAnalysisWithTheWrongGamesTokenIsAScopeViolationEvenForAnAdmin(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)
@@ -1040,10 +972,6 @@ func TestAnAnalysisWithTheWrongGamesTokenIsAScopeViolationEvenForAnAdmin(t *test
 }
 
 // TestTheRESTMirrorAnswersTheSameAnalysisAsTheTool.
-//
-// The two surfaces call one core each, and this is the assertion that
-// makes that claim checkable rather than architectural: the same game,
-// the same question, the same answer.
 func TestTheRESTMirrorAnswersTheSameAnalysisAsTheTool(t *testing.T) {
 	t.Parallel()
 	w := newTwoGames(t)

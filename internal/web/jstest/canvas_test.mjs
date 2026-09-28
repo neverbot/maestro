@@ -1,39 +1,6 @@
 // The harness for the canvas: internal/web/static/components/mst-canvas.js
 // (the emitter, the pan/zoom transform and the drag layer) and the
 // emitter contract it reads out of internal/web/static/render/scene.js.
-//
-// What this layer covers that no Go test can.
-//
-// **That one mark becomes one element and nothing more.** The emitter is
-// the joint the whole sub-project's verification turns on: the six
-// renderers are pure functions a mutation turns red, and they are only
-// worth testing that way if the thing that draws their answer adds
-// nothing of its own. So the assertions here are about the *contract* —
-// which attribute a field becomes, which fields are dropped, which
-// element a kind is — and never about how a picture looks.
-//
-// **That paint order is what the layers say.** SVG paints in document
-// order. The fixtures below push labels *before* their nodes on purpose,
-// so the assertion is that the layering does the work rather than that
-// the caller happened to order its marks well.
-//
-// **That a drag touches the dragged subtree and nothing else.** This is
-// the one performance property in the sub-project that a Node harness
-// can actually measure, because "how many elements changed" is a count
-// and not a frame rate. The stub's mutation log is the instrument; the
-// fixture is 200 nodes, so a full re-render is unmissable rather than a
-// near miss.
-//
-// **That a game's words are characters.** Task 5 answered this for the
-// text twin by asserting *placement*, because Lit does the escaping.
-// That argument does not transfer and is not reused: there is no
-// framework on this path. `createElementNS`/`setAttribute`/`textContent`
-// never parse markup, so the property is that no game string reaches
-// anything but a Text node, plus SVG's own three hazards, which
-// internal/web/static_canvas_test.go holds by shape.
-//
-// Run directly: `node internal/web/jstest/canvas_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { install, walk, SVG_NS } from "./svg_dom.mjs";
 
@@ -558,20 +525,6 @@ check("labelsStopScalingOutsideTheBand", () => {
 });
 
 // --- What a reader can actually see ----------------------------------
-//
-// Three properties found by opening this front end in a browser for the
-// first time (Task 15's hand checks). Each was a case where the scene
-// was right and the screen was not, and none of them could have failed a
-// test that only read the scene.
-
-// **The tail is a texture, and the texture exists.**
-//
-// palette.js paints the ninth-and-beyond values with a paint server so
-// they are visibly not one of the eight hues. A fill naming a pattern
-// nobody defined is the worst of both: SVG resolves it to *nothing*, so
-// the node is drawn invisible and no error is raised anywhere. So the
-// two halves are joined here — the paint the palette names, and the
-// definition the emitter emits.
 check("theHatchTheTailIsPaintedWithIsReallyEmitted", () => {
   const tree = emitScene({ marks: [{ kind: MARK_RECT, x: 0, y: 0, w: 10, h: 10, fill: HATCH_FILL }] }, {
     document: dom.document,
@@ -607,14 +560,6 @@ check("theHatchTheTailIsPaintedWithIsReallyEmitted", () => {
 });
 
 // **The cycle mark survives the zoom the picture is read at.**
-//
-// The mark that says a ranked drawing had to reverse an edge was two 1px
-// strokes nine units long, drawn inside the world group. On a
-// hundred-step progression the drawing fits at k = 0.058, where those
-// strokes measured 0.43 CSS pixels in Firefox — the whole of this
-// renderer's negative half, invisible. It is a label now, so the label
-// band keeps it at a constant apparent size, and this is the assertion
-// that a line would fail.
 check("theCycleMarkIsStillThereWhenTheWholePictureFits", () => {
   const canvas = newCanvas();
   canvas.draw({
@@ -651,17 +596,6 @@ check("theCycleMarkIsStillThereWhenTheWholePictureFits", () => {
 });
 
 // **No control a keyboard can reach is hidden from a screen reader.**
-//
-// The drawing is aria-hidden because the twin is the accessible content
-// of an answer. For one round the attribute sat on the box the canvas is
-// *slotted into*, which also holds the arrangement menu, the ground
-// panel and the table's sort headers — so every one of those buttons was
-// reachable by tab and announced to nobody, which is worse than either
-// alone. Found by reading the frame's shadow tree in Firefox.
-//
-// The assertion is the general rule rather than the two buttons that
-// were found: anything focusable, anywhere under the canvas, with an
-// aria-hidden ancestor.
 check("noControlIsBothReachableByKeyboardAndHiddenFromAScreenReader", () => {
   const canvas = newCanvas();
   canvas.draw(mapScene());
@@ -839,8 +773,6 @@ check("theCanvasStylesheetIsAdoptedAndNeverAnElement", () => {
   // shipped from Task 7 with none of its own layout: the host laid out
   // `static` instead of `absolute` and the surface drew at an SVG's
   // default 300x150. Found by mounting the first view (Task 15).
-  //
-  // `adoptedStyleSheets` is not inline style and no policy governs it.
   const adopted = [];
   const shadow = { adoptedStyleSheets: [] };
   const previous = globalThis.CSSStyleSheet;

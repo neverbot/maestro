@@ -184,15 +184,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "a respelled entity key is named even when the
 	// version is also stale" case pins the one job left to the spelling check
 	// inside the locked pre-read.
-	//
-	// The check on the row the upsert returns catches every respelling this
-	// one does, so deleting these lines is invisible wherever the version
-	// also matches. This is the case where the two disagree: a caller
-	// holding both a respelled key and a stale version is failing for two
-	// reasons at once, and the pre-read's order decides which it is told
-	// about. It hears the respelling — which names both spellings and both
-	// remedies — rather than "current version is 1", which would send it to
-	// retry with a version refused again for the same reason.
 	t.Run("a respelled entity key is named even when the version is also stale", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -221,18 +212,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "a race that would land an entity under another
 	// spelling is refused" case is the hole the locked pre-read cannot close,
 	// for entities.
-	//
-	// The pre-read runs before the write and only ever sees a row that is
-	// already committed. On the creation path there is nothing to lock, so a
-	// writer racing a creator sails through it, blocks on the folding unique
-	// index, and must be refused by something downstream — otherwise it
-	// lands its content on a row it never saw, under a spelling it never
-	// sent. conflictOnEntityKey is that something: the guard on the DO
-	// UPDATE is a guaranteed mismatch for a creating caller, and the re-read
-	// after it names both spellings.
-	//
-	// The interleaving is driven by an open rival transaction rather than a
-	// second goroutine, so it is the test's to choose and not the scheduler's.
 	t.Run("a race that would land an entity under another spelling is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -293,13 +272,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "an entity creation that loses the race for its key
 	// is refused" case pins the compare-and-set in the upsert's own DO UPDATE.
-	//
-	// A writer creating a key it has never seen has no version to expect and
-	// there is no row yet to lock, so its read cannot see the rival write at
-	// all — and here both writers spell the key the same way, so the
-	// post-write spelling check has nothing to catch either. The guard on
-	// the DO UPDATE is the only thing left between the loser of the race and
-	// a silent overwrite of content it never read.
 	t.Run("an entity creation that loses the race for its key is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -407,13 +379,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "upsert entity writes and rewrites the search vector"
 	// case pins the one column no database mechanism maintains.
-	//
-	// entities.search is application-computed — it is derived from
-	// user-declared jsonb whose text fields only the Go validator can pick
-	// out — so it is written by UpsertEntity and by nothing else. A write
-	// path that changes name or fields without rewriting it leaves the row
-	// indexed under its old words, and Task 6's search then silently fails to
-	// find content that is plainly there.
 	t.Run("upsert entity writes and rewrites the search vector", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -524,12 +489,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "bulk rejects an unknown mode" case keeps an
 	// unrecognised mode from meaning "partial".
-	//
-	// Task 7 builds the mode straight from an agent-supplied string, so a
-	// typo — "atomic ", "all-or-nothing" — would otherwise be read as the
-	// permissive mode and land rows a caller asked to have rolled back. A
-	// silent downgrade of a durability request is exactly the failure a
-	// caller cannot see, so it is refused at its own path instead.
 	t.Run("bulk rejects an unknown mode", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -560,14 +519,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "bulk partial stops when the caller is gone" case
 	// pins the one thing a partial batch owes a cancelled caller.
-	//
-	// Every item is its own transaction, so nothing stops the loop on its
-	// own: without the check, a cancelled context turns a 500-row batch into
-	// 500 failed round trips whose report nobody is left to read, and the
-	// call still returns a nil error, which reads as "the batch ran". The
-	// error is returned alongside whatever had already landed, because in
-	// partial mode rows landing before the cancellation is the mode's
-	// contract, not a bug to hide.
 	t.Run("bulk partial stops when the caller is gone", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -865,19 +816,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "a cancelled batch does not report the item in flight
 	// as a server fault" case pins the second half of the cancellation
 	// contract.
-	//
-	// TestEntitiesArea's "bulk partial stops when the caller is gone" case
-	// cancels before item 0, so the loop's guard catches it between two items
-	// and nothing is in flight. The ordinary case is the other one: the
-	// cancellation lands *inside* an item's own transaction. That item then
-	// fails like any other, and without a second look at ctx.Err() on the
-	// failure arm it is recorded by failureFor as internal_error — the code
-	// reserved for a fault nobody planned for — so one cancellation surfaces
-	// as both a stop error and a per-item server fault the caller is told to
-	// report rather than retry.
-	//
-	// The rival holds item 1's row locked, so the batch is stopped where the
-	// interleaving is the test's rather than the scheduler's.
 	t.Run("a cancelled batch does not report the item in flight as a server fault", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -951,13 +889,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "a list of text is searchable" case pins the one
 	// text-bearing field type that is not a plain string.
-	//
-	// Tags and aliases are the archetypal thing a designer searches for, and
-	// a list<text> whose elements never reach the tsvector is a row that
-	// silently cannot be found by its own tags — with nothing to signal why,
-	// which is the failure UpsertEntity's SQL comment already argues against
-	// for the other write paths. Task 6's search inherits whatever this
-	// writes.
 	t.Run("a list of text is searchable", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1004,13 +935,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "the search vector is the same for the same values"
 	// case pins the key sort in searchTextOf.
-	//
-	// Map iteration order is randomised per range, so without the sort two
-	// rows holding identical values get their words in different orders and
-	// the tsvector's positions differ. Nothing about search results changes,
-	// which is why nothing else catches it: what it costs is a stored column
-	// that differs between two identical writes, a diff no reader of the row
-	// can explain and a re-seed that looks like an edit.
 	t.Run("the search vector is the same for the same values", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1048,13 +972,6 @@ func TestEntitiesArea(t *testing.T) {
 
 	// TestEntitiesArea's "bulk events carry the stored identity" case extends
 	// the single path's pin to the other two.
-	//
-	// TestEntitiesArea's "entity events carry the stored identity" case
-	// exercises UpsertEntity alone, and the bulk test that already existed
-	// asserts only the entity key — which the database returns whatever the
-	// caller spelled. So both bulk paths could publish the caller's own
-	// spelling of the *type* key and leave the suite green, and a subscriber
-	// would be handed an identity no other reader of the game sees.
 	t.Run("bulk events carry the stored identity", func(t *testing.T) {
 		for _, mode := range []metamodel.BulkMode{metamodel.BulkPartial, metamodel.BulkAtomic} {
 			t.Run(string(mode), func(t *testing.T) {
@@ -1097,17 +1014,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestTypesArea's "a creation that loses its key to another spelling is
 	// named as a respelling" case reaches conflictOnEntityKey's respelling
 	// arm, the one check on the entity path that nothing else exercised.
-	//
-	// The other two race tests both end at the *post-write* spelling check,
-	// because their guard passes and the upsert returns the rival's row. This
-	// one holds a version the rival's row does not have, so the guarded DO
-	// UPDATE matches nothing and there is no row to compare: the re-read is
-	// the only thing left that can tell the caller its key already exists
-	// under another spelling. Without it the caller is told to merge onto a
-	// version, retries with it, and is refused again for a reason it has never
-	// been given — the entity twin of TestTypesArea's "a creation that loses
-	// its key to another spelling is named as a respelling" case in
-	// types_test.go.
 	t.Run("an entity losing its key to another spelling is named as a respelling", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1171,15 +1077,6 @@ func TestEntitiesArea(t *testing.T) {
 	// write would have met" case pins the FOR UPDATE on
 	// GetEntityByKeyForUpdate, as TestDocumentsArea's "the reported current
 	// version is the one the write would have met" case does for types.
-	//
-	// Deleting the lock leaves the rest of the file green: both entity race
-	// tests block on the unique index inside the INSERT, not on this lock,
-	// and the compare-and-set in the DO UPDATE refuses every lost update on
-	// its own. What the lock earns is the *number* the caller is told to
-	// merge onto. Without it the read runs against this transaction's
-	// snapshot and reports the version committed when it started, so a caller
-	// racing an in-flight edit re-issues with that version and is refused
-	// again — a loop it cannot leave by doing what the error said.
 	t.Run("the reported current entity version is the one the write would have met", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1237,16 +1134,6 @@ func TestEntitiesArea(t *testing.T) {
 	// scoped to the project" case pins the two project filters
 	// TestEntitiesArea's "entities are scoped to their project" case cannot
 	// see.
-	//
-	// Both are reached only from RemoveEntity, which reads the row, then its
-	// type, then deletes — so each of the three filters masks the others.
-	// Drop GetEntityByID's and the type re-read still refuses (a type id
-	// belongs to one game); drop DeleteEntity's and the row read has already
-	// refused. Only mutating all three at once turns the service-level test
-	// red, which is no pin at all: it says the three together are load
-	// bearing without saying that any one of them is. The filters are the
-	// isolation between two games, so each is asserted where it lives, over
-	// the query itself.
 	t.Run("the entity queries that address a row by ID are scoped to the project", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1285,21 +1172,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "a batch that repeats a key is diagnosed as such"
 	// case covers the ordinary accident: an agent seeding from a file that
 	// names one quest twice.
-	//
-	// Keys are matched without regard to case, so the two items address one
-	// row. Left to the database the second is refused as a *version
-	// conflict* — "current version is 1" against a caller that never claimed
-	// a version — which sends an agent to re-read a row and retry with the
-	// version it is handed, at which point its second item silently
-	// overwrites its first. The batch is the only place the real diagnosis
-	// exists, so it is made here: the item is refused as invalid_input and
-	// the message names the item it collides with.
-	//
-	// In partial mode the duplicate is a per-item failure and nothing else
-	// changes. Refusing the whole batch would throw away the other
-	// three hundred rows over one repeated key, which is the failure partial
-	// mode exists to prevent, and the first occurrence is a perfectly good
-	// item.
 	t.Run("a batch that repeats a key is diagnosed as such", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1407,16 +1279,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "an oversized field is stored whole and found by a
 	// word near its start" case pins the one trade the search index is allowed
 	// to make against a game's content.
-	//
-	// to_tsvector refuses to build a vector larger than 1,048,575 bytes
-	// (SQLSTATE 54000), and nothing bounds the length of a text or longtext
-	// value: a designer pasting a lore document of a megabyte or two had the
-	// whole row refused, reported as internal_error — the code reserved for
-	// what nobody planned for, which tells an agent to give up on a call it
-	// could have fixed. The row is the product and the index is a
-	// convenience, so the index is what gives way: searchTextOf bounds what
-	// it hands the vector, `fields` is stored untouched, and the documented
-	// consequence is that the tail of a very long field is not searchable.
 	t.Run("an oversized field is stored whole and found by a word near its start", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1459,15 +1321,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "a cancelled batch does not answer a repeated key
 	// instead" case pins the order of the two checks at the top of the bulk
 	// loop.
-	//
-	// A repeated key is a per-item failure and a cancellation stops the
-	// batch, so which is consulted first decides what the caller is told
-	// when both apply. With the repeat check first, a batch whose trailing
-	// item is a repeat reported that repeat and returned a nil error —
-	// which reads as "the batch ran" — even though the caller had gone
-	// before the loop reached it. That is precisely the failure the
-	// cancellation guard exists to prevent, escaping through the one arm
-	// that never consulted it.
 	t.Run("a cancelled batch does not answer a repeated key instead", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1498,14 +1351,6 @@ func TestEntitiesArea(t *testing.T) {
 	// TestEntitiesArea's "a repeat is refused even when the first occurrence
 	// is doomed" case pins the corner of the repeated-key rule that costs an
 	// agent a round trip, so that the core design's claim about it stays true.
-	//
-	// The first occurrence fails validation and the second is well formed,
-	// so a caller could reasonably expect the good one to land. It does not:
-	// the repeat is decided from the batch as submitted, before any item
-	// runs, and the key ends up written by neither. Falling back to
-	// "whichever survived validation" would make one item's outcome depend
-	// on another item's mistakes, in a batch that never said which of the
-	// two rows it meant.
 	t.Run("a repeat is refused even when the first occurrence is doomed", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1538,17 +1383,6 @@ func TestEntitiesArea(t *testing.T) {
 	// checkSearchQuery already applies on the read side: caller-supplied text
 	// must be valid UTF-8 and free of control characters, refused as the
 	// caller's own argument rather than left to Postgres.
-	//
-	// Proved live before this test existed, all of them through
-	// UpsertEntity: a NUL inside `name` returned `ERROR: invalid byte
-	// sequence for encoding "UTF8" (SQLSTATE 22021)`, untyped; the same NUL
-	// inside a `longtext` value returned `ERROR: unsupported Unicode escape
-	// sequence (SQLSTATE 22P05)`, untyped; a NUL substitute — a lone
-	// continuation byte, 0xff, not valid UTF-8 at all — returned the first
-	// error again; and a newline inside `name` was accepted and stored,
-	// which is the one of these five that stays accepted, deliberately: see
-	// textProblem's doc comment for why `longtext` keeps its newlines and
-	// `name` does not.
 	t.Run("upsert entity refuses unprintable text before it reaches postgres", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1603,13 +1437,6 @@ func TestEntitiesArea(t *testing.T) {
 	// `json:"-"` and full of database columns, so a marshalled result reported
 	// failures and nothing else — a perfect four-hundred-row batch answered
 	// with `{}`.
-	//
-	// Written is the wire half. It carries, per row that landed, the three
-	// things an agent cannot derive from what it sent: the row's id (which
-	// is what entities.remove takes), its version (which is what
-	// expected_version takes on the next edit), and — with type_key and key,
-	// which it *can* derive — the address that says which of its own items
-	// this row is.
 	t.Run("a bulk write reports what landed in a wire shape", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1711,14 +1538,6 @@ func payloadField(t *testing.T, e realtime.Event, field string) string {
 // searchColumn reads the value-derived halves of a row's search vector:
 // the name under label A and the name plus the flattened field text
 // under label B.
-//
-// **It filters out label C, which is the row's key**, because the one
-// caller compares two *different* rows and 0010_entity_key_search.sql
-// made the key part of the vector. Without the filter the comparison
-// below would be red for the one reason it is not asking about — the two
-// rows are `q0` and `q1` and are supposed to differ there.
-// TestTheEntityKeyBackfillIsExact (internal/db) is what asserts the C
-// half, whole and unfiltered.
 func searchColumn(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) string {
 	t.Helper()
 	var text string
@@ -1731,21 +1550,6 @@ func searchColumn(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) string {
 
 // cancelWhenLanded is a context that reports cancellation from the moment
 // a given entity key exists in the database.
-//
-// The finding it exists for is an ordering one: in UpsertEntities the
-// cancellation guard must be consulted before anything else the loop
-// does with an item, and a repeated key is the one thing that used to be
-// answered ahead of it. Forcing that ordering to matter needs a
-// cancellation landing *after* the last item that writes has committed
-// and *before* the loop reaches a trailing repeat — a window a
-// concurrent cancel() cannot be aimed at.
-//
-// So the context arms itself, synchronously, from inside Err(): the row
-// item 0 writes is visible to a second connection only once item 0's
-// transaction has committed, which is exactly the edge wanted. It cannot
-// disturb the item it observes — nothing in that item's transaction can
-// see the row before the commit that ends it — and it needs no timing
-// assumption at all.
 type cancelWhenLanded struct {
 	context.Context
 	t       *testing.T
@@ -1772,11 +1576,6 @@ func (c *cancelWhenLanded) armed() bool {
 	// connection under the commit, and the batch stops at item 0 with
 	// the same error it should have reported for item 1: the test then
 	// fails about one run in three, on nothing the product did.
-	//
-	// An acquired connection is exactly the condition "an item is in
-	// flight": between two items withTx has returned, its connection is
-	// back in the pool, and nothing else in this test holds one. So the
-	// edge this context exists for is the only moment it can fire.
 	if c.pool.Stat().AcquiredConns() != 0 {
 		return false
 	}

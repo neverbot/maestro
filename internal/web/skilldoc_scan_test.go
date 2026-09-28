@@ -13,23 +13,6 @@ import (
 )
 
 // This file is the anti-restatement guard: the one-tool test, mechanised.
-//
-// A sentence that names exactly one registered tool and makes a claim
-// about that tool's arguments, admitted values, defaults, bounds or
-// refusals belongs in that tool's description. The bundle may route to
-// it, and may quote it verbatim with attribution; it may not reword it.
-//
-// The guard catches that in **both** directions, which is the whole
-// point: the bundle inventing a claim (no description says it), and a
-// description being reworded underneath a quote that used to match
-// (the quote stops being verbatim). Reword a shared description and
-// every page quoting it goes red in the same commit as the reword.
-
-// restatementFixtures are the hand-written inputs the guard is asserted
-// against on every run. Half of them it must flag and half it must not,
-// because a scanner that has stopped working and a bundle that is clean
-// produce the same empty list — the failure this repository has shipped
-// four times, each break a level below the last.
 var restatementFixtures = []struct {
 	name string
 	// page is markdown, scanned exactly as a bundle page is.
@@ -170,11 +153,6 @@ func TestTheBundleRestatesNoToolDescription(t *testing.T) {
 // TestEveryClaimMarkerIsLiveAndBounded runs the plan's step-2 mutation on
 // every build instead of once by hand. Emptying the marker list, or
 // dropping any single marker from it, makes one of these sub-tests fail.
-//
-// The second half is the precision half: a marker must match its own
-// word and not a word that contains it. `mistakes` is not `takes`, and
-// the first draft of a guard of this shape in this repository matched by
-// substring and reported seven false positives.
 func TestEveryClaimMarkerIsLiveAndBounded(t *testing.T) {
 	t.Parallel()
 	registered := map[string]string{"entities.upsert": "Write entities in bulk."}
@@ -204,12 +182,6 @@ func TestEveryClaimMarkerIsLiveAndBounded(t *testing.T) {
 // direction that makes the bundle safe to detach from the server: a
 // quote is a copy, and a copy drifts, so the build compares it against
 // its original on every run.
-//
-// The reword mutation is run here rather than described: the same page
-// is audited against a tool table holding the description it quotes, and
-// then against one where that description has been reworded. The first
-// must pass and the second must fail. That is the whole claim of this
-// sub-project, asserted rather than promised.
 func TestAQuoteIsCheckedAgainstTheDescriptionItClaimsToCopy(t *testing.T) {
 	t.Parallel()
 	page := "> **From `entities.upsert`'s own description:**\n" +
@@ -379,26 +351,6 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 
 // notYetTaughtOutsideTheIndex is the ratchet Task 3 left behind, and it
 // is a deviation from the plan recorded in the plan's own corrections.
-//
-// The plan's step 3 asks that every tool outside a small administrative
-// set appear in some page other than the generated index, so no tool is
-// reachable only from a list. That rule is a property of the *finished*
-// bundle: when it was written the bundle was `skill.md` and the
-// generated index, and the prose pages that teach these tools were
-// Tasks 5 to 10. Writing the rule as an aspiration for those tasks to
-// remember is exactly the failure this plan's own preamble names, so it
-// was written as a set equality instead: this list is exactly the tools
-// no page but the index mentions.
-//
-// **It is empty, which is the finished state Task 12 asserts.** The last
-// eight entries were the analysis engine's own surface, which landed
-// after this plan was written and shipped no pages of its own;
-// reference/analysis.md and recipes/auditing-a-design.md teach them.
-//
-// It stays here, empty, rather than being deleted with the comparison
-// below: emptied and kept, a tool that stops being taught fails the
-// build naming itself. Deleted, the same tool would fail nothing, and
-// the guard would have been switched off by the commit that finished it.
 var notYetTaughtOutsideTheIndex []string
 
 // TestEveryRegisteredToolIsRoutedFromTheBundle asserts every registered

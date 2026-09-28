@@ -554,17 +554,6 @@ func TestDeleteArea(t *testing.T) {
 // moved there, both TestDeleteArea's "a deletion is announced" case and
 // TestDeleteArea's "no deletion is announced when the tombstone cannot be
 // written" case stay green.
-//
-// A deferred foreign key from document_versions.id to projects.id is
-// satisfied by nothing — a version's id is not a project id — but being
-// DEFERRABLE INITIALLY DEFERRED it is checked at COMMIT and not before,
-// so the tombstone insert succeeds and only the commit fails. It hangs
-// off document_versions rather than documents because Delete's only
-// INSERT is the tombstone; an UPDATE that does not touch documents.id
-// would never fire a key on that column. NOT VALID is what lets it be
-// added at all: version 1 already stands and would fail the check on
-// the spot, and NOT VALID skips the existing rows while still checking
-// every new one.
 func TestNoDeletionIsAnnouncedWhenTheDeleteCannotCommit(t *testing.T) {
 	svc, _, hub, pool := newService(t)
 	ctx := context.Background()

@@ -12,25 +12,6 @@ import (
 // TestTheDrawingsHoleIsReservedBeforeItArrives is a source guard over
 // one CSS rule, and it is a source guard because the thing it protects
 // is invisible in every other kind of test.
-//
-// `#view-root` is empty until pages/view.js mounts the frame. Without a
-// reserved height the page lays out at its natural size and then jumps
-// — measured at 570px, which is 70vh on a 1440×815 window — under a
-// reader who has already started reading the sentence above it. Nothing
-// fails when that rule is deleted: the picture still arrives, the tests
-// still pass, and the page is merely unpleasant in a way no assertion
-// sees.
-//
-// The two halves both matter and both are checked:
-//
-//   - it is `:empty`, so the reservation lasts exactly as long as the
-//     hole does. The table renderer is slotted into the same element and
-//     must size itself; a floor that outlived the mount would force a
-//     thousand-row table into a 70vh box, which is the defect
-//     mst-canvas.js's own comment records from the other direction.
-//   - the reserved height is the box mst-canvas gives itself. A
-//     reservation of a different size is still a jump, just a smaller
-//     one.
 func TestTheDrawingsHoleIsReservedBeforeItArrives(t *testing.T) {
 	t.Parallel()
 	styles, err := os.ReadFile("static/styles.css")

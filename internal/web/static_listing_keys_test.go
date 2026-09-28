@@ -12,26 +12,6 @@ import (
 
 // The guard for the defect that killed the Images destination: **the page
 // read a key the server has never written.**
-//
-// `handleListViewAssets` answers `{"assets": […], "next_cursor": "…"}`.
-// `pages/assets.js` read `body.items`, which is `undefined`, which is not
-// an array, which becomes an empty list, which renders "No images yet" —
-// on a game whose map view was drawing one of those files at the time.
-// Nothing was red anywhere: the Go tests read `assets` and passed, the
-// JavaScript was valid, and the page's own empty state is a legitimate
-// thing to render. Every line of row-building underneath that read had
-// never executed in a browser, and two of them were separately wrong.
-//
-// **Why a source guard.** What went wrong can only be seen by rendering
-// the page against the real server, and this repository has no browser
-// harness. What it can hold is the mechanical precondition: for every
-// listing a page reads, the key the page names is a key the handler
-// writes. That is the half that regresses when somebody renames a field;
-// the browser is what proved the fix.
-//
-// Mutation: change `body.assets` back to `body.items` in
-// `static/pages/assets.js` and this test fails naming the page, the key
-// it reads and the keys the handler writes.
 func TestListingKeysPagesReadAreKeysHandlersWrite(t *testing.T) {
 	t.Parallel()
 	// Each entry: the page module, the Go file whose handler answers it,

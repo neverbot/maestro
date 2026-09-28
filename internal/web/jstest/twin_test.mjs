@@ -2,51 +2,6 @@
 // model) and internal/web/static/components/mst-twin.js (the painter),
 // driven the way Task 4 drives the frame — the real, unmodified modules,
 // asserted over the plain data they return.
-//
-// What this covers that no Go test can, and that no other harness here
-// has had to cover before.
-//
-// **That the twin describes the answer and not the drawing.** The five
-// graphical renderers shelve what they cannot place, drop what falls
-// beyond a depth bound and collapse a crowd into a count chip. Every one
-// of those nodes still has a row, because the twin's row source is the
-// envelope. The fixture below runs a stand-in renderer that does all
-// three, so the assertion is a comparison against a picture that really
-// is smaller, not against a number written down twice.
-//
-// **That a hostile game name arrives as text.** A game's words are
-// hostile input — this repository has shipped one stored cross-site
-// scripting defect already — and the component renders them through Lit.
-// So the harness walks the emitted template and asks *where each value
-// is bound*: a value in child position becomes a Text node, a value in
-// an attribute position does not, and a value inside the static markup
-// would not be a value at all. Every game string must be a child
-// binding, and no game string may appear anywhere in the templates' own
-// HTML. That is the property; Lit's escaping is what enforces it, and
-// this is the test that we hand Lit the strings in the position where it
-// does.
-//
-// **That absent and empty stay two answers.** The views work spent real
-// effort keeping "unset" and "the empty string" distinguishable from the
-// jsonb up; a table that rendered both as nothing would throw it away at
-// the last step, in the last place anybody would look.
-//
-// Run directly: `node internal/web/jstest/twin_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
-
-// --- The DOM the components need, and no more -------------------------
-//
-// Lit's `html` builds a TemplateResult without touching the DOM; only
-// `render()` into a container needs one. So the stub below is what
-// *importing* a component module and *calling* its render() needs:
-// custom-element registration, an HTMLElement to extend, and an event
-// target. Nothing here parses HTML, which is deliberate — a stub that
-// could turn a string into elements would be a second, worse browser,
-// and the escaping question would then be a question about the stub.
-//
-// The elements are never connected, which is what keeps Lit from
-// scheduling a real update: ReactiveElement holds its first update until
-// connectedCallback enables it.
 import { register } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,30 +88,6 @@ function assertDeepEqual(actual, expected, message) {
 }
 
 // --- Walking an emitted template -------------------------------------
-//
-// A Lit TemplateResult is `{strings, values}`: the component's own HTML
-// in `strings`, everything it was handed in `values`, interleaved. The
-// walk below flattens a result — recursing into nested results and into
-// arrays, which is how a `.map()` over rows arrives — into one ordered
-// stream of markup chunks and bound values, and tells each value where
-// in that markup it sits.
-//
-// `position` is the whole point:
-//
-//   "text"      — a child binding. Lit commits it as a Text node, so the
-//                 value cannot be markup however it is spelled.
-//   "attribute" — inside a tag. Committed with setAttribute or as a
-//                 property; safe, but not *text*, and a game string here
-//                 is a game string the reader cannot read.
-//   "raw"       — inside <script>, <style>, <textarea> or <title>, where
-//                 a browser's own parser reads content as characters and
-//                 Lit's guarantee does not hold.
-//   "comment"   — inside <!-- -->.
-//
-// theBindingPositionScannerReadsWhatItClaimsTo is the guard on this
-// guard, in all four directions, because a scanner that answered "text"
-// to everything would make the escaping assertion below pass on any
-// component at all.
 const RAW_TEXT_ELEMENTS = new Set(["script", "style", "textarea", "title"]);
 
 function walk(result) {
@@ -545,21 +476,6 @@ check("everyAnswerHasATwinAndNoRefusalDoes", () => {
 
 // **The drawing is hidden and the box it is slotted into is not**, which
 // is a correction and not a preference.
-//
-// The frame used to hide the whole wrapper, and what arrives through
-// that slot is not only the picture: the canvas brings the arrangement
-// menu and the ground panel with it, and the `table` renderer brings its
-// sort headers. Every one of those buttons was reachable by tab and
-// announced to nobody — a keyboard user can reach a control a screen
-// reader will not read out, which is worse than either alone. Found by
-// reading this component's shadow tree in Firefox: two tabbable buttons,
-// "Unpin" and "Clear the saved position", inside the hidden div.
-//
-// So the attribute moved onto the thing that is actually decoration: the
-// `<svg>`, marked by mst-canvas.js's emitScene, where
-// internal/web/jstest/canvas_test.mjs asserts it — together with the
-// general rule that nothing focusable anywhere under the canvas has an
-// aria-hidden ancestor.
 check("theDrawingIsHiddenAndTheControlsBesideItAreNot", () => {
   const frame = new MstViewFrame();
   frame.frame = frameFor({ view: { key: "world", name: "The world", renderer: "graph" }, envelope: answer });

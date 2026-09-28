@@ -2,37 +2,6 @@
 // internal/web/static/render/timeline.js, over the drawing vocabulary it
 // shares with the other five (internal/web/static/render/marks.js,
 // render/controls.js) and the frame's own bands (render/scene.js).
-//
-// What this layer covers that no Go test can, and what is this
-// renderer's alone.
-//
-// **That an enum axis is its option sequence and not its set.** A
-// championship declaring `[heat, semi, final]` has an axis in that
-// order; sorting those three words alphabetically produces a picture
-// that is wrong in a way nothing in it shows. The fixture's declaration
-// order is deliberately not its alphabetical order, or the test proves
-// nothing — and the options come from the **declaration**, so a declared
-// option no node carries still gets a tick, which is the half no answer
-// can supply.
-//
-// **That a span whose end is before its start is drawn and named.** It
-// is a content defect a designer wants to know about, and a renderer
-// that sorted the two ends would draw a perfectly plausible bar over it.
-// The test asserts both halves: the mark has no length and carries a
-// caret, and the two values reach the frame **unswapped**.
-//
-// **That a node with no place on the axis is never at the origin.** The
-// origin is a value — the axis minimum, or the first declared option —
-// and the fixture has a node sitting on it, so "before the axis begins"
-// is asserted against a picture where the origin is occupied by
-// something that means it.
-//
-// **That the fourth overlapping mark in a lane collapses without a
-// re-run**, over a stubbed global `fetch` that counts, exactly as
-// `nested`'s depth chip does: a drawing density is not a fetch boundary.
-//
-// Run directly: `node internal/web/jstest/render_timeline_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
 import { UNSET_LABEL } from "../static/palette.js";
@@ -513,10 +482,6 @@ check("theTwinAndTheSceneAgreeOnEveryNode", () => {
   // The twin is built from the envelope alone and the scene from the
   // envelope and a field declaration; two descriptions of one answer
   // that disagree is the defect this ordering exists to catch.
-  //
-  // The fixture carries every way this renderer can meet a node: a
-  // point, a span, an inverted span, a value off the axis, a node with
-  // no value at all, and four in one lane so a chip is holding one.
   const nodes = [
     node("p", { label: "P", stage: "semi" }),
     node("gap", { label: "Gap" }),

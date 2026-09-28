@@ -13,17 +13,6 @@ import (
 
 // TestAValueTooLargeToIndexIsCallerFixable pins the backstop behind
 // searchTextLimit.
-//
-// The bound in searchTextOf is what actually keeps a long field
-// writable, and with it in place no test can reach SQLSTATE 54000
-// through the service. The mapping still has to exist and still has to
-// be pinned: 54000 is program_limit_exceeded, always a value of the
-// caller's that is too big for something, and the default arm of
-// failureFor would file it as internal_error — the code reserved for
-// what nobody planned for, which tells an agent to give up on a call it
-// could fix by shortening what it sent. Anything else Postgres raises
-// passes through untouched, so this cannot swallow a fault that is not
-// the caller's.
 func TestAValueTooLargeToIndexIsCallerFixable(t *testing.T) {
 	raised := &pgconn.PgError{
 		Code:    "54000",

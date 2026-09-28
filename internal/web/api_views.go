@@ -8,37 +8,6 @@ import (
 
 // The saved-view surface over REST: the browser's half of what
 // mcp_views.go gives an agent.
-//
-// **Every handler here calls the same unexported core the MCP tool
-// calls**, which is the split mcp_docs.go's header argues and this file
-// inherits: requireScope asks "is this token bound to this game", which
-// a session caller cannot answer, and requireProject asks the equivalent
-// question of a session. One implementation of every tool, two admission
-// checks — so a designer in a browser and an agent on /mcp cannot be
-// answered differently about what a view is or what refused it.
-//
-// **Running is a read and saving is a write**, and the split is made by
-// the route's own method rather than by any handler here:
-// registerContentRoute puts requireEditor in front of every non-GET
-// route on this surface (server.go). That is what makes "a viewer may
-// open a view and may not change one" true rather than intended, and
-// TestEveryContentWriteRouteRefusesAViewer drives every one of them.
-//
-// **views.run is a POST and is still a read**, which is the one place
-// that rule costs something: a query document does not fit in a query
-// string, and a POST is therefore the only honest spelling. What it
-// means is that a viewer cannot run a view over REST while a viewer with
-// a token can over MCP — recorded rather than papered over, because the
-// alternatives are worse. Registering it through registerProjectRoute to
-// dodge the editor gate would put a game-content route outside the one
-// convention test that watches this surface, and a GET carrying a
-// document in its URL would meet a server's own header bounds on the
-// first interesting query. The browser client this surface exists for is
-// sub-project 5's, and a viewer's read-only view runner is a decision for
-// the change that builds one.
-
-// ViewsRunBody is the POST body of the run route: exactly the MCP tool's
-// input, so the two surfaces take one argument shape.
 type ViewsRunBody = ViewsRunInput
 
 func (s *Server) handleListViews(w http.ResponseWriter, r *http.Request,
@@ -223,33 +192,11 @@ func (s *Server) handleSetViewBackground(w http.ResponseWriter, r *http.Request,
 // --- The renderer catalogue ------------------------------------------
 
 // RenderersOutput is the renderer catalogue as a browser reads it.
-//
-// **It exists so that one surface in this product can *offer* a renderer
-// rather than check one.** Every other consumer of internal/views'
-// catalogue asks it a yes-or-no question at save time; the "Save as"
-// dialog has to paint a chooser, and a chooser needs the names, each
-// renderer's knobs, each knob's kind and — for an enum — the exact
-// spellings the server admits. A dialog that carried that list of its own
-// would be a second copy of a table this repository generates its own
-// prose from precisely so it cannot be copied, and the copy would live in
-// JavaScript where no Go test reads it. Hence a route.
-//
-// It is a projection and not internal/views.Renderer itself, for this
-// package's standing reason: Renderer carries `Requires`, a func, which
-// cannot cross a wire, and the wire spelling of everything else is
-// decided here rather than by Go's field names.
 type RenderersOutput struct {
 	Renderers []RendererOutput `json:"renderers"`
 }
 
 // RendererOutput is one entry of the catalogue.
-//
-// `requires` is the prose half of the contract — what a *query* must
-// produce for this renderer to be saveable — and it is carried because
-// the dialog changes the renderer of a query it may not edit: a designer
-// who picks `nested` for a query with no containment edges is going to be
-// refused, and the sentence that says why is worth reading before the
-// refusal rather than after it.
 type RendererOutput struct {
 	Name            string                `json:"name"`
 	Consumes        string                `json:"consumes"`
@@ -260,12 +207,6 @@ type RendererOutput struct {
 }
 
 // RendererParamOutput is one knob.
-//
-// `values` is present for an enum and absent for every other kind, which is
-// the catalogue's own rule (TestRenderersArea's "an enum parameter declares
-// its values and nothing else does" case) carried onto the wire rather than
-// restated: a control that offered spellings for a number would compose a
-// document views.upsert refuses.
 type RendererParamOutput struct {
 	Name     string   `json:"name"`
 	Kind     string   `json:"kind"`
@@ -277,13 +218,6 @@ type RendererParamOutput struct {
 // handleListRenderers answers the catalogue. It reads no row, takes no
 // argument and cannot fail: the table is compiled in, and this is the
 // same table CheckRenderer judges an upsert against.
-//
-// It is a content route rather than a public one because it is part of a
-// game's surface and a caller with no business opening this game has no
-// business reading what it could be drawn with. It is a GET, so
-// registerContentRoute leaves it to a viewer as well as an editor: a
-// viewer cannot save the copy, and a chooser they can read and not submit
-// is better than a dialog that cannot explain itself.
 func (s *Server) handleListRenderers(w http.ResponseWriter, _ *http.Request,
 	_ Caller, _ ProjectScope,
 ) {

@@ -15,14 +15,6 @@ import (
 
 // Reason is why one entity is unreachable, and the four are ordered
 // **most specific first**.
-//
-// The order is a slice and not a map, and the reason is a finding views
-// recorded: a refusal-order guard there "worked" only because a map
-// literal happened to begin with the alphabetically-last key, which is
-// not an order at all. An entity that qualifies for more than one reason
-// gets the first of these it matches, and
-// TestTheReasonsAreOrderedMostSpecificFirst holds it with an entity that
-// qualifies for two.
 type Reason string
 
 const (
@@ -38,12 +30,6 @@ const (
 	ReasonContainerUnreachable Reason = "container_unreachable"
 	// ReasonIsolatedFromStart: no incoming gating edge at all, and not a
 	// seed.
-	//
-	// **It can only appear with include_ungated false**, because such an
-	// entity is a start point under the default settings. That is said
-	// here rather than discovered, because a reason that can never
-	// appear under the defaults is one a reader will otherwise think is
-	// broken.
 	ReasonIsolatedFromStart Reason = "isolated_from_start"
 	// ReasonNoPath: it has gates, and every one of them is unreachable
 	// itself.
@@ -110,11 +96,6 @@ type TypeCount struct {
 }
 
 // SeedReport is the start set as the engine understood it.
-//
-// **It is not a courtesy.** It is the field that turns "your whole game
-// is unreachable" from a verdict into a diagnosis, and it is the only
-// thing that distinguishes a real finding from a mistyped seed key that
-// somehow got through.
 type SeedReport struct {
 	Entities       []SeedRef `json:"entities"`
 	EntityTypes    []string  `json:"entity_types,omitempty"`
@@ -123,12 +104,6 @@ type SeedReport struct {
 }
 
 // UnreachableResult is the whole report.
-//
-// **Every count here is what makes the negative half real.** An empty
-// Findings list means one of two entirely different things -- everything
-// is reachable, or the walk found nothing -- and ReachableTotal,
-// PerType, Seed.Total and EdgesWalked are what tell them apart. A report
-// that carried only the findings would be the same JSON in both cases.
 type UnreachableResult struct {
 	Findings   []Finding `json:"unreachable"`
 	NextCursor string    `json:"next_cursor,omitempty"`
@@ -162,13 +137,6 @@ const (
 
 // Unreachable answers "what can no player reach", over the reachability
 // closure reach.go computes.
-//
-// **The complement is computed in SQL and not in Go**: the reached ids
-// go down as one array parameter and the entities table is subtracted
-// against them there, so a game of ten thousand entities is never
-// shipped across a wire to be subtracted. The reached ids are bounded by
-// MaxWalkRows and are already in this process, because the closure needs
-// them for its own truncation and invalid-edge counts.
 func (s *Service) Unreachable(ctx context.Context, projectID uuid.UUID, in UnreachableInput) (
 	UnreachableResult, error,
 ) {
@@ -271,15 +239,6 @@ func (s *Service) Unreachable(ctx context.Context, projectID uuid.UUID, in Unrea
 }
 
 // consideredTypes resolves which entity types a report is about.
-//
-// An ignored type is removed from the findings **and** from the totals,
-// which is why it is applied here, once, to the id list every statement
-// below takes.
-//
-// It takes the two key lists rather than one analysis's own input
-// struct, because three analyses now narrow themselves the same way and
-// a second copy of "resolve, then subtract the ignored" is a second
-// place the totals could stop agreeing with the findings.
 func (s *Service) consideredTypes(ctx context.Context, projectID uuid.UUID,
 	entityTypes, ignoreEntityTypes []string,
 ) (
@@ -426,10 +385,6 @@ LIMIT %s`, project, where, b.bind(int64(limit)+1))
 }
 
 // explain gives each finding on the page its reason and its blockers.
-//
-// It reads the same normalised in-edges the fixpoint does, from the same
-// statement, so "what gates this entity" has one definition in this
-// package rather than one per question.
 func (s *Service) explain(ctx context.Context, p Params, reach Reach, page []candidate) error {
 	if len(page) == 0 {
 		return nil
@@ -518,17 +473,6 @@ func (r Reach) maxDepthReached() int {
 }
 
 // unreachableFingerprint digests the report a cursor was issued under.
-//
-// **The project id is first, always** -- internal/paging's contract,
-// stated in prose there and enforced by nothing, so every caller obeys
-// it and every listing has a test. The parameters follow, because paging
-// through "unreachable from the tutorial zone" and having page 2 answer
-// "unreachable from character creation" is a wrong answer with no error.
-//
-// It is asserted compositionally as well as behaviourally, because the
-// behavioural test can pass without the project id whenever another part
-// discriminates -- here the parameter digest does -- and that is exactly
-// how the original paging defect survived its first test.
 func unreachableFingerprint(projectID uuid.UUID, in UnreachableInput, considered []string) string {
 	parts := []string{projectID.String(), "analysis.unreachable"}
 	parts = append(parts, considered...)

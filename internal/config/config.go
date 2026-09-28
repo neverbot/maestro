@@ -87,29 +87,6 @@ type Config struct {
 	// what it always was before Task 22: a seed used once, when the
 	// instance has no users at all, and never a value that overwrites an
 	// existing account's password.
-	//
-	// It exists because Task 22 shipped that reset unconditionally on
-	// every boot with both FIRST_ADMIN_* variables set, and its own
-	// review then proved live what that costs on an instance that keeps
-	// them set — which compose.yml ships and the readme normalises.
-	// An admin's deliberate password rotation was silently undone by the
-	// next restart, with every session for the account revoked at that
-	// moment, so Task 21's self-service password change was simply not
-	// durable for the bootstrap admin. A typo'd FIRST_ADMIN_PASSWORD of
-	// at least twelve characters destroyed a working password with no
-	// confirmation anywhere. And a shorter one aborted start-up on
-	// instances that had booted fine for as long as the value had only
-	// ever been a seed.
-	//
-	// Splitting the capability from the credential dissolves all three:
-	// with the opt-in absent the configured password is inert against an
-	// existing account, so compose.yml can keep both variables set with
-	// no standing hazard, and an operator who actually needs the recovery
-	// sets FIRST_ADMIN_PASSWORD_RESET=true for exactly one restart and
-	// unsets it again. Note what it does *not* gate: re-promoting the
-	// configured account to admin (restoring is_admin) stays
-	// unconditional, because that step never destroys anything an
-	// operator would miss.
 	FirstAdminPasswordReset bool
 
 	// TrustedProxyCount is the number of reverse proxies this instance
@@ -120,22 +97,6 @@ type Config struct {
 	// RemoteAddr is the real client and neither header is consulted at
 	// all — the same posture web.clientIP and web.setSessionCookie held
 	// before this field existed.
-	//
-	// Getting this wrong is a real failure mode in both directions, not
-	// just an inconvenience. Too low (in particular, left at zero behind
-	// an actual proxy) does not merely fail to identify the client: every
-	// request's RemoteAddr is then the proxy's own address, so a per-IP
-	// rate limiter keyed on it collapses into one global bucket shared by
-	// every caller on the instance — ten requests from anyone exhausts it
-	// for everyone until the window rolls, which is worse than having no
-	// limiter at all. Too high, or nonzero on an instance with no proxy in
-	// front of it, lets a direct caller forge whichever X-Forwarded-For
-	// entry this instance ends up trusting as "the client", defeating the
-	// per-IP budget from the other direction. Set it to the actual number
-	// of hops between the public internet and this process (usually 1)
-	// only once a reverse proxy is confirmed to be there and to behave
-	// this way; the default of zero is the only safe value for an
-	// instance reachable directly.
 	TrustedProxyCount int
 }
 
@@ -158,24 +119,6 @@ func (c Config) LogValue() slog.Value {
 
 // Load reads configuration through the given lookup function, so tests can
 // supply an environment without touching the real one.
-//
-// SESSION_KEY, once required and validated here (a minimum length, and a
-// named rejection of the placeholder value compose.yml shipped), was
-// removed by a Task 22 review: nothing outside this package ever read
-// Config.SessionKey. Sessions in this product are random tokens stored
-// in a table (internal/identity/sessions.go, IssueSession/UserForSession)
-// — nothing signs or encrypts anything with a key, so there was never a
-// mechanism SESSION_KEY could have been wired into. The readme told
-// operators to generate a real value with `openssl rand -base64 32`
-// before deploying anywhere but a laptop, in language that implied
-// rotating it invalidated sessions; it did nothing, ever. A control that
-// exists only as its own validation — required, length-checked, and
-// rejecting its own placeholder by name, with zero downstream effect —
-// is worse than no control at all: it is validation theater that reads
-// as a real security boundary to an operator who has no reason to go
-// looking for the one that isn't there, and it cost every deployment a
-// secret to generate, store and rotate for a value nothing consulted.
-// Deleting it is strictly safer than leaving it inert.
 func Load(getenv func(string) string) (Config, error) {
 	sessionTTL, err := parsePositiveDuration("SESSION_TTL", getenv("SESSION_TTL"), defaultSessionTTL, 0)
 	if err != nil {

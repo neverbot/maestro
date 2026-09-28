@@ -50,12 +50,6 @@ func TestRoutes(t *testing.T) {
 	a := newArea(t)
 
 	// TestARouteReadsBackEverythingItWasWrittenWith.
-	//
-	// `params` is a free jsonb blob written by an upsert, which is **the
-	// exact shape relations.fields had when it was write-only for a whole
-	// sub-project through nine review rounds**, and `note` is the field
-	// nobody has a reason to look at. Both are read back here, and again
-	// over the transport in Task 11.
 	t.Run("a route reads back everything it was written with", func(t *testing.T) {
 		g := levellingGame(t, a)
 		in := RouteInput{
@@ -101,11 +95,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestRouteParamsAreValidatedAtWriteTimeAndNotOnlyAtCheckTime.
-	//
-	// A route whose `gate` is nonsense is a route every check from now on
-	// will refuse, and the caller who can fix it is the one writing it.
-	// `params` existing and being judged by nothing is the write-only-field
-	// defect in its route-shaped form.
 	t.Run("route params are validated at write time and not only at check time", func(t *testing.T) {
 		g := levellingGame(t, a)
 		_, err := g.analysis.UpsertRoute(context.Background(), g.projectID, RouteInput{
@@ -144,9 +133,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestOmittingTheExpectedVersionIsRefusedRatherThanGuessed.
-	//
-	// The guess a caller would want depends on whether the route exists,
-	// which is the very thing the argument asserts.
 	t.Run("omitting the expected version is refused rather than guessed", func(t *testing.T) {
 		g := levellingGame(t, a)
 		_, err := g.analysis.UpsertRoute(context.Background(), g.projectID, RouteInput{
@@ -158,12 +144,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestAVersionClaimAgainstARouteThatIsGoneIsRefusedRatherThanRecreated.
-	//
-	// The reason is stronger for a route than for anything
-	// metamodel.RemovedError was written for: last_check,
-	// last_checked_design_version and every step row hang off the route's
-	// id, so a quiet re-creation would discard a designer's proved
-	// progression *and* its proof, under a new id, and answer success.
 	t.Run("a version claim against a route that is gone is refused rather than recreated", func(t *testing.T) {
 		g := levellingGame(t, a)
 		written := g.upsert(t, RouteInput{
@@ -193,9 +173,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestAStepListAboveTheCapIsRefusedAndNotTruncated.
-	//
-	// A route silently cut to five hundred steps is a proof of a
-	// progression that stops halfway and says it holds.
 	t.Run("a step list above the cap is refused and not truncated", func(t *testing.T) {
 		g := levellingGame(t, a)
 		long := make([]RouteStepInput, MaxRouteSteps+1)
@@ -217,9 +194,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestAStepKeyThatResolvesToNothingIsNotFoundAndNotATombstone.
-	//
-	// A tombstone is what a *deletion* leaves behind. Accepting one on write
-	// would let an agent author a route out of typos and be told it holds.
 	t.Run("a step key that resolves to nothing is not found and not a tombstone", func(t *testing.T) {
 		g := levellingGame(t, a)
 		_, err := g.analysis.UpsertRoute(context.Background(), g.projectID, RouteInput{
@@ -275,10 +249,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestTheStepListIsReplacedWholesaleAndNotMerged.
-	//
-	// Steps are positional and an upsert replaces them: a merge would leave
-	// a route holding steps its author had deleted, which is a claim nobody
-	// made.
 	t.Run("the step list is replaced wholesale and not merged", func(t *testing.T) {
 		g := levellingGame(t, a)
 		first := g.upsert(t, RouteInput{
@@ -304,11 +274,6 @@ func TestRoutes(t *testing.T) {
 
 	// TestANeverCheckedRouteIsNeitherStaleNorHealthy pins all three states
 	// in one test.
-	//
-	// Never checked, stale and checked are three different facts, and
-	// collapsing any pair either alarms a designer wrongly or reassures them
-	// wrongly. One test, because a state asserted in isolation passes on an
-	// implementation that only ever answers that one.
 	t.Run("a never checked route is neither stale nor healthy", func(t *testing.T) {
 		g := levellingGame(t, a)
 		route := g.upsert(t, RouteInput{
@@ -343,12 +308,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestAnOrdinaryUpsertLeavesAStoredVerdictStanding.
-	//
-	// The three verdict columns are not in the upsert's SET list, and that
-	// is the decision this table exists for: an edit to a route's name must
-	// not silently discard a verdict somebody proved. A caller that said
-	// nothing about a check would be saying "never checked" if they were
-	// listed there.
 	t.Run("an ordinary upsert leaves a stored verdict standing", func(t *testing.T) {
 		g := levellingGame(t, a)
 		route := g.upsert(t, RouteInput{
@@ -366,18 +325,6 @@ func TestRoutes(t *testing.T) {
 
 	// TestEditingARouteMakesItsOwnVerdictStale is the half design_version
 	// cannot see.
-	//
-	// `routes` is deliberately not one of the four tables the design-version
-	// triggers watch, so rewriting a route's steps moves no counter at all
-	// -- and a status decided on that counter alone would report a verdict
-	// about steps nobody has any more as `checked`. That is a stale green
-	// arriving through the one door design_version does not watch, and it is
-	// exactly what this engine exists not to produce. routeStatus compares
-	// the route's own updated_at against last_checked_at as well.
-	//
-	// The control is in the same test: a *design* write with no route write
-	// is stale for the other reason, so a status that had collapsed into one
-	// clock would fail one half or the other.
 	t.Run("editing a route makes its own verdict stale", func(t *testing.T) {
 		g := levellingGame(t, a)
 		route := g.upsert(t, RouteInput{
@@ -411,21 +358,6 @@ func TestRoutes(t *testing.T) {
 
 	// TestARenameLeavesARouteStepSpellingTheOldKey is the rename lesson,
 	// carried one step along.
-	//
-	// internal/metamodel/rename.go's header is the authority: a rename moves
-	// the catalogue row and nothing else, and it deliberately does not tidy
-	// view_refs.ref_key, because the stored row and the catalogue disagreeing
-	// on the spelling is what makes resolution fall to the by-id arm and
-	// report `type_renamed` rather than `missing`. A route step is the same
-	// shape: it stores entity_id as the resolution path plus
-	// (entity_type_key, entity_key) as a tombstone pair a rename must not
-	// touch.
-	//
-	// **Mutation:** have RenameEntityType tidy route_steps.entity_type_key.
-	// This test goes red on the stored spelling, and Task 10's
-	// TestARouteWhoseTypeWasRenamedIsStillOkAndSaysTheKeyMoved goes red on
-	// the diagnostic -- the second half of the same rule, which is why that
-	// half is named here rather than left to be discovered.
 	t.Run("a rename leaves a route step spelling the old key", func(t *testing.T) {
 		g := levellingGame(t, a)
 		g.upsert(t, RouteInput{
@@ -453,10 +385,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestRemovingARouteRequiresTheVersionAndSaysWhy.
-	//
-	// This is the **inversion** of views.remove, which takes none, and the
-	// message has to carry the reason: a reader who has just read that file
-	// will otherwise read this as an omission.
 	t.Run("removing a route requires the version and says why", func(t *testing.T) {
 		g := levellingGame(t, a)
 		route := g.upsert(t, RouteInput{
@@ -499,10 +427,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestTheRouteListingCarriesHealthAndCountsButNoStepsOrVerdicts.
-	//
-	// ListViewsPage's discipline, carried here: a listing says what is here
-	// and what needs attention, and routes.get is where a walk and its proof
-	// come from.
 	t.Run("the route listing carries health and counts but no steps or verdicts", func(t *testing.T) {
 		g := levellingGame(t, a)
 		first := g.upsert(t, RouteInput{
@@ -567,13 +491,6 @@ func TestRoutes(t *testing.T) {
 
 	// TestTheRouteListingFingerprintIsProjectIdFirstAndCarriesItsDomain is
 	// the compositional half.
-	//
-	// This listing takes **no filter**, which is exactly why the
-	// compositional assertion matters more here than elsewhere: the
-	// behavioural test above rests on the project id alone, so it would pass
-	// on a fingerprint that carried the project id and nothing else -- and
-	// then a cursor from another domain's listing over the same game would
-	// page this one perfectly and answer a different question.
 	t.Run("the route listing fingerprint is project id first and carries its domain", func(t *testing.T) {
 		g := a.game(t)
 		want := paging.Fingerprint(g.projectID.String(), "routes")
@@ -621,12 +538,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestARouteUpsertAndRemovalArePublished, with the gating each carries.
-	//
-	// The gating is this file's own decision (events.go argues it), so it is
-	// asserted rather than assumed: MinRole empty means every member of the
-	// game including a viewer, and HumanOnly false means an agent hears it
-	// too -- an agent looping over check and upsert is the subscriber whose
-	// next write is judged against a version another writer just moved.
 	t.Run("a route upsert and removal are published", func(t *testing.T) {
 		g := levellingGame(t, a)
 		hub := realtime.NewHub()
@@ -658,9 +569,6 @@ func TestRoutes(t *testing.T) {
 	})
 
 	// TestARespellingOfAStoredRouteKeyIsNamedRatherThanSilentlyApplied.
-	//
-	// Keys are matched without regard to case, so a second spelling is a
-	// rewrite of the handle a designer bookmarks rather than a new route.
 	t.Run("a respelling of a stored route key is named rather than silently applied", func(t *testing.T) {
 		g := levellingGame(t, a)
 		stored := g.upsert(t, RouteInput{
@@ -713,25 +621,6 @@ func requireNoEvent(t *testing.T, sub *realtime.Subscription, why string) {
 
 // TestNoRouteEventIsPublishedWhenTheCommitFails is the one placement a
 // refusal test cannot catch.
-//
-// A publish written as the last statement inside the transaction's
-// callback differs from the correct one only by the commit that follows,
-// and a rolled-back write and a refused write look identical from
-// outside. So the commit, and only the commit, is made to fail: a
-// deferred foreign key from routes.id to projects.id is satisfied by
-// nothing -- a route's id is not a project id -- but being DEFERRABLE
-// INITIALLY DEFERRED it is checked at COMMIT, so every statement inside
-// the transaction succeeds and the commit raises 23503. testutil's
-// per-test database is what makes installing such a constraint safe.
-//
-// internal/metamodel's and internal/views' tests of the same name are the
-// model; this construction is copied because it is the only one that
-// works.
-// **Its own database, not the area's.** This one installs a constraint
-// on `routes`, and ADD CONSTRAINT validates the rows already there: in a
-// database another claim has already written routes into, the constraint
-// refuses to install and the test fails for a reason that has nothing to
-// do with what it asserts.
 func TestNoRouteEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	t.Parallel()
 	g := levellingGame(t, area{pool: testutil.NewPool(t)})

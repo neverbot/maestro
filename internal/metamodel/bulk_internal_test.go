@@ -14,17 +14,6 @@ import (
 
 // TestFoldedIdentityKeepsThePartsOfARowApart pins both halves of what
 // FoldedIdentity claims: the case fold, and the length prefix.
-//
-// Only the fold was pinned before, by the batch tests that repeat a key
-// in a different case. Changing the format string from "%d:%s" to ":%s"
-// left the whole suite green — so the extraction's own headline
-// justification, that entities and relations cannot drift apart because
-// they fold identity through one function, was pinned for one kind of
-// drift and not the other. It matters most for edges: Ref.TypeKey and
-// Ref.Key are documented as never pattern-validated, so a part carrying
-// the delimiter is reachable input, and under a delimiter-only join the
-// pairs below are one identity — the second item of a batch refused as a
-// repetition of the first, or, in atomic mode, the whole batch refused.
 func TestFoldedIdentityKeepsThePartsOfARowApart(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -84,22 +73,6 @@ func TestFoldedIdentityKeepsThePartsOfARowApart(t *testing.T) {
 
 // TestABulkFailureNeverCarriesTheDatabasesOwnWords closes review finding
 // M2, and pins the ordering of failureFor's switch (finding L2).
-//
-// `mcpErrorFor` (internal/web/mcp_errors.go) deliberately withholds the
-// database's message from both `internal_error` and `retryable`, and a
-// test there asserts "canceling statement" never reaches an agent. The
-// bulk path had the same hole one step along: `failureFor` set
-// `Message: err.Error()` unconditionally, before the switch, so a batch
-// item that hit a lock timeout or an unexpected SQLSTATE reported the
-// raw Postgres text — table names, constraint names, SQLSTATEs — beside
-// a code that promised the agent it had been withheld. The bulk path is
-// where contention was actually observed, so it was the likelier route
-// and not the rarer one.
-//
-// The two codes that get a fixed message are exactly the two whose text
-// describes the *server's* internals rather than the caller's next move.
-// Every other arm names something the caller sent, and its message is
-// the useful half of the report.
 func TestABulkFailureNeverCarriesTheDatabasesOwnWords(t *testing.T) {
 	lockTimeout := fmt.Errorf("upsert relation: %w",
 		&pgconn.PgError{Code: "55P03", Message: "canceling statement due to lock timeout"})

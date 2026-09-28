@@ -56,14 +56,6 @@ const (
 	// bound never looks inside. Two is the deepest a legal value goes — a
 	// list of scalars, or a {"param": "…"} reference — so anything deeper
 	// is a shape this language has no meaning for.
-	//
-	// Without it the only bound on a value is encoding/json's own, at ten
-	// thousand: nothing overflows, but the refusal comes back at pointer
-	// "" in the decoder's wording, and a four-deep object inside `in`
-	// passes every check `in` makes, because a list operator counts its
-	// list and never looks into it. Task 3 applies it, in checkValueShape,
-	// and TestAPredicateValueHasItsOwnDepthBound pins both the refusal and
-	// the two legal shapes that sit exactly on it.
 	MaxValueDepth = 2
 
 	// MaxStringLen bounds every individual string anywhere in the
@@ -71,18 +63,6 @@ const (
 	// by metamodel.RowKeyProblems; a field key is 64 by Task 3's
 	// fieldKeyProblems). It is what stops a megabyte of text arriving as
 	// one enum value. TestAnOverlongStringIsRefusedWhereverItSits pins it.
-	//
-	// **Counted in bytes, and every message over it says "bytes"**, which
-	// is the opposite of the rule views.go's two prose caps follow and is
-	// deliberate. Those cap a designer's own prose, where a byte count
-	// would make an accented name shorter than an unaccented one for no
-	// reason a designer could guess; this is a machine bound on a query
-	// document — an identifier, an operator, one literal value — set two
-	// orders of magnitude above anything a person types, and what it is
-	// protecting is the size of what gets parsed and stored. The unit was
-	// stated two ways for one constant before this note existed:
-	// renderers.go printed "characters" over the same len() this file
-	// printed "bytes" over.
 	MaxStringLen = 4096
 
 	// MaxParams bounds `params`.
@@ -134,10 +114,6 @@ type Selector struct {
 }
 
 // Step is one traversal.
-//
-// From is required and there is deliberately no implicit "previous step":
-// an implicit chain makes a two-branch query impossible to read, and a
-// two-branch query is what the racing-career example needs.
 type Step struct {
 	From      string     `json:"from"`
 	Via       Strings    `json:"via"`
@@ -257,33 +233,6 @@ func (s *Strings) UnmarshalJSON(raw []byte) error {
 }
 
 // ParseQuery decodes, bounds and structurally validates a query document.
-//
-// It resolves nothing against a game: no key is looked up, no field type
-// is known, no operator is judged. That is deliberate and it is what
-// makes views.validate two stages — a document that is structurally wrong
-// is wrong for every game, and telling an agent so without a database
-// round trip is the difference between a composition loop that takes
-// seconds and one that takes a connection.
-//
-// **Every problem it can find after decoding is reported in one pass**,
-// so an agent fixes a five-step traversal in one round trip rather than
-// five. TestEveryProblemWithOneQueryIsReportedInOnePass pins it. The
-// three refusals that precede the decode — the size cap, the encoding
-// check and a syntax error — are necessarily alone, because there is no
-// document to walk yet.
-//
-// **What comes back is structurally bounded and semantically unjudged**,
-// and the caller that stores one should know the difference. Every
-// string is length-bounded, every collection is count-bounded, every
-// tree and every `any` is depth-bounded — including a parameter's
-// `default`, which is an `any` like a predicate's `value` and is bounded
-// for the same reason: a query document is stored, and an unbounded blob
-// in it becomes a saved view every later stage re-walks. What is *not*
-// judged is meaning: a default is not yet known to be a scalar of its
-// declared type, an operator is not yet known to suit the field, and no
-// key names anything. That is Task 4's resolve pass. A parsed query is
-// therefore safe to hold and to size; whether it is worth storing is a
-// question only resolution answers.
 func ParseQuery(raw []byte) (*Query, error) {
 	if len(raw) > MaxQueryBytes {
 		return nil, invalidQuery("", fmt.Sprintf(
@@ -674,28 +623,6 @@ func prefixed(ptr string, problems []metamodel.FieldError) []metamodel.FieldErro
 // no control characters at all, and at most MaxStringLen bytes. The
 // encoding itself is judged on the raw bytes in ParseQuery, before
 // encoding/json can replace an invalid sequence with U+FFFD.
-//
-// **It walks the value by reflection rather than naming the fields it
-// knows about, and that is the whole point.** This bound has been missed
-// five times in this repository, each time one step along from the last
-// fix, and each time because a check enumerated the fields somebody was
-// thinking about. A walk cannot forget a field; adding one to Query,
-// Selector, Step or any type they reach puts it under the bound with no
-// other change. TestEveryStringInAQueryIsBounded asserts the exact set of
-// positions reached, so a field that stops being walked fails a test
-// rather than shipping, and
-// TestAStringFieldAddedLaterIsBoundedWithoutTouchingTheWalk drives the
-// same entry point over a struct this package does not contain.
-//
-// The allowance is the empty string — no control character is legal
-// anywhere in a query, not even a newline. A query has no prose field:
-// every string in it is an identifier, an operator or one literal value,
-// and all three are one line by construction. metamodel.CheckText is the
-// judgement; this function is only the walk and the wording, which is
-// what keeps this package from growing a sixth copy of the scan.
-//
-// The pointer is built from the json tags, so it addresses the document
-// the caller wrote rather than the Go struct it decoded into.
 func checkAllText(v any) []metamodel.FieldError {
 	var problems []metamodel.FieldError
 	walkStrings(reflect.ValueOf(v), "", func(ptr, value string) {
@@ -728,41 +655,6 @@ func checkAllText(v any) []metamodel.FieldError {
 // walkStrings visits every string reachable from v, including strings
 // inside `any` values and inside map keys and values, calling visit with
 // the JSON pointer of each.
-//
-// A `value` holding a list of enum options is the case that makes the
-// `any` arm load-bearing: it is decoded as []any of string, and a check
-// that only looked at typed string fields would let every one of them
-// through.
-//
-// **A struct field tagged `json:"-"` is visited at its container's own
-// pointer rather than skipped**, and that rule is load-bearing rather
-// than tidy. Such a field is not a member of the document: it is where a
-// type that decodes from a *scalar* keeps what the scalar said, and
-// AttrRef.Attr is exactly that — `"label": "@name"` is caller text with
-// no member name of its own. Skipping it is how a string escapes this
-// bound, which is the defect this whole walk exists to close; visiting it
-// at the container's pointer addresses the caller's own document, since
-// that is where the caller wrote it.
-//
-// **An anonymous (embedded) field is walked at its container's pointer
-// too, whether or not reflection calls it exported**, and that is the
-// same rule stated for the other way a Go field and a document member can
-// disagree. `reflect` reports an anonymous field whose *type* is
-// unexported as unexported, while encoding/json promotes and populates
-// that type's exported fields as ordinary top-level members of the
-// document — so an `IsExported` guard used as a membership test drops
-// real caller text on the floor. It can be read through even though it
-// cannot be set, which is all a walk needs. The promoted members are
-// addressed at the container's pointer because that is where the caller
-// wrote them: an embedded type's Go name never appears in the document,
-// and the pointer is the whole product of a QueryError.
-// TestAnEmbeddedTypesPromotedFieldIsBounded pins both halves.
-//
-// A `json.RawMessage` is decoded and walked rather than treated as the
-// byte slice it is, because it is a *deferred* document member: its bytes
-// are caller text that no later stage would ever bound. A plain `[]byte`
-// is not walked, and must not be used for caller text: it decodes from
-// base64, so its bytes are not a string the caller wrote.
 func walkStrings(v reflect.Value, ptr string, visit func(ptr, value string)) {
 	if v.Kind() == reflect.Slice && v.Type() == rawMessageType && !v.IsNil() {
 		var deferred any
@@ -887,21 +779,6 @@ func (p *Predicate) normalise() {
 
 // AttrRef is an attribute reference: a field key, a built-in, or a
 // one-hop related attribute.
-//
-// One hop, and not many, deliberately: a multi-hop colour source is a
-// traversal, and traversals belong in `traverse` where they are bounded
-// and visible in the document rather than hidden in a projection. A
-// second hop is refused by the decoder rather than by a check, because
-// RelHop has no member to hold one and DisallowUnknownFields is on:
-// TestAnAttributeReferenceIsAStringOrAOneHopRelated sends `then` and
-// reads the unknown-key refusal back.
-//
-// Attr carries `json:"-"` because it is not a member of the document —
-// it holds what the *scalar* spelling said, so walkStrings visits it at
-// this reference's own pointer, which is where the caller wrote it.
-// Related does carry its member name even though UnmarshalJSON below is
-// what reads it, because it *is* a member and a problem inside it must be
-// addressed as `/project/color_by/related/via`.
 type AttrRef struct {
 	Attr    string  `json:"-"`
 	Related *RelHop `json:"related,omitempty"`

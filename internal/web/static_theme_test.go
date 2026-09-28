@@ -17,9 +17,6 @@ import (
 // and it is exactly the shape that rots: a hue tuned in one place and
 // not the other is a theme that disagrees with itself, and the only
 // person who would ever see it is the one who used the switch.
-//
-// Mutation: change any value in either block and this fails naming the
-// token and both values.
 func TestTheTwoDarkBlocksAgree(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
@@ -52,8 +49,6 @@ func TestTheTwoDarkBlocksAgree(t *testing.T) {
 // way only: a person on a dark system who asks for paper keeps getting
 // ink. That is the cascade defect this stylesheet has shipped five
 // times, and this is the one place a test can hold it.
-//
-// Mutation: drop the `:not([data-theme="light"])` and this fails.
 func TestAChosenLightThemeSurvivesADarkSystem(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
@@ -77,9 +72,6 @@ func TestAChosenLightThemeSurvivesADarkSystem(t *testing.T) {
 // before the body exists is a classic script in the head. A shell that
 // forgot it renders in the system's theme and jumps to the chosen one on
 // every navigation, which is a defect only a browser can see.
-//
-// Mutation: add `defer` to the tag in any shell, or drop the tag, and
-// this fails naming the shell.
 func TestEveryShellAppliesTheThemeBeforeItPaints(t *testing.T) {
 	t.Parallel()
 	shells, err := os.ReadDir("static")

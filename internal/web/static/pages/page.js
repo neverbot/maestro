@@ -1,24 +1,6 @@
 // The plumbing every page module shares: where this page is, where the
 // other pages are, and the three things a page does before it can render
 // anything.
-//
-// **It is a file Task 15 did not name, and the argument for it is the
-// standing failure pattern this plan keeps catching.** Seven page
-// modules each need to read the slug out of the URL, build a link to
-// another page of the same game, and decide what to do with a 401. Seven
-// copies of `/^\/g\/([^/]+)/` is seven chances to disagree about what an
-// address is, and the whole product has just moved to slug addressing —
-// the one decision a seventh copy would quietly break.
-//
-// **Every address in this front end is built here, and every one of them
-// is a slug.** internal/web/static_pages_test.go's
-// TestNoPageURLContainsAUUID reads the page modules for a uuid in a path
-// position and finds none, and it can only mean that while the paths are
-// built in one place a reader can check.
-//
-// It fetches nothing. Every call goes through internal/web/static/client.js,
-// which is the rule internal/web/static_client_test.go holds; what this
-// module owns is *where a page is*, not what a page knows.
 
 import { fetchGames, fetchMe, goToLogin, rememberGame, renderHeader } from "../app.js";
 // Imported for its side effect, which is the custom element's
@@ -67,10 +49,6 @@ export const DESTINATION_PROSE = "Prose";
 // was told the wrong location (found in the 2026-09-09 audit). A page in
 // the product with no entry in the bar is a page the bar has to lie
 // about.
-//
-// Analysis is deliberately *not* here yet, though the design settled it
-// as the fifth. Its screens do not exist, and a destination pointing at
-// nothing is worse than one that is missing: it lands with them.
 export const DESTINATION_IMAGES = "Images";
 // The fifth, and it waited for its screens. The frame settled five
 // destinations and shipped four, because "a destination pointing at
@@ -81,21 +59,6 @@ export const DESTINATIONS = [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATI
 
 // The sentence a game with no views at all reads, and the one piece of
 // onboarding in this product (the plan's O1).
-//
-// **It said only an agent could write a view, and that stopped being
-// true when the builder shipped.** The sentence was written when nothing
-// in this interface composed a query: it named MCP to a designer who has
-// no MCP client, and it went on saying "an agent writes one" beside a
-// *New view* button that opens the builder. Two defects in one line —
-// the prose-about-code rot this project keeps finding, and a negative
-// state teaching an API, which negativeState's own comment forbids.
-//
-// The heading is the fact. The sentence is what a view is, and the half
-// that says who may make one depends on the reader: a viewer's write is
-// refused by every content route, so they are told that rather than told
-// to open a builder that will refuse them. The link stays the skill
-// bundle, because the questions the builder cannot hold are still an
-// agent's job and that is where they are taught.
 export const NO_VIEWS_HEADING = "No saved views yet";
 export const NO_VIEWS_SENTENCE = "A view is a saved query plus a renderer.";
 export const NO_VIEWS_COMPOSE =
@@ -109,40 +72,10 @@ export const SKILL_BUNDLE_LABEL = "How an agent writes one";
 // The one line in this front end that names an address outside this
 // instance, and it is a **hyperlink a human may click** rather than
 // anything this page loads.
-//
-// internal/web/static_vendor_test.go's outbound-URL scan exists so that
-// a Maestro on a private network with no outbound route renders
-// completely, and this line does not touch that: nothing fetches it, the
-// page is whole without it, and a designer on an air-gapped instance
-// simply has documentation they cannot reach — the same position they
-// are in with any external reference. It is exempted there by an exact
-// one-declaration rule, in Task 7's SVG-namespace shape and for the same
-// reason: a blanket "any documentation URL" exemption would be a hole,
-// and refusing this one outright would leave the product's single piece
-// of onboarding pointing at a path this instance does not serve, which
-// is the *New view* button that leads nowhere wearing a different hat.
-// It points at the **repository**, not at a documentation site: there is
-// no documentation site, `claude.md` says so plainly, and this link
-// 404ed for the whole build. A page offering an action it cannot
-// perform is the defect this sub-project is written against, and a
-// link to a page that does not exist is one.
 export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";
 
 // The published documentation site, and the second address in this front
 // end that leaves the instance.
-//
-// **It opens in a tab of its own, and that is the whole of why it is
-// allowed to sit in the strip beside five destinations that do not.**
-// The other five are places inside this game; this one is a manual that
-// is not part of any game and is not served by this instance at all. A
-// link that replaced the screen with an external site would be the
-// strip's promise broken — every other item there keeps you where you
-// are working.
-//
-// An instance with no outbound route renders the strip whole and this
-// link simply does not resolve when pressed, which is the same position
-// SKILL_BUNDLE_HREF's own comment describes: nothing fetches it, nothing
-// on any page waits for it.
 export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/";
 export const DESTINATION_DOCUMENTATION = "Documentation";
 
@@ -174,11 +107,6 @@ export function segmentsOf(pathname) {
 }
 
 // --- Where the other pages are ---------------------------------------
-//
-// Every one of these takes the game's **slug** and the row's **key**,
-// and none of them can be handed an id: there is no parameter for one.
-// That is deliberate — an address the product could not spell wrongly is
-// better than one it is merely careful with.
 
 export function gameURL(slug) {
   return GAME_PREFIX + encodeURIComponent(String(slug));
@@ -251,12 +179,6 @@ export function settingsURL(slug) {
 }
 
 // TAB_AGENTS is the fragment that opens the settings page's second tab.
-//
-// It lives here with the address functions rather than in the page that
-// reads it, because the module that *links* to a tab and the module that
-// *opens* one must not each carry their own spelling of it: a link into
-// a half of a screen is an address, and every other address in this
-// product is built here.
 export const TAB_AGENTS = "#agents";
 
 export function analysisURL(slug) {
@@ -276,12 +198,6 @@ export function routeURL(slug, key) {
 // openGame is the first thing every page module does: it resolves the
 // slug in the URL against the games this caller can actually reach, and
 // hands back the game's own row and a data client bound to it.
-//
-// The list is still fetched and it is not fetched for an id. What it
-// supplies is the game's **name** for the heading and the fact that the
-// slug reaches a game at all — which is what tells "not found" apart
-// from a blank page. The slug that goes into every subsequent call is
-// the game's *stored* one and never the URL's own casing.
 export async function openGame(options = {}) {
   const doc = options.document || globalThis.document;
   // Every catalogue on this page is a table, said once here rather than
@@ -314,15 +230,6 @@ export async function openGame(options = {}) {
   // sign-out button appear one round trip later than they used to; the
   // alternative was a second GET /api/games on every page in the
   // product to fill in chrome the page had already paid for.
-  //
-  // `game` may be null — a slug that reaches nothing. The switcher then
-  // says "Games" instead of naming one, which is exactly the state that
-  // most needs a way out.
-  // The nav is built here and handed to the header, so the bar a person
-  // sees is one element in one order on every screen. `options.current`
-  // is the destination this page belongs to; a page that passes none
-  // gets the bar with nothing marked, which is honest, rather than the
-  // bar marking a page it is not on.
   const nav = game === null ? null : destinations(doc, game.slug, options.destination || null);
   renderHeader({
     me,
@@ -361,21 +268,6 @@ export function expired(answer) {
 }
 
 // --- What a page says when there is nothing to show ------------------
-//
-// **A page does not invent a negative state.** Task 4 exists so the
-// empty answer, the refusal and the reassurance are decided once, and
-// `mst-view-frame` is where a *view's* three negative states live. The
-// three helpers below are the same decision for the pages that are not
-// views — a catalogue, a listing, an entity — and they are here for the
-// same reason: one place, so seven pages cannot each style a failure
-// slightly differently.
-//
-// The server's sentence is carried across unmodified in every one of
-// them. None of these functions composes a word; the words are the
-// caller's, from the game or from the refusal.
-
-// say writes text into an element and reveals it. textContent, never
-// markup: every string a page renders is a designer's or an agent's.
 export function say(el, text) {
   if (!el) return null;
   el.textContent = text;
@@ -452,11 +344,6 @@ export function destinations(doc, slug, current) {
 // beside the work rather than over it, and the class marks it for the
 // stylesheet, which draws the arrow every convention uses for a link
 // that goes outside.
-//
-// `rel="noopener"` because a page opened with `target="_blank"` gets a
-// handle on the window that opened it otherwise. Nothing is being
-// trusted here beyond this project's own site, and the attribute costs
-// nothing.
 export function documentationLink(doc) {
   const link = doc.createElement("a");
   link.href = DOCUMENTATION_HREF;
@@ -474,11 +361,6 @@ export function documentationLink(doc) {
 // to this game", "Back to the game", "Back to the catalogue" and "Back to
 // this type" on five screens: two spellings of one destination, and not
 // one of them saying where the reader currently was.
-//
-// A crumb with an href is a place to go; the last crumb has none and is
-// where you are. Every string goes in through textContent, and every
-// address comes from the functions above, so a crumb can only ever point
-// at a slug address.
 export function crumbNodes(doc, trail) {
   const nodes = [];
   trail.forEach((crumb, index) => {
@@ -502,11 +384,6 @@ export function crumbNodes(doc, trail) {
 // setBreadcrumb fills the shell's own placeholder rather than prepending
 // a second one, so a page that renders twice — every page that names a
 // thing it had to fetch — does not stack two trails.
-//
-// It appends the nodes rather than building a nav and moving its
-// childNodes across: `childNodes` is a live NodeList the harness's DOM
-// stub does not model, and a product that reaches for a DOM API only a
-// browser has is a product one half of its tests cannot drive.
 export function setBreadcrumb(doc, trail) {
   const host = doc.getElementById("crumbs");
   if (!host) return null;
@@ -541,13 +418,6 @@ export function fill(listEl, emptyEl, rows) {
 
 // whoWrites is the second half of an empty state, and it is the half
 // that depends on who is reading.
-//
-// A viewer's write is refused by internal/web/server.go's
-// registerContentRoute on every content route, so telling a viewer to do
-// it would be promising an action this instance will not perform — worse
-// than saying nothing. Anything that is not "viewer" gets the editor's
-// sentence: viewer is the only role those routes refuse, so it is the
-// only one whose reader has to be told something different.
 export const ROLE_VIEWER = "viewer";
 
 export function whoWrites(role, what) {
@@ -568,26 +438,6 @@ export function whoWrites(role, what) {
 }
 
 // --- A secret shown once, and when an invitation stops working --------
-//
-// **Both screens that mint an invitation live here now.** The
-// administration screen makes accounts and the game's People tab makes
-// memberships, and the shape is the same one: a link nothing can show
-// again, kept on screen beside the ones minted before it. Two copies of
-// that would have been two chances to lose somebody's only link.
-
-// One link and the button that copies it. A copy that fails leaves the
-// link on screen, selectable, which is what it was there for anyway.
-//
-// **This is the other secret shown once, and it deliberately does not
-// use components/mst-dialog.js.** The token on the Agents tab moved into
-// a dialog so a credential stops sitting on a screen nobody is watching;
-// an invitation link is the same shape and the opposite case. Creating a
-// second invitation used to destroy the first link on screen — the only
-// copy of a still-valid secret, gone, with nothing said — and the fix
-// was to keep every link of this sitting and mark the earlier ones. A
-// dialog is dismissed, and dismissing it is exactly that defect again,
-// performed by the reader instead of by the page. So the links stay,
-// and this comment is here so the next survey does not "finish the job".
 export function inviteLink(doc, href) {
   const line = doc.createElement("div");
   line.className = "secret-line";
@@ -632,14 +482,6 @@ export function expiry(value) {
 // is read-only was inside an empty state, so the fuller a game was, the
 // less its screens said about what they will not let you do. Two
 // separate reviews found it, the second exactly that way round.
-//
-// It is role-aware through the same whoWrites the empty states use, so a
-// viewer is told the instance will refuse a write from them rather than
-// being told to go and make one.
-//
-// **It is a claim about a screen, so it comes off the screen that gains a
-// write.** A notice that outlives the limitation it describes is the next
-// piece of prose contradicting the code.
 export const READ_ONLY_LABEL = "Read-only";
 
 export function readOnlyNotice(doc, role, what) {
@@ -649,14 +491,6 @@ export function readOnlyNotice(doc, role, what) {
   // The detail is a hint rather than a second line: the head is a row a
   // page title shares, and a sentence there would push the content down
   // on every screen to say a thing that is true of all of them.
-  //
-  // **It was a `title` attribute, and two words in a dashed border are
-  // not an explanation.** "Read-only" states a limitation and leaves
-  // whose and why to the reader; the browser's own tooltip answered
-  // after a second, in the operating system's chrome, and never at all
-  // to a keyboard. components/mst-hint.js is where that sentence goes
-  // now, and it is a shared component because this is not the only word
-  // in the product carrying one.
   const hint = doc.createElement("mst-hint");
   hint.setAttribute("text", whoWrites(role, what));
   // The notice sits at the right edge of the page head, so the panel
@@ -686,10 +520,6 @@ export { STATE_EMPTY, STATE_LOADING, STATE_REFUSED, negativeState, fillState } f
 // the product's one piece of onboarding in it rather than a component of
 // its own. It kept its name; what it lost is the box and the 3px
 // coloured left stripe, which the identity bans by name.
-//
-// It takes the reader's role for the same reason the types and prose
-// states do: this screen gained a write, and a state that tells a viewer
-// to use it would be promising an action the server refuses.
 export function onboarding(doc, role) {
   return negativeState(doc, {
     kind: STATE_EMPTY,

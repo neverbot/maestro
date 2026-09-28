@@ -12,26 +12,6 @@ import (
 
 // This file is the projection: how a node presents itself, and the one
 // hop a presentation attribute may take to find its value somewhere else.
-//
-// **The one hop is the whole feature.** "Coloured by zone" is not a
-// property of the quest — it is the name of the zone one hop away, and
-// without it every such picture would need the designer to denormalise
-// the zone name onto every quest. One hop and not many, because a
-// multi-hop colour source is a traversal, and a traversal belongs in
-// `traverse` where it is bounded, visible in the document and drawn.
-//
-// **A hop that finds several entities is marked, not silently resolved.**
-// The first by name is used so that two runs of the same query paint the
-// same picture, and Node.Ambiguous says that a choice was made. Picking
-// one and saying nothing produces a map that is wrong in a way nobody in
-// the room can see, which is this language's most expensive failure mode.
-
-// ResolvedProjection is the projection with every type key turned into an
-// id and every field key known to be declared somewhere in scope.
-//
-// Slots are in projectionAttrs order — label, color_by, group_by,
-// size_by, sort_by — and a slot the document did not write is absent
-// rather than present and empty, so the compiler emits nothing for it.
 type ResolvedProjection struct {
 	Slots []ResolvedAttr
 	// Fields are the declared field keys `project.fields` asked to be
@@ -55,13 +35,6 @@ type ResolvedAttr struct {
 }
 
 // ResolvedHop is a one-hop related attribute with its types resolved.
-//
-// RelationTypeID is a pointer because a `via` that names nothing this
-// game declares is reported by resolution and still walked past: the pass
-// collects every problem before it refuses, so a hop whose relation type
-// is missing has to survive being constructed. The compiler refuses one
-// that reaches it unresolved, which is only possible from a *Resolved a
-// Go caller built by hand.
 type ResolvedHop struct {
 	Hop *RelHop
 	// Attr is what to read off the far entity: a built-in with its sigil,
@@ -80,22 +53,6 @@ type ResolvedHop struct {
 
 // projectionScope is the set of entity types a projection's attributes
 // are read against: every type the document draws nodes of.
-//
-// **Its rule is not a predicate's rule, and the difference is
-// deliberate.** fieldScope.field refuses a key that is not declared on
-// *every* type in scope, because a comparison against a type that does
-// not declare it silently matches nothing there — a filter that lies. A
-// projection has no such failure mode: a node whose type does not declare
-// the key simply carries no attribute, which is the same "unset" a node
-// with no value carries, and "colour the quests by min_level, the zones
-// have none" is a picture a designer legitimately asks for. So the rule
-// here is *declared by at least one type in scope*, which still refuses the
-// case worth refusing — a key nothing declares, which is a typo, and a typo
-// answered with a picture in one flat colour is the silent-empty failure
-// this language refuses everywhere else. TestProjectArea's "a projected
-// field of an undeclared key is refused at resolution" case pins the
-// refusal and TestProjectArea's "a projected field declared on one of
-// several types is allowed" case pins the other side.
 type projectionScope struct {
 	// subject names what the schemas belong to, for the refusal message.
 	subject string
@@ -105,23 +62,6 @@ type projectionScope struct {
 	// query reaches entities of a type it does not name — a traverse step
 	// with no to_type. Refusing a key there would refuse a projection
 	// over a type the document never had a chance to declare.
-	//
-	// **What the permission costs, said out loud because an agent will
-	// hit it.** It is not scoped to the untyped part: nodeScopeOf sets
-	// open if *any* step lacks to_type, and declares then returns before
-	// looking at a single schema. So one untyped step disables typo
-	// detection for the **whole** projection — a misspelt key is accepted
-	// for the types the document *did* name, and for project.fields too,
-	// not just for whatever the untyped step reaches. Reproduced with
-	// `color_by: "min_levle"` and `fields: ["no_such_key"]`: both are
-	// taken, and both answer with the flat one-colour picture this file's
-	// header calls the most expensive failure mode.
-	//
-	// It is left permissive rather than narrowed, because the alternative
-	// — judging a key against the named types only — refuses a projection
-	// over exactly the types the untyped step was written to reach. But a
-	// document that opens its scope has given up the typo check, and that
-	// is a trade worth knowing about before making it.
 	open bool
 	// unresolved marks a scope built from types that resolved to nothing.
 	// The missing type is already a reported problem, and adding "and its
@@ -152,21 +92,6 @@ func (sc projectionScope) declares(key string) error {
 // of every selector, plus the destination types of every step. A step
 // with no to_type opens the scope, because it reaches entities of any
 // type and no schema applies.
-//
-// **It resolves each key the way every other reference in this package
-// resolves one** — by the id a saved view recorded at that pointer, then
-// by the key — rather than by the key alone. Reading it by key would
-// make a projection over a *renamed* type report every one of its keys
-// as undeclared, because the scope would have been built from the types
-// the document's old spellings still name and the renamed one would be
-// missing from it. That is this repository's standing defect: a rule
-// established at one position and not carried to the next one along.
-// TestARenamedTypeStillJudgesTheProjectionThatDrawsIt pins it.
-//
-// st is nil everywhere but a saved view's own run, and this position
-// never reports the rename: the same pointers are resolved by
-// resolveInto's own closures, which do, and a diagnostic reported twice
-// is a designer told to repair one thing twice.
 func nodeScopeOf(cat *Catalogue, q *Query, st *staleness) projectionScope {
 	sc := projectionScope{subject: "the entity types this query draws"}
 	seen := map[uuid.UUID]bool{}
@@ -197,14 +122,6 @@ func nodeScopeOf(cat *Catalogue, q *Query, st *staleness) projectionScope {
 
 // resolveProjection turns the document's projection into the compiler's,
 // reporting every problem at the pointer the caller wrote.
-//
-// The type references it makes go through the caller's own entityType and
-// relationType closures rather than through the catalogue directly, so
-// each of them lands in Refs: a colour that reads a relation type is a
-// structural dependency of the view, and a deleted relation type breaks a
-// colour exactly as it breaks a traversal. Task 12's staleness report is
-// what reads them, and a reference resolved privately here would be a
-// view reported as fine while its picture had lost its colours.
 func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 	entityType func(ptr, key string) *dbq.EntityType,
 	relationType func(ptr, key string) *dbq.RelationType,
@@ -279,15 +196,6 @@ func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 
 // resolveEdgeLabel judges an edges[] entry's label_from against the
 // relation types that entry draws.
-//
-// It is the edge's half of the same rule, and it is narrower on one
-// point: a relation has an id, a type, two endpoints, its declared
-// fields, its validity flag and its timestamps and nothing else
-// (0004_metamodel.sql plus 0009), so @name and @key name no column there.
-// fieldScope.builtin is the judgement, spelled once and reused, so an
-// edge label and an edge predicate admit and refuse the same built-ins
-// for the same reason — which is what made @invalid drawable and
-// comparable in one change when 0009 gave relations the column.
 func resolveEdgeLabel(cat *Catalogue, rows []*dbq.RelationType, label, ptr string,
 	add func(ptr, message string), st *staleness) string {
 	if label == "" {
@@ -331,15 +239,6 @@ const projectionPrefix frag = "p"
 // projection emits the three fragments a node arm needs: the attrs
 // payload, the ambiguity flag, and the lateral joins the related slots
 // require.
-//
-// **attrs is jsonb, built with jsonb_build_object and stripped of its
-// nulls.** Two consequences, both wanted. A number stays a number, so a
-// renderer sizing by a projected field is not comparing text; and a slot
-// that found nothing is *absent* rather than present and empty, so
-// "this quest has no zone" and "this quest's zone is named the empty
-// string" are different answers. A field whose stored value is literally
-// JSON null is read as unset, which is the same reading every other
-// stage of this package gives it.
 func (c *compiler) projection(alias, typeAlias frag) (attrs, ambiguous, joins frag, err error) {
 	var pairs, terms, lateral []frag
 	for i, slot := range c.r.Projection.Slots {
@@ -362,15 +261,6 @@ func (c *compiler) projection(alias, typeAlias frag) (attrs, ambiguous, joins fr
 		// A hop that found nothing has no row at all, so matches is null
 		// and the node is not ambiguous. COALESCE says so in the column
 		// rather than leaving it null.
-		//
-		// **Only the golden file observes it**, and that is recorded
-		// rather than dressed up: a null boolean scans into a *bool of
-		// nil, which Run already reads as false, and `null OR true` is
-		// true — so removing the COALESCE changes no answer this package
-		// gives today. It stays because the column then means "not
-		// ambiguous" instead of "unknown" to anything that reads the
-		// statement rather than Run: a later arm that ANDs this term, or
-		// a WHERE over it, would drop the unmatched rows.
 		terms = append(terms, sprintf("COALESCE(%s.matches, 0) > 1", hop))
 	}
 	attrs = "NULL::jsonb"
@@ -394,13 +284,6 @@ func (c *compiler) projection(alias, typeAlias frag) (attrs, ambiguous, joins fr
 // payload is the node's fields column: the whole jsonb when the run asked
 // for it, exactly the keys `project.fields` named when it did not, and a
 // typed null when it asked for neither.
-//
-// **The named keys go into the payload and not into attrs**, which is the
-// difference between the two members: `project.fields` asks for *content*
-// under the keys the game declared, and a slot asks for a presentation
-// attribute under the slot's own name. Merging them would also make a
-// field called "color_by" collide with the colour, which is a game's
-// vocabulary breaking a renderer's.
 func (c *compiler) payload(alias frag) frag {
 	if c.opts.IncludeFields {
 		// The whole payload is a superset of any list, so an explicit list
@@ -419,20 +302,6 @@ func (c *compiler) payload(alias frag) frag {
 	// Stripped of its nulls like attrs, and for the same reason: a node
 	// that does not carry one of the named keys carries nothing under it,
 	// rather than a null a renderer has to tell from a stored one.
-	//
-	// **jsonb_strip_nulls recurses, which the include_fields branch above
-	// does not.** So a projected value that is itself an object would be
-	// rewritten — its own null members dropped — and `project.fields`
-	// and `include_fields` would answer the same question with different
-	// values. Unreachable today from every direction: the metamodel
-	// declares no object field type (0004_metamodel.sql), array elements
-	// are left alone by strip_nulls anyway, and a null written through
-	// UpsertEntity is dropped on the way in, so no stored payload can
-	// contain one. It takes raw SQL to build a row that shows the
-	// difference. Recorded rather than fixed, because the fix — strip
-	// only the top level — is a rewrite for a shape the metamodel cannot
-	// currently express; whoever adds an object field type reads this
-	// first.
 	return sprintf("jsonb_strip_nulls(jsonb_build_object(%s))", joinFrags(pairs, ", "))
 }
 
@@ -471,81 +340,6 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 }
 
 // relatedHop emits one slot's LEFT JOIN LATERAL.
-//
-//	LEFT JOIN LATERAL (
-//	    SELECT to_jsonb(far.name) AS value, count(*) OVER () AS matches
-//	    FROM relations rel
-//	    JOIN entities far ON far.id = rel.target_id AND far.project_id = $1
-//	                     AND far.entity_type_id = $t AND far.invalid = false
-//	    WHERE rel.project_id = $1 AND rel.relation_type_id = $r
-//	      AND rel.source_id = e.id
-//	    GROUP BY far.id, far.name
-//	    ORDER BY far.name, far.id
-//	    LIMIT 1
-//	) AS p1 ON true
-//
-// **A LEFT join, not an inner one.** A node whose hop finds nothing keeps
-// its row; dropping it would silently narrow the picture to "the quests
-// that have a zone", which is a different query and one nobody asked for.
-// TestProjectArea's "a one hop related attribute reads the far entity" case
-// is red under a plain JOIN LATERAL, because the zoneless quest disappears.
-//
-// **LIMIT 1 with the count taken over the whole match set**, which is not
-// what this task's plan prescribed. The plan asked for LIMIT 2, on the
-// cap + 1 argument the truncation flags use — but a lateral that returns
-// two rows *duplicates the node row*. Measured rather than reasoned
-// about: two far entities for one node produce two rows, each carrying
-// the same true count. The duplicate then reaches capOf, whose
-// `DISTINCT ON (id) … ORDER BY id, rank, depth` names no attribute, so
-// **which of the two zones survives is unspecified** — it happened to be
-// the first on this Postgres, which is the same "green three runs out of
-// three" the result ordering was pinned as text for.
-//
-// A window count is computed before ORDER BY and LIMIT, so
-// `count(*) OVER ()` with LIMIT 1 gives exactly one row whose matches is
-// the *true* number of candidates — not a weaker detection than cap + 1
-// but a stronger one, and free: finding the first far entity by name
-// requires sorting the matches anyway, so stopping at two saves nothing.
-//
-// **The GROUP BY is what makes matches count far entities rather than
-// edges**, and the flag is about entities everywhere it is documented —
-// Node.Ambiguous, this file's header, the plan. Windows are computed after
-// grouping, so grouping by far.id makes one far entity one row whatever
-// number of edges reached it. Without it, `direction: "any"` lied: its
-// anchor is `(rel.source_id = e.id OR rel.target_id = e.id)`, so a relation
-// type declared in **both** directions between the same pair matched twice
-// and flagged a node ambiguous with a single candidate — see
-// TestProjectArea's "a reciprocal pair is one far entity not two" case, and
-// note that `any` is the natural spelling for a symmetric type such as
-// `connects_to`. Two edges to one zone is not a colour a designer has to
-// resolve; a flag that fires where there is nothing to choose is one
-// designers learn to ignore, which costs what a flag that never fires
-// costs. `out` and `in` were never affected — the unique index on (type,
-// source, target) already makes one row one far entity there.
-//
-// **The ordering is the reason the same query paints the same picture
-// twice.** far.name first because that is the rule the flag documents —
-// the first by name — and far.id after it, because two zones of the same
-// name would otherwise swap between runs.
-//
-// **Every project filter sits ahead of the subquery's own SELECT**, which
-// is a requirement of TestCompileArea's "every table reference is project
-// filtered" case rather than a style: that guard splits the statement on
-// the word SELECT, so a filter written after a nested one lands in another
-// block and is not seen. There is no nested SELECT in here at all, and the
-// three references — relations, entities and, for @type, entity_types —
-// each carry their own filter in the JOIN or WHERE that introduces them.
-//
-// **That requirement is enforced, not merely written here**, by
-// flatLateralProblems: the body of every JOIN LATERAL must hold exactly
-// one SELECT, and one that nests fails naming the reason. A sentence in
-// this comment is something the next task has to have read; a failing
-// test is something it trips over. The nesting was measured rather than
-// assumed, and it is over-strictness and not a silent hole — the filter
-// after the nested SELECT lands in the next block, so the reference is
-// *reported* — but a report that says "this table is unfiltered" about a
-// filter the reader can see is a failure Task 13 would debug as a bug in
-// its own SQL. flatLateralProblems is what tells it the truth instead.
 func (c *compiler) relatedHop(alias, name frag, slot ResolvedAttr) (frag, error) {
 	hop := slot.Related
 	ptr := pointer("project", slot.Name, "related")
@@ -631,12 +425,6 @@ func (c *compiler) invalidFilterHop() frag {
 
 // invalidFilterHopEdge is the same rule for the *relation* this hop
 // follows, which since 0009 can be flagged too.
-//
-// It is the twin of invalidFilterHop and not an afterthought: a colour
-// read across an edge whose own fields no longer validate is a colour
-// read across a relationship the game no longer states, and a picture
-// that excludes invalid quests must not be coloured through an invalid
-// `takes_place_in`. Both ends of the hop are judged, or neither is.
 func (c *compiler) invalidFilterHopEdge() frag {
 	if c.r.Query.IncludeInvalid {
 		return ""
@@ -646,11 +434,6 @@ func (c *compiler) invalidFilterHopEdge() frag {
 
 // edgeLabel is the label an edges[] entry asked to be drawn on each
 // relation it draws, as jsonb under the key "label".
-//
-// It rides in the same attrs column the nodes use rather than in a column
-// of its own, because a column that one arm of a UNION fills is a column
-// every other arm has to spell as a typed null — and the two are the same
-// thing anyway: a presentation attribute read off the row.
 func (c *compiler) edgeLabel(spec *ResolvedEdge, relationAlias, typeAlias frag) (frag, error) {
 	if spec.LabelFrom == "" {
 		return "NULL::jsonb", nil

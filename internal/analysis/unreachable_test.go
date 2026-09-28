@@ -45,12 +45,6 @@ func TestUnreachable(t *testing.T) {
 
 	// TestAGameWhereEverythingIsReachableReportsZeroAndCountsThemAll is the
 	// negative half, and it is the load-bearing one.
-	//
-	// **An empty findings list is what a broken walk returns too**, so the
-	// assertion is not that the list is empty: it is that the list is empty
-	// *and* twelve entities were counted reachable *and* each type is named
-	// with its own count. A walk that started nowhere satisfies the first
-	// and fails the other two.
 	t.Run("a game where everything is reachable reports zero and counts them all", func(t *testing.T) {
 		g := a.gated(t)
 		g.declareEntityType(t, "zone")

@@ -17,14 +17,6 @@ import (
 )
 
 // newProject inserts a bare project row to scope a test's data.
-//
-// It writes SQL directly rather than calling internal/projects: that
-// package would be an import cycle away today and, more to the point, a
-// project is only a scope here — these tests never exercise membership,
-// slugs or ownership. It is a test helper rather than a method on Service
-// because production code has no business creating projects: an exported
-// CreateBareProjectForTest would ship in the binary and be callable from
-// the MCP surface.
 func newProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	slug := "azeroth-" + uuid.NewString()[:8]
@@ -360,20 +352,6 @@ func TestTypesArea(t *testing.T) {
 	// TestViewsArea's "a respelling is named even when the version is also
 	// stale" case pins the only job left to the spelling check in the locked
 	// pre-read.
-	//
-	// Correction 15 made the post-write check the actual refusal, and it
-	// closes the pre-read's path as well: deleting the pre-read branch
-	// leaves every other test in this package green, because in all of them
-	// the version matches and the write goes through to be caught after the
-	// fact. This is the case where the two disagree. A caller holding both a
-	// respelled key *and* a stale version is failing for two reasons at
-	// once, and the order decides which one it is told about: the pre-read
-	// checks the spelling first, so it hears the respelling — which names
-	// both spellings and both remedies — rather than "current version is 1",
-	// which would send it to re-read a row it is not even addressing by the
-	// stored spelling and to retry with a version that will be refused
-	// again for the same reason. Without the pre-read the version check runs
-	// first and version_conflict wins.
 	t.Run("a respelling is named even when the version is also stale", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -407,9 +385,6 @@ func TestTypesArea(t *testing.T) {
 		// see the rival write at all. The compare-and-set therefore has to live
 		// in the INSERT ... ON CONFLICT itself: an unguarded DO UPDATE turns the
 		// loser of the race into a silent overwrite of a type it never read.
-		//
-		// The rival is an open transaction rather than a second goroutine, so
-		// the interleaving is the test's to choose and not the scheduler's.
 		rival, err := pool.Begin(ctx)
 		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
@@ -676,20 +651,6 @@ func TestTypesArea(t *testing.T) {
 	// TestTypesArea's "a race that would land under another spelling is
 	// refused" case is the regression test for a hole the pre-read alone could
 	// not close.
-	//
-	// The spelling refusal used to live only in the locked read at the top of
-	// UpsertEntityType, which happens *before* the guarded write and only sees
-	// a row that is already visible. On the creation path there is no row to
-	// lock, so a writer racing a creator sailed straight through it and had
-	// to be refused downstream, or it would land its content on a row it
-	// never read, stored under a different spelling, returning no error at
-	// all — the one outcome correction 4 rules out. conflictOnEntityTypeKey
-	// is what refuses it: a creating caller passes noVersion, the guarded
-	// DO UPDATE therefore matches nothing, and the re-read names both
-	// spellings.
-	//
-	// The interleaving is driven by an open rival transaction rather than a
-	// second goroutine, so it is the test's to choose and not the scheduler's.
 	t.Run("a race that would land under another spelling is refused", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -708,18 +669,6 @@ func TestTypesArea(t *testing.T) {
 		// The rival's row is invisible to this upsert's own locked read — an
 		// uncommitted row is not there to be seen or locked — so it takes the
 		// creation path and then blocks on the unique index.
-		//
-		// **No ExpectedVersion, and that is what routes this race.** It used
-		// to carry one — the version the rival's row would land on — so the
-		// guarded DO UPDATE matched and the *post-write* spelling check was
-		// the thing that refused. A version claim against a row the locked
-		// read cannot see is now refused before the write reaches the
-		// database at all (metamodel.RemovedError), which is a different
-		// answer to a different question, so the race this test is about is
-		// staged the way it actually happens to a seeding agent: two
-		// creations, neither claiming a version, one losing to the folding
-		// unique index. The guard is then a guaranteed mismatch, and
-		// conflictOn* re-reads and names the spelling.
 		result := make(chan error, 1)
 		go func() {
 			_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
@@ -758,14 +707,6 @@ func TestTypesArea(t *testing.T) {
 	// named as a respelling" case covers conflictOnEntityTypeKey's other
 	// branch: the guarded upsert matched no row *and* the winner took the key
 	// under a different spelling.
-	//
-	// TestTypesArea's "a creation that loses the race for its key is refused"
-	// case above exercises the same re-read but with matching spellings, so it
-	// can only ever observe the version-conflict branch; deleting the
-	// respelling branch left the whole suite green. A designer who loses this
-	// race must be told what actually stands in the way — a key already
-	// spelled differently, which they can address — not a version conflict on
-	// a row they never created and whose spelling they cannot see.
 	t.Run("a creation that loses its key to another spelling is named as a respelling", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -814,17 +755,6 @@ func TestTypesArea(t *testing.T) {
 
 	// TestDocumentsArea's "the reported current version is the one the write
 	// would have met" case pins the FOR UPDATE on GetEntityTypeByKeyForUpdate.
-	//
-	// Removing the lock leaves every other test in this file green, because
-	// the compare-and-set in the upsert's own DO UPDATE still refuses every
-	// lost update on its own. What the lock earns is the *number* a caller is
-	// told to merge onto. Without it the read runs against this
-	// transaction's snapshot and returns whatever version was committed when
-	// it started, so a caller racing an in-flight edit is told "current
-	// version is 1", re-issues with 1, and is refused again — a loop it
-	// cannot get out of by doing what the error said.
-	//
-	// The rival is an open transaction, so the interleaving is the test's.
 	t.Run("the reported current version is the one the write would have met", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1018,16 +948,6 @@ func TestTypesArea(t *testing.T) {
 
 	// TestTypesArea's "an actor from another game is named" case covers the
 	// database's own backstop.
-	//
-	// 0004_metamodel.sql gives entity_types a composite
-	// FOREIGN KEY (updated_by_token_id, project_id) REFERENCES
-	// api_tokens (id, project_id), so a token belonging to another game
-	// cannot be recorded as the editor of this one's type. That constraint
-	// worked already; what did not was the reporting, which surfaced the
-	// SQLSTATE verbatim ("upsert entity type: ... violates foreign key
-	// constraint ... (SQLSTATE 23503)") into whatever log or handler caught
-	// it. Nothing about that string tells an operator a token was scoped to
-	// the wrong game.
 	t.Run("an actor from another game is named", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1057,15 +977,6 @@ func TestTypesArea(t *testing.T) {
 	// TestTypesArea's "a malformed key is invalid input not a schema
 	// violation" case pins which wire code a row-argument problem is published
 	// under.
-	//
-	// Every problem this package reported used to read `schema_violation:
-	// key: ...`, which is the code the skill bundle teaches an agent to
-	// recover from by fixing *entity values* — advice that cannot help
-	// anybody whose types.upsert call carried a key with a space in it. The
-	// type is still ValidationError, because a malformed key is the same
-	// shape of fault as a malformed value (a path, a message, fixable in
-	// place); only the code differs, and it differs because the recovery
-	// does.
 	t.Run("a malformed key is invalid input not a schema violation", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -1116,16 +1027,6 @@ func TestTypesArea(t *testing.T) {
 	// TestTypesArea's "an unrecognised code matches no sentinel" case pins
 	// that ValidationError.Is and ValidationError.Error cannot disagree about
 	// what an error is.
-	//
-	// The zero Code means schema_violation, because the value validator
-	// predates the split and sets none. A *misspelled* code is not that: it
-	// used to fall into the same branch, so &ValidationError{Code:
-	// "invalid_inptu"} printed the typo and still satisfied
-	// errors.Is(err, ErrSchemaViolation) — silently defaulting a typo to the
-	// most-taught recovery, which is the one recovery an agent will spend
-	// round trips on. Matching nothing is the honest answer: an unmapped
-	// error reaches an agent as internal_error, which is what an unreachable
-	// code deserves.
 	t.Run("an unrecognised code matches no sentinel", func(t *testing.T) {
 		typo := &metamodel.ValidationError{
 			Code:   "invalid_inptu",
@@ -1152,28 +1053,6 @@ func TestTypesArea(t *testing.T) {
 	// TestTypesArea's "a relation type created during a type removal cannot
 	// keep the removed ID" case stages the race the endpoint prune does not
 	// close on its own.
-	//
-	// `PruneEntityTypeFromEndpointLists` is a single `UPDATE` over
-	// `relation_types`. Under READ COMMITTED it sees the rows that exist
-	// when its statement starts, and `UpsertRelationType`'s *creation* path
-	// has no row for it to find and — before the share lock this test
-	// exists for — took no lock of its own against `entity_types`. A
-	// relation type created between the prune's statement and
-	// `RemoveEntityType`'s commit therefore kept the removed id, which is
-	// exactly the unrepairable state `RemoveEntityType`'s comment describes:
-	// a rule nothing can satisfy, a refusal naming the wrong problem, and a
-	// row that cannot be re-declared because the list it holds is refused as
-	// `invalid_input`. The *update* path was already safe — the prune's own
-	// row lock plus READ COMMITTED's re-check catch it — so creation was the
-	// whole hole, and creation is the common case for a seeding agent.
-	//
-	// **The interleaving is staged rather than raced.** A third connection
-	// holds an uncommitted `relation_types` row spelled `takes_place_in`,
-	// which parks the upsert on the unique index *after* it has read and
-	// locked its endpoint types and before it writes anything. The removal
-	// then runs into that lock. Without the share lock the removal sails
-	// past, commits, prunes nothing — there is no row yet — and the upsert
-	// then lands the id of a type that no longer exists.
 	t.Run("a relation type created during a type removal cannot keep the removed ID", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

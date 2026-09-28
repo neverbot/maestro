@@ -15,21 +15,6 @@ import (
 
 // This file serves the skill bundle as a zip over one unauthenticated,
 // signed, short-lived URL.
-//
-// **The bundle bytes never travel through an MCP response.** skill.install
-// (mcp_skill.go) hands out a descriptor pointing here; the agent fetches
-// the archive with whatever HTTP tool the host gives it. A 20k-token
-// bundle inlined into a tool result would cost its full price on every
-// call, including the calls where the agent already had it.
-//
-// **The URL carries its own authorisation and takes no bearer header.**
-// The alternative — the ordinary Authorization header — puts a game token
-// into whatever `curl` invocation the agent constructs, which is a token
-// in a shell command in a transcript. The signature is the price of
-// keeping it out of one.
-
-// skillZipPath is the download route, named once so the handler, the
-// signer and the descriptor cannot disagree about which path is signed.
 const skillZipPath = "/skill.zip"
 
 // skillURLTTL is how long a signed download URL stays good. Long enough
@@ -39,11 +24,6 @@ const skillURLTTL = 5 * time.Minute
 
 // signSkillURL returns the `exp` and `sig` query arguments that admit a
 // request to path until exp.
-//
-// **The path is inside the MAC**, not merely beside it. A signature that
-// covered only the expiry would be a signature valid on every route that
-// ever learns to check one, so the day a second signed download exists
-// the first one's URLs would open it.
 func signSkillURL(key []byte, path string, exp int64) string {
 	mac := hmac.New(sha256.New, key)
 	// The separator is a byte that cannot occur in a URL path, so
@@ -67,14 +47,6 @@ func signedSkillURL(key []byte, base string, exp int64) string {
 
 // handleSkillZip serves the embedded bundle to a caller holding a live
 // signature, and refuses everything else with 401 and no body.
-//
-// No bearer header is read here and none is accepted: this route's whole
-// reason to exist is that the agent's token stays out of the fetch. A
-// caller without a signature is refused rather than served, even though
-// the bundle is not secret — an unauthenticated download of an archive
-// that grows with the product is a free amplifier, and "it is not secret"
-// is an argument about confidentiality, not about who gets to spend the
-// bandwidth.
 func (s *Server) handleSkillZip(w http.ResponseWriter, r *http.Request) {
 	if !s.skillURLIsLive(r) {
 		// No body. There is nothing a caller can do with a description of
@@ -144,12 +116,6 @@ func externalBaseURLFrom(ctx context.Context) string {
 }
 
 // externalBaseURLFor reconstructs the origin a request arrived on.
-//
-// X-Forwarded-Proto and X-Forwarded-Host are read **only behind a trusted
-// proxy**, on the same operator decision clientIP and the session cookie
-// already gate on: on a directly exposed instance both headers are
-// attacker-controlled, and this one is used to build a URL the caller is
-// then told to fetch.
 func (s *Server) externalBaseURLFor(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {

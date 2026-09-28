@@ -17,10 +17,6 @@ import (
 // has to tell apart, and one inert one. It builds them in a game that
 // already exists, so a claim sharing an area's database gets the same
 // three gating types in a project of its own.
-//
-// The traits are declared rather than derived from roles, because the
-// subject here is the walk and not the resolver, and a fixture that let
-// the resolver choose would fail for two reasons at once.
 func gatedIn(t *testing.T, g game) game {
 	t.Helper()
 	g.declareEntityType(t, "quest")
@@ -42,14 +38,6 @@ func TestReach(t *testing.T) {
 
 	// TestANormalisedWalkFollowsAPrerequisiteEdgeBackwardsAndAnUnlockEdgeForwards
 	// is the normalisation itself, asserted rather than assumed.
-	//
-	// The two halves are in one test on purpose: they are one rule seen from
-	// two sides, and the mutation that breaks one leaves the other green,
-	// which is what makes this discriminating rather than a smoke test.
-	// `requires` reads "A requires B" -- source depends on target, so the
-	// engine follows it target→source -- and `unlocks` reads "A unlocks B",
-	// followed source→target. Both are gates and after the walk nothing
-	// downstream knows which was which.
 	t.Run("a normalised walk follows a prerequisite edge backwards and an unlock edge forwards", func(t *testing.T) {
 		g := a.gated(t)
 		for _, key := range []string{"a", "b", "c", "d"} {
@@ -86,9 +74,6 @@ func TestReach(t *testing.T) {
 	// other half of the same decision: a gate is directional, and an
 	// analysis that followed one backwards would report a game as healthy
 	// because it could reach everything from anywhere.
-	//
-	// **The control is what makes it a test.** Without the second half, this
-	// passes against a walk that reaches nothing at all.
 	t.Run("a normalised walk will not follow a gating edge against its direction", func(t *testing.T) {
 		g := a.gated(t)
 		g.entity(t, "quest", "x")
@@ -174,14 +159,6 @@ func TestReach(t *testing.T) {
 
 	// TestContainmentPropagatesReachabilityDownward and its twin are the two
 	// halves of propagate_containment.
-	//
-	// Both seed the container explicitly with include_ungated **off**, and
-	// that is not incidental: a contained entity has no gating in-edge once
-	// containment stops counting as one, so under the default seeding it
-	// would become a start point and be reached for a reason that has
-	// nothing to do with propagation. The pair would then be green either
-	// way, which is the "test that passes for the wrong reason" this plan
-	// names.
 	t.Run("containment propagates reachability downward", func(t *testing.T) {
 		g := containmentGame(t, a)
 		got := g.reach(t, Params{

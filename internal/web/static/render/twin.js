@@ -1,43 +1,6 @@
 // The text twin's model: a pure function from the run envelope to the
 // two tables that *are* the accessible content of every view, the five
 // graphical ones included.
-//
-// One property governs this file and every test of it:
-//
-// **The twin describes the answer, not the drawing.** Its row source is
-// the envelope and nothing else. A node the graph renderer shelved
-// because the layout could not place it, a node dropped beyond a depth
-// bound, a node collapsed into a `+12 more` count chip — each still has
-// a row here, with its name, its type, its key and every projected slot.
-// The moment the twin is derived from a scene it stops being the ground
-// truth the renderers are checked against and becomes a second, poorer
-// rendering of the same picture; the six renderer tasks that follow
-// assert their scene and this model describe the same answer, which is
-// only a real assertion while the two are computed from the envelope
-// independently. That is why this module imports no renderer, takes no
-// scene, and has no parameter through which one could reach it.
-//
-// The second property is the one that turns the identity's central claim
-// into something a test can fail: **colour is never the only carrier.**
-// Every value that earns a hue on the canvas is written out here as
-// text, through the same `labelFor` the legend uses, so a designer who
-// cannot separate two hues — or cannot see them at all — reads the same
-// answer off the twin.
-//
-// The third is the distinction internal/views/execute.go goes out of its
-// way to preserve and which a table is the last place it could be
-// thrown away: **a slot that found nothing is absent, and absent is not
-// the empty string.** An absent cell carries ABSENT_TEXT and is flagged
-// `absent`; a slot holding "" carries the empty string and is not. Two
-// different cells, in the model and on the screen.
-//
-// It writes its own words — a caption, the em dash, the note on an edge
-// endpoint the query chose not to draw — because they are its own
-// statements about the answer and there is no server sentence for any of
-// them. The component that paints it writes none, exactly as
-// mst-view-frame.js writes none of scene.js's; that rule is held by
-// TestEveryComponentSpeaksOnlyItsModelsWords in
-// internal/web/static_frame_test.go.
 
 import { labelFor } from "../palette.js";
 // The row's identity, and the value the twin compares against to know
@@ -51,27 +14,6 @@ import { addressOf } from "../address.js";
 // has no column to be named after. It is the text half of
 // render/marks.js's absent dash; `absentTextFor` below is what a cell
 // with a column says instead.
-//
-// One spelling, one meaning, wherever this product writes an answer in
-// rows: *there was nothing here*. The twin below writes it for a
-// projection slot a node does not carry; render/table.js writes it for
-// every column of the renderer whose whole picture is a table, where §4.7
-// says in as many words that an empty cell is indistinguishable from a
-// rendering bug. Stating the rule for one of the two and letting the
-// other invent its own is the drift this module is shared to prevent —
-// the same correction render/marks.js's ABSENT_DASH already carries.
-//
-// A mark, and never a blank cell: a blank cell is what the *empty
-// string* looks like, and folding the two together at the last step
-// would discard end to end what the envelope, the palette's `unset`
-// legend row and both tables keep apart. A reader sees something where
-// there is no answer and nothing where the answer is nothing.
-//
-// Because a game may legitimately hold an em dash as a value, the mark
-// is never the only carrier either: the cell also says `absent`, which
-// the component paints as a class and which
-// aValueThatLooksLikeTheAbsentMarkIsStillNotAbsent asserts is what tells
-// the two apart.
 export const ABSENT_TEXT = "—";
 
 // absentTextFor is the **word** for a value that is not there, which is
@@ -79,27 +21,12 @@ export const ABSENT_TEXT = "—";
 // catalogue has said it in words since the rule was written and these
 // two tables said it with a mark, so one product spelled one rule two
 // ways.
-//
-// The em dash survives as the fallback for a cell with no column to name
-// — an edge label, where "no label" would be about the table rather than
-// about the game — and the argument the dash carried is untouched by the
-// change: a game may legitimately hold the words "no zone" as a value,
-// exactly as it may hold an em dash, so the `absent` flag stays the
-// carrier that tells the two apart and the text is never the only one.
 export function absentTextFor(column) {
   const name = typeof column === "string" ? column.trim() : "";
   return name === "" ? ABSENT_TEXT : "no " + name;
 }
 
 // OUTSIDE_NOTE labels the far end of a stub.
-//
-// An edge's endpoints are not guaranteed to be among the nodes, and this
-// is ordinary rather than exceptional (internal/views/execute.go): an
-// `edges: [{between: …}]` entry draws relations between sets the query
-// chose not to draw. On the canvas that edge ends in mid-air; here its
-// far end is the only address the envelope carries for it — the entity's
-// id — said plainly, with this note, so a reader is told the row is
-// complete and the picture is not.
 export const OUTSIDE_NOTE = "outside this picture";
 
 // The three columns every node row has before its projection slots. They
@@ -124,10 +51,6 @@ export const COLUMN_LABEL = "label";
 const LABEL_SLOT = "label";
 
 // twinFor builds both tables from one envelope.
-//
-// It takes the envelope alone. See the note at the top of this file for
-// why there is no second parameter: a twin that could see the drawing is
-// a twin that would eventually describe it.
 export function twinFor(envelope) {
   const env = envelope && typeof envelope === "object" ? envelope : {};
   const nodes = Array.isArray(env.nodes) ? env.nodes.filter(isObject) : [];
@@ -171,12 +94,6 @@ function nodeTable(nodes) {
 
 // slotsOf is the union of every slot any node carries, not the slots of
 // the first node.
-//
-// The projection is per node — a related attribute that resolved for one
-// quest and found nothing for the next is a slot present on one and
-// absent on the other — so reading the columns off one row would drop
-// whole columns for every other row, and the node that had the answer
-// would be the node whose answer vanished.
 function slotsOf(nodes) {
   const seen = new Set();
   for (const node of nodes) {
@@ -189,24 +106,6 @@ function slotsOf(nodes) {
 
 // valueCell is where absent and empty stay two answers, and it is
 // **exported because render/table.js draws the same cell**.
-//
-// A table's columns are the twin's columns with a declared order and a
-// pager around them; two implementations of "what does a value look like
-// in a row" would be two places for the em dash, the `absent` flag and
-// the palette's own text rule to drift apart, and the whole point of
-// that rule is that one reader meets it twice and sees the same thing.
-//
-// `hasOwnProperty` and not `attrs[key] === undefined`, the same test
-// palette.js's legend makes, because the envelope's distinction is
-// presence: a slot present with a null value is a value the game means,
-// and it reads as `null` rather than as a blank.
-//
-// It reads `attrs` and then `fields`: a projection slot lands in the
-// first and a declared field key a run carried lands in the second
-// (internal/views/execute.go), and a table may name either
-// (internal/views/renderers.go's `column`). The twin's own columns are
-// only ever slots, so the second lookup changes nothing here and is the
-// one place a table column could otherwise have needed its own rule.
 export function valueCell(node, key) {
   for (const bag of [node && node.attrs, node && node.fields]) {
     if (!isObject(bag) || !Object.prototype.hasOwnProperty.call(bag, key)) continue;
@@ -252,11 +151,6 @@ function edgeTable(edges, byID) {
 }
 
 // endpointCell names the node an edge reaches, or says it is not here.
-//
-// A stub is not a defect and is not reported as one: it is an edge whose
-// far end the query did not draw. The cell carries the id, because that
-// is the whole of what the envelope says about that end, and the note
-// that says so.
 function endpointCell(column, id, byID) {
   const node = typeof id === "string" ? byID.get(id) : undefined;
   if (node) return present(column, text(node.name));

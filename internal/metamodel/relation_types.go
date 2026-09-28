@@ -14,29 +14,6 @@ import (
 )
 
 // RelationTypeInput is an upsert request for a relation type.
-//
-// SourceTypeIDs and TargetTypeIDs are the entity types allowed at each
-// endpoint, and an empty list means "any type" rather than "no type": a
-// relation type that declares neither is the ordinary case, not a
-// relation type nothing can instance. Every id in them must name an
-// entity type of this same game — the columns are plain uuid[] with no
-// foreign key of their own, so an id from another game would otherwise
-// be stored and simply never match, leaving a rule no write can satisfy
-// and a refusal that names the wrong problem.
-//
-// SemanticRole is optional and, when set, must be one of SemanticRoles.
-//
-// AnalysisTraits is optional and, when set, must be a coherent
-// combination drawn from AnalysisTraits (the package-level slice). It is
-// a different question from SemanticRole asked of the same edge — what
-// the edge *means* to a designer, and how it *behaves* in a graph walk —
-// and declaring a role does not declare behaviour. An empty or nil list
-// is stored as NULL, which is *undeclared*; a type that is deliberately
-// inert declares {"annotation"}, and the column refuses an empty array
-// precisely so those two cannot be spelled the same way.
-//
-// ExpectedVersion carries the same meaning and the same insert-path
-// caveat as EntityTypeInput.ExpectedVersion; see it.
 type RelationTypeInput struct {
 	Key             string
 	Label           string
@@ -52,32 +29,12 @@ type RelationTypeInput struct {
 
 // SemanticRoles are the classifications a relation type may declare, in
 // the order 0004_metamodel.sql's CHECK lists them.
-//
-// **This slice and that CHECK are one list written twice, and this one
-// is the copy a caller ever sees.** The constraint alone was the whole
-// guard until review finding H3: a value outside it travelled all the
-// way to Postgres, came back as an untyped check-constraint violation
-// and reached an agent as `internal_error` — a server fault, with no
-// path and no list of what would have been accepted, for something the
-// agent had typed and could have fixed. It is the only reachable CHECK
-// on the metamodel tables, so this is the only place the pairing was
-// needed; the constraint stays as the backstop for a writer that does
-// not come through this package.
-//
-// Exported for the rule correction 24 established for MaxSearchQuery: a
-// bound a caller cannot read is a bound a caller trips over. The MCP
-// tool description for `types.upsert`'s relation half is built from it,
-// so a role added here is offered to agents without a second edit.
 var SemanticRoles = []string{
 	"prerequisite", "unlock", "containment", "spatial", "availability", "reward",
 }
 
 // checkSemanticRole refuses a role the column would refuse, as
 // invalid_input at the argument's own path.
-//
-// Empty is not a role but the absence of one — the column is nullable
-// precisely because a relation type need not classify itself — so it is
-// accepted here and stored as NULL by the caller.
 func checkSemanticRole(role string) []FieldError {
 	if role == "" {
 		return nil
@@ -108,17 +65,6 @@ type relationTypeEvent struct {
 }
 
 // UpsertRelationType creates or updates a relation type.
-//
-// **Editing the field schema re-judges this type's edges**, exactly as
-// editing an entity type's re-judges its entities, and by the same
-// function: revalidate applies the core design's schema-evolution rule to
-// both tables, so an edge whose values stop fitting is flagged rather than
-// deleted or back-filled, and one a widening makes legal again is
-// unflagged. Until 0009 nothing of the kind happened here — `relations`
-// had no `invalid` column, so an edge stored against this type kept
-// whatever fields it had and was never re-judged against a schema this
-// call may just have changed, silently. That gap is what 0009 and this
-// line close.
 func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, in RelationTypeInput) (dbq.RelationType, error) {
 	problems := rowKeyProblems("key", in.Key)
 	// relation_types has label and description and no plural, colour or
@@ -261,13 +207,6 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 }
 
 // endpointList turns an undeclared endpoint list into an empty array.
-//
-// pgx encodes a nil slice as SQL NULL, and source_type_ids and
-// target_type_ids are NOT NULL, so passing the zero value straight
-// through fails the insert outright — the ordinary case, since most
-// relation types declare no endpoint rules at all. Empty is also what
-// nil means here: an undeclared list accepts any type, and that is the
-// column's own default.
 func endpointList(ids []uuid.UUID) []uuid.UUID {
 	if ids == nil {
 		return []uuid.UUID{}
@@ -278,59 +217,6 @@ func endpointList(ids []uuid.UUID) []uuid.UUID {
 // checkEndpointTypes reports every id of an endpoint list that names no
 // entity type of this game, at its own indexed path so a caller can see
 // which element to fix.
-//
-// The id is repeated in the message rather than left to the path alone:
-// a caller that built the list from a map has the ids and not the
-// positions in front of it.
-//
-// **The read holds a share lock on every type it finds**, which is what
-// makes correction 6's invariant survive a concurrent removal rather
-// than only a sequential one. `RemoveEntityType` prunes the removed id
-// out of the endpoint lists, but the prune is one `UPDATE` over
-// `relation_types` under READ COMMITTED and the *creation* path here has
-// no row for it to find; before this lock, a relation type created
-// between the prune's statement and the removal's commit kept a dangling
-// id, and the row it produced was the unrepairable one `RemoveEntityType`
-// describes. With the lock, the removal's `DELETE` waits for this
-// transaction, and its prune — which runs after the delete — then sees
-// the row this one wrote. See LockEndpointEntityTypes for why the lock is
-// taken here, before the relation type's own row lock, and not later.
-//
-// One statement per list rather than one lookup per id, because the lock
-// and the check are the same read: a per-id loop would take the same
-// locks one round trip at a time.
-//
-// **A failure to read at all is returned as an error, not folded into a
-// FieldError.** It used to be: any error from the lock query, including one
-// this transaction had no way to satisfy, came back as `FieldError{Message:
-// "could not be checked: " + err.Error()}`, which the caller then wrapped
-// as `codeInvalidInput`. That is a lie a lock timeout can now tell that it
-// could not before this function started taking `FOR SHARE`: the old per-id
-// `GetEntityTypeByID` took no lock and could not be cancelled by
-// `lock_timeout`, so nothing reached this branch except a connection
-// actually down. `FOR SHARE` can be parked behind another transaction's row
-// lock and cancelled by `lock_timeout`/`statement_timeout` (SQLSTATE 55P03
-// / 57014) — a retryable contention event, not a problem with the ids the
-// caller sent, and `invalid_input` is read by a seeding agent as "resending
-// this unchanged is pointless," which for contention is exactly wrong.
-// `FieldError.Message` is also a bare string: flattening the error into one
-// erases the `*pgconn.PgError` a caller further up could otherwise recover
-// with `errors.As`. Returning the error instead keeps its SQLSTATE intact
-// and lets it propagate past `ValidationError` entirely, landing on the
-// `retryable` wire code: Task 7 took the call this comment left open and
-// gave contention a code of its own, so an agent meeting a lock timeout
-// here is told to resend the same call rather than merely told it failed.
-// IsRetryable (service.go) is the classifier, failureFor (bulk.go) and
-// mcpErrorFor (internal/web/mcp_errors.go) are the two boundaries that read
-// it, and TestRelationsArea's "a lock timeout on the endpoint check is not
-// reported as invalid input" case proves it end to end against a real held
-// lock. What makes any of it possible is that the error keeps its
-// `*pgconn.PgError`, which is what flattening it into a `FieldError`
-// destroyed.
-//
-// A failure to read at all is still attributed to the list and not an
-// element in spirit — nothing was checked, so no index is the one at
-// fault — but now as an opaque error rather than a field-shaped one.
 func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	path string, keys []string,
 ) ([]uuid.UUID, []FieldError, error) {
@@ -345,11 +231,6 @@ func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID
 	// argument, and over the *list* rather than the element. It is the
 	// same rule ListRelations' type_key and endpoint filters follow, and
 	// the same failure this repository has closed twice before.
-	//
-	// A malformed key could also have been left to fall out as "names no
-	// entity type of this game", which is true of it — but rowKeyProblems
-	// says *what* is wrong with it, and "no such type" sends a caller
-	// looking for a type rather than at the string it typed.
 	var malformed []FieldError
 	for i, key := range keys {
 		malformed = append(malformed, rowKeyProblems(fmt.Sprintf("%s[%d]", path, i), key)...)
@@ -430,14 +311,6 @@ func conflictOnRelationTypeKey(ctx context.Context, q *dbq.Queries, projectID uu
 
 // RelationTypeByKey loads one relation type, matched without regard to
 // case as every key in this domain is.
-//
-// A missing key is named, not reported through the generic notFound
-// helper. The caller supplied this key: ListRelations filters on it and
-// says so in its own doc comment, and "not_found" on its own tells an
-// agent that mistyped `requires` as `require` nothing about which of the
-// arguments it sent was wrong — the one thing it needs to fix the call.
-// upsertRelationWith has named it since it shipped; this is the same
-// message from the read path.
 func (s *Service) RelationTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.RelationType, error) {
 	row, err := s.q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{ProjectID: projectID, Key: key})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -460,12 +333,6 @@ func (s *Service) ListRelationTypes(ctx context.Context, projectID uuid.UUID) ([
 
 // RemoveRelationType deletes a relation type, refusing while it is in use
 // unless the caller says cascade.
-//
-// One transaction, as RemoveEntityType is: the count, the cascade delete
-// and the delete itself are one decision, and a count taken outside the
-// transaction is a count another writer can invalidate before the delete
-// runs. The row is read first for its key, so relation_type.removed
-// carries the identity it declares rather than an empty string.
 func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
 	var removedKey string
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
@@ -521,11 +388,6 @@ func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUI
 
 // revalidateRelationsOfType re-checks every stored edge against its
 // relation type's current schema and flags the ones that no longer fit.
-//
-// The rule it applies is revalidate's, shared with the entity sweep so
-// that neither table can be given a schema-evolution policy the other
-// does not have. What stays here is which two statements this table's
-// half of it runs.
 func (s *Service) revalidateRelationsOfType(ctx context.Context, q *dbq.Queries, typ dbq.RelationType) error {
 	return revalidate(ctx, sweep{
 		fieldSchema: typ.FieldSchema,

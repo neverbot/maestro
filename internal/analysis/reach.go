@@ -15,13 +15,6 @@ import (
 
 // Gating is how many of an entity's gates must be reachable before the
 // entity is.
-//
-// The two are a real choice and neither is stored: `any` is what a walk
-// computes natively and is the default; `all` is the stricter reading a
-// caller may ask for on the call. See the spec's O1 and the two tests
-// that hold the pair apart,
-// TestUnderAllABothGatedEntityNeedsBothGatesReachable and
-// TestTheSameGameReportsFewerUnreachableUnderAnyThanUnderAll.
 type Gating string
 
 const (
@@ -45,31 +38,6 @@ type SeedRef struct {
 }
 
 // Params is one reachability question.
-//
-// **ExcludeInvalid defaults to false, and that is a decision this
-// package took against the one internal/views took.** `invalid` on a
-// relation means *this row's `fields` no longer fit its type's
-// `field_schema`*. It says nothing about the row's endpoints or its
-// relation type, and endpoints and relation type are the only things any
-// analysis here reads. Excluding invalid edges would let a field-schema
-// edit on `requires` -- adding a required `difficulty` field, say --
-// make forty missions report as unreachable, with the cause being a
-// change that has no relationship at all to whether they are reachable.
-// **A verdict about structure must not move when a field schema moves.**
-//
-// internal/views/compile.go's invalidFilter excludes by default, for the
-// opposite and equally correct reason: a picture *asserts* a
-// relationship, a reader believes the assertion, and drawing an edge
-// whose own values are known-broken is a claim the game does not
-// support. A reader comparing the two files finds the disagreement
-// explained here rather than assuming one of them forgot. internal/
-// metamodel's traversal listing follows invalid edges too, its `Invalid`
-// filter being a tri-state whose default is "both", so this package is
-// with the metamodel and against views deliberately.
-//
-// The caller may ask for the stricter reading, and every result reports
-// InvalidEdgesFollowed either way: silence about a real limit is the
-// "correct and unasserted" defect with the sign flipped.
 type Params struct {
 	ProjectID uuid.UUID
 
@@ -107,13 +75,6 @@ type Params struct {
 
 // Reach is what one closure found, and it is deliberately more than a
 // set of ids.
-//
-// **An empty report and a report over an empty walk are different facts**
-// and this struct is what keeps them apart: SeedCount, EdgesWalked and
-// ReachedTotal say how much work was done, so "nothing is unreachable"
-// can be told from "the walk started nowhere and found nothing". Every
-// analysis built on this carries those numbers into its own answer for
-// the same reason.
 type Reach struct {
 	// Reached is every entity the closure admitted, seeds included.
 	Reached map[uuid.UUID]bool
@@ -165,11 +126,6 @@ type Reach struct {
 }
 
 // Reach computes one reachability closure.
-//
-// **This is the component internal/views' O8 promised the analysis
-// engine would own**, and both analysis.unreachable and routes.check
-// call it. It compiles into graph.WalkCTE and emits no recursion of its
-// own.
 func (s *Service) Reach(ctx context.Context, p Params) (Reach, error) {
 	if p.MaxDepth > MaxMaxDepth {
 		return Reach{}, limitExceeded("max_depth", p.MaxDepth, MaxMaxDepth)
@@ -288,48 +244,6 @@ LEFT JOIN relations r ON r.id = w.via_relation AND r.project_id = $1`
 }
 
 // normalisedWalk builds the one walk every gating analysis runs.
-//
-// **The engine normalises every gating edge into one internal form,
-// needed → dependent, reversing prerequisite_of edges as it reads them,
-// so every gating analysis runs over one direction and never thinks
-// about direction again.** A `prerequisite_of` edge reads "A requires B"
-// -- the *target* must be satisfied before the source, which is the
-// spec's own wording -- so it is followed target→source; an `unlocks`
-// edge reads "A unlocks B" and is followed source→target. Both are
-// gates and after this function nothing downstream knows which was
-// which.
-//
-// Direction is Any and the per-type direction lives in EdgePredicate.
-// That is not a workaround, it is the only shape that is correct here.
-// graph.Walk carries one Direction for the whole walk, and a game's
-// gating edges point both ways. Two walks unioned would double-count a
-// node reachable through both and would need two truncation flags. So:
-// Any, whose near/far are deliberately a single arm over a scalar CASE
-// (see graph.WalkCTE's own note on why two UNION arms are both illegal
-// in Postgres and wrong when written legally), and a predicate that says
-// which types may be followed which way. The predicate is spliced
-// **inside** the recursion's JOIN, where both `r` and `w` are in scope,
-// so an edge excluded by direction is an edge the walk does not traverse
-// rather than a row it filters afterwards --
-// TestANormalisedWalkWillNotFollowAGatingEdgeAgainstItsDirection is what
-// makes that a decision rather than a coincidence.
-//
-// RelationTypeIDs still carries the union, because graph.Walk documents
-// that an **empty list follows no edge at all** -- not every edge -- and
-// because the type filter is the clause the index serves; the predicate
-// narrows within it.
-//
-// `containment` is in the forward set here **and is also walked
-// separately by the cycle analysis**, for two different questions.
-// Reachability propagates from container to contained, which is a
-// forward gate. A containment *loop* is a different report with a
-// different fix, and it is a separate graph. Both statements are true,
-// and both are written down because a reader who finds `containment` in
-// two places will otherwise assume one of them is a mistake.
-//
-// CarryRelationPath is deliberately not set: reachability names entities
-// and never edges, and the column exists for the cycle analysis, which
-// has to name every edge of a loop.
 func (p Params) normalisedWalk(name, seedSQL string, seedArgs []any) graph.Walk {
 	forward, reverse, symmetric := p.edgeSets()
 
@@ -363,11 +277,6 @@ func (p Params) normalisedWalk(name, seedSQL string, seedArgs []any) graph.Walk 
 // edgeSets is the one place the trait vocabulary becomes three id
 // arrays, and every statement in this package that has an opinion about
 // direction takes them from here.
-//
-// forward is followed source→target, reverse target→source, symmetric
-// either way. `containment` joins forward only when the caller left
-// propagation on. `annotation` and a bare `acyclic` appear in none of
-// the three, which is how a type declared inert is followed by nothing.
 func (p Params) edgeSets() (forward, reverse, symmetric []uuid.UUID) {
 	gates, containment, reverse, symmetric := p.edgeSetsByKind()
 	return dedupeIDs(concatIDs(gates, containment)), reverse, symmetric
@@ -375,16 +284,6 @@ func (p Params) edgeSets() (forward, reverse, symmetric []uuid.UUID) {
 
 // edgeSetsByKind is the same four sets with containment kept apart from
 // the other forward gates.
-//
-// The split exists for one reader: the unreachable analysis owes a
-// *reason*, and "the only way in is through a container nobody can
-// reach" is a different sentence, with a different fix, from "every
-// route to it is blocked". Everything else folds the two together, which
-// is what edgeSets above does, so the walk and the fixpoint cannot start
-// disagreeing about what a gate is.
-//
-// containment comes back empty when the caller switched propagation off,
-// which is the single place that switch is applied.
 func (p Params) edgeSetsByKind() (gates, containment, reverse, symmetric []uuid.UUID) {
 	sem := p.Semantics
 	gates = dedupeIDs(concatIDs(sem.WithTrait("unlocks"), sem.WithTrait("ordering")))
@@ -401,16 +300,6 @@ func (p Params) edgeSetsByKind() (gates, containment, reverse, symmetric []uuid.
 // gates an entity has under `all`, whether an unreachable entity is
 // isolated or merely blocked, which entities block it, and whether a
 // route step's prerequisites hold.
-//
-// **A symmetric edge is not an in-gate.** It is an adjacency: it says
-// two places are joined, not that one must be reached before the other,
-// and counting it would make every zone in a connected map gated by
-// every neighbour -- so with no explicit seeds a map would have no
-// ungated entity at all and the whole game would report unreachable.
-//
-// node is the SQL expression naming the entity whose in-edges are
-// wanted; forward and reverse are the placeholders holding the two id
-// arrays.
 func inGateSQL(node, forward, reverse string, excludeInvalid bool) string {
 	pred := fmt.Sprintf(
 		"r.project_id = $1 AND ((r.relation_type_id = ANY(%s::uuid[]) AND r.target_id = %s)"+
@@ -433,19 +322,6 @@ type seedPlan struct {
 }
 
 // resolveSeeds turns the three seed sources into one anchor.
-//
-// **A key that does not resolve is not_found naming the key, never
-// dropped silently.** A silently empty seed set turns "you gave me a bad
-// key" into "your entire game is unreachable", and that sentence is the
-// single most damaging wrong answer this engine can produce.
-//
-// The seed SQL filters on the project in every arm even though
-// graph.WalkCTE's anchor join filters again. That is **redundant today**
-// and it is written anyway: the redundancy is one line, and the shape it
-// defends is a later seed source that does not go through the anchor.
-// Saying so here is the phrasing the views sub-project's own lesson asks
-// for -- a silence around a real property is the documentation defect
-// with the sign flipped.
 func (s *Service) resolveSeeds(ctx context.Context, p Params) (seedPlan, error) {
 	plan := seedPlan{includeUngated: p.includeUngated()}
 
@@ -565,31 +441,6 @@ func (s *Service) routeSeeds(ctx context.Context, projectID uuid.UUID, key strin
 
 // allFixpoint computes GatingAll over the rows the walk already
 // returned.
-//
-// **This is a separate code path and it is not a walk**, which is stated
-// rather than implied because the two modes look like variants of one
-// thing and are not. "Every gate of X is reachable" is a property of X's
-// whole in-neighbourhood, not of any one path, and a recursion that
-// carries paths cannot answer it. So: start from the seeds, repeatedly
-// admit an entity whose every normalised in-gate is already admitted,
-// stop when a pass admits nothing.
-//
-// The candidate set is the `any` closure, because all-reachable is a
-// subset of any-reachable by construction -- an entity none of whose
-// gates the walk ever reached cannot have all of them reached. That is
-// what the plan means by "one walk's rows plus one in-degree query".
-//
-// A symmetric neighbour admits on `any` even here: gating is a statement
-// about gates, and an adjacency does not become a dependency because the
-// mode changed.
-//
-// It is bounded by MaxMaxDepth passes. A fixpoint that has not converged
-// in that many passes over a graph whose walk was depth-bounded at most
-// that deep has a cycle in it, and a cycle admits nothing under `all` --
-// each member waits for another. Whichever way it ends, entities the
-// walk reached and this pass did not admit are reported in Note, which
-// names analysis.cycles as where to look, because that is the analysis
-// that says which loop it is.
 func (s *Service) allFixpoint(ctx context.Context, p Params, out *Reach) error {
 	candidates := make([]uuid.UUID, 0, len(out.Reached))
 	for id := range out.Reached {
@@ -727,11 +578,6 @@ func (p Params) propagateContainment() bool {
 // emptySeedSet is the refusal for a start set that names nothing, and it
 // names all three sources because a caller who supplied none of them
 // cannot guess which one this call wanted.
-//
-// It is invalid_input and not a new code, for the reason errors.go
-// argues: metamodel.CodeInvalidInput already means "a row's own
-// arguments being malformed; the fix is to change that argument", and an
-// empty seed set with include_ungated false is exactly that.
 func emptySeedSet(what string) error {
 	return invalidInput("seed_entities", fmt.Sprintf(
 		"the start set %s, and include_ungated is off, so this run would report every "+

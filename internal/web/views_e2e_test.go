@@ -31,35 +31,6 @@ import (
 // drag four nodes, add twelve more quests, watch the vocabulary move
 // under the saved document, repair it, and finally delete a type the view
 // depends on.
-//
-// **It is driven over the tool surface and not over the domain**, because
-// what it exists to answer is "does the product work", and a step that
-// reached past the transport would be answering a different question. The
-// one deliberate exception is named where it is made, in step 8.
-//
-// **The negative halves are the point.** A walk that only asserts things
-// arrive proves almost nothing: the fixture is shaped so that at every
-// step something must *not* come back, and each of those absences is a
-// different rule of the language being enforced.
-//
-//   - a level-12 quest is outside the band (the step's own where),
-//   - a level-35 quest is outside it on the other side,
-//   - a level-26 quest is inside the band and available to the *warrior*
-//     (the traversal itself, which a band filter alone cannot test),
-//   - a requires edge to a quest outside the band is not drawn
-//     (edges[].between, which is the reason the spec's example has one),
-//   - the seed class node comes back with no position rather than at the
-//     origin,
-//   - and twelve quests added afterwards arrive unpinned.
-//
-// **Nine review rounds of this sub-project's own history say the same
-// thing about fixtures**: one too small to distinguish two policies is
-// a test that passes for the wrong reason. Two zones, so `color_by` is
-// not a constant; four dragged nodes and a fifth undragged one, so
-// "positions came back" cannot pass by returning them all.
-
-// The nine quests, their bands and their zones. Written as a table
-// because every assertion below is about which of them came back.
 type e2eQuest struct {
 	key   string
 	name  string
@@ -439,10 +410,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	ctx := context.Background()
 
 	// --- Step 2: the agent misspells the relation type.
-	//
-	// This is the first of the two mistakes views.validate exists for,
-	// and the assertion is the pointer: an agent told only "this query is
-	// invalid" has to re-read a forty-line document to find the typo.
 
 	_, err := web.MCPViewsValidate(ctx, w.deps, w.agent, w.game, web.ViewsValidateInput{
 		Query: json.RawMessage(`{"v":1,
@@ -477,11 +444,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 		"type, the operators it answers and the one that was asked for", sentence)
 
 	// --- Step 4: the query the agent gets right, saved once.
-	//
-	// views.validate first, because that is the loop: the two refusals
-	// above cost no database walk, and this pass is what tells the agent
-	// the document is now saveable *with this renderer*, which is the one
-	// thing a bare parse cannot answer.
 
 	valid, err := web.MCPViewsValidate(ctx, w.deps, w.agent, w.game, web.ViewsValidateInput{
 		Query: json.RawMessage(e2eQuery), Renderer: "graph",
@@ -708,28 +670,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	}
 
 	// --- Step 8: the vocabulary moves under the saved document.
-	//
-	// **The plan's step 8 says to rename available_to through
-	// relation_types.upsert, and that call still cannot do it**: both
-	// type upserts are addressed by key and idempotent by it, so writing
-	// a different key creates a *second* type and leaves the first
-	// standing. What this walk does instead is the call that was built
-	// for the job — `relation_types.rename`, over the same MCP surface
-	// as every other step here, with the version it read.
-	//
-	// It used to be an UPDATE on the row, because no rename existed and
-	// the state had to be reached somehow. Driving the real tool is the
-	// point of this walk: the honesty of the whole file is that an agent
-	// could have made every call in it.
-	//
-	// **Only the catalogue moves.** The stored document and its ref row
-	// both keep the old spelling, which is what a rename must leave
-	// behind: tidying view_refs.ref_key to the new key while the
-	// documents keep the old one is read as a torn index, deliberately,
-	// and would report the type missing instead.
-	//
-	// The deletion branch — the other thing an agent can do to a type —
-	// is step 11, and it is where on_stale earns its two spellings.
 	beforeRename, err := web.MCPRelationTypesGet(ctx, w.deps, w.agent, w.game,
 		web.RelationTypesGetInput{Key: "available_to"})
 	assert.Must(t, err == nil, "read available_to before renaming it: %v", err)
@@ -805,13 +745,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 
 	// --- Step 10: the designer deletes the zone type, and is told what
 	// it broke.
-	//
-	// This is the branch an agent can really drive, and the spec is
-	// explicit that the deletion is *allowed*: a view is derived and can
-	// be rewritten in one call, so making a type undeletable because a
-	// six-month-old diagram mentions it would push designers into
-	// deleting views in order to delete types. What they are owed
-	// instead is the list.
 
 	for _, zone := range []string{"elwynn", "westfall"} {
 		if _, err := web.MCPEntitiesRemove(ctx, w.deps, w.agent, w.game,
@@ -841,10 +774,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 
 	// --- Step 11: the two spellings of on_stale, over a reference that
 	// really is dead.
-	//
-	// This is where the default earns its argument: a diagram that
-	// silently dropped its colours looks exactly like a correct diagram,
-	// and a designer will believe it.
 
 	_, err = web.MCPViewsRun(ctx, w.deps, w.agent, w.game, web.ViewsRunInput{Key: "mage-2030"})
 	broken := queryErrorOf(t, err, views.CodeQueryStale)
@@ -879,14 +808,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	}
 
 	// --- Step 12: the isolation sweep, over the walk's own state.
-	//
-	// Which tools exist and that every one of them refuses a foreign
-	// token is asserted by the registration-driven sweep in
-	// mcp_views_test.go, which enumerates the registry and fails when a
-	// tool it does not drive is added. What that sweep cannot say is that
-	// a real arrangement survives the attempt, so this one drives the
-	// calls that would *change* something and then re-reads the walk's
-	// own picture.
 
 	foreign := map[string]func() error{
 		"views.get": func() error {
@@ -949,17 +870,6 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 // HTTP, with a real token, saving a view and running it — and reading
 // the envelope out of StructuredContent, which is what a client actually
 // consumes.
-//
-// **It is a different test from the walk above, and the difference is
-// the point.** Every other assertion in this file calls the MCP*
-// functions directly, which is where the isolation invariant is pinned
-// and where a story can be told; nothing there passes through the tool
-// registration, the input schemas, the output schemas or the SDK's own
-// marshalling. Three of those four can be wrong while every test in this
-// package is green, and one of them was: views.run's declared output
-// schema required two stats members the envelope has never carried
-// (node_count, edge_count) and omitted the two it does (nodes, edges).
-// Nothing read the schema, so nothing said so.
 func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
 	t.Parallel()
 	w := newE2EWorld(t)
@@ -1028,20 +938,6 @@ func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
 // TestEveryViewsToolIsCallableOverTheRealTransport drives all ten tools
 // through the mounted MCP endpoint, with arguments that are meant to
 // succeed.
-//
-// **It is a schema test wearing a smoke test's clothes**, and that is
-// the point of driving every tool rather than one. The SDK validates a
-// call's arguments against the registered *input* schema before any
-// handler runs, and the handler's answer against the registered *output*
-// schema before it reaches the wire; both schemas are inferred from Go
-// types or written by hand, and neither is read by any test that calls
-// the MCP* functions directly. Two were wrong at once when this test was
-// written — the query document declared as an array of bytes on three
-// tools, and views.run's stats declaring two members the envelope has
-// never carried — and the whole package was green.
-//
-// The table is checked against the registry, so a tool added without a
-// call here fails rather than going unexercised.
 func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 	t.Parallel()
 	w := newE2EWorld(t)
@@ -1082,13 +978,6 @@ func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 	// The order matters — a view has to exist before it can be run — so
 	// the map is driven through a list and the map is what the registry
 	// is compared against.
-	//
-	// **views.run comes after views.set_positions**, so the run whose
-	// answer the output schema judges actually carries a stored position.
-	// Run first, the `positions` array is empty and an array of nothing
-	// satisfies any item schema at all — which is how a misspelled
-	// position member would have gone on passing this test the day the
-	// schema started naming them.
 	order := []string{
 		"views.upsert", "views.list", "views.get", "views.validate",
 		"views.set_positions", "views.run", "views.clear_positions", "views.list_assets",

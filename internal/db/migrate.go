@@ -17,12 +17,6 @@ import (
 var migrationsFS embed.FS
 
 // newProvider builds a goose provider scoped to sqlDB.
-//
-// It uses goose's instance-scoped provider API (rather than the
-// package-level API, which relies on shared mutable state and races under
-// -race when multiple pools migrate concurrently) and takes a Postgres
-// session advisory lock, so that several replicas migrating the same
-// database at start-up serialize instead of stepping on each other.
 func newProvider(sqlDB *sql.DB) (*goose.Provider, error) {
 	sub, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -97,12 +91,6 @@ func checkNoSchemaDrift(ctx context.Context, provider *goose.Provider) error {
 // migrateDownTo rolls back to a stated version, one migration at a
 // time, and is what a test asserting the reversal of a *particular*
 // migration uses.
-//
-// It exists because `migrateDown` rolls back the most recent migration,
-// whichever that happens to be: a test that called it once to undo
-// migration N kept passing as N stayed newest and started asserting the
-// reversal of N+1 the day one was added, with nothing saying so. Naming
-// the version is what makes such a test keep meaning what it says.
 func migrateDownTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer func() { _ = sqlDB.Close() }()

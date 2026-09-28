@@ -100,27 +100,6 @@ var importMapScript = regexp.MustCompile(`(?s)<script type="importmap">(.*?)</sc
 
 // importMapHashes is one `'sha256-…'` source per distinct import map in
 // the shipped shells, sorted, ready to be joined into a script-src.
-//
-// **This exists because `default-src 'self'` silently switches the
-// import map off.** The map is an *inline* script, so a policy with no
-// hash, nonce or 'unsafe-inline' makes a browser refuse to apply it —
-// and refusing to apply an import map is not a visible failure: the
-// element is still in the DOM, `document.querySelector` still finds it,
-// and the only symptom is that every bare specifier fails to resolve the
-// moment some page imports one. Task 2 shipped the map, Task 15 is the
-// first page that imports `lit`, and this is what opening that page in a
-// browser found. Nothing before it could have: no test in this package
-// enforces a CSP by parsing it, and the map's own tests read the file
-// rather than the policy.
-//
-// A **hash** rather than a nonce or 'unsafe-inline'. 'unsafe-inline'
-// would re-admit every injected script this policy exists to refuse. A
-// nonce would have to be generated per response and threaded into the
-// shell, which means the shells stop being static files. The map is
-// shipped in the binary and changes only with a deploy, so its hash is
-// computable once, at startup, from the bytes that are actually served
-// — which is the property that matters: a map edited without this being
-// updated cannot happen, because there is nothing to update.
 var importMapHashes = func() []string {
 	seen := map[string]bool{}
 	entries, err := fs.ReadDir(assets, ".")
@@ -156,9 +135,5 @@ func ImportMapHashesForTest() []string {
 }
 
 // contentSecurityPolicy is the policy every response carries.
-//
-// script-src repeats 'self' because naming the directive at all replaces
-// default-src for scripts: a script-src of hashes alone would refuse
-// every module this front end loads.
 var contentSecurityPolicy = "default-src 'self'; script-src 'self' " +
 	strings.Join(importMapHashes, " ") + "; frame-ancestors 'none'"

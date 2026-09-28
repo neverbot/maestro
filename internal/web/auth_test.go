@@ -316,25 +316,6 @@ func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 // the halfway point of its SESSION_TTL gets pushed back out to exactly a
 // full SESSION_TTL from now, so a caller in continued use is never logged
 // out mid-session.
-//
-// This backdates sessions.expires_at directly with the pool, the same
-// technique TestExpiredSessionIsRejectedAndPruned and
-// TestResolveAPITokenThrottlesLastUsedAtWrites (internal/identity) use,
-// rather than sleeping inside a short TTL: a sleep leaves little margin
-// for user creation, an HTTP round trip and two queries before an
-// overshoot flips the session from "past halfway" to "expired", which
-// fails hard (a 401, not a soft miss) — the worst kind of flake to
-// debug. An injectable fake clock would be worse, not better: expiry is
-// enforced in SQL by expires_at > now(), so a Go-side clock would
-// desynchronise from the database and this would end up testing a
-// fiction instead of the real comparison ExtendSession and
-// UserForSession both make. Backdating the column keeps Postgres' own
-// now() as the only clock in play.
-//
-// The assertion brackets now()+SessionTTL around the request instead of
-// checking "extended by at least N": a renewal that landed at the wrong
-// offset (half the TTL, say, or the pre-cap value before LEAST applies)
-// would pass a loose lower bound but fails this bracket.
 func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

@@ -26,13 +26,6 @@ import (
 )
 
 // The saved-view routes, over HTTP.
-//
-// Everything about the query language and about what a view stores is
-// decided in internal/views and tested there. What is tested here is
-// what only the transport can be wrong about: that both surfaces answer
-// with the same codes and the same envelope, that a viewer may run a
-// view and may not save one, and that the view.* events reach a
-// subscriber over the endpoint a browser actually subscribes to.
 
 type viewsRESTFixture struct {
 	srv       *web.Server
@@ -228,10 +221,6 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 	// path itself — the tool takes it in the body — so the key
 	// extraction is the one thing the REST mirror can be uniquely wrong
 	// about here, and deleting it left the whole suite green.
-	//
-	// A background needs a renderer that draws one, so the placement
-	// runs against a second view; the clear runs against it too, since
-	// clearing is the arm that reaches a different statement.
 	asset := f.uploadAsset(t, "azeroth.png")
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
 		"key": "atlas", "name": "The atlas", "renderer": "map",
@@ -297,11 +286,6 @@ func TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode(t *testing.T) {
 // TestEveryContentWriteRouteRefusesAViewer already drives every write at
 // a viewer; what it cannot say is that a viewer can still *read*, and a
 // surface that refused a viewer everything would satisfy it.
-//
-// Running is the interesting case, because it is a read spelled as a
-// POST: over REST it is therefore gated as a write, which is what
-// api_views.go's header records as the cost of that spelling. So the
-// read a viewer must keep is the listing and the view itself.
 func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)
@@ -342,13 +326,6 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 // own event tests: those prove the hub was published to, this proves a
 // subscriber actually receives it, over the endpoint it subscribes to,
 // on a server wired the way main.go wires it.
-//
-// **Two subscribers, and both are load-bearing.** A viewer is the one a
-// MinRole above viewer would cut out, and a token caller is the one
-// HumanOnly true would cut out — and internal/web's own member, token
-// and invite events all set HumanOnly true, so a test that only ever
-// subscribed with a cookie would stay green if somebody published a
-// view event that way and agents had silently stopped being told.
 func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)
@@ -446,9 +423,10 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 			// render the older of two drags.
 			// The same holds for a background: identity only, no
 			// asset id and no version, since the write advances none.
-			assert.Should(t, step.kind == "view.upserted" || step.kind == "view.removed" || !(strings.Contains(data, `"x"`) || strings.Contains(data, `"version"`) ||
-				strings.Contains(data, `"asset`)), "%s got a value on a %s payload, want identity only: %s",
-				who, step.kind, data)
+			assert.Should(t, step.kind == "view.upserted" || step.kind == "view.removed" ||
+				!strings.Contains(data, `"x"`) && !strings.Contains(data, `"version"`) &&
+					!strings.Contains(data, `"asset`),
+				"%s got a value on a %s payload, want identity only: %s", who, step.kind, data)
 		}
 	}
 }
@@ -516,10 +494,6 @@ func TestTheViewListingCarriesItsRendererAndCursorOverREST(t *testing.T) {
 // but the refusal the field exists to make was unasserted on every one
 // of the routes that call it, and removing the check from the run route
 // left the whole suite green.
-//
-// The field is a confirmation and never a selector: a client that has
-// lost track of which game it is editing is told so, rather than told
-// its write succeeded in the other one.
 func TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)

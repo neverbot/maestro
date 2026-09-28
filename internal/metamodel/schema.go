@@ -27,24 +27,11 @@ const (
 
 // FieldTypes is every declared field type, in the order the bundle, the
 // tool descriptions and Validate's own refusals print them.
-//
-// It is the list, and the constants above are its members.
-// TestSchemaVocabArea's "field types lists every declared field type" case
-// parses this file and pins both directions, so a seventh type cannot be
-// declared without being listed here, nor listed here without being
-// declared — the shape a closed vocabulary rots in is one copy growing
-// while the other does not.
 var FieldTypes = []FieldType{
 	FieldText, FieldLongText, FieldNumber, FieldBool, FieldEnum, FieldListText,
 }
 
 // Field is one declared field of an entity type or relation type.
-//
-// HasDefault is not part of the wire format. On the wire a default is
-// declared by the presence of the "default" key and by nothing else, so
-// there is exactly one source of truth for the fact; UnmarshalJSON sets
-// HasDefault from that presence and MarshalJSON writes the key back only
-// when HasDefault is set. See Field.UnmarshalJSON.
 type Field struct {
 	// Key identifies the field inside the row's jsonb object. It must be
 	// lower_snake_case ASCII, at most maxKeyLen characters; see keyPattern
@@ -84,21 +71,6 @@ type fieldJSON struct {
 
 // UnmarshalJSON decodes a field, declaring a default when — and only when —
 // the "default" key is present and not null.
-//
-// This is the path every agent-authored schema takes: MCP hands Task 3 a
-// field_schema straight off the wire, so a default that is not inferred here
-// is a default that is silently dropped. An explicit null is not a default:
-// null is how this package spells "not set" everywhere else, and Validate
-// already treats a null value as an absent one.
-//
-// Decoding rejects any key it does not know, via DisallowUnknownFields. The
-// package's own contract for values, stated in Validate's doc comment, is
-// "an unknown field is an error, never dropped" — the declaration path must
-// not do the reverse. Without this, a typo like "defualt" parsed clean and
-// silently lost the declared default: exactly the defect the HasDefault
-// correction existed to fix. This also turns a stray "has_default" — which a
-// confused agent may well send, since an earlier iteration accepted it —
-// into an explicit error instead of silence.
 func (f *Field) UnmarshalJSON(raw []byte) error {
 	var w fieldJSON
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -127,15 +99,6 @@ func (f *Field) UnmarshalJSON(raw []byte) error {
 // MarshalJSON writes the "default" key only for a field that declares one,
 // so the value round trips back through UnmarshalJSON to the same
 // HasDefault.
-//
-// A field with HasDefault set and a nil Default cannot be spelled on the
-// wire, since nil is not a value any field type could hold — Check rejects
-// it, but a schema built by a Go caller may never have been through Check
-// before it reaches here. Encoding it anyway would launder that invalid
-// state into a valid-looking schema that silently round-trips to
-// HasDefault: false, turning an error into silence. So this is rejected at
-// marshal time instead: the round trip is documented as lossless because
-// this state can never enter it.
 func (f Field) MarshalJSON() ([]byte, error) {
 	if f.HasDefault && f.Default == nil {
 		return nil, fmt.Errorf("field %q: has_default is set with a nil default, which is not a value any field type could hold", f.Key)
@@ -195,20 +158,6 @@ const maxKeyLen = 64
 
 // keyPattern is the field-key rule: lower_snake_case ASCII, starting with a
 // letter. It is deliberately narrow, and every exclusion pays for itself:
-//
-//   - No dot, because "fields.<key>" is the error path this package returns;
-//     a key containing a dot makes "fields.a.b" ambiguous between the field
-//     "a.b" and a nested "b" inside "a".
-//   - No upper case, so two keys can never differ only by case — a collision
-//     no case-sensitive map would catch but every human reader would trip
-//     over. Lowercasing by rule beats detecting the collision after the fact.
-//   - No whitespace, brackets or dashes, so a key is a single token wherever
-//     it is later quoted, flattened or parsed.
-//   - ASCII only, so no two spellings of one key (NFC and NFD forms of the
-//     same accented word) can coexist as different keys.
-//
-// The rule is enforced at declaration time, where an agent can still act on
-// the news, rather than being discovered six hundred rows later.
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // isFinite reports whether v is neither NaN nor an infinity.

@@ -45,13 +45,6 @@ func TestRenameArea(t *testing.T) {
 	// TestRenameArea's "a renamed type is the same row under a new key" case
 	// is the whole point of the call, and it asserts the two halves separately
 	// because only one of them is new.
-	//
-	// The new half is that the *row* survives: the id is the one the type
-	// had, so every entity, every endpoint rule and every saved view
-	// reference that names this id still names this type. The workaround a
-	// rename replaces — declare the new type, move every entity, delete the
-	// old — is exactly the thing that cannot say that: it produces a new id
-	// and takes the history with the deleted row.
 	t.Run("a renamed type is the same row under a new key", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -111,14 +104,6 @@ func TestRenameArea(t *testing.T) {
 
 	// TestRenameArea's "a rename addresses the old key without regard to case"
 	// case pins that `from` is an address and not a value.
-	//
-	// Every other by-key read in this package matches case-insensitively,
-	// and a rename must too: a caller holding `Boss` from a listing and
-	// spelling it `boss` is addressing the same row. What it must *not* do
-	// is refuse it as a respelling the way the write path does — there is no
-	// spelling being stored on that side of the call, so there is nothing to
-	// refuse. Without this test, `from` could be matched exactly and every
-	// other test in this file would still pass.
 	t.Run("a rename addresses the old key without regard to case", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -137,11 +122,6 @@ func TestRenameArea(t *testing.T) {
 	// TestRenameArea's "a rename onto a taken key is refused at the
 	// destination" case pins the refusal and the shape it takes: invalid_input
 	// at `to`, not a version conflict.
-	//
-	// The distinction is the one every occupied-destination refusal in this
-	// repository makes: a conflict tells a caller to merge onto a version
-	// and try again, and no amount of retrying frees a key another type
-	// holds.
 	t.Run("a rename onto a taken key is refused at the destination", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -185,12 +165,6 @@ func TestRenameArea(t *testing.T) {
 	// deliberately the same decision internal/markdown's Move made for a
 	// document path hours earlier and keyRespellingError made for a row key
 	// before that.
-	//
-	// entity_types_key_key is UNIQUE (project_id, lower(key)), so `quest` and
-	// `Quest` are one address written two ways. A rename between them changes
-	// no address at all: it rewrites a stored display string, advances a
-	// version and publishes an event announcing a change no reader can
-	// observe. All three refusals now agree.
 	t.Run("a case only rename is refused as one address", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -243,11 +217,6 @@ func TestRenameArea(t *testing.T) {
 	// TestRenameArea's "a rename needs the version it read" case pins both
 	// halves of the version claim: absent is invalid_input at its own path,
 	// and wrong is a version_conflict carrying the number to merge onto.
-	//
-	// A rename is guarded for the reason a document move is: it advances the
-	// version, so an unguarded one would land on top of an edit the caller
-	// never read — and it would do it to the one column every other reader
-	// of this game spells out loud.
 	t.Run("a rename needs the version it read", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -298,11 +267,6 @@ func TestRenameArea(t *testing.T) {
 	// exactly the same comparison: strings.EqualFold means what SQL's lower()
 	// means only because rowKeyPattern has already guaranteed both values are
 	// ASCII.
-	//
-	// A malformed pair that also folds together must therefore be reported
-	// as malformed. Moving the fold check above the validation turns this
-	// test red — the caller would be told its two keys are one address when
-	// neither is a key at all.
 	t.Run("the case only refusal is judged after the keys are validated", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -393,13 +357,6 @@ func TestRenameArea(t *testing.T) {
 	// TestRenameArea's "two opposite renames do not deadlock" case pins the
 	// lock ordering judgeRename applies, and it is the same rule and the same
 	// failure internal/markdown's lockBothEnds records for a document move.
-	//
-	// Renaming `a` to `b` while another caller renames `b` to `a` has each
-	// transaction wanting the row the other holds. Locking the two ends in
-	// from-then-to order closes the cycle and Postgres breaks it with
-	// SQLSTATE 40P01; locking them in folded-key order — a value both
-	// transactions compute the same way — removes it. One of the two calls
-	// wins and the other is refused, but neither may deadlock.
 	t.Run("two opposite renames do not deadlock", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -442,11 +399,6 @@ func TestRenameArea(t *testing.T) {
 
 	// TestRenameArea's "a relation type is renamed the same way" case pins the
 	// twin, end to end.
-	//
-	// It is a separate call over a separate table, and the failure this
-	// repository names most often is a rule established correctly and not
-	// carried one step along — so the twin gets its own assertions rather
-	// than a comment claiming symmetry.
 	t.Run("a relation type is renamed the same way", func(t *testing.T) {
 		pool := a.pool
 		hub := realtime.NewHub()

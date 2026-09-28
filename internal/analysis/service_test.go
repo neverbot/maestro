@@ -21,11 +21,6 @@ func TestService(t *testing.T) {
 	// is the one the route CRUD rests on: a route's row and its whole ordered
 	// step list are one change, so a step rewrite that landed beside a route
 	// that rolled back would leave a walk nobody authored.
-	//
-	// It asserts the rollback through a write this package can already make
-	// — a route row — with the positive control that the identical write
-	// commits when fn returns nil. Without that control, a withTx that
-	// never wrote anything at all would pass the rollback half.
 	t.Run("a failed unit of work leaves nothing behind", func(t *testing.T) {
 		g := a.game(t)
 
@@ -67,11 +62,6 @@ func TestService(t *testing.T) {
 
 	// TestAPublishedEventCarriesItsGatingAsGiven pins that publish passes
 	// minRole and humanOnly through rather than deriving them from the kind.
-	//
-	// They are passed explicitly at every call site in this repository, so
-	// that each site shows the gating it chose instead of inheriting one from
-	// a table three files away — and a publish that quietly substituted a
-	// default would make every one of those choices decorative.
 	t.Run("a published event carries its gating as given", func(t *testing.T) {
 		g := a.game(t)
 		hub := realtime.NewHub()

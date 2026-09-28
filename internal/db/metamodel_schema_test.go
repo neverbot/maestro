@@ -440,26 +440,6 @@ func TestDeletingATokenClearsOnlyTheTokenColumn(t *testing.T) {
 // from now on. If it were not, a game seeded before the migration would
 // rank differently from the same game re-seeded after it, silently and
 // with nothing to signal why.
-//
-// **It runs the shipped files against real rows — review finding M3.**
-// The first version of this test wrote both SQL expressions out in its
-// own literal and compared them, and said "change either and this test
-// says so". It did not: the reviewer changed the *actual migration's*
-// UPDATE to a non-equal expression and the whole suite stayed green,
-// because nothing in it ever applied 0006 to a row. It proved an
-// algebra identity about a copy.
-//
-// So the migration's Up arm is read out of the file that ships and
-// executed, and the comparison is against `dbq.UpsertEntity` — the
-// generated caller of the statement that ships. Neither side is written
-// out here any more, and a change to either one that breaks the
-// identity fails this test.
-//
-// The order is the real one: a database is migrated, and content is
-// seeded into it afterwards. That also keeps the migration's unqualified
-// UPDATE off the re-seeded rows, which it would otherwise weight a
-// second time — a fact worth knowing about 0006 and the reason it is a
-// one-shot rather than something to re-run.
 func TestTheSearchBackfillIsExact(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -595,18 +575,6 @@ func TestTheSearchBackfillIsExact(t *testing.T) {
 // property: a row migrated by the Up arm holds byte-for-byte the vector
 // the shipping write path produces for the same row, so a migrated game
 // and a re-seeded one rank identically.
-//
-// **The two halves of each pair differ only by their entity type**, not
-// by their key — which is the change: the key is in the vector now, so
-// comparing `migrated-07` against `reseeded-07` would compare two
-// different vectors and pass or fail for the wrong reason. Two types in
-// one game let both rows carry the identical key, which is what the
-// entity key unique index (project, type, lower(key)) allows.
-//
-// The shapes are 0006's twelve plus the two the key can be that the name
-// cannot: a key is pattern-checked in Go, so the ones that reach the
-// database are ASCII, but a hyphenated key and a key that is also a word
-// of the name are both ordinary and both exercise the merge.
 func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -755,13 +723,6 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 
 // gooseArm returns one arm of a shipped migration, read from the file
 // that ships rather than from a copy.
-//
-// It parses the goose annotations rather than importing goose's own
-// parser, which is unexported: the format here is two `-- +goose Up` /
-// `-- +goose Down` markers and plain statements between them, and the
-// migrations in this repository use nothing else. A migration that grows
-// a StatementBegin block will need this to grow with it, and will say so
-// by failing.
 func gooseArm(t *testing.T, file, arm string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("migrations", file))
@@ -782,15 +743,6 @@ func gooseArm(t *testing.T, file, arm string) string {
 // TestRelationsCarryAnInvalidFlagAndAVersion pins 0009's two columns at
 // the level the migration made the claim: their existence, their types,
 // their NOT NULL, and the defaults an existing edge is read back under.
-//
-// The defaults are the load-bearing half. 0009 back-fills nothing — it is
-// a pure DDL change — so a row written before it must read as "presumed
-// valid, never edited": `invalid false` because the write path had always
-// validated an edge against its type's schema, and `version 1` because
-// that is what an INSERT lands on and therefore what the first
-// compare-and-set against such a row has to expect. A default of `true`,
-// or a nullable column, would have made every pre-existing edge in every
-// deployed game unwritable or wrongly flagged on the day of the upgrade.
 func TestRelationsCarryAnInvalidFlagAndAVersion(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -836,22 +788,6 @@ func TestRelationsCarryAnInvalidFlagAndAVersion(t *testing.T) {
 
 // TestTheEdgeSweepSeeksAnIndexRatherThanScanning is the measurement
 // 0009's "no new index" claim rests on, run rather than quoted.
-//
-// The re-validation sweep reads `relations WHERE project_id = $1 AND
-// relation_type_id = $2`. entities needed `entities_type_idx` for its own
-// sweep because `entities_key_key` leads with project_id and only then
-// entity_type_id; relations already has *two* indexes leading with
-// relation_type_id — `relations_edge_key` (0004, the unique triple) and
-// `relations_type_target_idx` (0008) — so the index 0009 would otherwise
-// have added already exists twice over, and which of the two the planner
-// picks is its business.
-//
-// **So the assertion is on the shape of the plan, not on an index
-// name.** Naming one would pin a choice this test has no opinion about
-// and would go red on a planner that made the other, equally good, one.
-// What it must catch is the sequential scan a sweep would fall back to
-// if both indexes were dropped or reshaped away from that leading
-// column, which is the outcome 0009 says cannot happen.
 func TestTheEdgeSweepSeeksAnIndexRatherThanScanning(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

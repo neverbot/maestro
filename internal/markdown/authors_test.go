@@ -14,15 +14,6 @@ func TestAuthorsArea(t *testing.T) {
 
 	// TestAuthorsArea's "a revoked token still names what it wrote" case is
 	// where the decision lives.
-	//
-	// The question a batch of audit columns forces is what a caller is told
-	// about a token that has since been revoked, and the answer is: its
-	// label, the same as a live token's. Revoking a token changes what it
-	// may do next, not who wrote the prose, and the tokens listing already
-	// includes revoked rows on purpose because it is the audit trail for
-	// what happened. The alternative — falling back to a category, the way
-	// the reading view says "a former member" — would hide the one fact a
-	// designer reading a suspect version needs.
 	t.Run("a revoked token still names what it wrote", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -92,11 +83,6 @@ func TestAuthorsArea(t *testing.T) {
 	// pins the project filter on the token half of the resolver. api_tokens
 	// rows are project-scoped, and one game reading another's labels would be
 	// a cross-game read on the one call that turns an id into a name.
-	//
-	// The document write path cannot reach this — 0007_documents.sql's
-	// composite keys refuse another game's token outright — so the resolver
-	// is driven directly, which is also what internal/web does for a
-	// single document's audit pairs.
 	t.Run("a token is resolved inside its own game only", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()

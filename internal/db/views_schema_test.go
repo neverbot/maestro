@@ -18,11 +18,6 @@ import (
 // cross-game test below needs two of them, and builds its illegal row
 // out of one game's view and the other's entity, view, type, asset or
 // token.
-//
-// Every test takes its own throwaway database from testutil.NewPool, so
-// no test here can be read as passing because of a row another test
-// left behind, and every statement below runs as its own implicit
-// transaction on the pool: a refused statement rolls back only itself.
 type viewGame struct {
 	projectID      string
 	entityTypeID   string

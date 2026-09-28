@@ -1,28 +1,6 @@
 // The layout worker. Spec §5.4: layout runs off the main thread, so a
 // slow layout never freezes the page, the pan/zoom, or a drag already in
 // flight.
-//
-// **This file holds no decisions, and that is its whole design.** It is
-// the one part of this layer no Node harness can drive — a worker needs
-// a browser — so everything that could be wrong lives on the other side
-// of the seam, in compose.js and engine.js, which are pure functions a
-// harness imports directly. What is left here is a message in, one call,
-// a message out. If a future edit finds itself adding a branch to this
-// file, the branch belongs in compose.js instead.
-//
-// It is a **module** worker (`new Worker(url, { type: "module" })`), so
-// it imports the vendored dagre through engine.js with no build step —
-// the second reason the no-build-step rule survives this sub-project.
-// Every import in this graph is by relative path and never by bare
-// specifier: an import map belongs to a *document*, and a worker has
-// none, so `import … from "dagre"` here would fail to resolve at load
-// and the page would see only a worker that never answered. engine.js's
-// header says the same thing where the imports actually are.
-//
-// The budget is not enforced here. A worker cannot reliably interrupt
-// its own synchronous layout, so the deadline is the page's: budget.js's
-// supervisor races this worker against a timer and calls `terminate()`,
-// which is the only thing that actually stops a dagre run.
 
 import { layoutView } from "./compose.js";
 

@@ -15,10 +15,6 @@ import (
 // is only useful under: the same tree packs to the same bytes, so an
 // agent that has already downloaded a version can skip the next
 // download.
-//
-// Mutation that proves it bites: set the entry header's Modified to
-// time.Now() in zipTree (or build the entry with w.Create, which does
-// exactly that) and this test fails on the second call.
 func TestTheZipIsByteIdenticalAcrossCalls(t *testing.T) {
 	first, err := Zip()
 	assert.Must(t, err == nil, "Zip: %v", err)
@@ -36,10 +32,6 @@ func TestTheZipIsByteIdenticalAcrossCalls(t *testing.T) {
 // bundle_version worth anything is that two *builds*, days apart, of the
 // same tree agree — which is a property of the stored stamp, not of two
 // calls in one process.
-//
-// Mutation that proves it bites: set Modified: time.Now() on the header
-// in zipTree; this test fails naming the entry and the year, while the
-// byte-equality test stays green.
 func TestTheZipCarriesNoBuildTimestamp(t *testing.T) {
 	archive, err := Zip()
 	assert.Must(t, err == nil, "Zip: %v", err)
@@ -100,10 +92,6 @@ func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 // TestTheVersionHashIsLengthPrefixed is the assertion that would be
 // missing if the test only checked that the real bundle hashes stably,
 // which is true under a broken hash too.
-//
-// Mutation that proves it bites: drop the length prefixes from hashTree
-// (write the path and the body straight into the digest) and the two
-// trees below hash identically.
 func TestTheVersionHashIsLengthPrefixed(t *testing.T) {
 	left, err := hashTree(fstest.MapFS{"ab": &fstest.MapFile{Data: []byte("c")}})
 	assert.Must(t, err == nil, "hashTree: %v", err)
@@ -129,10 +117,6 @@ func TestTheVersionMovesWhenOneByteMoves(t *testing.T) {
 // a set of mutated trees both ways and asserts the partitions agree: no
 // two trees may pack to different archives and hash the same, and none
 // may pack identically and hash apart.
-//
-// Mutation that proves it bites: make zipTree skip a path (say, one
-// ending in ".md"); two trees differing only in skill.md then pack
-// identically while hashing apart, and this test names the pair.
 func TestTheVersionMovesWheneverTheZipDoes(t *testing.T) {
 	trees := map[string]fs.FS{
 		"as it ships":       Files(),

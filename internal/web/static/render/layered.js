@@ -1,61 +1,5 @@
 // The `layered` renderer: the same node vocabulary as `graph`, arranged
 // in ranks, and honest about the edges it had to draw backwards.
-//
-// A renderer is a **pure function from an envelope to a scene** — the
-// rule render/graph.js's header sets out, and everything in it applies
-// here: no DOM, no fetch, no colour decision, no SVG. What is new is
-// what this renderer is *for*, and it is the negative half.
-//
-// **Its consumption note says "expected mostly acyclic".** A progression
-// with a cycle is data the metamodel permits and a designer can very
-// easily author — `a` unlocks `b`, `b` unlocks `c`, `c` unlocks `a` — and
-// a ranked drawing of it is only possible because something reversed an
-// edge. A picture that quietly reversed an arrow would be exactly the
-// wrong-picture-that-looks-right this product keeps guarding against: it
-// would show `c` as a prerequisite of `a` and be, in the one place a
-// designer looks, a lie. So:
-//
-//   the arrowhead stays in the relation's **true** direction, which
-//     means a line that runs backwards up the picture,
-//   the line carries a **double-slash** (render/marks.js), the
-//     map-maker's mark for a break,
-//   and the frame says how many edges run against the ranking and
-//     whether the graph has a cycle (render/scene.js's footer).
-//
-// The frame's sentence is deliberately **not an analysis claim**. It
-// does not name the nodes in the cycle and it never says "unreachable":
-// this is a drawing artefact, honestly reported, and the analysis
-// sub-project owns the real answer. Naming a cycle properly means
-// naming *which* cycle, and a renderer that guessed would be inventing
-// a result the product has not computed.
-//
-// **The captions differ by parameter, and that is the reason the
-// parameter exists.** `rank_by: "edges"` ranks by the longest path
-// through the graph, and the only caption that answers is the rank
-// index. `rank_by: "level"` ranks by a number the game itself declares,
-// and the caption is that **value** — a band labelled `22` is worth
-// something to a designer where a band labelled `3` is not. One
-// implementation cannot tell those apart, which is why there are two
-// tests for it.
-//
-// **What it draws when the answer is not a clean one:**
-//
-//   an edge that runs against the ranking — its true arrowhead and a
-//     double-slash, counted in the frame.
-//   a node whose numeric rank slot is absent — a trailing **unranked**
-//     band, captioned, at the end, and the box is dashed
-//     (render/marks.js's one spelling for "something this box needs is
-//     not here"). Never rank zero, where it would read as a starting
-//     point of the progression.
-//   an edge that leaves the picture — a stub, exactly as `graph` draws
-//     one, counted in the footer.
-//   a relation from an entity to itself — counted, not drawn: this
-//     vocabulary has no curved mark and Task 7's rule is that the
-//     renderer which adds one adds the drag layer's reshaping answer
-//     with it.
-//   a node with no position — not drawn, named in `unplaced`.
-//   a truncated answer — what an untruncated one draws. The envelope
-//     says a cap was hit and not which node lost a neighbour.
 
 import { addressOf } from "../address.js";
 import { labelFor } from "../palette.js";
@@ -110,11 +54,6 @@ export const BAND_MARGIN = 24;
 // which is the half internal/views/renderers.go deliberately does not
 // carry: its `Doc` describes what a query must produce, written for an
 // agent (render/controls.js's own header has the argument).
-//
-// `rank_by`'s is the one that matters most here. The catalogue says it
-// takes `"edges"` or a number field key; what a designer needs to know
-// is that the choice changes the **caption on every band**, which is the
-// whole reason to reach for the second form.
 export const CONTROLS = [
   control(
     PARAM_RANK_DIRECTION,
@@ -152,20 +91,6 @@ export const CONTROLS = [
 // --- What the layout is asked for ------------------------------------
 
 // layeredLayoutRequest is the request the worker runs.
-//
-// **The engine is asked for the arrangement across the ranks, and this
-// module decides the ranks themselves.** That split is not an
-// implementation convenience: `rank_by` naming a number field means the
-// *game* states the layer, and no graph algorithm can be asked for it —
-// while the order of the nodes within a layer, which is what keeps edges
-// straight, is exactly what a ranked engine is good at. So dagre lays
-// the graph out with `rankdir` from `rank_direction`, and layeredScene
-// keeps its cross-axis coordinates and replaces its along-axis ones with
-// this module's own bands.
-//
-// The boxes are measured here with the same `boxFor` that draws them,
-// for render/graph.js's reason: two measurements would put a label
-// outside the box the layout reserved for it.
 export function layeredLayoutRequest(envelope, params = {}) {
   const nodes = nodesOf(envelope);
   const options = readParams(params);
@@ -186,32 +111,12 @@ export function layeredLayoutRequest(envelope, params = {}) {
 
 // ranksFor is the whole of the parameter's meaning: which band each node
 // is in, what each band is called, and whether the graph has a cycle.
-//
-// Two policies, and they produce different captions on purpose.
-//
-//   "edges" — the longest path through the drawn relations. A node's
-//     rank is one past the deepest of its prerequisites, which is the
-//     rank a reader of a progression means. The caption is the index,
-//     because there is nothing else to say about band 3.
-//   a number field — the value itself, ascending, one band per distinct
-//     value. The caption is that value.
-//
-// Returns `{bandOf, bands, cyclic}` where `bandOf` maps an address to a
-// band index and `bands` is in drawing order.
 export function ranksFor(nodes, drawn, rankBy) {
   return rankBy === RANK_BY_EDGES ? rankByEdges(nodes, drawn) : rankByField(nodes, drawn, rankBy);
 }
 
 // rankByEdges is the longest path, over the graph with its cycles
 // broken.
-//
-// **Breaking them is where the cycle is discovered**, which is why this
-// function reports it rather than a separate pass: a depth-first walk in
-// address order finds a back edge exactly when the graph has a cycle,
-// and the same walk is what makes the remaining edges a DAG that can be
-// ranked at all. A node is inserted in address order for the layout
-// engine's own reason — the answer must not depend on the order the
-// envelope happened to arrive in.
 function rankByEdges(nodes, drawn) {
   const keys = nodes.map(addressOf).sort(compare);
   const out = new Map(keys.map((key) => [key, []]));
@@ -282,16 +187,6 @@ function rankByEdges(nodes, drawn) {
 
 // rankByField is one band per distinct value of a declared number field,
 // ascending, with the **value** as the caption.
-//
-// A node whose field is absent, or carries something that is not a
-// finite number, goes to a trailing band captioned as unranked. It is
-// last and it is never band zero: at zero it would read as a starting
-// point of the progression, which is a claim about content made out of
-// a missing value.
-//
-// The cycle is still reported, because it is still true and the frame
-// still has to say it: the walk that finds it is the one above, run for
-// its answer and not for its ranking.
 function rankByField(nodes, drawn, field) {
   const values = new Map();
   for (const node of nodes) {
@@ -328,15 +223,6 @@ function rankByField(nodes, drawn, field) {
 // --- The scene -------------------------------------------------------
 
 // layeredScene is the picture.
-//
-// Returns, beyond render/graph.js's own shape:
-//   bands    — one entry per rank, in drawing order, with its caption
-//              and its extent, so a test and the frame read the same
-//              answer the drawing did.
-//   against  — how many drawn edges run backwards through the ranking.
-//   cyclic   — whether the drawn relations contain a cycle at all.
-//   unranked — how many nodes are in the trailing band, which is an
-//              absence and is therefore counted rather than only drawn.
 export function layeredScene(envelope, layout, params = {}) {
   const nodes = nodesOf(envelope);
   const options = readParams(params);
@@ -497,13 +383,6 @@ export function layeredScene(envelope, layout, params = {}) {
 }
 
 // alignBands positions each band's run of boxes across the picture.
-//
-// **Unset is not "center".** Left alone, the boxes keep the coordinates
-// the engine chose, which is what makes an edge between two ranks
-// straight; recentring every band would throw that away to line the
-// bands up. So `align` is an override — a designer who wants the layers
-// flush asks for it — and the default is the arrangement the engine
-// worked for.
 function alignBands(bands, members, align, cross, crossSize) {
   if (align === null) return;
   const all = [];
@@ -573,11 +452,6 @@ function ruleFor(band, extent, along, cross) {
 
 // readParams is the one reader, so a knob spelled wrongly is absent
 // everywhere rather than honoured in half the module.
-//
-// An unrecognised `rank_direction` or `align` is not a picture drawn
-// half-sideways: the server refuses one at save time, so the client that
-// met it would be drawing a view that cannot exist. It falls back to the
-// default, which is what a view saved without the parameter gets.
 function readParams(params) {
   const p = params && typeof params === "object" ? params : {};
   return {
@@ -627,10 +501,6 @@ function labelOf(node) {
 
 // numberOf is a node's value for a declared number field, or null when
 // there is none.
-//
-// `hasOwnProperty` and a finiteness test, not `|| 0`: a field absent and
-// a field carrying 0 are two answers, and the second is a rank zero the
-// game means.
 function numberOf(node, field) {
   const attrs = isObject(node.attrs) ? node.attrs : null;
   if (!attrs || !Object.prototype.hasOwnProperty.call(attrs, field)) return null;

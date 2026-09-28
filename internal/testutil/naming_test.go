@@ -12,25 +12,6 @@ import (
 // TestEveryTestDatabaseNameCarriesItsStamp is a source guard, and it is
 // here because the defect it prevents cannot be seen from inside any one
 // package.
-//
-// internal/testutil's sweep identifies an abandoned test database by the
-// millisecond stamp in its name and drops anything without one, on the
-// reasoning that a name with no stamp predates the stamp and is
-// therefore older than any run in flight. `go test ./...` runs one
-// process per package, so that sweep runs while other packages' tests
-// are using their own databases — and one package built its name without
-// a stamp. Another package's sweep force-dropped it mid-migration, and
-// the failure arrived as "terminating connection due to administrator
-// command" inside a migration, in a package that had nothing to do with
-// the sweep, only under a full-suite run.
-//
-// No test can catch that from where it happens, so the rule is held over
-// the source: **every name that begins maestro_test_ is built with the
-// stamp**. The exception is this package's own files, where the
-// unstamped spelling is a fixture for the parser that reads the stamp.
-//
-// Mutation: drop the `%d` from the name in internal/db's
-// migrate_internal_test.go and this fails naming that file.
 func TestEveryTestDatabaseNameCarriesItsStamp(t *testing.T) {
 	const prefix = `"maestro_test_`
 	const stamped = `"maestro_test_%d_`

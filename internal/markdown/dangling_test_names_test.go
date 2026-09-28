@@ -178,22 +178,6 @@ type citation struct {
 // citedTestNames extracts every Test-shaped identifier from the
 // comments of a source file, given the file's line-comment prefix ("//"
 // or "--").
-//
-// **Long identifiers get hard-wrapped mid-word, with no space and no
-// hyphen** — this package's own comments do it (see
-// internal/db/queries/documents.sql, where one test name spans two "--"
-// lines) — because the wrapping is done by an author holding an 80-odd
-// column budget, not by a tool that knows an identifier from a word. A
-// naive per-line scan reads the two halves as two short, unrelated,
-// nonexistent names and reports both as dangling, which is a false
-// positive this check must not have or nobody will trust its real
-// findings. So: a match that reaches the exact end of its line's comment
-// text is a candidate fragment, and its continuation is pulled off the
-// front of the next comment line, with no separator inserted, mirroring
-// how the split happened in the first place. A citation that ends
-// mid-line, followed by punctuation or more prose on the same line, is
-// never treated as a fragment — a name cited mid-sentence reads its
-// comment line whole.
 func citedTestNames(src, prefix string) []citation {
 	lines := strings.Split(src, "\n")
 	comments := make([]string, len(lines))

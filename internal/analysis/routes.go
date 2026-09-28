@@ -18,68 +18,6 @@ import (
 
 // A route is its own row, and deliberately not a saved view and not a
 // kind of one.
-//
-// The question is fair: `views` is already a table of saved,
-// parameterised, versioned artefacts addressed by (project, key), with
-// events, an expected_version and a dependency index. A route is saved,
-// parameterised, versioned and addressed by (project, key). Four reasons
-// it is still its own table, in the order that decided it:
-//
-//  1. **A view stores a question; a route stores a claim and a verdict
-//     about it.** internal/views caches nothing, on purpose: "nothing is
-//     cached unless it can say when it went out of date", and its own
-//     plan settled (O9) that it adds no design_version because it has no
-//     stored result to invalidate. A route is the exception that rule
-//     names -- last_check, last_checked_at and
-//     last_checked_design_version are a persisted verdict on a named
-//     artefact. Putting that on `views` would give that table a cached
-//     answer four days after its own sub-project argued it must not have
-//     one, and every views query would have to learn a column it never
-//     reads.
-//
-//  2. **A route's payload is authored and ordered; a view's dependency
-//     index is derived and unordered.** view_refs is rebuilt from the
-//     stored query on every upsert -- it can always be recomputed, which
-//     is why a rename is allowed to leave it stale. A route_step cannot
-//     be recomputed from anything: it is content somebody wrote, in an
-//     order that is the whole point, and its foreign key to `entities`
-//     has to survive a deletion as a visible tombstone (ON DELETE SET
-//     NULL plus the stored key). No view_refs row has, or could have,
-//     that lifecycle.
-//
-//  3. **A view is defined by things a route has none of.** renderer,
-//     renderer_params, layout_mode, background_asset_id,
-//     view_positions. Making a route a view means either five columns
-//     and a child table that are meaningless for half the rows, or a
-//     `kind` discriminator that every existing statement, the list
-//     cursor's fingerprint (which keys on the renderer filter) and every
-//     renderer requirement check would have to learn. That is a schema
-//     change to shipped, tested code in exchange for reusing an `id`
-//     column.
-//
-//  4. **Running a view is a read; checking a route is a write.** views.run
-//     is a GET and registerContentRoute leaves it at viewer.
-//     routes.check stores its verdict, so it is a POST and takes the
-//     editor gate. One table whose rows are read-only under one verb and
-//     mutating under another is a permission model with an exception in
-//     it.
-//
-// What the two **do** share is deliberately shared and not duplicated:
-// the reachability closure in reach.go (which views' own O8 assigned
-// here), internal/paging for the listing cursor, metamodel.RemovedError
-// for a version claim against a row that is gone, and the
-// (project, key) addressing every row in this product uses.
-//
-// And one thing a route gives back to the rest of the engine: because a
-// route is an ordered list of this game's entities, it is also a **seed
-// set** (spec open question 2), which is why analysis.unreachable takes
-// `seed_route` and why no start_sets table exists.
-
-// The bounds on a route's own prose. They are internal/views' and
-// internal/metamodel's, deliberately: a route's name is the same kind of
-// value as a view's name -- one line in a picker, ordered by a listing --
-// and its description is the same kind of prose. A third number would be
-// a third cap a designer meets for one shape of text in one product.
 const (
 	// MaxRouteNameLen bounds `name`, which is required: ListRoutes
 	// orders by it, so an unnamed route sorts to the front of every list
@@ -106,30 +44,10 @@ const noRouteVersion int32 = -1
 
 // createRouteVersion is the `expected_version` that spells "this route
 // must not exist yet".
-//
-// It is 0 because this surface takes internal/views' and
-// internal/markdown's convention rather than internal/metamodel's
-// absent-means-create, and it is named rather than written as a bare `0`
-// where the literal would read as a version number and is in fact the
-// opposite of one: no stored route is ever at version 0, so this value
-// can only mean "I am creating".
 const createRouteVersion int32 = 0
 
 // RouteParams is the route's own definition of what "holding together"
 // means: the reachability question a check asks about it.
-//
-// **A route carries its own parameters so that two people checking one
-// route get one answer.** A verdict computed under the caller's defaults
-// would mean something different depending on who ran it, which is
-// precisely the "two people analysing one game getting different answers
-// for reasons neither can see" that stored routes exist to end.
-//
-// It is validated at write time against the same bounds
-// analysis.unreachable applies, and
-// TestRouteParamsAreValidatedAtWriteTimeAndNotOnlyAtCheckTime is what
-// makes that a decision rather than a paragraph: a route whose `gate` is
-// nonsense is refused by routes.upsert, at `/params/gate`, rather than
-// being stored and failing every check from then on.
 type RouteParams struct {
 	// Gate is `any` (the default) or `all`. It is spelled `gate` on the
 	// wire and resolves to reach.Params.Gating, which is the same value
@@ -145,13 +63,6 @@ type RouteParams struct {
 	// SeedEntities and SeedEntityTypes are start points the route's own
 	// steps do not supply -- a character creation screen, say, that
 	// nobody would list as a step of a levelling route.
-	//
-	// They are bounded here and **resolved at check time**, not at write
-	// time. A step is resolved on write because a step is the claim
-	// itself and a route authored out of typos must not be told it
-	// holds; a seed is a parameter of the question, and refusing to save
-	// a route because a seed entity has since been deleted would make
-	// the parameters harder to fix than to abandon.
 	SeedEntities    []SeedRef `json:"seed_entities,omitempty"`
 	SeedEntityTypes []string  `json:"seed_entity_types,omitempty"`
 
@@ -163,14 +74,6 @@ type RouteParams struct {
 
 // Reach turns a route's stored parameters into the closure's own
 // arguments, which is the one place the two spellings meet.
-//
-// It exists so routes.check cannot quietly compute under the caller's
-// defaults: there is exactly one conversion and it reads every stored
-// field. A field added to RouteParams and not added here would be the
-// write-only-column defect in its route-shaped form, which is what
-// TestARouteReadsBackEverythingItWasWrittenWith and Task 10's
-// TestARouteChecksUnderItsOwnStoredParamsAndNotTheCallersDefaults exist
-// to catch from their two ends.
 func (p RouteParams) Reach(projectID uuid.UUID) Params {
 	return Params{
 		ProjectID:            projectID,
@@ -193,19 +96,6 @@ type RouteStepInput struct {
 }
 
 // RouteInput is one route upsert, addressed by its key.
-//
-// ExpectedVersion is **required**: 0 to create a route that must not
-// exist yet, or the version read. Omitting it is invalid_input and not a
-// guess, because the guess a caller would want depends on whether the
-// route exists and that is the very thing it is asserting.
-//
-// A non-nil, non-zero ExpectedVersion against a route this game does not
-// have is a metamodel.RemovedError -- not_found saying it was removed --
-// rather than a quiet creation. The reason is stronger here than where
-// that error was written: a route's last_check, its
-// last_checked_design_version and every one of its step rows hang off
-// the route's id, so a re-creation under a new id would discard a
-// designer's proved progression *and* its proof, and answer success.
 type RouteInput struct {
 	Key             string
 	Name            string
@@ -218,12 +108,6 @@ type RouteInput struct {
 
 // RouteStep is one step as it is read back: the stored address, the
 // resolved id, and the note.
-//
-// **EntityID is nil for a tombstone** -- the entity was deleted and
-// 0013_analysis.sql's ON DELETE SET NULL kept the step, visibly, with
-// its keys. The keys are never rewritten by a rename either
-// (internal/metamodel/rename.go is the authority), so the stored
-// spelling is what a check reports as moved.
 type RouteStep struct {
 	Position   int32      `json:"position"`
 	EntityID   *uuid.UUID `json:"entity_id"`
@@ -241,13 +125,6 @@ type RouteStep struct {
 
 // RouteStatus is the three-state health of a route, and the three are
 // **three**, not a boolean with a null.
-//
-// "Never checked" is a different fact from "checked, and the design has
-// moved since", which is a different fact from "checked against this
-// design". Collapsing any pair of them either alarms a designer wrongly
-// or reassures them wrongly, and an empty answer satisfies any assertion
-// -- which is why TestANeverCheckedRouteIsNeitherStaleNorHealthy pins
-// all three in one test rather than two of them in two.
 type RouteStatus string
 
 const (
@@ -281,12 +158,6 @@ type Route struct {
 	Steps       []RouteStep `json:"steps"`
 
 	// Status is the three-state health, decided against DesignVersion.
-	//
-	// **There is no separate `stale` boolean beside it.** Stale is one
-	// of the three states, and shipping a status *and* a boolean derived
-	// from it is one fact spelled twice, which a later edit drifts apart
-	// -- the defect this repository keeps producing, in its smallest
-	// form. A caller that wants the boolean compares against RouteStale.
 	Status RouteStatus `json:"status"`
 
 	// LastCheck is the stored verdict as routes.check wrote it, and it
@@ -305,13 +176,6 @@ type Route struct {
 
 // RouteSummary is one row of a listing: enough to pick a route and to
 // see its health, and **no step list and no stored verdict**.
-//
-// That mirrors ListViewsPage's discipline about not shipping query
-// documents in a listing, and it has the same justification: a listing
-// answers "what is here and what needs attention", a route's steps and
-// its proof are what routes.get is for, and a listing that carried them
-// would grow without bound in the length of the routes rather than in
-// their number.
 type RouteSummary struct {
 	Key         string      `json:"key"`
 	Name        string      `json:"name"`
@@ -322,12 +186,6 @@ type RouteSummary struct {
 }
 
 // RoutePage is one page of routes plus the cursor for the next.
-//
-// **NextCursor is set when the page came back full**, and empty
-// otherwise, so a caller looping until it is empty is correct and must
-// expect a final empty page rather than treating one as an error. The
-// rest of the contract is paging.Cursor's. Cursor.Sort, for this
-// listing, is the route's name.
 type RoutePage struct {
 	Routes     []RouteSummary `json:"routes"`
 	NextCursor string         `json:"next_cursor,omitempty"`
@@ -343,18 +201,6 @@ const (
 
 // UpsertRoute creates or replaces a route, addressed by its key, and
 // **replaces its whole step list**.
-//
-// Steps are positional, and rewriting them wholesale is simpler for an
-// agent than diffing a list whose every index moves when one step is
-// inserted. The rewrite is DELETE-then-INSERT inside the same
-// transaction as the route row's compare-and-set, so a step list never
-// lands beside a route row that rolled back.
-//
-// **A step's keys are resolved to an entity id before anything is
-// stored, and a key that does not resolve is not_found naming the step's
-// position and its key.** It is not stored as a tombstone: a tombstone
-// is what a *deletion* leaves behind, and accepting one on write would
-// let an agent author a route out of typos and be told it holds.
 func (s *Service) UpsertRoute(ctx context.Context, projectID uuid.UUID, in RouteInput) (
 	Route, error,
 ) {
@@ -489,11 +335,6 @@ type resolvedStep struct {
 
 // resolveSteps turns each (entity type key, entity key) pair into an
 // entity id of **this game**, through the metamodel's own scoped lookup.
-//
-// A key that resolves to nothing is not_found naming the step's position
-// and its key -- never dropped, never stored as a tombstone. A route
-// silently missing the step an agent typed wrongly is a proof of a
-// progression the agent never described.
 func (s *Service) resolveSteps(ctx context.Context, projectID uuid.UUID, steps []RouteStepInput) (
 	[]resolvedStep, error,
 ) {
@@ -511,11 +352,6 @@ func (s *Service) resolveSteps(ctx context.Context, projectID uuid.UUID, steps [
 }
 
 // writeSteps replaces one route's whole step list.
-//
-// Delete-then-insert rather than a diff, for writeRefs' reason and one
-// of its own: positions are dense and every one of them moves when a
-// step is inserted, so a diff would rewrite most rows anyway and would
-// be a second place that decides what a step is.
 func writeSteps(ctx context.Context, q *dbq.Queries, projectID, routeID uuid.UUID,
 	steps []resolvedStep,
 ) error {
@@ -542,11 +378,6 @@ func writeSteps(ctx context.Context, q *dbq.Queries, projectID, routeID uuid.UUI
 
 // RouteByKey loads one route by its key, matched without regard to case,
 // with its steps and its three-state status.
-//
-// A missing key is named rather than reported as a bare sentinel,
-// because the caller supplied this key and it is the one thing it can
-// act on -- the same split internal/views draws between ViewByKey and
-// ViewByID.
 func (s *Service) RouteByKey(ctx context.Context, projectID uuid.UUID, key string) (Route, error) {
 	row, err := s.q.GetRouteByKey(ctx, dbq.GetRouteByKeyParams{ProjectID: projectID, Key: key})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -616,32 +447,6 @@ func (s *Service) routeFromRow(ctx context.Context, projectID uuid.UUID, row dbq
 // routeStatus is the three-state decision, written once because two
 // readers ask it -- routes.get and the listing -- and a status decided
 // twice is a status two callers can disagree about.
-//
-// **The counter is coarse and that is accepted.** Any write anywhere in
-// the game moves design_version, so a typo fixed in one entity's
-// description marks every route in the game stale. The alternative is a
-// per-route dependency set maintained on every write, which would be
-// wrong the moment a *new* relation makes a previously irrelevant entity
-// relevant -- and a staleness signal that is subtly wrong is worse than
-// one that is bluntly right, because re-checking is cheap and believing
-// a stale green is not.
-//
-// **Two clocks, not one, and the second is not decoration.**
-// design_version answers "has the game changed under this verdict"; it
-// cannot answer "has the *route* changed under it", because `routes` is
-// deliberately not one of the four tables the triggers watch -- a check
-// that marked every route in the game stale, including the one it had
-// just checked, would be a mechanism that invalidates its own output
-// (0013_analysis.sql argues it). So a route whose steps were rewritten
-// after its last check would otherwise read as `checked`: a verdict
-// about a claim nobody makes any more, presented as green. That is the
-// stale-green this whole design exists to prevent, arriving through the
-// one door design_version does not watch. updated_at against
-// last_checked_at closes it, with no new column and no trigger:
-// routes_set_updated_at already moves the first on every write to the
-// row, and every upsert writes the row because it advances the version.
-// TestEditingARouteMakesItsOwnVerdictStale is that half; the design half
-// is TestANeverCheckedRouteIsNeitherStaleNorHealthy.
 func routeStatus(checkedAt *time.Time, updatedAt time.Time,
 	checkedVersion *int64, current int64,
 ) RouteStatus {
@@ -658,9 +463,6 @@ func routeStatus(checkedAt *time.Time, updatedAt time.Time,
 }
 
 // ListRoutes returns one page of a game's routes.
-//
-// **A page is a position, not a snapshot**; paging.Cursor records what
-// that means while the game is being edited underneath the caller.
 func (s *Service) ListRoutes(ctx context.Context, projectID uuid.UUID, cursor string, limit int32) (
 	RoutePage, error,
 ) {
@@ -704,21 +506,6 @@ func (s *Service) ListRoutes(ctx context.Context, projectID uuid.UUID, cursor st
 }
 
 // routeListingFingerprint digests the listing a cursor was issued under.
-//
-// **The project id is first and the domain discriminator is second.**
-// Without the project id two games' listings share a fingerprint and one
-// game's cursor pages the other's rows from a position that means
-// nothing there -- the defect internal/paging's package comment records.
-// Without "routes", a cursor from this listing and one from another
-// domain's listing over the same game would be interchangeable, and each
-// would page the other perfectly and answer a different question.
-//
-// This listing takes no filter, so the digest has only two parts, and
-// that is exactly why it is asserted compositionally as well as
-// behaviourally: with no filter to discriminate, the behavioural test
-// rests on the project id alone, and
-// TestTheRouteListingFingerprintIsProjectIdFirstAndCarriesItsDomain is
-// what pins the order rather than the mere fact of a difference.
 func routeListingFingerprint(projectID uuid.UUID) string {
 	return paging.Fingerprint(projectID.String(), "routes")
 }
@@ -739,20 +526,6 @@ func checkedAt(at pgtype.Timestamptz) *time.Time {
 func refuseRouteCursor(message string) error { return invalidInput("cursor", message) }
 
 // RemoveRoute deletes a route and, through ON DELETE CASCADE, its steps.
-//
-// **It takes an expected_version, and that is the opposite of what
-// views.remove does.** internal/views argues that a view is derived
-// content, cheap to re-upsert from a document the caller already holds,
-// so requiring a version there would make every removal a read-then-write
-// against churn the caller does not care about. A route inverts both
-// halves of that argument: its steps are *authored*, in an order that is
-// the whole point, and its stored verdict is not reconstructible at all
-// -- somebody proved a progression and the proof goes with the row. So
-// the inversion is stated here rather than left to be read as an
-// omission by someone who has just read views.remove.
-//
-// TestRemovingARouteRequiresTheVersionAndSaysWhy asserts the refusal and
-// that the message names what would be lost.
 func (s *Service) RemoveRoute(ctx context.Context, projectID uuid.UUID, key string,
 	expectedVersion *int32,
 ) error {
@@ -829,12 +602,6 @@ func routeKeyRespellingError(requested, stored string) error {
 
 // problems judges a route's stored parameters against the same bounds
 // analysis.unreachable applies to the same arguments.
-//
-// **They are judged on write and not only on check**, which is the whole
-// of Step 2's `params` decision: a route whose gate is nonsense is a
-// route every check from now on will refuse, and the caller who can fix
-// it is the one writing it. The paths are the pointer into the stored
-// document, so a caller is told which member of which object to change.
 func (p RouteParams) problems() []metamodel.FieldError {
 	var problems []metamodel.FieldError
 	switch p.Gate {
@@ -876,12 +643,6 @@ func (p RouteParams) problems() []metamodel.FieldError {
 }
 
 // stepProblems bounds the step list itself.
-//
-// **At most MaxRouteSteps, refused and not clamped.** A route silently
-// truncated to five hundred steps is a proof of a progression that stops
-// halfway and says it holds, which is the worst thing a stored verdict
-// can be. The refusal names the count and the cap so a caller can split
-// the route rather than guess.
 func stepProblems(steps []RouteStepInput) []metamodel.FieldError {
 	var problems []metamodel.FieldError
 	if len(steps) > MaxRouteSteps {
@@ -927,15 +688,6 @@ func routeNameProblems(name string) []metamodel.FieldError {
 
 // storableText is internal/views' checkStorableText, over the metamodel's
 // two exported primitives rather than over a copy of its rules.
-//
-// It is written here rather than imported because internal/views and
-// internal/analysis may not import each other -- the seam views' own O9
-// settled -- and the shared half is already as low as it goes:
-// metamodel.LengthProblem counts characters rather than bytes and
-// metamodel.CheckText finds the control character. What is local is the
-// one asymmetry: a description is prose and a newline in it is the
-// author's paragraph break, while a name is one line in a picker and a
-// newline there is refused like any other control character.
 func storableText(value string, max int, allowParagraphs bool) string {
 	if problem := metamodel.LengthProblem(value, max); problem != "" {
 		return problem

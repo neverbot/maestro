@@ -14,13 +14,6 @@ import (
 
 // seedViews saves n views under keys view0…viewN-1, all sharing one
 // name so the (name, id) keyset is the only thing that orders them.
-//
-// **One name for every row is the point.** With distinct names a keyset
-// that compared name alone, or that sorted by name alone, pages
-// perfectly: the defect only shows where rows tie, and duplicate names
-// are ordinary in game content ("Elwynn" as a map and as a quest list).
-// internal/metamodel found exactly this — dropping `id` from its own
-// ORDER BY left its whole suite green until a fixture shared one name.
 func (g *game) seedViews(t *testing.T, n int, name, renderer string) []uuid.UUID {
 	t.Helper()
 	ids := make([]uuid.UUID, 0, n)
@@ -48,11 +41,6 @@ func TestListArea(t *testing.T) {
 	// case pages a listing whose rows all share one name, three at a time, and
 	// asserts the walk sees each row exactly once and in the order the
 	// statement sorts by.
-	//
-	// Seven rows and a page of three, rather than two rows and a page of
-	// one: a two-row fixture cannot distinguish any paging policy at all —
-	// "the second page starts after the first row" is true of a keyset, of
-	// an offset, and of an implementation that returns the tail every time.
 	t.Run("a view listing walks every row once in its sort order", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -94,11 +82,6 @@ func TestListArea(t *testing.T) {
 
 	// TestListArea's "the renderer filter narrows the listing and the cursor
 	// goes with it" case.
-	//
-	// The second half is the one worth having: every filter of a listing
-	// shares one sort order, so a cursor carried from the unfiltered listing
-	// into the filtered one would page perfectly and answer a different
-	// question.
 	t.Run("the renderer filter narrows the listing and the cursor goes with it", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -131,14 +114,6 @@ func TestListArea(t *testing.T) {
 	// TestListArea's "a cursor from another game is refused by the view
 	// listing" case is the behavioural half of the fingerprint's
 	// project-id-first rule.
-	//
-	// It is deliberately taken with the *same* filter in both games, because
-	// that is the only shape in which the project id is what discriminates:
-	// with different filters the renderer part of the fingerprint would
-	// refuse the cursor on its own, and the test would pass with the project
-	// id gone. Which is exactly how the original defect in internal/paging
-	// survived its first test — hence the compositional test below, which
-	// this one cannot replace.
 	t.Run("a cursor from another game is refused by the view listing", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
@@ -162,10 +137,6 @@ func TestListArea(t *testing.T) {
 	// TestListArea's "the view listing fingerprint is project id first and
 	// carries its domain" case is the compositional half, asserting the exact
 	// ordered argument list.
-	//
-	// **The behavioural test can pass without the project id** whenever
-	// another part discriminates — here the renderer filter does — and that
-	// is precisely how the original defect survived its first test.
 	t.Run("the view listing fingerprint is project id first and carries its domain", func(t *testing.T) {
 		projectID := uuid.New()
 		got := viewListingFingerprint(projectID, ViewFilter{Renderer: "graph"})

@@ -56,16 +56,6 @@ func listOfMembers(names []string) string {
 
 // unknownMembers is every top-level member of the body that the target
 // has no field for, in the order they appear.
-//
-// It exists because encoding/json's DisallowUnknownFields reports the
-// first one and stops, and this surface promises the whole list. It
-// compares against the struct's own `json` tags rather than a list
-// written by hand, so a renamed field cannot make this quietly wrong,
-// and it only ever runs on a request that is already being refused.
-//
-// Nested members are not walked: a nested object is a field whose own
-// type the decoder checks, and a caller told which top-level member is
-// wrong can find the rest with the same trick this list is teaching.
 func unknownMembers(body []byte, target any) []string {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -180,19 +170,6 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	// A member no input on this surface has is refused, never dropped.
-	//
-	// encoding/json's default is to discard what it does not recognise,
-	// and that default is the wrong one everywhere here: a caller that
-	// sent `layotu_mode` is told its write succeeded, with the mode it
-	// asked for silently not applied, and a caller that sent an argument
-	// the server used to take -- the per-view layout seed removed in
-	// Task 17 -- is told the same, which is worse: it had a meaning once.
-	// The MCP surface has refused this from the first day,
-	// for free: the SDK infers `additionalProperties: false` from the Go
-	// struct, so a member that is not a field is a schema violation
-	// before any handler runs. This is the same rule on the other path,
-	// which is where this project's recurring defect lives.
-	// TestNoSurfaceAcceptsALayoutSeed drives one removed member at both.
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -240,12 +217,6 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 			// caller is told neither where nor what was expected —
 			// while every other refusal on the game-content surface
 			// names its own path.
-			//
-			// Field is empty when the whole body was the wrong shape (a
-			// list, a bare string): there is no path to name then, and
-			// naming none is right, but the answer still has to say
-			// what was wrong rather than call well-formed JSON
-			// malformed.
 			if wrongType.Field == "" {
 				writeError(w, http.StatusBadRequest, errCodeBadRequest,
 					"the request body must be "+jsonBodyTypeName(wrongType.Type)+", not "+wrongType.Value)
@@ -300,16 +271,6 @@ func unknownFieldName(err error) (string, bool) {
 
 // wrongTypeProblem says what was wrong with a value encoding/json
 // refused, in the caller's own vocabulary.
-//
-// The number case is why this is a function rather than a
-// concatenation. encoding/json sets UnmarshalTypeError.Value to
-// "number <literal>" when the JSON kind was right and the value was
-// not — 999999999999 into an int32, or 1.5 into any integer — so
-// "must be " + jsonTypeName + ", not " + Value produced "must be a
-// number, not number 999999999999": it leaks the library's own wording
-// and, worse, denies that a number is one. What is actually wrong there
-// is the width or the fraction, so that is what the answer says, with
-// the field's real bounds in it.
 func wrongTypeProblem(e *json.UnmarshalTypeError) string {
 	literal, isNumber := strings.CutPrefix(e.Value, "number ")
 	if lo, hi, bounded := integerBounds(e.Type); isNumber && bounded {
@@ -362,10 +323,6 @@ func integerBounds(t reflect.Type) (int64, int64, bool) {
 // name it, because that is the vocabulary the caller is writing in: a
 // client that sent a string for `expected_version` is helped by "must be
 // a number", not by "must be int32".
-//
-// Anything this list does not recognise is called "a value" rather than
-// guessed at — a wrong name is worse than no name, and the field path is
-// the part that does the work.
 func jsonTypeName(t reflect.Type) string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -488,14 +445,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 // makes retrying harder) would be actively misleading. The client sees
 // 500 and can retry; the cookie is only cleared once revocation actually
 // happened, or there was nothing to revoke in the first place.
-//
-// Revocation is only ever checked at request admission, here and in
-// authenticate (internal/web/auth.go) — it does not, and structurally
-// cannot, tear down a connection that is already open. A long-lived
-// handler that keeps a session's connection alive past this check (the
-// SSE stream Task 14 adds) will not notice a logout that happens after it
-// accepted the connection; that handler has to design around it on its
-// own terms (see authenticate's own doc comment on this same limitation).
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(SessionCookie); err == nil {
 		if err := s.opts.Identity.RevokeSession(r.Context(), cookie.Value); err != nil {
@@ -527,16 +476,6 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// oracle on top: the response distinguishes an out-of-domain address
 	// from a malformed one from a taken one from success, on two branches
 	// neither of which requires a credential to reach.
-	//
-	// One IP-keyed budget, checked once here rather than duplicated per
-	// branch, covers both. It stays IP-only rather than pairing with a
-	// second key the way handleLogin's email+IP pair does: unlike login,
-	// req.Email here never names an *existing*, attacker-targetable
-	// account whose budget could be spent out from under its owner — the
-	// self-service branch is creating a brand new account, and the invite
-	// branch's real credential is the token, not the email (see the
-	// invite-branch comment below, and Task 6 Correction 10, for why the
-	// token itself is never the limiter key).
 	ip := s.clientIP(r)
 	if !s.registerIPLimiter.Allowed(ip) {
 		writeError(w, http.StatusTooManyRequests, errCodeRateLimited, "too many attempts, wait a minute")
@@ -556,19 +495,6 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		// granted membership in a second game through the invite
 		// surface at all — verified live, and the whole reason this
 		// branch exists (Task 21's Round 2 review).
-		//
-		// CallerFrom, not anything from the request body, decides which
-		// path runs, and the id passed to RedeemInviteForExistingUser is
-		// caller.UserID — resolved server-side from the session cookie
-		// by authenticate (auth.go), which already ran for this request
-		// even though handleRegister itself is not wrapped in
-		// requireCaller. Nothing here ever reads an id or an email out
-		// of req for this purpose: doing so would let redeeming an
-		// invite grant somebody else's account the membership instead
-		// of the caller's own. A bearer-token caller does not qualify —
-		// IsToken() — since an API token authenticates an agent scoped
-		// to one game's content, not a person who could plausibly be
-		// "already logged in" in the sense this branch means.
 		if caller, ok := CallerFrom(r.Context()); ok && !caller.IsToken() {
 			result, err := s.opts.Identity.RedeemInviteForExistingUser(r.Context(), req.InviteToken, caller.UserID)
 			if err != nil {
@@ -749,38 +675,6 @@ func (s *Server) behindTrustedProxy() bool {
 }
 
 // clientIP extracts the request's source IP for rate-limiting purposes.
-//
-// With Config.TrustedProxyCount at its default of zero (a directly exposed
-// instance), this reads only r.RemoteAddr and never consults
-// X-Forwarded-For: that header is attacker-controlled on a direct
-// connection, and trusting it here would let a caller pick their own
-// rate-limit key, reopening exactly the "attacker picks their own key"
-// problem Correction 10 fixed for invite redemption.
-//
-// Maestro is, however, commonly deployed behind a reverse proxy — and
-// there, RemoteAddr is the proxy's own address on every single request.
-// Leaving TrustedProxyCount at zero in that deployment does not merely
-// fail to identify individual clients: it collapses every caller on the
-// instance into one shared rate-limit bucket keyed on the proxy's
-// address, so ten requests from anyone exhausts the invite, register or
-// login-IP budget for everyone else until the window rolls — a denial of
-// onboarding (and of login) that is worse than having no limiter at all.
-// An operator running behind N trusted reverse proxies must set
-// TRUSTED_PROXY_COUNT=N for this method to see through them to the real
-// client; the zero-value default is safe only for an instance reachable
-// directly, and is not a "conservative" choice that happens to also work
-// behind a proxy.
-//
-// When TrustedProxyCount is positive, this trusts exactly that many
-// rightmost entries of X-Forwarded-For as having been appended, in order,
-// by that many trusted hops (never removed or reordered), and reads the
-// entry immediately to their left as the real client — the standard
-// "N trusted hops" interpretation, matching how each hop is expected to
-// append the address it directly observed. If the header carries fewer
-// entries than TrustedProxyCount — a misconfiguration, or a hop that
-// failed to set it — there is no entry that can be trusted as the real
-// client, so this falls back to RemoteAddr (the nearest trusted hop's own
-// address) rather than guessing.
 func (s *Server) clientIP(r *http.Request) string {
 	if n := s.opts.Config.TrustedProxyCount; n > 0 {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

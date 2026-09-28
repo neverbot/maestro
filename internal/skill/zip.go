@@ -22,24 +22,6 @@ func Zip() ([]byte, error) {
 }
 
 // Version is the bundle's content hash: "sha256:" followed by hex.
-//
-// It hashes the *tree*, not the zip, and it length-prefixes every path
-// and every body before hashing them. Without the prefixes, a file
-// "ab" holding "c" and a file "a" holding "bc" hash identically, which
-// is the classic concatenation collision. Computed once, lazily, under
-// a sync.Once: the tree cannot change while the process runs.
-//
-// Hashing the tree rather than the zip bytes is only honest because the
-// zip is a pure, deterministic function of the tree and holds exactly
-// it: zipTree writes every path the walk finds, in sorted order, with
-// the file's bytes and nothing else derived from the host. Two tests pin
-// that equivalence rather than leaving it as a claim —
-// TestTheZipHoldsExactlyTheTree reads the archive back and compares it
-// entry by entry against the tree, and TestTheVersionMovesWheneverTheZipDoes
-// partitions a set of mutated trees by zip bytes and by version and
-// asserts the two partitions agree. Without them this hash could go on
-// covering a tree whose packing had started dropping, reordering or
-// rewriting files, which is a hash over bytes nobody is served.
 func Version() string {
 	versionOnce.Do(func() {
 		sum, err := hashTree(Files())

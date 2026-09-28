@@ -396,17 +396,6 @@ func TestDocumentsArea(t *testing.T) {
 
 	// Two creations of the same path race with nothing to lock, so the
 	// guarded upsert is the only thing that can refuse one of them.
-	//
-	// **It is staged rather than run as two goroutines, and that is the
-	// point.** The goroutine version of this test (and of the one above)
-	// almost never produces a real overlap — each writer acquires a
-	// connection and opens its own transaction first — so with two
-	// unsynchronised goroutines the second writer's locked read simply finds
-	// the committed row and the Go check refuses it, leaving the SQL guard
-	// unexercised: changing `=` to `>=` in UpsertDocument, or deleting the
-	// guard outright, left the whole suite green. Holding an uncommitted
-	// insert open is what forces the writer down the path where nothing but
-	// the guard stands between two creations.
 	t.Run("the guarded upsert is what refuses a creation that raced another", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -460,11 +449,6 @@ func TestDocumentsArea(t *testing.T) {
 	// A creation that loses to a racing creation *under a different
 	// spelling* is told the spelling, not a version conflict: the version is
 	// not the caller's problem here and merging onto it would not help.
-	//
-	// This is the path the plan expected the post-write `row.Path != in.Path`
-	// check in writeWith to cover. It does not — see writeWith's comment for
-	// why that check was unreachable — conflictAfterFailedUpsert's own
-	// re-read is what covers it, and this is the test that pins it.
 	t.Run("a creation losing to a differently spelled path is told the spelling", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -498,20 +482,6 @@ func TestDocumentsArea(t *testing.T) {
 	// A creation that races a path being both created *and* soft-deleted by
 	// someone else is told a version_conflict naming the tombstone, not an
 	// internal_error.
-	//
-	// The creating writer's locked read finds nothing at a free path, so it
-	// locks nothing, and there is nothing to force the other writer to wait
-	// on. What is staged here instead is the guarded upsert itself: the other
-	// writer's uncommitted INSERT blocks our writer's own INSERT ... ON
-	// CONFLICT the same way TestDocumentsArea's "the guarded upsert is what
-	// refuses a creation that raced another" case stages it, and by the time
-	// the other writer commits, its transaction has both created the row and
-	// soft-deleted it, landing current_version at 2 with deleted_at set before
-	// our writer's guarded upsert ever runs. The guard fails on the version
-	// mismatch exactly as it does for an ordinary racing creation, and
-	// conflictAfterFailedUpsert must re-read the tombstone -- not a live row
-	// -- to report it, which is what IncludeDeleted being true on that re-read
-	// is for.
 	t.Run("a creation racing a create and delete is told the tombstone", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -566,11 +536,6 @@ func TestDocumentsArea(t *testing.T) {
 	// The number a conflicted caller is told to merge onto is the one its own
 	// write would have met, not the one that was current when it started.
 	// Told a stale number, a caller retries into the same refusal forever.
-	//
-	// This is the test GetDocumentByPathForUpdate's comment points at. It
-	// passes with FOR UPDATE and without it — see that comment for why both
-	// mechanisms deliver a fresh number — so what it pins is the guarantee,
-	// not the clause.
 	t.Run("the reported current version is the one the write would have met", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -829,22 +794,6 @@ func TestDocumentsArea(t *testing.T) {
 
 	// TestDocumentsArea's "a document written with another games token is
 	// refused as such" case closes a gap Task 14 recorded rather than fixed.
-	//
-	// 0007_documents.sql gives both documents and document_versions the
-	// composite key into api_tokens that every audit column in this product
-	// carries, so the database already refuses this write; what was missing
-	// was the *sentence*. Without the mapping the refusal reaches a server
-	// log as SQLSTATE 23503 over
-	// document_versions_author_token_id_project_id_fkey, which says nothing
-	// about a credential bound to the wrong game — the exact defect
-	// metamodel.ActorConstraintViolation exists to remove, and which was
-	// mapped in the metamodel and in views and in neither of the two write
-	// paths here.
-	//
-	// The wire code stays internal_error and that is deliberate: the actor
-	// is resolved by the transport from the credential the call arrived
-	// with and is never caller-supplied, so there is nothing an agent can
-	// change. errors.go states that argument where the sentinel is aliased.
 	t.Run("a document written with another games token is refused as such", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -912,15 +861,6 @@ func waitForABlockedStatement(t *testing.T, pool *pgxpool.Pool) {
 // the callback, guarded on a nil error, left the rest of this suite green,
 // because every other failure this package can produce is a refusal that
 // never reaches a publish at all.
-//
-// It is reachable because testutil.NewPool hands every test its own
-// throwaway database, so this test may install a constraint no other
-// test sees. A deferred foreign key from documents.id to projects.id is
-// satisfied by nothing — a document's id is not a project id — but being
-// DEFERRABLE INITIALLY DEFERRED it is checked at COMMIT and not before,
-// so every statement inside the transaction succeeds and only the commit
-// fails. The same technique as internal/metamodel's
-// TestNoEventIsPublishedWhenTheCommitFails.
 func TestNoEventIsPublishedWhenTheWriteCannotCommit(t *testing.T) {
 	svc, _, hub, pool := newService(t)
 	ctx := context.Background()

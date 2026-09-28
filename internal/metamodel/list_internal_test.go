@@ -41,11 +41,6 @@ func TestAnEntityPageAsksForTooMuchAndGetsTheCap(t *testing.T) {
 
 // TestAFingerprintTellsFiltersApartWhereverTheirPartsDivide pins the
 // length prefixing fingerprintOf inherits from foldedIdentity.
-//
-// Without it two different filters whose parts run together spell one
-// string — ("ab", "c") and ("a", "bc") — and share a fingerprint, so a
-// cursor issued for one pages the other and the check this whole
-// mechanism exists for passes over exactly the case it was added for.
 func TestAFingerprintTellsFiltersApartWhereverTheirPartsDivide(t *testing.T) {
 	assert.Must(t, fingerprintOf("ab", "c") != fingerprintOf("a", "bc"), "two filters dividing differently share a fingerprint")
 	assert.Must(t, fingerprintOf("a", "") != fingerprintOf("", "a"), "an empty part is not distinguished from a missing one")

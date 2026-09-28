@@ -21,16 +21,6 @@ import (
 // The four properties of Task 15's routing that live in the *arrangement*
 // of this package rather than in any one request, and that a browser
 // would otherwise be the first thing to discover.
-//
-// Every route in this sub-project serves a static shell and resolves
-// nothing server-side, which makes the shell-to-route join the one thing
-// a Go test can hold about it — and the one thing nobody would notice
-// breaking until a page 404ed.
-
-// pageModules is every module under static/pages/, which is where the
-// seven page modules live. It is a walk rather than a list for the
-// reason every roster in this package is: a list is what the next file
-// forgets to join.
 func pageModules(t *testing.T) []string {
 	t.Helper()
 	found, err := filepath.Glob(filepath.Join("static", "pages", "*.js"))
@@ -65,18 +55,6 @@ func concreteURL(pattern string) string {
 
 // TestEveryShellIsReachableByItsRoute is the join a browser would
 // otherwise make first.
-//
-// A shell added to internal/web/static without a route is a page that
-// exists, is embedded in the binary, is refused by the /static/ file
-// server (deliberately — see TestNoShellIsServedTwice below) and is
-// reachable at no URL at all. Nothing else in this package can see that:
-// the shell compiles into the embed, every existing test goes on
-// passing, and the only symptom is a 404 in front of a designer.
-//
-// It asserts both halves. Every shell has an entry in server.go's
-// shellRoutes table, and every entry really serves that shell's bytes at
-// that pattern — driven through a real request, so a table that named
-// the wrong file fails here too.
 func TestEveryShellIsReachableByItsRoute(t *testing.T) {
 	t.Parallel()
 	routes := web.ShellRoutesForTest()
@@ -153,14 +131,6 @@ var gamesPathRegexp = regexp.MustCompile(`export const GAMES_PATH = "([^"]+)";`)
 // in one game and could reach no other, because the only address that
 // listed their games was "/" — and "/" is a shortcut that sends a caller
 // with one game straight back into it.
-//
-// The header's game switcher points at app.js's GAMES_PATH, and this is
-// what makes that link a page rather than a 404: the constant is read
-// out of the module and driven at this server, by a caller with exactly
-// one game, which is precisely the caller "/" refuses to show a list to.
-// Delete the route and this fails; rename the constant without adding
-// the route and this fails too, which is the join a shipped-dead wiring
-// slips through.
 func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile(filepath.Join("static", "app.js"))
@@ -202,17 +172,6 @@ func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
 
 // TestNoShellIsServedTwice keeps the new shells inside the /static/ file
 // server's refusal.
-//
-// Every shell is reachable only at the routes shellRoutes declares,
-// through a handler with its own dispatch logic — handleRoot's
-// single-game shortcut and its redirect for an anonymous caller in
-// particular. A second URL under
-// /static/ would bypass all of that, which is precisely the defect a
-// review found once: /static/index.html, wired through http.FileServerFS
-// with no filtering, skipped handleRoot entirely.
-//
-// It enumerates the shells rather than naming four, so a shell added
-// tomorrow is inside the rule the day it lands.
 func TestNoShellIsServedTwice(t *testing.T) {
 	t.Parallel()
 	server, _, _ := newTestServer(t)
@@ -240,18 +199,6 @@ var idInPath = regexp.MustCompile(`/\$\{[A-Za-z_][A-Za-z0-9_.]*\.id\b|/" \+ [A-Z
 
 // TestNoPageURLContainsAUUID pins the decision the whole product moved
 // to and that a single convenient line would undo.
-//
-// **Every route is addressed by slug, and every row under it by key.**
-// A page that built a uuid path would work perfectly — the ids exist,
-// the API used to take them — and would produce URLs a designer cannot
-// read, cannot type, and cannot recognise as the view they were looking
-// at. It would also be undiscoverable: nothing 404s, nothing throws, and
-// the only symptom is an address bar full of hex.
-//
-// The scan covers the page modules and the plumbing they share. It does
-// **not** cover render/scene.js, whose `joinEdges` indexes nodes by
-// `Node.ID` — that is a join inside one envelope and never an address,
-// and its own doc comment says so.
 func TestNoPageURLContainsAUUID(t *testing.T) {
 	t.Parallel()
 	var offences []string
@@ -313,13 +260,6 @@ func TestTheUUIDScanReadsWhatItClaimsTo(t *testing.T) {
 
 // TestEveryShellCarriesTheImportMapAndTheStylesheet is the third thing a
 // shell can be missing and still look fine in a diff.
-//
-// static_vendor_test.go already holds that every shell's import map is
-// the *same* map and that it precedes every module script; what it
-// cannot see is a shell with no map at all, because its own enumeration
-// starts from the shells that have one. A shell without the stylesheet
-// renders as unstyled text, and one without the map 404s every bare
-// specifier the moment a component is imported.
 func TestEveryShellCarriesTheImportMapAndTheStylesheet(t *testing.T) {
 	t.Parallel()
 	for _, shell := range shellFiles(t) {
@@ -337,11 +277,6 @@ func TestEveryShellCarriesTheImportMapAndTheStylesheet(t *testing.T) {
 
 // TestEveryPageModuleIsLoadedByAShell is the other direction, and it is
 // the one that catches a module nobody reaches.
-//
-// A page module under static/pages/ that no shell loads is dead code
-// that every test in this package goes on passing over. The one
-// exception is the plumbing module the others import, which is loaded
-// because they are.
 func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 	t.Parallel()
 	loaded := map[string]bool{}
@@ -372,22 +307,6 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 // TestTheNarrowFallbackIsWiredAtBothCallSites is a source-shape guard,
 // which is the weakest kind of check in this repository and the correct
 // answer for what it holds.
-//
-// The fallback below tablet width has a runtime half and a wiring half.
-// The runtime half — that an undrawn canvas refuses every write, and
-// that the page's own keydown wiring writes nothing while it is hidden —
-// is driven for real by jstest/writes_test.mjs and jstest/pages_test.mjs,
-// which are the checks that matter. The wiring half is two lines with no
-// runtime signature a harness can reach: `viewPage` installs the watch,
-// and `draw` re-applies the fallback after *every* redraw. Delete
-// either and nothing throws, no test the harness can run goes red, and
-// the symptom is a picture that quietly comes back — freshly armed —
-// the next time a stream event redraws a narrow window.
-//
-// So it is pinned by its shape. The plan's own learned section names
-// this pattern and rates it honestly: a weak guard over a property with
-// no runtime signature beats no guard, and pretending otherwise is how
-// the property gets deleted twice.
 func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
@@ -398,14 +317,6 @@ func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 	// The `finally` is the point and not the call: a redraw that threw
 	// must still leave the fallback applied, and a call placed after the
 	// three returns of drawPicture would miss two of them.
-	//
-	// **First in the block, and not alone in it.** This used to require
-	// the `finally` to contain nothing else, which is a shape and not a
-	// property: the fit was later moved in beside it, precisely because
-	// it has to run *after* the width decides whether the canvas is on
-	// screen (static_view_fit_test.go holds that ordering). What matters
-	// here is that the width is applied on every exit, including a throw,
-	// and that nothing runs before it.
 	assert.Should(t, regexp.MustCompile(`(?s)finally\s*\{\s*applyWidth\(state, state\.narrow === true\);`).MatchString(src), "draw no longer re-applies the fallback in a finally: a redraw would put the drawing back and re-arm the writes")
 	assert.Should(t, strings.Contains(src, "state.arrangement.setDrawn(!fell);"), "applyWidth no longer disarms the arrangement: hiding the canvas in CSS alone leaves a keyboard nudging a drawing nobody can see")
 }
@@ -413,18 +324,6 @@ func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 // TestAnUnknownAddressIsStillThisProduct drives the catch-all for real,
 // because the shell table above cannot: its entry is registered by hand
 // and is reached at no pattern of its own.
-//
-// What it closes: every address the mux did not know answered Go's own
-// `404 page not found` — the browser's default serif on a transparent
-// body, with no header, no game switcher and no way back. It was met by
-// anyone who mistyped a link, and by anyone following one to a
-// destination whose route is spelled differently from its name (the
-// Images destination is served at `/assets`).
-//
-// Four callers, three answers: a person gets the shell with a 404, a
-// client under /api/ gets the JSON envelope every other refusal on that
-// surface uses, a caller with the right address and the wrong method
-// still gets 405, and a known route is untouched.
 func TestAnUnknownAddressIsStillThisProduct(t *testing.T) {
 	t.Parallel()
 	server, _, _ := newTestServer(t)

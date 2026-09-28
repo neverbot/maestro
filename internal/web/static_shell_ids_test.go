@@ -12,22 +12,6 @@ import (
 )
 
 // **app.js binds by id at module scope, and every shell imports it.**
-//
-// The sign-in shell's registration form is `id="invite"` and the
-// picker's list is `id="games"`; app.js finds them with
-// `document.getElementById` when the module is evaluated, whichever page
-// loaded it. A new screen that happened to call its own form `invite`
-// therefore got two submit handlers: its own POST to /api/invites, and
-// app.js's POST to /api/auth/register. Both ran, the register call was
-// refused, and its refusal overwrote the success on screen — a page that
-// worked and looked broken. Found in a browser on the administration
-// screen's first load, because nothing else could have found it.
-//
-// The rule this holds: an id app.js binds at module scope belongs to the
-// two shells app.js was written for, and no other shell may spell it.
-//
-// Mutation: rename `new-invite` back to `invite` in admin.html and this
-// fails naming the shell and the id.
 func TestNoShellStealsAnIdAppJSBindsAtModuleScope(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile("static/app.js")

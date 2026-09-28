@@ -13,46 +13,6 @@ import (
 
 // Every component's one property with no runtime signature: **a
 // component invents no words.**
-//
-// Every sentence a designer reads in the frame is built in
-// internal/web/static/render/scene.js, which is a pure function a Node
-// harness drives and a mutation turns red. The component is supposed to
-// be a painter: it decides where each string sits and what it is painted
-// with, and never what it says. Nothing at runtime can see the
-// difference — a component that hard-coded "complete picture" into its
-// footer would render perfectly, pass every check in
-// internal/web/jstest/frame_test.mjs (which never loads it) and be
-// exactly the drift the whole task exists to prevent, since the next
-// five renderers would each grow their own copy.
-//
-// So it is held by shape, the way internal/web/static_client_test.go
-// holds "this module composes no sentence": **every text node in a
-// component's templates is either whitespace or an interpolation.** A
-// word typed between two tags is a failing test.
-//
-// The one deliberate exception is the label of the single action the
-// diagnostics panel offers, which is a constant at the top of
-// mst-view-frame.js and reaches the template as `${RUN_ANYWAY_LABEL}` —
-// an interpolation like any other, and named there rather than in the
-// model because it names a *control* and not a state of the answer.
-//
-// **It walks the directory rather than naming a file.** The first
-// version of this guard named mst-view-frame.js literally, which is this
-// project's standing failure — a rule established and not carried one
-// step along — waiting to happen: the text twin landed the next task and
-// would have been the first component nobody scanned, and it is the
-// component that renders the most game strings of any. Every component
-// is read on the day it lands, and TestTheComponentScanReadsEveryComponent
-// is what stops the walk quietly finding none.
-
-// textNodeRE finds a candidate text node: a `>` that closes a tag —
-// preceded by something that is neither whitespace nor `=`, which is
-// what tells `</span>` from a JavaScript `a > b` and from an arrow
-// `() =>` — followed by whatever runs until the region ends.
-//
-// A region ends at `<` (the next tag), at `$` (an interpolation) or at a
-// backtick (the end of the template). Anything non-blank before one of
-// those is a word the component is saying in its own voice.
 var textNodeRE = regexp.MustCompile("[^\\s=]>([^<$`]*)")
 
 // scanTemplateText returns every text node the component speaks in its
@@ -98,10 +58,6 @@ func stripCSSBlock(src string) string {
 // component rather than as something the components share. A component
 // puts an element on the page; a shared module does not, and the scans
 // below are about what a designer reads on screen.
-//
-// It is a content test and not a name list, so the day somebody adds
-// mst-something.js the scan reads it without being told to, which is the
-// property TestTheComponentScanReadsEveryComponent exists to keep.
 var definesAComponent = regexp.MustCompile(`customElements\.define\(|extends LitElement|attachShadow\(`)
 
 func componentFiles(t *testing.T) []string {
@@ -141,100 +97,6 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // without this list being updated is a change somebody should have to
 // look at — and the count assertion is what catches the next one
 // arriving.
-//
-// mst-canvas.js holds **no Lit template at all**, so the scan above
-// passes over it vacuously and the property it stands for is held
-// elsewhere: internal/web/jstest/canvas_test.mjs asserts at runtime that
-// every character in the emitted SVG tree is a mark's own text, and that
-// the canvas stylesheet generates no `content:` of its own. A component
-// whose silence no test can see is a component this list should not have
-// let in quietly, which is why the argument is written down here.
-//
-// mst-canvas.js and mst-ground.js both carry **words of their own**, and
-// the argument for that is mst-view-frame.js's own exception carried one
-// step along. RUN_ANYWAY_LABEL sits in that component rather than in the
-// model because it names a *control* and not a state of the answer, and
-// everything these two say is the same kind of thing: what a button
-// does, and what it will not do. The arrangement menu says that
-// unpinning changes no pixel until the position is cleared, that undo
-// has one level and no server behind it, and that a position write loses
-// silently to a concurrent one — three behaviours a designer would
-// otherwise learn by watching nothing happen. The ground's picker states
-// the three refusals *before* a file is chosen, which is a precondition
-// and not a refusal: the refusals themselves are the server's, and
-// internal/web/jstest/writes_test.mjs asserts both components render a
-// rejected write's message exactly as it arrived, while
-// internal/web/static_ground_test.go pins the picker's promises to the
-// bounds internal/views really applies.
-//
-// mst-table.js joined the list in Task 15, and it carries one word of its
-// own for the same reason: SORT_HINT names what pressing a column header
-// does, which is a control and not a state of the answer. Everything else
-// it renders — every label, every cell, every group caption, the pager's
-// sentence — is an interpolation of render/table.js's model, which is
-// what the scan above reads the templates for.
-//
-// mst-picker.js is the query builder's control over a game's own
-// vocabulary, and it holds **no Lit template at all** — it is a
-// `<details>` around a filtered list, built with createElement, because
-// a control that closes on a click has no state a framework would
-// manage. So the scan passes over it vacuously and the argument is here.
-//
-// It carries three words of its own and each names a *control* or an
-// absence rather than a state of the answer, which is
-// mst-view-frame.js's exception carried one step along: "Choose" is what
-// an unmade choice says, "no choice" is the option that means a clause
-// is not being used, and "nothing to choose from" is what a game that
-// declared no relation types offers. Everything else in it — every
-// label, every key — is the game's own vocabulary, and
-// internal/web/jstest/picker_test.mjs asserts exactly that: what it
-// offers comes from the listing, and what it answers with is the key the
-// game wrote.
-//
-// mst-save-as.js joined the list in Task 16, and it holds **no Lit
-// template at all** — so, like mst-canvas.js, the scan above passes over
-// it vacuously and the argument has to be made here. It carries words of
-// its own, and every one of them is the same kind of thing the ground's
-// picker carries: a control's label, and a precondition stated *before*
-// a designer spends anything on it. The three notes say what the dialog
-// does and does not do — the query is copied unchanged, a query is
-// changed by asking an agent over views.upsert, and the values set here
-// are the copy's opening binding rather than a rewrite of the query's
-// declared defaults — none of which is a state of an answer and none of
-// which any model could carry, because there is no answer here to have a
-// state. The key sentences are not this file's either: they are
-// internal/metamodel's rowKeyProblems, verbatim, and
-// internal/web/static_save_as_test.go pins all three and the pattern to
-// that source in both directions. The refusals themselves stay the
-// server's, and internal/web/jstest/save_as_test.mjs asserts a taken key
-// is rendered exactly as it arrived.
-// mst-hint.js is the newest, and it holds **no Lit template** either:
-// it is a focusable trigger and a panel, built with createElement, and
-// the only string it renders is the sentence its caller hands it. So the
-// scan passes over it vacuously too, and the argument is that it carries
-// **no words of its own at all** — not a label, not a state, not a
-// fallback. What it shows is the caller's sentence, and the caller today
-// is pages/page.js's read-only notice, whose words are that module's and
-// are pinned there.
-//
-// mst-dialog.js is the product's one modal, and it holds **no Lit
-// template** either: a caller hands it nodes it built itself, and the
-// only strings it owns are two control labels, "Done" and "Close". So
-// the scan passes over it vacuously and the argument is that it says
-// nothing *about an answer* — it has no answer of its own, only a title
-// and a footer its caller named. The words inside any dialog belong to
-// whoever opened it, and are pinned there: the token dialog's are in
-// pages/settings.js.
-//
-// control-styles.js joined the directory in the 2026-09-10 design pass
-// and is **not** a component: it defines no custom element and holds no
-// template. It is the one statement of what a button and a field look
-// like, adopted by every shadow root in the product, and it exists
-// because element selectors in styles.css do not cross a shadow boundary
-// — five of six controls on the view screen were browser defaults until
-// it landed. It carries no words a reader sees, so the scan above has
-// nothing to read in it, and naming it here as a component would be
-// claiming an argument it does not need.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	t.Parallel()
 	found := componentFiles(t)
@@ -298,34 +160,10 @@ func TestTheTemplateTextScanReadsWhatItClaimsTo(t *testing.T) {
 // hidesASlot finds a template that hides a slot from assistive
 // technology: an `aria-hidden="true"` followed, in the same template
 // expression, by a `<slot>`.
-//
-// It is a substring rule and not a parser, deliberately — there is no
-// HTML parser in this package and adding one to hold one property would
-// be a second, worse browser — so it is bounded by the end of the
-// template literal, which is what makes "in the same template" mean
-// anything at all.
 var hidesASlot = regexp.MustCompile("(?s)aria-hidden=\"true\"[^`]*<slot")
 
 // TestNoComponentHidesASlotFromAssistiveTechnology is the source-shape
 // half of the fourth screen finding.
-//
-// The drawing is hidden from assistive technology because the text twin
-// is the accessible content of an answer — that is settled and right.
-// What was wrong is *where* it was said: `aria-hidden="true"` sat on the
-// box the canvas is slotted into, and what arrives through that slot is
-// not only the picture. The canvas brings the arrangement menu and the
-// ground panel; the `table` renderer brings its sort headers. Every one
-// of those buttons was reachable by tab and announced to nobody, which
-// is worse than either alone — a reader who cannot see the page tabs
-// into something that is not there.
-//
-// So the hiding moved onto the `<svg>` itself, in mst-canvas.js's
-// emitScene, where internal/web/jstest/canvas_test.mjs asserts it along
-// with the general rule that nothing focusable under the canvas has an
-// aria-hidden ancestor. This test holds the thing a harness cannot see
-// without a real browser and a real slot: that no component ever hides a
-// slot again. A slot's contents are somebody else's, and hiding them is
-// a decision about elements this file has never seen.
 func TestNoComponentHidesASlotFromAssistiveTechnology(t *testing.T) {
 	t.Parallel()
 	scanned := 0

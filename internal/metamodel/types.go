@@ -21,36 +21,6 @@ import (
 const noVersion int32 = -1
 
 // EntityTypeInput is an upsert request.
-//
-// ExpectedVersion must match the stored version when the type already
-// exists; a nil ExpectedVersion against an existing type is a conflict,
-// not an overwrite.
-//
-// On creation there is nothing to match, but the field is *not* ignored:
-// it is still passed as the guard on the upsert's DO UPDATE, because a
-// caller that believes it is creating may in fact be racing a creator, and
-// the guard is the only thing standing between the loser of that race and
-// a silent overwrite.
-//
-// **A version claim against a row that is not there is refused, not read as
-// a creation.** It used to be read as one: the locked read found nothing,
-// the call took the insert path, the guard was never evaluated, and a fresh
-// row appeared under a new id at version 1 with no error. The argument for
-// that was that nothing is overwritten and the caller can tell from the
-// returned Version of 1 — and it is wrong about what is lost. What is lost
-// is not the content, which the caller was resending anyway; it is every
-// relation, view reference, prose link and endpoint rule that named the
-// *removed* row by id, each of which now names nothing while a row with the
-// same key sits there looking fine. The state is easy to reach: an update
-// parking behind a committed removal produces it, and TestRemovedArea's "an
-// update that loses to a committed removal is told the row is gone" case
-// stages exactly that race. So a non-nil ExpectedVersion that reaches the
-// empty read is a RemovedError — a not_found saying the row was removed,
-// never a version_conflict, because there is nothing to merge onto and
-// "merge and retry" is a loop that cannot terminate.
-//
-// A nil ExpectedVersion still creates, unchanged: that caller claimed
-// nothing and gets what it asked for.
 type EntityTypeInput struct {
 	Key             string
 	Label           string
@@ -71,10 +41,6 @@ type entityTypeEvent struct {
 }
 
 // UpsertEntityType creates or updates a type, addressed by its key.
-//
-// The whole operation is one transaction: the type's row and the verdict
-// on every entity already stored against it change together, so a schema
-// edit can never land with its instances left judged by the old schema.
 func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in EntityTypeInput) (dbq.EntityType, error) {
 	problems := rowKeyProblems("key", in.Key)
 	problems = append(problems,
@@ -171,29 +137,6 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 		// happened to match the version the winner landed on passed both
 		// the locked read and the guarded DO UPDATE and updated a row it
 		// never saw, under a spelling it never sent.
-		//
-		// That writer no longer reaches this statement. A version claim against a
-		// row the locked read cannot see is now refused up there (RemovedError),
-		// so the only calls that get here are the ones whose claim matched a row
-		// this transaction holds FOR UPDATE — where the returned row *is* that
-		// row, by the guard — and the ones claiming nothing, which pass noVersion
-		// and so can only ever insert their own spelling or lose to the index and
-		// land in conflictOnEntityTypeKey. Both remaining refusals are still
-		// exercised: conflictOnEntityTypeKey's respelling arm is what a creation
-		// racing another spelling meets, and TestTypesArea's "a race that would
-		// land under another spelling is refused" case stages exactly that.
-		//
-		// Proved by mutation before it was deleted: with the version rule
-		// in place, this check no longer fires for any test in the
-		// package — the five race tests that used to reach it or its
-		// siblings now stop at the earlier refusal. This is the same
-		// position internal/markdown reached for the identical check on
-		// its own write path, and for the same kind of reason: a check
-		// that cannot fire is a second claim about a race that one place
-		// actually handles.
-
-		// A schema change can invalidate stored rows. Re-check them rather
-		// than rejecting the change or inventing values for a new field.
 		return s.revalidateEntitiesOfType(ctx, q, row)
 	})
 	if err != nil {
@@ -222,16 +165,6 @@ func conflictOnEntityTypeKey(ctx context.Context, q *dbq.Queries, projectID uuid
 
 // EntityTypeByKey loads one type by its key, matched without regard to
 // case, as every key in this domain is.
-//
-// A missing key is named rather than reported through the generic
-// notFound helper: the caller supplied this key, so it is the one thing
-// it can act on, and EntityByKey resolves a type through here before it
-// can look at an entity at all — a bare "not_found" from that call would
-// not even say which of its two keys was the wrong one. The write paths
-// have named it since they shipped; this is the same message from the
-// read path. **EntityTypeByID deliberately keeps the bare sentinel**: a
-// caller addressing a row by id already holds the id it sent, and there
-// is no second argument for it to tell apart.
 func (s *Service) EntityTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.EntityType, error) {
 	row, err := s.q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: key})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -266,81 +199,6 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // RemoveEntityType deletes a type. Without cascade, a type that still has
 // entities is refused: silently deleting a game's content is never the
 // right reading of "remove this type".
-//
-// **It also prunes the type's id out of every relation type's endpoint
-// lists, in the same transaction.** `source_type_ids` and
-// `target_type_ids` are plain `uuid[]`, and Postgres has no foreign key
-// from an array element, so without this the id outlives the type it
-// names and Task 5's correction 6 — endpoint lists that always name a
-// type of this game — holds only until the first removal. What it leaves
-// behind is worse than untidy: the relation type holds a rule nothing can
-// satisfy, a designer who recreates the key gets a fresh id and is
-// refused with `entity type "zone" cannot be the target of relation type
-// "takes_place_in"` while `zone` visibly *is* the declared target, and
-// the type cannot be repaired through its own API at all, because
-// re-declaring it with the list it currently holds is refused as
-// `invalid_input`.
-//
-// *(Metamodel 14 changed only how that last sentence reaches a caller:
-// an endpoint rule is stated and read back as entity type **keys**, and
-// an id with no type left to name is dropped from the answer rather
-// than rendered as an empty key. So a dangling id would now be invisible
-// to a re-declaration rather than fatal to it — which makes the prune
-// more important, not less, because the row would otherwise hold a rule
-// nothing reports.)*
-//
-// **Pruning here rather than a real referential constraint**, and that is
-// the choice rather than the cheap way out of it. A referential
-// constraint over these lists does not exist in Postgres: it would mean
-// replacing both columns with junction tables carrying a composite
-// `ON DELETE CASCADE` key, which is a migration plus a rewrite of every
-// read and write of an endpoint rule, and it changes the shape
-// `RelationTypeInput` presents to an agent. That may well be the right
-// end state — it would also give the lists an index and let a view join
-// on them — but it is a schema decision, and Task 5's job is to close the
-// invariant Task 5 created.
-//
-// **The prune alone closes the sequential path and not the concurrent
-// one**, and it takes a second mechanism to close both. `DeleteEntityType`
-// is the only path by which an entity type disappears — deleting a project
-// cascades the relation types with it — so the prune is exact for every id
-// that exists when its statement runs. It is one `UPDATE` under READ
-// COMMITTED, though, and a relation type *created* after it has run and
-// before this transaction commits is a row it never saw: the update path is
-// caught by the prune's own row lock and READ COMMITTED's re-check, the
-// creation path had no row to lock. What closes it is on the other side, in
-// `checkEndpointTypes`: the endpoint read there holds a share lock on every
-// type it names, so the `DELETE` above waits for that writer and the prune
-// below then finds its row. `TestTypesArea's "a relation type created
-// during a type removal cannot keep the removed ID" case` stages the
-// interleaving deterministically.
-//
-// **The prune is announced, not left to be inferred.** It changes rows
-// the caller never named and moves no `version`, so a subscriber holding
-// an endpoint rule has nothing else to learn from; `relation_type.upserted`
-// goes out for each row changed, after `type.removed`. See the cascade
-// note in events.go, which covers deleted edges and deliberately not this.
-//
-// **One consequence, recorded because it is a widening.** Pruning the
-// last id of a list leaves it empty, and an empty list means "any type"
-// rather than "no type" (see `endpointList`). A relation type that
-// accepted only `zone` at its target therefore accepts anything once
-// `zone` is removed. That is the lesser of the two: the widening is
-// visible in the row a designer reads and is one edit away from being
-// narrowed again, where the dangling id was neither visible nor
-// repairable.
-//
-// **Two costs of the share lock that closes the concurrent path, judged
-// acceptable and recorded rather than rediscovered.** A transaction
-// holding checkEndpointTypes' FOR SHARE against an entity type this call
-// is deleting parks this delete indefinitely — there is no default
-// timeout, and removals are rare enough that unbounded is the accepted
-// trade against the dangling id the alternative produces. And that same
-// FOR SHARE now serialises against UpsertEntityType's FOR UPDATE on its
-// own row, so declaring a relation type over an entity type blocks an
-// edit of that entity type for as long as the declaration's transaction
-// holds the lock, and the reverse. See LockEndpointEntityTypes
-// (metamodel.sql) for the measurements.
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
 	var removedKey string
 	var pruned []dbq.PruneEntityTypeFromEndpointListsRow
@@ -351,16 +209,6 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		// keyed "" is gone. The id alone would have been a defensible
 		// payload, but entityTypeEvent declares a key field and a client
 		// reading one cannot tell "not carried" from "empty".
-		//
-		// **Locked, and locked before anything touches `entities`.** The
-		// lock is what puts this writer and `UpsertEntity` in the same
-		// order over the same two tables: an entity write takes
-		// `FOR KEY SHARE` on this row and then `FOR UPDATE` on its own
-		// entity row, so a removal that took the entity rows first (the
-		// `DeleteEntitiesOfType` below, and the `ON DELETE RESTRICT`
-		// check inside `DeleteEntityType`, which reads `entities` back
-		// `FOR KEY SHARE`) and this row second closed a cycle. See
-		// GetEntityTypeByIDForUpdate and GetEntityTypeByKeyForKeyShare.
 		typ, err := q.GetEntityTypeByIDForUpdate(ctx, dbq.GetEntityTypeByIDForUpdateParams{
 			ProjectID: projectID, ID: id,
 		})
@@ -432,25 +280,6 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 	// another route. Announcing them one by one is affordable here in a
 	// way the per-edge cascade is not: a game has a handful of relation
 	// types and thousands of edges.
-	//
-	// **Defensive against a plan `RETURNING` gives no promise on, and pinned
-	// rather than merely asserted.** `PruneEntityTypeFromEndpointLists` is a
-	// single `UPDATE`; Postgres documents no ordering for its `RETURNING` at
-	// all, so a query planner free to prefer a sequential scan on a larger
-	// table is free to hand this back in any order. This sort is raw `Key` in
-	// byte order — not `lower(key)`, the order the unique index
-	// (`relation_types_key_key`) actually keeps, since stored keys permit
-	// uppercase. Both orders are deterministic, so picking one over the other
-	// changes nothing about correctness, but they are not the same order, and
-	// this line is the one that is contractual: what a caller sees is whatever
-	// this comparison says, never whatever the statement above happened to
-	// return. TestEventsArea's "pruned endpoint lists are published in sort
-	// order not database order" case (events_test.go) is built to fail if this
-	// line is deleted: it prunes two relation types whose keys disagree
-	// between byte order and folded order, so the database's own natural
-	// `RETURNING` sequence — today, an index scan ordered by `lower(key)` — is
-	// the exact reverse of what this sort demands, and removing the sort was
-	// verified to turn that test red.
 	sort.Slice(pruned, func(i, j int) bool { return pruned[i].Key < pruned[j].Key })
 	for _, row := range pruned {
 		s.publish(projectID, eventRelationTypeUpserted, relationTypeEventMinRole,
@@ -461,11 +290,6 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 
 // revalidateEntitiesOfType re-checks every stored entity against its
 // type's current schema and flags the ones that no longer fit.
-//
-// The rule it applies — what is re-checked, what is flagged, why nothing
-// is back-filled and why both verdicts are written — is revalidate's, and
-// is shared with the edge sweep so the two cannot drift. What stays here
-// is which two statements this table's half of it runs.
 func (s *Service) revalidateEntitiesOfType(ctx context.Context, q *dbq.Queries, typ dbq.EntityType) error {
 	return revalidate(ctx, sweep{
 		fieldSchema: typ.FieldSchema,

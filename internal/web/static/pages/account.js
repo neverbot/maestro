@@ -1,15 +1,4 @@
 // Your account: who you are, how this looks, and your password.
-//
-// The first screen in Maestro that belongs to a person rather than to a
-// game, and the only interface to two things the server has always been
-// able to do and nothing could reach: PATCH /api/me/password, and — with
-// the three fields GET /api/me gained for this page — saying your name
-// instead of your user id.
-//
-// **It is not inside a game**, so it does not go through openGame: there
-// is no slug to resolve, no switcher to fill and no read-only notice to
-// draw. What it shares with every other screen is the header and the
-// breadcrumb, which is why those two come from here directly.
 
 import { fetchMe, markRefused, renderHeader, sendJSON, setFormBusy } from "../app.js";
 import { goToLogin } from "../app.js";

@@ -42,17 +42,6 @@ const randomTokenBytes = 32
 // alone answers "should an active session survive its SESSION_TTL" but
 // says nothing about "for how long, ultimately", which is a separate
 // policy decision this instance makes explicitly rather than by omission.
-// 90 days is long enough that a designer who opens their laptop weekly is
-// never forced to log back in, and short enough that a credential nobody
-// has used in three months stops being a standing risk on its own.
-//
-// This constant exists for documentation and cross-reference only —
-// ExtendSession's own SQL (identity.sql) is what actually enforces the
-// cap, via a LEAST(..., created_at + interval '90 days') that must keep
-// matching the "90 days" here. Nothing in Go re-derives or re-checks it
-// at runtime; TestMaxSessionLifetimeMatchesExtendSessionSQL
-// (sessions_internal_test.go) is what keeps the two from drifting apart
-// silently.
 const maxSessionLifetime = 90 * 24 * time.Hour
 
 // IssueSession mints a session token and stores only its hash. The token
@@ -94,12 +83,6 @@ func (s *Service) IssueSession(ctx context.Context, userID uuid.UUID) (token str
 // type, so nothing downstream is ever one careless writeJSON away from
 // serving PasswordHash back to a browser (see the doc comment on User in
 // users.go).
-//
-// The expiry is returned so a caller can implement sliding sessions — call
-// ExtendSession when it decides the session is worth renewing — without a
-// second round trip to fetch it. Deciding when to do that (every request?
-// past some remaining-lifetime threshold?) is an HTTP-layer policy; this
-// method only makes the information available.
 func (s *Service) UserForSession(ctx context.Context, token string) (User, time.Time, error) {
 	sum := sha256.Sum256([]byte(token))
 	row, err := s.q.GetSessionUser(ctx, sum[:])
@@ -131,26 +114,6 @@ func (s *Service) UserForSession(ctx context.Context, token string) (User, time.
 // ResolveAPIToken's last_used_at write off it (tokens.go). It exists
 // here, in the identity package rather than at the HTTP layer, so that
 // policy needs no schema or sqlc change of its own to support it.
-//
-// The target expiry is computed by the query itself, from Postgres' own
-// now() and the ttl passed in — not by this method computing
-// time.Now().Add(ttl) and handing over an already-resolved timestamp.
-// That distinction is load-bearing, not stylistic: an earlier version
-// did the latter, and it did not make concurrent renewals collapse into
-// one write the way its comment claimed, because two concurrent requests
-// each compute their own, slightly later, target and each satisfies a
-// WHERE clause that only asked "is my target later than the current
-// value". See identity.sql's doc comment on ExtendSession for the actual
-// fix (a one-minute slack in the predicate) and for why this stays an
-// UPDATE, never an upsert, so a logout racing this call cannot resurrect
-// a session it just deleted.
-//
-// Returns the number of rows the UPDATE actually touched — 0 or 1, since
-// token_hash is the table's primary key. resolveSessionCaller does not
-// use this value; it exists so a test can count actual writes directly
-// (see TestConcurrentRenewalsProduceExactlyOneWrite) instead of
-// inferring them from the final expires_at, which looks identical
-// whether one write happened or several.
 func (s *Service) ExtendSession(ctx context.Context, token string, ttl time.Duration) (int64, error) {
 	sum := sha256.Sum256([]byte(token))
 	n, err := s.q.ExtendSession(ctx, dbq.ExtendSessionParams{
@@ -181,13 +144,6 @@ func (s *Service) RevokeSession(ctx context.Context, token string) error {
 // session minted under the old one — including whatever stole it, if that
 // is why the password is being changed at all — is still live. Both writes
 // commit or roll back together instead.
-//
-// This revokes the caller's own session too: there is no way to tell "this
-// session" apart from any other at this layer, and treating one session as
-// exempt would mean a stolen session surviving a password change simply by
-// being the one that happened to request it. Whatever HTTP handler calls
-// this must re-issue a fresh session (IssueSession) for the request that
-// triggered it.
 func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, newPassword string) error {
 	// Same bounds as CreateUser's password check, and for the same
 	// reasons: the byte bound is checked first because it protects
@@ -233,25 +189,6 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, newPassw
 // already give them elsewhere, and a designer who suspects their
 // password leaked can still rotate it out from under an attacker who
 // only ever had the cookie.
-//
-// A mismatch reports ErrInvalidCredentials, the same sentinel
-// Authenticate uses for a wrong password — not a distinct
-// "wrong-current-password" error — so the HTTP layer maps both to an
-// identical 401 body. There is no enumeration concern to defend against
-// here the way Authenticate's sentinel-hash trick defends against one
-// for an anonymous caller (the caller already proved who they are via
-// their session), but reusing the same sentinel keeps this file from
-// growing a second "credentials were wrong" vocabulary for no behavioural
-// difference.
-//
-// If targetUserID names no user at all — not expected in practice, since
-// the HTTP layer only ever calls this with the id from an already-
-// resolved session, but not impossible if the account is deleted in the
-// instant between session resolution and this call — this also reports
-// ErrInvalidCredentials rather than a distinct not-found error, for the
-// same reason Authenticate's own unknown-user branch does: there is no
-// caller-visible difference worth drawing between "no such account" and
-// "wrong password" once execution has already reached this method.
 func (s *Service) ChangeOwnPassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
 	dbUser, err := s.q.GetUserByID(ctx, userID)
 	if err != nil {
@@ -284,11 +221,6 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID uuid.UUID, curre
 // the life of the process (see that function's own doc comment for the
 // interval and failure-handling decisions) — this method itself stays
 // pure database bookkeeping with no process-lifecycle opinion of its own.
-// An unpruned row is disk bloat, not a live security exposure:
-// GetSessionUser already treats it as dead regardless of whether this has
-// run recently, which is what makes calling it on a coarse interval
-// (rather than eagerly, inline with every session read) a correctness-
-// neutral choice.
 func (s *Service) PruneExpiredSessions(ctx context.Context) (int64, error) {
 	n, err := s.q.DeleteExpiredSessions(ctx)
 	if err != nil {

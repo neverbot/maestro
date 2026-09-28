@@ -1,24 +1,4 @@
 // Command maestro-docs builds this repository's documentation site.
-//
-// The site is generated from the files that already exist and are
-// already true — `readme.md`, the skill bundle's own pages, the
-// generated design system — and it invents no prose of its own. That is
-// the whole design decision here: a documentation site written by hand
-// beside a product is a second description of it, and this repository
-// has spent the year learning what a second description costs.
-//
-// What it publishes:
-//
-//   - the readme, as the home page;
-//   - every page of the skill bundle, which is what an agent is handed
-//     and what the product's own onboarding link points at;
-//   - the generated design system page, copied whole.
-//
-// No CSS framework, no fonts fetched from anywhere, no JavaScript: the
-// same discipline the product's own front end keeps, for the same
-// reason.
-//
-//	go run ./cmd/maestro-docs -o site
 package main
 
 import (
@@ -128,11 +108,6 @@ var nonWord = regexp.MustCompile(`[^a-z0-9_]+`)
 // `relation_types` and `entities` are the tool surface's eleven domain
 // headings and they are the names a client sends over the wire; "Running
 // it" and "Known limitations" are Maestro talking.
-//
-// **It is a shape and not a guess.** The Copyable Is Mono Rule says a
-// value a person might select and paste is monospace, and "has no spaces
-// and no capitals" is a property of the text rather than an opinion
-// about it, which is why this can be a rule at all.
 var identifierRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]*$`)
 
 // anchor gives every h2 an id and returns the list, so the rail can
@@ -164,14 +139,6 @@ func anchor(body string) (string, []section) {
 }
 
 // withoutFrontmatter drops a bundle page's YAML header.
-//
-// **It was being published as a heading.** `skill.md` opens with
-// `---\nname: maestro\ndescription: ...\n---`, and markdown reads a line
-// of dashes under text as a setext heading: the skill page's first
-// section heading, on the published site, was the words "name: maestro"
-// followed by the whole description as a paragraph. The frontmatter is
-// for the agent's client, which reads it off the file; a person reading
-// the page is being shown the envelope.
 func withoutFrontmatter(body string) string {
 	if !strings.HasPrefix(body, "---\n") {
 		return body
@@ -187,11 +154,6 @@ func withoutFrontmatter(body string) string {
 // blurbOf is a page's own first sentence, taken from its markdown: the
 // frontmatter, the generator's comment line and the h1 are skipped, and
 // what is left is the first paragraph, cut at its first full stop.
-//
-// **It is quoted and not written.** A description of a page written
-// beside the page is the second description this whole generator exists
-// to refuse; the page's own opening sentence is the page saying what it
-// is.
 func blurbOf(body string) string {
 	lines := strings.Split(body, "\n")
 	i := 0
@@ -221,14 +183,6 @@ func blurbOf(body string) string {
 
 // fontFiles are the faces the site sets its two voices in: the same
 // files the product serves, copied rather than re-fetched.
-//
-// **A documentation site that names a typeface it does not carry is the
-// same defect as a design document that names one the product does not
-// serve**, which is what the typography section of docs/design.md said
-// about itself until the fonts were vendored. The design system page in
-// particular renders specimens of both voices; without these it renders
-// them in whatever the reader's machine has, under a heading that says
-// which face it is.
 var fontFiles = []string{
 	"literata-var-latin.woff2",
 	"fira-sans-400-latin.woff2",
@@ -515,14 +469,6 @@ func bundlePages() ([]page, error) {
 // --- The bundle, as a destination ------------------------------------
 
 // AGENTS_INDEX is where the header's "For agents" link goes.
-//
-// **It was an anchor, and the anchor was the problem.** The link pointed
-// at `index.html#for-agents`: an h2 at 5,951 pixels down a 6,621-pixel
-// page, so a reader who clicked it landed with the whole navigation
-// scrolled off the top, looking at nineteen bullets sorted by
-// repository path — `agents/genres/...` first and `skill`, the bundle's
-// own entry point, last. A label that promises a destination gets a
-// destination.
 const agentsIndexPath = "agents/index.html"
 
 // groupLabels name the bundle's four directories in the reader's words.
@@ -628,12 +574,6 @@ func agentsIndexPage(root string, bundle []page) (page, error) {
 
 // siteDir holds one markdown file per page the site writes rather than
 // borrows.
-//
-// **The prose lives in markdown, not in this file.** The front page was
-// forty `WriteString` calls with sentences and hand-escaped HTML inside
-// them: nobody could fix a comma without recompiling, and the one thing
-// this generator is for — turning markdown into pages — was the one
-// thing the front page did not do.
 const siteDir = "docs/site"
 
 // partialRE is the one extension these pages have over markdown, and it
@@ -642,10 +582,6 @@ const siteDir = "docs/site"
 // own index, built from the files that exist; `{{map}}` is every page
 // and every heading of this site, built from the pages that were just
 // rendered. Neither can be typed by hand and stay true.
-//
-// A word in braces rather than an HTML comment, because goldmark runs
-// without `html.WithUnsafe` on purpose (see internal/markdown) and would
-// have dropped a comment before this could see it.
 var partialRE = regexp.MustCompile(`<p>\{\{([a-z]+)\}\}</p>`)
 
 // sitePage renders one of them.
@@ -685,11 +621,6 @@ func expand(body string, parts map[string]string) (string, string) {
 
 // figureRE is an image alone in a paragraph, optionally followed by an
 // emphasised paragraph.
-//
-// **That pair is this site's figure**, because markdown has no figure
-// and this renderer admits no raw HTML to write one with. One rule, said
-// here and in docs/images/readme.md: a picture on its own line is a
-// figure, and an italic line under it is its caption.
 var figureRE = regexp.MustCompile(`(?s)<p>(<img [^>]*?)\s*/?></p>\n?(?:<p><em>(.*?)</em></p>)?`)
 
 // srcRE reads the file a rendered image points at.
@@ -732,21 +663,6 @@ func pngSize(path string) (int, int, bool) {
 const mapPath = "map.html"
 
 // sitemapPage is this site's answer to "where is the thing called X".
-//
-// **It is an index and not a search box, and that is design.md's own
-// argument.** The frame refuses a search field in the product's header
-// ("search belongs to the catalogue it filters, and a second one here
-// would be a control that searches nothing in particular"), and a box
-// that searched this site would need an index, a script and a payload on
-// a site that ships no JavaScript at all. One page carrying every
-// heading of every page is the same answer with none of that: the
-// browser's own find already searches a page, and here the page is the
-// site.
-//
-// Each page is a `details`, **open**, so the reader can fold away what
-// they are not reading and find-in-page still sees every word. Closed by
-// default would have been tidier and would have broken the one thing
-// this page is for.
 func sitemapPage(root string, pages []page) (page, error) {
 	var out strings.Builder
 	out.WriteString(`<div class="map">` + "\n")
@@ -800,17 +716,6 @@ func sitemapPage(root string, pages []page) (page, error) {
 
 // stripRemoteImages removes every image the site would fetch from
 // another origin.
-//
-// The readme carries two shields.io badges, which on this site are the
-// only chromatic pixels above the fold — a saturated blue and an orange
-// that belong to neither of this palette's two chromatic exemptions —
-// and they are GitHub's chrome verbatim, which docs/product.md names as
-// an anti-reference. They are also two requests to a third-party origin
-// from a product whose own CSP forbids exactly that: the design-system
-// page's stylesheet comment records making this mistake once already.
-//
-// They stay in readme.md, where they are read on GitHub and are the
-// right furniture. They do not come here.
 var remoteImageRE = regexp.MustCompile(`<img[^>]+src="https?://[^"]*"[^>]*>`)
 
 // altRE is the words the image was carrying.
@@ -847,13 +752,6 @@ var selfNamingLink = regexp.MustCompile(`\[([^\]]+)\.md\]\(([^)]+)\.md\)`)
 // rewriteLinks points a markdown link at a neighbouring `.md` file at
 // the page this generator wrote for it. A link that still said `.md`
 // would download a file instead of opening a page.
-//
-// **The label is rewritten too when the label *is* the filename.** The
-// home page read "MIT. See license.md." over a link to `license.html`:
-// the href was right and the words named a file this site does not
-// serve. Only a label that is exactly its own target is touched; a
-// sentence that happens to mention a filename is prose and stays as it
-// was written.
 func rewriteLinks(body string) string {
 	body = selfNamingLink.ReplaceAllString(body, "[$1]($2.html)")
 	return strings.ReplaceAll(body, ".md)", ".html)")
@@ -877,11 +775,6 @@ func depthOf(p string) int {
 
 // crumbsFor is the trail under the header: where this page sits, and
 // the way back up it.
-//
-// docs/design.md's frame puts one on every screen ("a 32px breadcrumb,
-// then the page head"), for the reason product.md's first principle
-// gives: a reader who cannot name the screen they are on has no map. The
-// site had none, and its deepest pages are three levels down.
 func crumbsFor(p page, bundle []page, up string) string {
 	type crumb struct{ href, label string }
 	trail := []crumb{{up + "index.html", "Maestro"}}
@@ -926,12 +819,6 @@ func crumbsFor(p page, bundle []page, up string) string {
 
 // railFor is the navigation beside the content: where this page sits in
 // the site, what else sits beside it, and what is on it.
-//
-// The frame gives the rail 280px, sticky under the header, folding
-// beneath the content below 1100px. What it carries here is what is true
-// of the whole site — its pages — plus this page's own headings, which
-// is the difference between surveying 58 tools and scrubbing 3,848
-// pixels for them.
 func railFor(p page, bundle []page, up string) string {
 	var out strings.Builder
 	out.WriteString(`<nav class="rail" aria-label="Site">` + "\n")
@@ -984,18 +871,6 @@ func railFor(p page, bundle []page, up string) string {
 
 // railSection is one group of the rail, and it is a `details` for the
 // sake of the narrow screen.
-//
-// **Below 1100px the rail is a band above the article**, because folded
-// beneath it the rail is thirty links a reader meets after everything
-// they came for. The band was 262px of a 900px screen on the tool
-// surface — content buried under chrome, which is product.md's
-// ad-choked-wiki anti-reference arriving through the door marked "do not
-// hide the navigation". Both positions were wrong.
-//
-// So the two heavy groups ship **closed** and the stylesheet forces them
-// open above 1100px, where there is a column to put them in. The site
-// group stays a flat band: five links, always visible, which is the
-// Never Hidden Rule's actual requirement.
 func railSection(label string, count int, links string) string {
 	return "<section>\n<details>\n<summary><h2>" + escape(label) +
 		" <span>" + fmt.Sprint(count) + "</span></h2></summary>\n<ul>\n" +

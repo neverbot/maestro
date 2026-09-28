@@ -264,19 +264,6 @@ func TestSearchRanksANamedHitAboveAMentionAcrossKinds(t *testing.T) {
 // nothing but the merge's own determinism decides the order. It would
 // catch a merge ordered by anything with no order of its own — a map
 // iteration, say.
-//
-// **What it does not catch, recorded rather than implied: replacing
-// sort.SliceStable with sort.Slice in searchContent leaves *this* test
-// green**, at -count=20 and -count=5. All its ties are same-kind
-// (document vs. document), so the input this fixture hands the merge is
-// already in the order the merge produces, and pdqsort moves nothing. A
-// fixture that ties *across* kinds does catch it —
-// TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks, whose own
-// comment carries the measurement and is red against sort.Slice, proved
-// by hand. sort.SliceStable stays because the stable order is the one
-// the two queries' own tie-breaks (name then id; title then id) were
-// written to produce, and that other test is what actually pins the
-// choice — this one only pins the narrower, same-kind case.
 func TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -359,9 +346,6 @@ func TestASearchNeverLeavesTheTokensGame(t *testing.T) {
 // already shipped, and this commit changed its answer's shape: what has
 // to hold from here on is that a field added to any of the three is
 // decided in the open rather than discovered by an agent.
-//
-// Every optional key is given a value, because the marshaller omits the
-// empty ones and a zero value would pin half the contract.
 func TestTheSearchWireTypesCarryExactlyTheseKeys(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -514,28 +498,6 @@ func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
 // merge sorts is always non-decreasing because "each side arrives
 // already ordered by the exact key the merge sorts on", which only
 // holds when the entity block happens to rank above the document block.
-//
-// It does not here. Twenty entities that only mention the query in a
-// field (name_match false) rank at 0.39641288; twenty documents that
-// only mention it in their body (name_match false too) rank at
-// 0.648798 — a single identical mention sentence, scored differently by
-// the two vectors (see the tool description's own note on that). Search
-// appends the entity block first and the document block second
-// (searchContent's own order), so the concatenation this hands to the
-// merge is [rank 0.396 x20][rank 0.649 x20]: the exact reverse of the
-// order the merge produces, and about as unsorted as a same-length
-// slice can be — every element has to cross every element of the other
-// block.
-//
-// That is real work for the sort, and it is where the claim breaks:
-// with sort.Slice in place of sort.SliceStable, this is red — proved by
-// hand, not asserted here, because the break is nondeterministic across
-// runs and pdqsort's internals are not this suite's to pin. What this
-// test pins is the promise that survives *because* the sort is stable:
-// documents.sql promises document ties break by title then id, and
-// metamodel.sql promises entity ties break by name then id, and both
-// tie-break orders — set by each query's own ORDER BY — must still hold
-// after the merge despite the full reversal above.
 func TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -628,15 +590,6 @@ func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T
 
 // TestASearchOmitsFieldsUnlessAskedToBeVerbose pins the flag Task 9's
 // seeding run found missing, on both surfaces and over the wire.
-//
-// The measurement that made it necessary: against a game whose rows carry
-// 25 KB of lore each, one sixty-hit search answered with 1.6 MB of JSON,
-// because there was no argument that turned the payload off. The fixture
-// here is that shape in miniature — one row carrying a long briefing —
-// and it asserts the two things that matter: without the flag the hit
-// carries no `fields` key *at all* on the wire (not an empty object,
-// which a client would have to tell apart from a row with no values),
-// and with it the whole payload comes back.
 func TestASearchOmitsFieldsUnlessAskedToBeVerbose(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)
@@ -733,12 +686,6 @@ func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
 // TestSearchFindsAnEntityByItsKeyOverTheToolSurface carries 0010's change
 // one step along: the domain test proves the vector holds the key, and
 // this proves an agent calling the tool gets the row.
-//
-// It also pins where the key went. The row is found by its handle and
-// comes back with name_match false, because 0010 put the key at label C
-// and left `name_match` asking about the name alone — the property that
-// keeps "a row the query names outranks a row that mentions the words" a
-// guarantee, which a keyed-by-counter catalogue would otherwise flood.
 func TestSearchFindsAnEntityByItsKeyOverTheToolSurface(t *testing.T) {
 	t.Parallel()
 	f := newMetamodelFixture(t)

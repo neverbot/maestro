@@ -15,11 +15,6 @@ import (
 
 // knownVocabularies is every vocabulary name a guard in this repository
 // knows how to check, with where the check lives.
-//
-// It is the list the "one step along" guard below is built on: a fence
-// named vocab:layout_modes that no guard checks is an unchecked
-// enumeration wearing the costume of a checked one, and a checker with
-// no fence is a comparison against nothing.
 var knownVocabularies = map[string]string{
 	"field_types":    "TestBundleVocabulariesMatchCode, here",
 	"semantic_roles": "TestBundleVocabulariesMatchCode, here",
@@ -78,11 +73,6 @@ func TestBundleVocabulariesMatchCode(t *testing.T) {
 // one step along, which is where every guard in this repository has
 // died: the set of fence names in the bundle must equal the set of
 // vocabularies a guard knows how to check.
-//
-// Without it, a contributor adds ```vocab:layout_modes```, no guard
-// looks at it, and the suite is green over an enumeration nothing
-// compares — the same defect as a budget tier table that does not name a
-// new directory.
 func TestEveryVocabFenceIsKnownAndEveryKnownVocabIsFenced(t *testing.T) {
 	fences, err := skill.VocabFences(skill.Files())
 	assert.Must(t, err == nil, "reading the bundle's vocab fences: %v", err)
@@ -231,14 +221,6 @@ func mustFences(t *testing.T, fsys fstest.MapFS) []skill.VocabFence {
 // could produce and no test can judge. Whether the advice on them is
 // *good* is a question for a reader; these three guards pin the three
 // properties of them that are not a matter of taste.
-//
-// Each reads the shipped pages out of skill.Files(), not a fixture. A
-// guard pointed at a fixture is a guard that stays green while the
-// shipped page says anything at all — and it walks every modelling/*.md
-// rather than the three that exist today, so a fourth page added
-// tomorrow is judged without editing this file.
-
-// modellingPages reads every modelling/*.md out of a bundle tree.
 func modellingPages(t *testing.T, fsys fs.FS) map[string]string {
 	t.Helper()
 	pages := map[string]string{}
@@ -329,12 +311,6 @@ func renameSentences(body string) []string {
 
 // deniedRename reports the sentences of a page that assert something
 // cannot be renamed without saying it is an entity or a row.
-//
-// The asymmetry is the point: a *type* can be renamed and an *entity*
-// cannot, and a page that states only the first half sends an agent at a
-// tool that does not exist, while a page that states only the second
-// half sends it at the delete-and-recreate workaround the rename
-// replaced — which loses every edge.
 func deniedRename(body string) []string {
 	var out []string
 	for _, sentence := range renameSentences(body) {
@@ -401,15 +377,6 @@ func TestTheRenameRuleIsTaughtBothWays(t *testing.T) {
 // TestTheAnalyticalAxisIsTaughtAsShippedNotAsComing replaces the plan's
 // TestNoModellingPageTeachesAnUnshippedColumn, and the replacement is
 // itself the correction it guards.
-//
-// The plan's ship-order section states that analysis_traits is not a
-// column, so its guard forbade the identifier on these pages. It is a
-// column today (0013_analysis.sql), an accepted input on
-// relation_types.upsert, and that tool's own description says declaring
-// a semantic_role does not declare behaviour. The old guard would now
-// forbid teaching a shipped argument an agent has to send; this one
-// requires it to be taught, and forbids the sentence the plan itself
-// would have produced — an axis described as still on its way.
 func TestTheAnalyticalAxisIsTaughtAsShippedNotAsComing(t *testing.T) {
 	pages := modellingPages(t, skill.Files())
 	deciding, ok := pages["modelling/deciding.md"]

@@ -1,15 +1,5 @@
 // The harness for the query builder: the sentence, the document it
 // writes, and the two refusals it makes for itself.
-//
-// The emitter has its own file (compose_test.mjs) and the pickers have
-// theirs. What is here is the **screen**: that a stack reads as one
-// sentence in the order a person would say it, that a diagnostic's JSON
-// pointer finds the clause that wrote it, and that a save the server
-// would refuse is refused here first, with the reason beside the button
-// rather than after a press.
-//
-// Run directly: `node internal/web/jstest/builder_test.mjs`.
-// internal/web/static_builder_test.go shells out to it too.
 
 import path from "node:path";
 import { register } from "node:module";
@@ -195,12 +185,6 @@ check("a typed value is a number when it is one",
   [20, "Elwynn", "", "20 quests", "007"]);
 
 // --- Where a diagnostic is put ----------------------------------------
-//
-// **`markClause` walks the clause lines and nothing else.** The row of
-// "and then follow…" buttons is a child of the same root, and a version
-// that walked every child cleared that row's last child: the second add
-// button rendered as a 28px empty box every time a diagnostic was
-// placed. Found on screen with five clauses.
 {
   const doc = dom.document;
   const root = doc.createElement("div");
@@ -228,11 +212,6 @@ check("a typed value is a number when it is one",
 }
 
 // --- Opening a stored view --------------------------------------------
-//
-// §4: the builder **generates and never edits**. It opens a stored query
-// only when that document round-trips through it unchanged, and what it
-// then composes is a *new* view — so the page says so, and the save is a
-// create.
 
 {
   const { openedFrom, startedFrom } = await import("../static/pages/builder.js");

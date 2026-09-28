@@ -3,19 +3,6 @@
 // a stubbed event stream carrying real `text/event-stream` bytes, and
 // injected timers so a 750ms coalescing window is a millisecond of test
 // time rather than a sleep.
-//
-// What this covers that no Go test can. The client is the only module in
-// this front end that fetches, and everything that makes it safe is a
-// property of the JavaScript: that forty events are one re-read, that a
-// re-read waits for a drag and for an unacknowledged write and for a
-// hidden tab, that a payload never becomes state, that a position write
-// carries a type and a key and no uuid, that a heartbeat comment is not
-// an event, that the stream reconnects when the server closes it — which
-// it always does, on purpose — and that a refusal reaches the caller as
-// the server's own sentence, character for character.
-//
-// Run directly: `node internal/web/jstest/client_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import {
   BAND,

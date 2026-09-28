@@ -14,15 +14,6 @@ import (
 )
 
 // TestAGameIsAddressedByItsSlugAndNotByItsID is the decision, pinned.
-//
-// The routes took a uuid while /g/{slug} took a slug, so a person who
-// had just created a game and was looking at it by name had to go and
-// find a uuid before they could mint a token or seed anything. The slug
-// now *replaces* the id here rather than being accepted beside it — the
-// call the metamodel made for row keys, taken for the same reason: two
-// names for one thing cost every caller a decision and buy nothing.
-//
-// So both halves are asserted: the slug works, and the id does not.
 func TestAGameIsAddressedByItsSlugAndNotByItsID(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
@@ -75,14 +66,6 @@ func TestTheSlugAddressFoldsCase(t *testing.T) {
 
 // TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal is the
 // property the whole shape of resolveGameRef exists to protect.
-//
-// A uuid is not guessable, so the old routes could safely answer "you
-// are not a member of this game" — the caller had to be holding the id
-// already. A slug is a name someone chose, so the same answer would be
-// an enumeration oracle: a stranger could walk plausible names and learn
-// which studios exist here, one guess at a time. BySlugForUser joins
-// membership into the lookup so both cases are one answer, and this is
-// what proves it stays that way.
 func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)

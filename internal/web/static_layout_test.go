@@ -17,32 +17,6 @@ import (
 // properties of that directory that no harness can see at runtime,
 // because each of them is about the *arrangement* of the code rather
 // than about what it computes.
-//
-// internal/web/jstest/layout_test.mjs holds everything else: the
-// determinism, the three degeneracies of the fit, the separation pass,
-// the grid and the budget are all arithmetic over plain data, and the
-// only honest way to test JavaScript is to run it. What is left here is:
-//
-//   - **No module in this directory imports by bare specifier.** An
-//     import map is a property of a *document*; a module worker has its
-//     own module map and no map at all. So `import … from "dagre"`
-//     inside anything worker.js pulls in resolves to nothing, in the
-//     worker, at load — and the page sees not an error but a worker that
-//     never answers, which looks exactly like a slow layout and would be
-//     reported to the designer as the budget running out. It works today
-//     because the two vendored imports are written as paths; a habit is
-//     not a guard.
-//   - **The budget is one number and its sentence is generated from it.**
-//     A hard-coded "2 seconds" beside a 2000 survives every runtime
-//     assertion in the harness until somebody tunes the constant, at
-//     which point the interface starts telling designers a number that
-//     is not the one it enforced.
-//   - **The spelling a stored position reads back in is the one the
-//     server writes.** compose.js parses the envelope's `positions[]`,
-//     and internal/views.Position carries no struct tags, so that
-//     spelling is Go field names and lives nowhere anybody would think
-//     to look. This is the seam between the two halves, and it is
-//     asserted by marshalling the real struct rather than by quoting it.
 
 const layoutDir = "static/layout"
 
@@ -70,10 +44,6 @@ func layoutModules(t *testing.T) map[string]string {
 var importSpecifier = regexp.MustCompile(`(?m)^\s*(?:import|export)[^;]*?from\s*["']([^"']+)["']`)
 
 // TestTheLayoutModulesResolveWithoutAnImportMap is the worker rule.
-//
-// It also asserts the directory holds the four modules the layout is
-// made of, so that a fifth one added without a thought about workers is
-// a diff somebody reads rather than a file this test never opened.
 func TestTheLayoutModulesResolveWithoutAnImportMap(t *testing.T) {
 	t.Parallel()
 	modules := layoutModules(t)
@@ -180,37 +150,6 @@ func everyOwnModule(t *testing.T) map[string]string {
 
 // TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites is the
 // seam between Go and JavaScript that nothing else joins.
-//
-// A stored position must be spelled the same way in the answer as in the
-// call. `internal/views.Position` now carries json tags, so a run
-// marshals `entity_type`, `entity_key`, `x`, `y`, `pinned` — the
-// spelling views.set_positions takes and internal/web/static/client.js
-// sends — and compose.js reads exactly that, once.
-//
-// It shipped otherwise. Position carried no tags, a run answered in Go
-// field names, and a composer reading only the documented spelling found
-// no stored position in any envelope: not an error, not an empty list
-// with a reason, but a view that looks as though nobody ever arranged
-// it — so every saved arrangement would have been silently re-laid out
-// on every load.
-//
-// The names are taken from the struct rather than quoted, so removing or
-// renaming a tag fails here — loudly, in the same commit — instead of
-// silently unreading every arrangement in the product.
-//
-// **Comments are stripped before the module is searched.** The previous
-// version of this guard searched the raw source, and the module's own
-// doc comment named every member it was looking for: the assertion would
-// have held over a `storedFrom` that read nothing at all. A guard that a
-// comment can satisfy is not a guard.
-//
-// **It follows the reader.** `storedFrom` was compose.js's while the
-// layout was the only thing that read a saved arrangement; `map` reads
-// one without running an engine at all (spec §5.1), so the function
-// moved to static/positions.js and this guard moved with it. A guard
-// left pointing at the module a rule used to live in is a rule that
-// stops being checked on the day it is carried one step along, which is
-// this sub-project's own most repeated defect.
 func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.T) {
 	t.Parallel()
 	encoded, err := json.Marshal(views.Position{})
@@ -260,14 +199,6 @@ func reads(code, name string) bool {
 // withoutComments removes `//` line comments and `/* */` blocks, so a
 // source-shape guard asserts over code rather than over prose that
 // happens to name what it is looking for.
-//
-// It is deliberately naive about a `//` inside a string or a regular
-// expression literal: over-removal can only make a guard fail loudly,
-// never pass quietly, which is the direction a source-shape guard should
-// err in. What it must not do is quietly stop stripping, which would
-// weaken every caller at once, so
-// TestTheCommentStripperRemovesCommentsAndKeepsCode pins both halves of
-// what it does.
 func withoutComments(code string) string {
 	blocks := regexp.MustCompile(`(?s)/\*.*?\*/`)
 	lines := regexp.MustCompile(`(?m)//.*$`)

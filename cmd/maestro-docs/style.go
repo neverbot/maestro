@@ -3,25 +3,6 @@ package main
 // siteCSS is the site's whole stylesheet: the product's own tokens, the
 // warm paper ground and the two voices, in the one place a static site
 // needs them.
-//
-// It is a copy of a handful of values from docs/design.md rather than a
-// second design: the site is not the product, it has no components, and
-// wiring the product's 1,800-line stylesheet into a static page would
-// bring six shadow-root components' worth of rules with it. The tokens
-// are the part that matters, and `docs/design-system.html` — published
-// beside this — is where they are stated normatively.
-//
-// **The frame below is design.md's page frame and not a second one.**
-// The first version of this file set `main { max-width: 46rem }`, which
-// put 688px of content in a 1440px window — the same 686px, two pixels
-// off, that design.md's own page-frame section records as a defect it
-// already fixed once ("the 68ch measure belongs to the prose role alone
-// and never to the page"). It also printed every word of the site on
-// `ground` with the chrome on `paper`, which is the Two Grounds Rule
-// exactly backwards, and set every section heading in the serif, which
-// is the Two Voices Rule exactly backwards. Three named rules, all three
-// inverted, on a site whose reason to exist is publishing the document
-// that names them.
 const siteCSS = `
 /* The two voices, from the same files the product serves — see
    copyFonts. Every face swaps rather than blocks: the site draws in the

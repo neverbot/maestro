@@ -3,41 +3,6 @@
 // import — the text twin's model, because the twin is the accessible
 // content of *every* view (spec §8.1) and a frame that could be built
 // without one is a frame that eventually is.
-//
-// This module is written **before any renderer** and on purpose. The six
-// drawings are drawings; this is where a designer learns the drawing is
-// not the whole truth, and if each renderer owned its own version of
-// these states there would be six of them, differing. Everything below
-// is decided once, here, and `mst-view-frame.js` only paints it.
-//
-// One rule governs the wording, and it is a refusal.
-//
-// **The frame never says "complete".** internal/views/execute.go is
-// explicit that `truncated.depth` cannot be set at all by a query whose
-// every step is one hop, and that `truncated.nodes`/`.edges` can
-// over-report; so a false flag means "not measured" as often as it means
-// "not truncated". A picture with three false flags is a picture nothing
-// is known to be missing from, which is not the same statement as a
-// complete one, and the envelope refuses to make the second. When
-// nothing is flagged this module says **nothing** — `bannersFor` returns
-// an empty array and no sentence anywhere claims a whole picture.
-//
-// The second rule is Task 3's, carried one step along: **where the
-// server has a sentence, it is rendered verbatim and never composed.**
-// A staleness refusal carries `details.fields[].message`, generated from
-// internal/views/stale.go's own structures and asserted there in both
-// directions; restating any of it here is the drift that work refused.
-// What this module writes in its own words is the half the server says
-// nothing about — a truncation, an ambiguous node, an automatic
-// placement, an empty answer — because for those there is no server
-// sentence to render.
-//
-// A third, quieter rule: this module counts what the envelope counts.
-// `node.ambiguous` is a flag on the **node** (execute.go argues it: a
-// node with two related slots, one of them ambiguous, is flagged, and
-// which of the two is deliberately not said), so the ambiguity band
-// counts nodes and its sentence names nodes. Counting slots would be
-// inventing a distinction the server declined to carry.
 
 import { fillFor } from "../palette.js";
 import { twinFor } from "./twin.js";
@@ -97,9 +62,6 @@ export const BANNER_BACKGROUND_MISSING = "background_missing";
 // best-effort picture is very often also truncated. The three truncation
 // codes sit together and in flag order (nodes, edges, depth) because
 // they are three sentences about one cap family, never one summary.
-//
-// It is a list and not a comparison function so that the whole order is
-// one readable thing a test can assert against.
 export const BANNER_ORDER = [
   BANNER_STALE,
   BANNER_DROPPED,
@@ -119,14 +81,6 @@ export const BANNER_ORDER = [
 // not a set of booleans because they are mutually exclusive answers to
 // "what is under the title strip", and a caller that has to combine
 // flags to find out is a caller that will combine them wrongly.
-//
-//   picture     — a drawing. The ordinary case, negative bands or not.
-//   empty       — a successful run that matched nothing.
-//   diagnostics — a refusal. **No picture at all**, which is the whole
-//                 point of the failing on_stale default.
-//   unbound     — a refusal whose every diagnostic is param_unbound.
-//                 Answered in the parameter bar, which is the place that
-//                 can fix it, and not with a JSON pointer.
 export const KIND_PICTURE = "picture";
 export const KIND_EMPTY = "empty";
 export const KIND_DIAGNOSTICS = "diagnostics";
@@ -156,18 +110,6 @@ export const CODE_QUERY_STALE = "query_stale";
 // --- The banner stack ------------------------------------------------
 
 // bannersFor reads the envelope and returns the bands, in BANNER_ORDER.
-//
-// `placedAutomatically` is a count the caller owns: the envelope says
-// which nodes have a saved position and the layout engine knows which of
-// them it had to place, and neither half alone is the number. `droppedRefs`
-// is likewise the caller's: a successful envelope does not echo the
-// policy it ran under, so "this picture was drawn best-effort" is a fact
-// only the caller that asked for it holds. Both default to nothing, so a
-// caller that knows neither gets no band rather than a guessed one.
-//
-// Returns `[]` for a clean envelope. That empty array is the refusal at
-// the top of this file, in code: there is no "everything is fine" band,
-// because the envelope cannot support one.
 export function bannersFor(envelope, options = {}) {
   const env = envelope && typeof envelope === "object" ? envelope : {};
   const placed = countOf(options.placedAutomatically);
@@ -328,11 +270,6 @@ export function bannersFor(envelope, options = {}) {
 
   // The containment cycle, last, because it is the only band that names
   // entities and a reader who has met the others learns its position.
-  //
-  // One row per repeat, each naming **both** ends: the box the nest
-  // stopped at and the box that contains it. A band that said only "this
-  // picture contains a cycle" would leave a designer to find two boxes
-  // out of four hundred.
   const cycles = Array.isArray(options.containmentCycles) ? options.containmentCycles : [];
   if (cycles.length > 0) {
     banners.push({
@@ -379,18 +316,6 @@ export function bannersFor(envelope, options = {}) {
 }
 
 // staleRefsOf is the envelope's non-rename diagnostics, as rows.
-//
-// Renames are excluded here and answered in the title strip: they arrive
-// beside a **full and correct** picture, because the reference resolved
-// by id, so banding them would spend the loudest surface the frame has
-// on the one diagnostic that costs the designer nothing today.
-//
-// A success envelope carries `stale[]` with a code, a pointer and the
-// was/now pair and **no sentence** — the sentences live on the refusal
-// (internal/views/stale.go's staleQuery puts them in Fields, which
-// internal/web publishes as details.fields[].message). So these rows
-// carry an empty message rather than a composed one, and the frame shows
-// the pointer, which is an address a designer can act on.
 export function staleRefsOf(envelope) {
   const env = envelope && typeof envelope === "object" ? envelope : {};
   const diags = Array.isArray(env.stale) ? env.stale : [];
@@ -408,11 +333,6 @@ export function staleRefsOf(envelope) {
 
 // renamedFor is the quiet title-strip line, and it is deliberately not a
 // band and offers no action.
-//
-// Returns null when nothing was renamed, so the caller has no empty
-// object to test for. The line expands to the pointers: the designer's
-// repair is `views.upsert` with the new spelling, which they hand to
-// their agent, and a pointer is what an agent needs to find the place.
 export function renamedFor(envelope) {
   const env = envelope && typeof envelope === "object" ? envelope : {};
   const rows = (Array.isArray(env.stale) ? env.stale : [])
@@ -442,18 +362,6 @@ function isRenamed(code) {
 
 // diagnosticsFor turns a refusal into the panel that replaces the
 // picture, plus the unbound parameters the parameter bar answers.
-//
-// It walks `details.fields` and not `details.stale`, which is the list
-// with the **sentences** on it and is also the wider list: a stale
-// document can be broken for a second reason at a position no diagnostic
-// covers (internal/views/stale.go's staleQuery carries both), and
-// walking the diagnostics would drop that reason silently. The code and
-// the was/now pair are read off `details.stale` by pointer, which is the
-// join the server built the two lists to allow.
-//
-// `param_unbound` comes out into `unbound`: a designer who opened a link
-// without `?p.class=` is one field away from a picture, and sending them
-// to a JSON pointer for that would be absurd.
 export function diagnosticsFor(error) {
   const err = error && typeof error === "object" ? error : {};
   const details = err.details && typeof err.details === "object" ? err.details : {};
@@ -490,12 +398,6 @@ export function diagnosticsFor(error) {
 }
 
 // runAction performs the one action the panel offers.
-//
-// It takes the client rather than importing it: this module fetches
-// nothing and imports nothing, which is what lets a Node harness drive
-// it, and it is the property internal/web/static_client_test.go's fetch
-// perimeter holds for the whole front end. An action it does not know is
-// a no-op returning null rather than a guess.
 export function runAction(action, client, options = {}) {
   if (!action || action.code !== ACTION_RUN_BEST_EFFORT) return null;
   if (!client || typeof client.runView !== "function") return null;
@@ -507,27 +409,6 @@ export function runAction(action, client, options = {}) {
 // --- The strips ------------------------------------------------------
 
 // footerFor is the strip that is always present, on every kind.
-//
-// **Two elapsed numbers, never one.** `stats.duration_ms` is what the
-// query cost and `layoutMs` is what the picture cost, and "this view is
-// slow" is unanswerable without both — the first question is which half.
-// The layout number is absent until Task 6 runs an engine, and absent is
-// how it renders: a zero would claim a measurement nobody made.
-//
-// `max_depth_reached` is measured and not declared (execute.go), so it
-// is reported as what was reached and never as what was asked for.
-//
-// `outside` is the third number and the renderers' own: how many of the
-// answer's edges lead out of the picture (spec §4.2's *"8 edges lead
-// outside this picture"*). It is not in the envelope — an edge whose
-// endpoint the query chose not to draw is only discovered by joining the
-// two lists, which is what render/scene.js's joinEdges does and what
-// every one of the six renderers reports — so it arrives the way
-// `layoutMs` does, from the caller, and is absent when nobody counted.
-// A count of zero says nothing, for this module's first rule: there is
-// no band, and no clause, for the absence of a thing. `against` is the
-// fourth number and follows the same rule for the same reason: a picture
-// with nothing running backwards through it says nothing about ranking.
 export function footerFor(envelope, options = {}) {
   const layoutMs = options.layoutMs === undefined || options.layoutMs === null
     ? null
@@ -610,10 +491,6 @@ export function footerFor(envelope, options = {}) {
 
 // barFor is the parameter bar: one control per parameter the query
 // declares, present only when it declares any.
-//
-// `marked` is the unbound highlight. It is on the control and carries
-// the server's own sentence, because the place that can fix an unbound
-// parameter is the field, and the sentence is still the server's.
 export function barFor(declarations, values, options = {}) {
   const declared = Array.isArray(declarations) ? declarations : [];
   const bound = values && typeof values === "object" ? values : {};
@@ -661,37 +538,6 @@ export function deslug(key) {
 
 // legendModel is the colour key: the rows a renderer's `legend` already
 // carries, paired with the paint each one wears.
-//
-// **This exists because the legend was built and never drawn.** Four
-// renderers return `legend` from palette.js's `legendFor` — eight hue
-// rows ordered by frequency, a hatched tail, an `unset` row — every
-// renderer test asserts over it, and no component, page or emitter in
-// the product ever read it. A designer opening a `graph` with
-// `color_by` saw eight colours and nothing anywhere on the page saying
-// what any of them meant, which makes the hues decoration and the whole
-// of §2.3's colour discipline unreadable. Found by opening the seeded
-// game in a browser and searching the rendered page, both light DOM and
-// every shadow root, for a swatch: there was none.
-//
-// It is built here and not in the component for this file's standing
-// reason — a decision taken inside a component is a decision no test can
-// see — and it reads the paint off `fillFor` rather than re-deriving
-// one, so the swatch beside a label and the fill on the node are one
-// answer read twice and cannot drift.
-//
-// **It carries `kind` and `index` and not a CSS string**, and that is
-// the content security policy talking rather than taste. A `style`
-// attribute is inline style, this instance's policy refuses it with no
-// error of any kind (Task 15's third correction measured exactly that),
-// so a swatch painted from a value carried here would be a swatch with
-// no colour on every real page — the same defect this function exists to
-// undo. The two fields name one of a fixed, small set of paints, and the
-// component declares all of them in its own stylesheet.
-//
-// `present` is false rather than the object being null when a view
-// paints nothing (`map` returns `legend: null`, always) or when the
-// answer had no nodes: a key with no rows is a heading over an empty
-// box.
 export function legendModel(legend) {
   const rows = legend && Array.isArray(legend.rows) ? legend.rows : [];
   return {
@@ -710,18 +556,6 @@ export function legendModel(legend) {
 // --- The frame -------------------------------------------------------
 
 // frameFor is the whole model, and the one function the component reads.
-//
-// Exactly one `kind` comes back, and each of the four is produced by a
-// condition no other kind can meet: a refusal with rows is diagnostics,
-// a refusal with only unbound parameters is unbound, a clean run with
-// nothing in it is empty, and everything else is a picture.
-//
-// The empty case is a **success** and looks like one: the same frame,
-// the same footer, one sentence and what ran. No danger colour, no
-// warning, and **no guess at the cause** — the envelope does not carry
-// how many entities were considered, so "0 of 340 matched" is a number
-// the interface does not have, and "try widening your filter" is advice
-// generated from no information.
 export function frameFor(input = {}) {
   const view = input.view && typeof input.view === "object" ? input.view : {};
   const envelope = input.envelope && typeof input.envelope === "object" ? input.envelope : null;
@@ -846,24 +680,6 @@ function count(n, one, many) {
 }
 
 // --- The scene: marks, layers, and the emitter's contract ------------
-//
-// Everything below is the second half of this module's job, and it
-// arrives here rather than in the canvas for the same reason the banners
-// did: it is **data**, so a Node harness reads it and a mutation turns
-// it red, where a decision taken inside a component is a decision no
-// test can see.
-//
-// A renderer returns a scene: an array of marks, plus the legend, the
-// banners and the shelf this file already builds. A mark is plain data —
-// `{kind, layer, key, x, y, w, h, text, fill, dash, class}` — and the
-// emitter (components/mst-canvas.js) turns one mark into one SVG
-// element with the attributes named below and **nothing else**. It has
-// no opinion about colour, absence or truncation: those were decided in
-// Task 1 (palette.js) and Task 4 (above) and travel in the mark.
-
-// The SVG namespace. An SVG element created with createElement rather
-// than createElementNS is an unknown HTML element that lays out as
-// nothing, which is a bug with no error message.
 export const SVG_NS = "http://www.w3.org/2000/svg";
 
 // The five mark kinds, and the element each becomes. Five and not six:
@@ -892,9 +708,6 @@ export const MARK_ELEMENTS = {
 // and not a nicety — a label under its own node is a label nobody can
 // read, and a dragged node under the graph it is being dragged through
 // is a drag a designer loses track of.
-//
-// The order is a list rather than a comparison so the whole of it is one
-// readable thing, exactly as BANNER_ORDER above.
 export const LAYER_IMAGE = "image";
 export const LAYER_EDGES = "edges";
 export const LAYER_NODES = "nodes";
@@ -917,12 +730,6 @@ export const DEFAULT_LAYER = {
 export const PLACEABLE_LAYERS = LAYER_ORDER.filter((layer) => layer !== LAYER_DRAG);
 
 // The attributes every kind carries, and the one addressing attribute.
-//
-// `key` is the entity's address — `(type, key)` as JSON, the same string
-// engine.js's addressOf builds and the twin's rows are keyed by — and it
-// reaches the DOM as `data-key` so a browser inspecting the canvas shows
-// what a node *is*. The canvas itself never reads it back out of the
-// DOM; it holds an index built while emitting.
 export const COMMON_ATTRIBUTES = {
   key: "data-key",
   class: "class",
@@ -933,10 +740,6 @@ export const COMMON_ATTRIBUTES = {
 // named here does not reach the DOM.** That is what keeps the emitter
 // dumb without making it a passthrough — a passthrough is how `onload`,
 // `href` and `style` arrive on an element built from data.
-//
-// `text` is deliberately in none of them. A mark's text becomes a Text
-// node and never an attribute value; see the canvas's own header for why
-// that is a different argument here than it was for the text twin.
 export const MARK_ATTRIBUTES = {
   [MARK_RECT]: {
     x: "x",
@@ -1006,33 +809,6 @@ export const MARK_ORIGINS = {
 
 // isDrawableHref is the one URL rule this front end has, and it lives
 // beside the one attribute that fetches.
-//
-// SVG is not the text twin's problem restated. Nothing here parses
-// markup, so no escaping is delegated to anybody — but `<image>` and
-// `<use>` *fetch what their href names*, and an `href` is the one mark
-// field whose value a browser resolves rather than draws. A background
-// asset is served by this instance at a path this interface builds
-// (`/api/games/{slug}/views/assets/{id}`), so the whole legitimate set
-// is same-origin absolute paths, and that is what this admits: a
-// leading slash, no protocol-relative second slash, no scheme, no
-// whitespace and no backslash. Everything else — `javascript:`, a
-// `data:` document with a script in it, an off-instance host on a
-// self-hosted server with no outbound network — is refused here rather
-// than argued about at six call sites.
-// --- What a view does not show ---------------------------------------
-
-// offscreen counts the nodes a view does not show.
-//
-// **The picture lies by omission.** Measured on a 105-node view whose
-// fit had silently failed: 48 nodes drew outside a 1392x571 canvas with
-// `overflow: hidden`, no scrollbar and no notice, and the result looks
-// exactly like a complete diagram — the worst shape a failure can have
-// on a screen whose job is "is anything missing".
-//
-// Fitting is the fix and this is the admission: a designer who has
-// zoomed in is looking at part of the answer on purpose and should still
-// be told which part. It lives here, beside the marks it counts, and the
-// arithmetic is pure so a harness can drive it.
 export function offscreen(scene, view, size) {
   const marks = Array.isArray(scene) ? scene : Array.isArray(scene && scene.marks) ? scene.marks : [];
   const width = size && Number.isFinite(size.width) ? size.width : 0;
@@ -1071,33 +847,6 @@ export const ENDPOINT_TARGET = "target";
 export const ENDPOINT_BOTH = "both";
 
 // joinEdges is the one place the rule lives.
-//
-// **An edge's endpoints are not guaranteed to be among the nodes, and
-// that is ordinary rather than exceptional**: `edges: [{between: …}]`
-// draws relations between sets the query chose not to draw
-// (internal/views/execute.go). Every one of the six renderers has to
-// tolerate it in its first version, and six implementations of one rule
-// would be five bugs — so it is implemented here, once, and the six
-// consume both halves of the answer.
-//
-// Returns `{drawn, stubs}`:
-//
-//   drawn — `{edge, source, target}`, both endpoints resolved to the
-//           node objects, which is what a renderer needs to place a line.
-//   stubs — `{edge, source, target, missing}` where at least one of the
-//           two is null and `missing` says which. **Both endpoints
-//           missing is also a stub**, and is the case an implementation
-//           written around "one end is outside" gets wrong: an `|| `
-//           that answers "source" for it hides half the truth, and a
-//           check that requires exactly one missing end drops the edge
-//           entirely.
-//
-// The join is by `Node.ID`, which is the one use of an entity id in this
-// front end and never leaves the envelope it came in (the plan's own
-// note on addressing, and static_client_test.go's guard). A node with no
-// id, or with an id that is not a string, is not an endpoint anybody can
-// join to: it is skipped rather than indexed under `undefined`, where it
-// would silently resolve every edge that names no source.
 export function joinEdges(nodes, edges) {
   const byID = new Map();
   for (const node of Array.isArray(nodes) ? nodes : []) {

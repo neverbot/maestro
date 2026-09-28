@@ -26,13 +26,6 @@ import (
 )
 
 // The background-asset routes, over HTTP.
-//
-// Everything about the *bytes* is decided in internal/views and is
-// tested there — the sniff, the size bound, the header decode, the SVG
-// refusal. What is tested here is what only the transport can be wrong
-// about: which headers a served image carries, that the body arrives
-// byte for byte, that the transport's own size bound exists, and that
-// one game cannot reach another's images through a leaked id.
 
 type assetFixture struct {
 	srv       *web.Server
@@ -133,12 +126,6 @@ func testJPEG(t *testing.T, width, height int) []byte {
 
 // TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType is the
 // serving route's whole contract.
-//
-// "Its own" is the load-bearing word: two formats are uploaded and each
-// has to come back under the mime *its own bytes* carry. A handler that
-// answered a constant image/png would pass a test that served one image,
-// and a browser told the wrong type for the right bytes is exactly the
-// confusion nosniff exists to stop mattering.
 func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 	t.Parallel()
 	f := newAssetFixture(t)
@@ -185,10 +172,6 @@ func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 // TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs is the plan's first
 // case, driven over the wire: the bytes of an SVG, sent with a PNG's
 // Content-Type and a PNG's filename.
-//
-// Both of those are the caller's own claims, and this route reads
-// neither. The refusal is internal/views' — this test is what proves the
-// transport does not slip a second, weaker judgement in front of it.
 func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 	t.Parallel()
 	f := newAssetFixture(t)
@@ -213,15 +196,6 @@ func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 
 // TestAnOversizeUploadIsRefusedOverTheWire asserts that the domain's
 // size bound reaches a browser as something a designer can act on.
-//
-// **The plan asked for an http.MaxBytesReader here and there is none**,
-// because it can never fire: the domain reads through a LimitReader of
-// the same cap in the same read path, so the transport's limiter is
-// never handed the byte that would trip it, and setting it a byte
-// tighter only replaces a sentence about scaling the image down with
-// `http: request body too large`. api_view_assets.go's header records
-// the measurement. What is left to assert here is the mapping — a 400
-// naming /bytes — which is the transport's actual job.
 func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 	t.Parallel()
 	f := newAssetFixture(t)
@@ -242,11 +216,6 @@ func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 
 // TestAnAssetOfAnotherGameIsNotServedOverHTTP is the isolation sweep for
 // these routes, with its positive control.
-//
-// The id is real and the caller owns both games, which is the case that
-// matters: the refusal has to come from the URL's game and not from the
-// caller's standing, or a leaked id would serve one game's map inside
-// another's page.
 func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	t.Parallel()
 	f := newAssetFixture(t)
@@ -377,14 +346,6 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 
 // TestTheAssetListingPagesOverTheWire is the transport half of the
 // listing's correction.
-//
-// The route answered with every asset a game held, with no limit and no
-// cursor, in a product where every other listing reads `cursor` and `limit`
-// off the query string and answers `next_cursor`. A client that can page
-// documents or entities must be able to page this the same way, which is
-// what the parameter *names* here are for — the service half
-// (TestAssetsArea's "the asset listing is paged and its cursor is its own"
-// case) pins the keyset itself.
 func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 	t.Parallel()
 	f := newAssetFixture(t)

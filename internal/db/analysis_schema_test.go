@@ -19,10 +19,6 @@ import (
 // needs: a project, an entity type, two entities, a relation type and a
 // route with one step. Every cross-game test builds its illegal row out
 // of one game's route and the other's entity or token.
-//
-// Every test takes its own throwaway database from testutil.NewPool, so
-// nothing here can be read as passing because of a row another test left
-// behind.
 type analysisGame struct {
 	projectID      uuid.UUID
 	entityTypeID   uuid.UUID
@@ -108,14 +104,6 @@ func TestAnalysisTablesExist(t *testing.T) {
 // TestTheTraitVocabularyConstraintRefusesAnUnknownTrait is the whole
 // point of putting the vocabulary in the database rather than only in
 // Go: a value outside it must not reach a row.
-//
-// The positive control in the same test is not decoration. A check
-// constraint with a typo in its own array literal refuses *everything*,
-// and a test that only asserts the refusal passes against it -- which is
-// the "a constraint that admits everything is worse than none" failure
-// with the sign flipped. So this asserts both that {teleports} is
-// refused with SQLSTATE 23514 and that {prerequisite_of,acyclic} lands
-// and reads back.
 func TestTheTraitVocabularyConstraintRefusesAnUnknownTrait(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -164,10 +152,6 @@ func TestTheTraitVocabularyConstraintRefusesAnUnknownTrait(t *testing.T) {
 // said anything about this type", {annotation} is "this type is
 // deliberately inert", and {} is neither -- it is a third spelling that
 // would make the two indistinguishable to every reader.
-//
-// Mutation: drop `cardinality(analysis_traits) > 0` from the check and
-// this test goes red on the empty-array half while every other test in
-// this file stays green.
 func TestAnEmptyTraitArrayIsRefusedAndNullIsNot(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -262,15 +246,6 @@ func TestARouteStepCannotBorrowAnotherGamesRoute(t *testing.T) {
 
 // TestDeletingAnEntityLeavesItsRouteStepWithATombstone is the argument
 // for SET NULL rather than CASCADE, asserted rather than stated.
-//
-// CASCADE would silently shrink the route, which is the precise failure
-// routes exist to prevent: the check would then report a healthy route
-// that no longer says what its author wrote. SET NULL leaves the step
-// standing with its address intact, so the next check can say
-// missing_entity and name the key a designer would recognise.
-//
-// Mutation: change ON DELETE SET NULL (entity_id) to CASCADE in the
-// migration and this test goes red on the missing row.
 func TestDeletingAnEntityLeavesItsRouteStepWithATombstone(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -404,11 +379,6 @@ func TestDeletingARouteTakesItsSteps(t *testing.T) {
 // fifth project-scoped table anywhere in this repository fails a test in
 // a package its author did not touch and forces the decision to be made
 // rather than skipped.
-//
-// This is the compositional half of the counter's guarantee.
-// TestEveryMetamodelWriteBumpsTheDesignVersion is the behavioural half,
-// and the two are separate because a behavioural test that happens to
-// cover three of four tables looks identical to one that covers four.
 var designTables = map[string]string{
 	"entity_types":   "a game's kinds of thing",
 	"relation_types": "a game's kinds of edge, and where analysis_traits live",
@@ -471,9 +441,6 @@ func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
 	// Triggers, by table, from the catalogue -- matched on the function
 	// they call rather than on their names, so renaming one does not
 	// silently empty this assertion.
-	//
-	// tgtype's low bits: 1 = FOR EACH ROW, 2 = BEFORE, 4 = INSERT,
-	// 8 = DELETE, 16 = UPDATE (see Postgres's pg_trigger.h).
 	type trig struct {
 		name  string
 		ttype int16
@@ -537,15 +504,6 @@ func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
 // TestEveryMetamodelWriteBumpsTheDesignVersion is the behavioural half:
 // twelve cases, four tables by insert, update and delete, each asserting
 // the counter **strictly increased**.
-//
-// Not "increased by one". The trigger fires once per statement and a
-// cascade fires several, so a delta of one is an implementation detail
-// this schema deliberately does not promise -- asserting it would pin
-// the wrong thing and go red the first time a write touched two tables.
-//
-// Mutation: remove the DELETE trigger from relations only, and this test
-// goes red on exactly that case while the other eleven stay green. If it
-// stays green, the table is not driving.
 func TestEveryMetamodelWriteBumpsTheDesignVersion(t *testing.T) {
 	t.Parallel()
 
@@ -663,10 +621,6 @@ func TestEveryMetamodelWriteBumpsTheDesignVersion(t *testing.T) {
 // coarseness the trigger approach accepts, as behaviour rather than as a
 // comment: three rows written by one statement move the counter at least
 // once, and nothing promises three.
-//
-// It matters because the moment anything reads this number as "how many
-// changes there have been", the per-statement granularity becomes a bug
-// report. It is an opaque monotonic token and that is all it is.
 func TestTheDesignVersionIsMonotonicAndNotACountOfChanges(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -694,17 +648,6 @@ func TestTheDesignVersionIsMonotonicAndNotACountOfChanges(t *testing.T) {
 
 // TestDeletingAnEntityBumpsTheCounterThroughTheRelationsCascade is the
 // case a Go-side bump misses, which is why the counter is a trigger.
-//
-// The plan named this as "removing a type takes its entities", which the
-// shipped schema does not do -- entity_types is ON DELETE RESTRICT
-// precisely so that dropping a type with instances fails loudly
-// (0004_metamodel.sql, TestDeletingAnEntityTypeWithInstancesIsRejected).
-// The cascade that does exist is the one from an entity to its edges,
-// and it makes the same point more sharply: a Go call site that deletes
-// an entity knows it deleted one row, and does not know that Postgres
-// also removed every edge touching it. The trigger does, and the counter
-// moves twice -- once for the entities statement and once for the
-// cascaded relations statement.
 func TestDeletingAnEntityBumpsTheCounterThroughTheRelationsCascade(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -733,9 +676,6 @@ func TestDeletingAnEntityBumpsTheCounterThroughTheRelationsCascade(t *testing.T)
 // isolation half, and its positive control is what makes it real: a
 // trigger that updated *nothing at all* would pass the first assertion
 // on its own.
-//
-// Mutation: remove `WHERE p.id IN (SELECT project_id FROM changed)` from
-// bump_design_version and this test goes red on the first assertion.
 func TestAWriteToAnotherGameDoesNotMoveThisGamesDesignVersion(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -765,16 +705,6 @@ func TestAWriteToAnotherGameDoesNotMoveThisGamesDesignVersion(t *testing.T) {
 // measurement of cost (b) in 0013_analysis.sql: every write to a game now
 // updates that game's projects row, so two writers to one game serialise
 // on it for the remainder of their transactions.
-//
-// Measured rather than reasoned about. On this project's Postgres 16 the
-// second transaction blocks for as long as the first holds its
-// transaction open -- the 150 ms this test deliberately sleeps -- and
-// then completes immediately: the elapsed time of the second write is
-// the first transaction's remaining lifetime and not a cost of its own.
-// Both writes land and the counter moves twice, which is the property
-// that matters: serialisation is a latency cost, never a lost bump.
-//
-// The next person to argue about this cost argues with that number.
 func TestTwoConcurrentWritesToOneGameBothLandAndTheCounterMovesTwice(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -881,20 +811,6 @@ func TestDeletingAGameDoesNotFailOnItsOwnDesignVersionTrigger(t *testing.T) {
 // TestTheReachabilityWalkSeeksAnIndexRatherThanScanning is the
 // measurement 0013_analysis.sql's "no relations_project_type_idx" claim
 // rests on, run rather than quoted.
-//
-// The statement is not a hand-written approximation of the walk: it is
-// emitted by internal/graph's WalkCTE with the normalising edge
-// predicate the reachability analysis will pass it, so a change to the
-// emitter changes what this test measures.
-//
-// **The assertion is on the shape of the plan and not on an index
-// name**, exactly as TestTheEdgeSweepSeeksAnIndexRatherThanScanning is:
-// which of the five indexes on relations the planner picks is its
-// business, and naming one would go red on a planner that made the
-// other, equally good, choice. What it must catch is the sequential scan
-// the walk would fall back to if the edge indexes were reshaped away --
-// which is the outcome the migration says cannot happen, and the reason
-// the sixth index it declines to add is not needed.
 func TestTheReachabilityWalkSeeksAnIndexRatherThanScanning(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

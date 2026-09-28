@@ -58,17 +58,6 @@ var reservedSlugs = map[string]bool{
 // (the family behind "Trojan Source"-style spoofing). unicode.IsControl
 // does not flag these — they are format characters (category Cf), not
 // controls — so validateName checks for them separately.
-//
-// Written as \uXXXX escapes rather than the literal runes: gosec's G116
-// scans source bytes for these characters wherever they appear, including
-// as data inside a map literal like this one, and previously flagged this
-// whole file at its package clause for containing exactly the characters
-// this map exists to reject. Escaping them is invisible to Go (the map's
-// keys are identical runes either way — see the "name-bidi-override" case
-// in TestCreateRejectsInvalidName) but removes the finding outright,
-// which keeps this file under gosec's ordinary scrutiny instead of
-// needing a standing path-based exclusion in .golangci.yml the way a
-// literal-character version of this map would.
 var bidiOverrides = map[rune]bool{
 	'\u202A': true, '\u202B': true, '\u202C': true, '\u202D': true, '\u202E': true, // LRE RLE PDF LRO RLO
 	'\u2066': true, '\u2067': true, '\u2068': true, '\u2069': true, // LRI RLI FSI PDI
@@ -99,22 +88,6 @@ var (
 	// way ErrSlugTaken maps projects_slug_key: by constraint name, so
 	// Task 12's handler can report a 404 instead of leaking a raw
 	// SQLSTATE.
-	//
-	// Named ErrMemberNotFound, not ErrUserNotFound, since Task 22: this
-	// package and internal/identity each used to define their own
-	// sentinel named ErrUserNotFound, with identical text ("user not
-	// found") but distinct identity — errors.Is compares by pointer, not
-	// text, so a
-	// handler that accidentally checked the wrong package's sentinel
-	// would compile cleanly and simply never match, silently falling
-	// through to a 500 for a condition that had a real 404 mapping. No
-	// call site was actually doing that when this was found, but the
-	// two names being identical made it possible to introduce by a
-	// plausible-looking import alone; this package's sentinel now names
-	// what it actually reports — a project's membership target, not
-	// identity's own account lookups — so the two can no longer collide
-	// on name even though the underlying condition ("no such user") is
-	// the same in spirit.
 	ErrMemberNotFound = errors.New("user not found")
 
 	ErrSlugTaken   = errors.New("slug already in use")
@@ -239,11 +212,6 @@ func validateSlug(slug string) (string, error) {
 
 // validateName trims name and checks its length bound and that it carries
 // no control characters or Unicode bidirectional-override characters.
-// Names are stored verbatim and later rendered into page titles, the game
-// picker and SSE payloads, so a newline or a bidi override — invisible in
-// a form field, capable of making the rendered text read in an order
-// different from its byte order — would store cleanly today and only
-// become someone else's problem at render time.
 func validateName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if n := utf8.RuneCountInString(name); n < minNameRunes || n > maxNameRunes {
@@ -295,17 +263,6 @@ const derivedSlugAttempts = 10
 const fallbackSlug = "game"
 
 // SlugFrom derives an address from a game's name.
-//
-// **A designer should not have to know what a slug is.** The create form
-// asked for one under the label "Address", next to a placeholder that
-// taught the wrong thing, and the answer was almost always the name in
-// lower case with the spaces knocked out. So the name is the input and
-// this is the rule, in one place, rather than in a browser where an
-// agent creating a game over REST would not reach it.
-//
-// Accents fold rather than vanish: `Ámbar` is `ambar` and not `mbar`,
-// which is what dropping every rune outside `[a-z0-9]` would give. The
-// decomposition is NFD and what it drops is the combining marks.
 func SlugFrom(name string) string {
 	var out strings.Builder
 	var pendingHyphen bool
@@ -351,13 +308,6 @@ func candidateSlugs(name string) []string {
 // Create makes a project and its creator its owner, atomically: a failure
 // granting the membership must not leave an ownerless project behind for
 // ErrLastOwner to later refuse to ever fix.
-//
-// **An empty slug means "derive one from the name".** A caller that
-// supplies one gets exactly it, and ErrSlugTaken when it is taken: they
-// named an address and deserve to hear that the address is not free. A
-// caller that supplies none is not choosing an address at all, so a
-// collision resolves to the next free number rather than failing on a
-// word they never typed.
 func (s *Service) Create(ctx context.Context, slug, name string, creator uuid.UUID) (Project, error) {
 	name, err := validateName(name)
 	if err != nil {
@@ -383,18 +333,6 @@ func (s *Service) Create(ctx context.Context, slug, name string, creator uuid.UU
 
 // Update changes a game's two settings: its name, and the address every
 // URL into it carries.
-//
-// **The old address is not kept anywhere, and that is the decision.**
-// Storing it would mean old links keep resolving for some window nobody
-// can name, a redirect that quietly becomes wrong, and a second source
-// of truth for what a game is called. Instead the screen that offers
-// this says plainly that every existing link stops working, and only an
-// owner can reach it. Somebody who changes an address on purpose knows
-// what they are doing; somebody who does not should not be here.
-//
-// ErrSlugTaken and ErrSlugInvalid come back exactly as they do from
-// Create: an address typed by hand is refused rather than resolved,
-// because the person naming it will want to hear that it is not free.
 func (s *Service) Update(ctx context.Context, id uuid.UUID, slug, name string) (Project, error) {
 	slug, err := validateSlug(slug)
 	if err != nil {
@@ -472,9 +410,6 @@ func (s *Service) create(ctx context.Context, slug, name string, creator uuid.UU
 
 // ListForUser returns every project the user is a member of, ordered by
 // name then id (see the query's own doc comment for why the tiebreak).
-// This is the query behind the single-game navigation shortcut described
-// in the spec: a caller that gets back exactly one project sends the user
-// straight to it instead of showing a picker.
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Project, error) {
 	rows, err := s.q.ListProjectsForUser(ctx, userID)
 	if err != nil {
@@ -512,26 +447,6 @@ type Membership struct {
 
 // BySlugForUser resolves a game by the name a human types, scoped to the
 // user asking.
-//
-// **It is the only slug lookup this package offers, and the scoping is
-// not a convenience.** A slug is a name someone chose — "azeroth",
-// "le-mans" — so it is guessable in a way a uuid is not, and a lookup
-// that resolved one first and judged standing second would be an
-// enumeration oracle: a stranger could tell "that game exists and I am
-// not in it" from "there is no such game", one guess at a time. The
-// query joins membership, so both collapse into no rows and both come
-// back as ErrProjectNotFound. That is the shape Task 8's Correction 12
-// specified when it removed the bare BySlug this replaces, recorded
-// there as "the moment one is added, it must call BySlugForUser, never
-// the unexported form"; this is that moment.
-//
-// It answers with the role as well as the project, so internal/web's
-// requireProject resolves a game and the caller's standing in it in one
-// round trip rather than two.
-//
-// ErrProjectNotFound, not ErrNotAMember: the two are indistinguishable
-// here by construction, and returning the sentinel that names a *verdict
-// about the caller* would be a claim this function cannot make.
 func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UUID) (Membership, error) {
 	row, err := s.q.GetProjectBySlugForUser(ctx, dbq.GetProjectBySlugForUserParams{
 		Slug: slug, UserID: userID,
@@ -593,38 +508,6 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Membe
 // database's point of view, and giving them separate methods would only
 // invite a caller to duplicate the role-validation and last-owner checks
 // below across both.
-//
-// SetRole performs no authorization check of its own — it trusts the
-// caller (Task 12's HTTP handler) to have already decided this call is
-// allowed. This is a deliberate decision, not an oversight: authorization
-// here would need to know things this package has no business
-// knowing (who is making the request, and on whose behalf), and Task 12's
-// own corrections explain why that decision belongs at the HTTP layer.
-//
-// The last-owner guard only ever fires when the target is already an
-// owner being moved to a different role: promoting someone, or changing a
-// non-owner's role, can never reduce the owner count. When it does apply,
-// CountOwnersForUpdate is called inside this method's transaction, taking
-// a row lock on every owner membership of the project. That lock is
-// deliberate defence in depth, not the sole thing preventing two
-// concurrent demotions of a project's last two owners from both
-// succeeding: migration 0002's constraint trigger enforces the identical
-// invariant independently, re-checked at commit time regardless of this
-// lock, and already serializes that race on its own — see
-// CountOwnersForUpdate's own doc comment for why, and for the review that
-// confirmed it directly by removing this lock and running the concurrency
-// test unchanged. What the lock earns here is failing fast with a typed
-// ErrLastOwner instead of the transaction aborting on a raw trigger
-// exception.
-//
-// Returns the labels of every token this call revoked because the new
-// role dropped below editor (see the demotion branch below), never nil —
-// the same convention RemoveMember's return follows, for the same
-// reason: a quality review found the first version of this method's
-// HTTP handler answered a bare 200 after silently killing a demoted
-// member's agents, leaving the owner who demoted them with no way to
-// know which ones. A promotion, or a role change that never crosses the
-// editor threshold, always returns an empty (non-nil) slice.
 func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role string) ([]string, error) {
 	if !roles.Valid(role) {
 		return nil, fmt.Errorf("%w: %q", ErrRoleInvalid, role)
@@ -713,20 +596,6 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 // removal and under a direct user deletion, and for what each one does
 // and does not earn on its own. Like SetRole, this method performs no
 // authorization check of its own; see SetRole's doc comment for why.
-//
-// api_tokens.user_id records who created a token, not a live
-// authorization link, and this package does not import identity to make
-// this call (nor does identity import this package): RevokeAPITokensForMember
-// is plain SQL over api_tokens, defined in this package's own query file
-// and reached through the same shared dbq.Queries handle UpsertMembership
-// elsewhere in this file already uses the other way — a query defined in
-// identity.sql, called from here.
-//
-// Returns the labels of every token this call revoked, never nil (see
-// this method's own tail for why) — a quality review pointed out that
-// answering with a bare success left an owner with no idea which of
-// their agents just stopped working: a revoked token id means nothing on
-// its own, but "nightly export" or "seed agent" does.
 func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID) ([]string, error) {
 	var revokedLabels []string
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
@@ -777,17 +646,6 @@ func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID)
 // migration 0002's last-owner trigger has an escape hatch built for
 // exactly this statement, so it never trips on the project's own last
 // owner being cascaded away with everything else.
-//
-// A concurrent second call for the same id — the caller's own handler
-// has already confirmed standing on this project by the time either
-// call reaches here, so this can only be two requests racing, not a
-// guess at an id that never existed — matches zero rows and returns nil,
-// the same idempotent convention DeleteMembership and
-// RevokeAPITokensForMember already follow, not a distinguishable error:
-// pgx's Exec does not report rows-affected as an error condition, and
-// treating "already deleted" as a failure here would turn a benign race
-// (the second owner to click delete) into a spurious 500 instead of the
-// 204 both callers actually want.
 func (s *Service) Delete(ctx context.Context, projectID uuid.UUID) error {
 	if err := s.q.DeleteProject(ctx, projectID); err != nil {
 		return fmt.Errorf("delete project: %w", err)

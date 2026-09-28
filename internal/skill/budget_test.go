@@ -15,15 +15,6 @@ import (
 // The page budgets. They exist because the number an agent actually pays
 // for this bundle is tokens, and a page nobody bounded grows until it is
 // cheaper to skip than to read.
-//
-// The byte caps are there because the line caps alone are gameable by a
-// page of very long lines. 9000 bytes is roughly 2,000 tokens at this
-// repository's measured 4.4 bytes per token for English prose with code
-// fences.
-//
-// The table is written before the prose, deliberately: a budget added
-// after the page it bounds is a budget raised to fit what was already
-// written.
 var budgetTiers = []budgetTier{
 	{
 		Name:     "entry point",
@@ -88,18 +79,6 @@ type budgetReport struct {
 
 // auditBudgets walks a bundle tree and reports every page over its
 // tier's caps and every file no tier claims.
-//
-// It walks fs.WalkDir over the whole tree rather than a list of pages,
-// for the reason every guard in this package does: a rule that watches
-// the files it was written for stops watching the moment somebody adds
-// one.
-//
-// **It reports a problem for an empty tree and for a tree with no
-// skill.md**, which is not decoration. Every caller of this function
-// asserts that it found nothing wrong, and a walk that sees no files
-// finds nothing wrong — this repository has shipped a guard whose scan
-// pattern matched nothing and looked clean for exactly that reason.
-// TestTheBudgetGuardFailsOnAnEmptyTree drives it.
 func auditBudgets(fsys fs.FS) (budgetReport, error) {
 	report := budgetReport{Tiers: map[string]string{}}
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
@@ -219,9 +198,6 @@ func TestEveryBundleFileIsInATier(t *testing.T) {
 // TestTheBudgetGuardFailsOnAnEmptyTree is the precision fixture for the
 // budget itself: every other assertion in this file is "the audit found
 // nothing wrong", and an audit that reads nothing finds nothing wrong.
-//
-// Mutation that proves it bites: delete the report.Files == 0 branch in
-// auditBudgets and this test fails.
 func TestTheBudgetGuardFailsOnAnEmptyTree(t *testing.T) {
 	empty, err := auditBudgets(fstest.MapFS{})
 	assert.Must(t, err == nil, "auditing an empty tree: %v", err)
@@ -279,10 +255,6 @@ func mentions(problems []budgetProblem, substring string) bool {
 
 // routedPages reads the paths named in skill.md's "Where to go next"
 // table — the second cell of every row, in backticks.
-//
-// It reads the shipped entry point rather than a fixture, and it reads
-// it out of Files() rather than from disk, so the table it judges is the
-// one that ships in the binary.
 func routedPages(fsys fs.FS) (map[string]int, error) {
 	body, err := fs.ReadFile(fsys, "skill.md")
 	if err != nil {
@@ -322,10 +294,6 @@ func isTranscript(p string) bool { return path.Ext(p) == ".json" }
 // lesson pointed at the entry point itself, in both directions: a page
 // nothing routes to is a page nothing reads, and a row naming a page
 // that does not exist sends an agent at nothing.
-//
-// It walks Files() rather than a list, because the pages a contributor
-// adds and forgets to route are exactly the ones a list would not
-// mention either.
 func TestTheRoutingTableNamesEveryPage(t *testing.T) {
 	fsys := Files()
 	routed, err := routedPages(fsys)

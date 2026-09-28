@@ -3,34 +3,6 @@
 // shares with the other five (internal/web/static/render/marks.js,
 // render/controls.js) and the frame's own sentences
 // (render/scene.js).
-//
-// What this layer covers that no Go test can, and what is this
-// renderer's alone.
-//
-// **That a broken edge is marked and not hidden.** This renderer's
-// consumption note says "expected mostly acyclic" and a ranked drawing
-// of a cyclic graph is only possible because something ran an edge
-// backwards. A picture that silently reversed an arrow would show a
-// prerequisite chain the wrong way round and look perfectly fine doing
-// it, which is the whole class of defect this sub-project is built
-// against. So the arrowhead is asserted to be at the relation's **true**
-// target, the double-slash is asserted to be on the line, and the
-// frame's sentence is asserted to count it.
-//
-// **That the frame's sentence stays a drawing report.** It does not name
-// the nodes and never says "unreachable": sub-project 6 owns the real
-// answer, and a renderer that guessed at it would be publishing a result
-// the product has not computed.
-//
-// **That the two ranking policies produce two captions.** One fixture
-// cannot tell them apart, so there are two, and the mutation that
-// captions everything with its index turns exactly one of them red.
-//
-// **That the picture and the text twin describe one answer.** Task 5
-// built the twin before any renderer for this.
-//
-// Run directly: `node internal/web/jstest/render_layered_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
 import { MARK_ELEMENTS, MARK_LABEL, MARK_ORIGINS, footerFor, joinEdges } from "../static/render/scene.js";
@@ -217,12 +189,6 @@ check("aReversedEdgeKeepsItsTrueArrowhead", () => {
 
   // And the line itself carries the break: one double-slash, on the one
   // edge that runs against the ranking, at its middle.
-  //
-  // **It is a glyph and not a pair of strokes, which is a correction
-  // made in a browser**: two nine-unit lines inside the zoomed world
-  // render at 0.43 px on the picture this mark exists for. See
-  // render/marks.js's reversalMarks, and the check below, which is the
-  // one that would have caught it.
   const slashes = marksOfClass(result, CLASS_REVERSED);
   assertEqual(slashes.length, 1, "the double-slash is one mark and there is one of it");
   assertEqual(slashes[0].text, REVERSAL_TEXT, "and it is a double slash");
@@ -237,16 +203,6 @@ check("aReversedEdgeKeepsItsTrueArrowhead", () => {
 // **The mark a reader can actually find**, which is the whole of this
 // renderer's negative half: a layered picture that silently reverses an
 // arrow is the wrong picture that looks right.
-//
-// A hand check on a hundred-step progression fitted the drawing at
-// k = 0.058 and measured the two strokes at 0.43 × 0.43 CSS pixels — at
-// the zoom where the progression reads as a progression, the mark was
-// invisible. The property that fixes it is not "the mark is bigger": it
-// is that the mark is drawn by the one mechanism in this front end that
-// holds a size in *screen* terms while the world scales, which is the
-// label band (mst-canvas.js's labelScale / labelFontSize). So the
-// assertion is that the mark is a label at all — a line, of any length,
-// scales with the picture and disappears again.
 check("theReversalMarkKeepsItsSizeWhileThePictureShrinks", () => {
   const result = scene(cycleOfThree(), {});
   const slashes = marksOfClass(result, CLASS_REVERSED);

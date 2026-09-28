@@ -2,21 +2,6 @@
 // stack, the drawing, footer strip. One component for all six drawings,
 // so the negative states are designed once and cannot drift between
 // them.
-//
-// **This file writes no sentences.** Every word a designer reads comes
-// out of the model `render/scene.js` builds — which is also where the
-// server's own sentences are carried across verbatim — and this file
-// only decides where each string sits and what it is painted with. The
-// rule is held mechanically by
-// TestTheViewFrameSpeaksOnlyTheModelsWords (internal/web/static_frame_test.go):
-// every text node in the templates below is either whitespace or an
-// interpolation, so a word typed into a template here is a failing test
-// rather than a second copy of a sentence.
-//
-// It fetches nothing. The one action the diagnostics panel offers is
-// dispatched through scene.js's runAction against the client the page
-// hands it, which keeps internal/web/static/client.js the only module in
-// this front end that reaches the network.
 
 import { LitElement, css, html, nothing, unsafeCSS } from "lit";
 
@@ -266,13 +251,6 @@ export class MstViewFrame extends LitElement {
   // The shared control vocabulary is a fetched sheet rather than a
   // string, so it cannot be spread into `static styles`; `CONTROL_CSS`
   // there is only the two rules a page stylesheet cannot express.
-  //
-  // **`firstUpdated` and not `connectedCallback`**: Lit builds the
-  // render root on its first update, so a call from connectedCallback
-  // adopts into `undefined` and does nothing at all — silently, because
-  // adoptControlStyles answers null for a root it cannot dress. Which is
-  // exactly the shape of defect this repository keeps recording: correct
-  // in the module, dead at the call site.
   firstUpdated() {
     adoptControlStyles(this.renderRoot);
   }

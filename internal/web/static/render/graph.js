@@ -1,55 +1,4 @@
 // The `graph` renderer: a node-link diagram, and the first of six.
-//
-// A renderer is a **pure function from an envelope to a scene**. It reads
-// what the server said and the layout's answer, and it returns marks —
-// plain data that components/mst-canvas.js turns into SVG elements one
-// for one. It decides nothing about colour (palette.js, Task 1), nothing
-// about what a negative state says (render/scene.js, Task 4) and nothing
-// about where a node goes (layout/, Task 6); those travel in, and this
-// module arranges them.
-//
-// That purity is the whole verification story of this sub-project: a
-// picture is a value a Node harness can read, and every claim below —
-// that an absence is marked twice, that a size is an area, that
-// clustering draws nothing — is an assertion over that value rather than
-// a screenshot somebody looked at.
-//
-// **The scene and the text twin describe the same answer.** The twin
-// (render/twin.js) is built from the envelope alone and is the
-// accessible content of every view; this module is built from the
-// envelope and a layout. Two descriptions of one answer that disagree is
-// the defect the plan's ordering exists to catch, so the harness joins
-// them: every node the twin has a row for is drawn or is reported
-// unplaced, and every edge row is drawn or is a stub.
-//
-// **What it draws when the answer is not a clean one**, which in this
-// product is the ordinary case rather than the edge case:
-//
-//   an absent colour value — the box is unfilled and its outline is
-//     dashed, and the legend carries the palette's `unset` row. Two
-//     carriers, because colour is never the only one.
-//   an absent size value — the range's minimum, which is the smallest
-//     box and not no box. A node missing *both* gets both marks: two
-//     absences are two facts, and one "unknown" treatment would collapse
-//     them into one.
-//   an ambiguous node — one mark at the box's corner, on the node,
-//     because `Node.Ambiguous` is a flag on the node and execute.go is
-//     explicit that which slot it was is not said.
-//   an edge that leaves the picture — a stub: a line out of its known
-//     endpoint ending in a small hollow ring, no label, counted in the
-//     footer. Not an error and never `--danger` (§4.2).
-//   a truncated answer — **nothing at all**, deliberately. The envelope
-//     says a cap was hit; it does not say which node lost a neighbour,
-//     and a mark claiming to know would be this interface inventing the
-//     one thing the server declined to measure. The frame bands it
-//     (Task 4) and the picture draws what it was given.
-//   an empty answer — an empty scene: no marks, no legend rows. The
-//     frame says *"This view matched nothing"* and says it as a success;
-//     a renderer that drew an apology would be a second voice.
-//   a node with no position — not drawn, and named in `unplaced`. A box
-//     at the origin for a node nobody placed is the lie execute.go
-//     refuses one row up, and drawing it would put an entity somewhere a
-//     designer could then drag and save.
 
 import { addressOf } from "../address.js";
 import { fillFor, labelFor, legendFor } from "../palette.js";
@@ -85,16 +34,6 @@ export const PARAM_ARROWS = "arrows";
 
 // The controls, in the order the catalogue prints them, each with the
 // sentence a designer reads beside it.
-//
-// **`group_by` and `cluster_by` are the pair these tooltips exist for.**
-// They take the same kind of value, sit beside each other in the same
-// panel, and do entirely different things: one draws a box around the
-// nodes sharing a value, the other draws nothing whatever and only tells
-// the layout to keep them together. Nowhere else in this interface can
-// that be learned — the catalogue's own text describes what a *query*
-// must produce, not what appears on the canvas — so these two sentences
-// are the whole of the teaching, and the harness asserts them rather
-// than admiring them.
 export const CONTROLS = [
   control(
     PARAM_COLOR_BY,
@@ -144,18 +83,6 @@ export const CONTROLS = [
 // graphLayoutRequest is the `nodes` and `edges` half of the request the
 // worker runs, in the layout layer's own vocabulary: an entity is a
 // `(type, key)` pair with a measured box, and an edge is a pair of them.
-//
-// **The sizes are measured here and nowhere else.** The box a node is
-// laid out in and the box it is drawn in come from one call to
-// `boxFor`, so a `size_by` value that makes a node three times the area
-// makes the layout reserve three times the area; a renderer that
-// measured for the drawing only would draw big boxes into small holes.
-// `theLayoutIsAskedForTheBoxThatIsDrawn` is that join.
-//
-// `cluster_by` reaches the layout here, as each node's `cluster`, and
-// this is the only thing it ever does. `group_by` is deliberately absent
-// from this function: an enclosure is drawn around wherever the nodes
-// ended up and never asks for them to be moved.
 export function graphLayoutRequest(envelope, params = {}) {
   const nodes = nodesOf(envelope);
   const options = readParams(params);
@@ -194,27 +121,6 @@ export function graphLayoutRequest(envelope, params = {}) {
 // --- The scene -------------------------------------------------------
 
 // graphScene is the picture.
-//
-// `layout` is the layout layer's answer — `{placements: [{key, x, y,
-// width, height}]}` where `key` is the entity's address and `x`/`y` are
-// the box's centre.
-//
-// Returns:
-//   marks    — the scene, in the order it is built: enclosures, edges,
-//              stubs, then nodes. Paint order is the *layers'* (Task 7),
-//              not this array's; the order here is only so that two runs
-//              over one envelope produce the same array.
-//   legend   — palette.js's rows for `color_by`, or null when the view
-//              colours nothing. Null and not an empty list: "this view
-//              has no colour slot" is not "this slot had no values".
-//   stubs    — `{total, drawn, anchorless}`. `total` is the footer's
-//              *"n edges lead outside this picture"*; `anchorless` is the
-//              part of it nothing can be drawn for, because **both**
-//              endpoints are outside and there is no known end to leave.
-//   loops    — how many relations run from an entity to itself, which
-//              this vocabulary cannot draw and does not silently drop.
-//   unplaced — the addresses of nodes the layout placed nowhere.
-//   groups   — one entry per `group_by` value that has an enclosure.
 export function graphScene(envelope, layout, params = {}) {
   const nodes = nodesOf(envelope);
   const options = readParams(params);
@@ -354,15 +260,6 @@ function slot(value) {
 
 // paintFor is the fill and the dash, and it is the one place the two
 // absences are told apart.
-//
-// Three answers, not two:
-//
-//   no colour slot at all — `--paper` and no dash. "This view colours
-//     nothing" is not "this node's value is missing", and a picture that
-//     drew them alike would report an absence nobody asked about.
-//   a value — the palette's hue, or its hatch for the ninth-and-beyond.
-//   the slot absent from this node — no fill and a dashed outline, and
-//     the legend already carries the `unset` row that names it.
 function paintFor(node, options, legend) {
   if (options.colorBy === null) return { fill: NODE_PLAIN_FILL, dash: false };
   const json = valueJSON(node, options.colorBy);
@@ -382,16 +279,6 @@ function boxOf(node, options, domain) {
 
 // groupsOf is one entry per `group_by` value, with the placed boxes that
 // carry it.
-//
-// A node whose group slot found nothing is in **no** enclosure rather
-// than in an enclosure of absences: a box drawn around "the ones we know
-// nothing about" is a claim that they belong together, which is exactly
-// what an absence does not say. The palette makes the same choice with
-// its `unset` legend row, which names the absence without giving it a
-// hue.
-//
-// Ordered by heading, so the scene is the same array for one envelope
-// however the nodes arrived.
 function groupsOf(nodes, boxes, groupBy) {
   if (groupBy === null) return [];
   const byValue = new Map();
@@ -410,13 +297,6 @@ function groupsOf(nodes, boxes, groupBy) {
 // enclosureAround is the rectangle a stub has to leave: the enclosure of
 // the node's own group, as drawn, or the picture's bounds when the node
 // is in no group.
-//
-// This is what makes "a stub leaves its group's box" a property of the
-// drawing rather than of a lucky arrangement — the terminus is put
-// beyond this rectangle by construction. §4.3 names it as the reason
-// enclosures are hairlines rather than filled panels: the stub crossing
-// the line is correct, and a filled panel would make it look like a
-// mistake.
 function enclosureAround(box, groups, pictureBounds) {
   for (const group of groups) {
     if (!group.members.includes(box)) continue;

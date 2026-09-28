@@ -26,12 +26,6 @@ import (
 // plan corrections for where that is written down) needs a details
 // payload none of Task 13's own errors carry, and a caller-supplied
 // value that grows one should never require a matching case added here.
-//
-// A plain sentinel error (projects.ErrProjectNotFound, say) is still
-// supported — mcpErrorFor falls back to a short, explicit mapping for
-// those — but any new MCP-specific error a metamodel tool introduces
-// should be an *MCPError, not another package-level sentinel needing its
-// own case in mcpErrorFor's switch.
 type MCPError struct {
 	Code    string
 	Message string
@@ -64,13 +58,6 @@ func NewMCPError(code, message string) *MCPError {
 // handler, is deliberate: ToolHandlerFor packs a bare error into
 // unstructured prose text with no code at all (its own doc comment says
 // so) — exactly the failure mode this task's brief warned about.
-//
-// The one place this vocabulary does NOT reach is the SDK's own
-// argument-schema validation, which runs before any tool handler is
-// ever called and rejects malformed input with plain prose, no code —
-// see addScopedTool's own doc comment and
-// TestMCPInputValidationFailuresAreProseNotACode (mcp_http_test.go) for
-// why that is a documented exception, not an oversight.
 func mcpErrorResult(code, message string, details map[string]any) *mcp.CallToolResult {
 	body := map[string]any{"error": code, "message": message}
 	if len(details) > 0 {
@@ -120,14 +107,6 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	// version conflict on a document would otherwise fall all the way
 	// through to internal_error, which is the code meaning "give up"
 	// for the one failure a re-read and a retry resolve.
-	//
-	// A document conflict carries the current body as well as the
-	// current version, unless the caller turned the echo off, and says
-	// so when the version to merge onto is a tombstone. The details
-	// payload is built in the domain (ConflictError.Details) so this
-	// surface and the REST one cannot disagree about what a conflict
-	// carries. TestEveryMarkdownDomainErrorHasAWireCode and
-	// TestAConflictCarriesTheBodyAsDataRatherThanProse pin it.
 	case errors.As(err, &docConflict):
 		return mcpErrorResult(errCodeVersionConflict, err.Error(), docConflict.Details())
 
@@ -171,12 +150,6 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	// fifth for a timeout. TestEveryViewsSentinelHasAWireCode drives
 	// views.Sentinels() through this function rather than repeating the
 	// list, so a fifth sentinel added there cannot be forgotten here.
-	//
-	// All four carry fieldDetails, which reads *views.QueryError's Fields
-	// as JSON pointers into the query document: `/traverse/0/via/0` is
-	// the whole reason this sub-project addresses itself by pointer, and
-	// publishing it as details.fields[].path needs no translation — a
-	// pointer is a path like any other.
 	case errors.Is(err, views.ErrQueryInvalid):
 		return mcpErrorResult(errCodeQueryInvalid, err.Error(), fieldDetails(err))
 	case errors.Is(err, views.ErrRendererRequirements):
@@ -196,13 +169,6 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	// forgotten here — an unrecognised code matches no arm and surfaces
 	// as internal_error, which tells an agent to give up on something it
 	// could fix in one call.
-	//
-	// The details payload is the game's relation type catalogue, built
-	// in the domain (analysis.UndeclaredError.Details) so this surface
-	// and the REST one cannot disagree about what the refusal carries.
-	// It is the whole reason this code exists: the recovery is "declare
-	// something about your game's relation types" and no caller can
-	// perform it without that list.
 	case errors.Is(err, analysis.ErrSemanticsUndeclared):
 		return mcpErrorResult(errCodeSemanticsUndeclared, err.Error(), undeclaredDetails(err))
 
@@ -275,11 +241,6 @@ func mcpUnauthenticated() *mcp.CallToolResult {
 // would have to parse. The shape is {"fields": [{"path", "message"}]},
 // which is the same shape invalidInput (mcp_metamodel.go) builds for a
 // problem this layer diagnosed itself.
-//
-// An error carrying no field list — an endpoint mismatch, a not_found —
-// gets no details at all rather than an empty array: "there were no
-// field problems" and "this kind of error has no field problems" are
-// different statements, and only the second is true here.
 func fieldDetails(err error) map[string]any {
 	var (
 		validation *metamodel.ValidationError
@@ -330,16 +291,6 @@ func fieldDetails(err error) map[string]any {
 
 // staleDetails is fieldDetails plus the diagnostics a stale view carries,
 // under details.stale.
-//
-// The two lists answer different readers and are deliberately not one.
-// details.fields is what an agent acts on: an addressed sentence per
-// broken position, in the same shape every other refusal on this wire
-// uses, so a caller with one error handler needs no second one. Under
-// details.stale is the machine-readable half — a code, a pointer, and the
-// was/now pair — which is what a UI bands over a picture it has decided
-// to draw anyway, and what an agent uses to tell a rename it can repair
-// from a type that is simply gone. internal/views fills both from one
-// list, so they cannot disagree about what moved.
 func staleDetails(err error) map[string]any {
 	var queryErr *views.QueryError
 	if !errors.As(err, &queryErr) || len(queryErr.Stale) == 0 {
@@ -370,15 +321,6 @@ func staleDetails(err error) map[string]any {
 
 // undeclaredDetails is the relation type catalogue an undeclared game's
 // refusal carries, or nil when the error is the bare sentinel.
-//
-// It is a helper rather than an `errors.As` in the arm itself for the
-// reason every other arm in these two functions matches with errors.Is:
-// the arm's job is to name the *code*, which the sentinel decides, and
-// the payload is whatever the concrete error underneath happens to
-// carry. Matching on the concrete type instead would send a bare
-// analysis.ErrSemanticsUndeclared -- which is what
-// TestEveryAnalysisSentinelHasAWireCode drives, and what a future
-// wrapper could produce -- all the way to internal_error.
 func undeclaredDetails(err error) map[string]any {
 	var undeclared *analysis.UndeclaredError
 	if !errors.As(err, &undeclared) {

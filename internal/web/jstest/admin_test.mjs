@@ -1,15 +1,4 @@
 // The administration screen's account list.
-//
-// **What this file is written against.** The screen used to say, in its
-// own prose, that Maestro could not tell you who was on the instance —
-// there was no endpoint — and offered a field to type an address into
-// instead. What matters now is not that a list renders: it is that the
-// row says what a person needs before they change somebody's standing,
-// and that the one change which would lock the reader out of the page
-// they are standing on is not offered.
-//
-// Run directly: `node internal/web/jstest/admin_test.mjs`.
-// internal/web/static_admin_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 

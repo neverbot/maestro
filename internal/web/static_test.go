@@ -80,10 +80,6 @@ func TestGamePageIsServedForAnySlug(t *testing.T) {
 // serves the game page's: this route resolves nothing server-side
 // either, and doc.js is what discovers from GET /api/games whether the
 // caller can reach the game at all.
-//
-// The document's own path is not in the URL's path and is not read here:
-// it travels in the query string (see internal/web/api_docs.go's header),
-// so this route never sees it.
 func TestDocumentPageIsServedForAnySlug(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)
@@ -181,19 +177,6 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 
 // TestThePolicyAdmitsEveryShellsImportMap is the check that would have
 // caught the defect Task 15 found by opening a page in a browser.
-//
-// An import map is an **inline** script. Under `default-src 'self'` with
-// no hash, a browser refuses to apply it — and refusing to apply an
-// import map produces no error anybody looks at: the element is still in
-// the DOM, every existing test still passes, and the only symptom is
-// that the first page to import a bare specifier loads nothing at all.
-// Task 2 shipped the map, Task 15 mounted the first page that needs it,
-// and four tasks' worth of components were unreachable in a browser in
-// between.
-//
-// It hashes the map out of each shell **on disk** rather than asking
-// static.go for the hashes it computed, because a test that asked the
-// code under test for its own answer would agree with any answer.
 func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)
@@ -226,29 +209,6 @@ func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
 // of the guard TestThePolicyAdmitsEveryShellsImportMap opens, and it
 // exists because the import map was not the only thing `default-src
 // 'self'` was silently switching off.
-//
-// **An inline style is refused exactly as silently as an inline script.**
-// A `<style>` element — written into a shell, or built in script and
-// appended to a shadow root, which is the same thing to a policy —
-// carries no hash here, so a browser leaves it in the tree with its text
-// intact and applies none of it: `style.sheet` is null and nothing
-// anywhere throws. The canvas shipped that way from Task 7 until Task 15
-// mounted a view and read the sheet back: the host laid out `static`
-// instead of `absolute` and the surface drew at an SVG's default
-// 300x150. A `style` attribute set from script is refused the same way
-// and was confirmed the same way, in the same browser.
-//
-// So the rule this test keeps is that **this product's own assets ship
-// no inline style at all**, and the way to give a component a stylesheet
-// is `adoptedStyleSheets`, which no policy governs — which is also why
-// every Lit component was unaffected while the one hand-rolled element
-// was not. There is no allowance for "guarded by a feature check": a
-// fallback this policy cannot execute is a mechanism nothing reads.
-//
-// vendor/ is exempt and named as such: it is third-party code this
-// repository does not write, and Lit's own `<style>` path is reached
-// only when `adoptedStyleSheets` is missing, which no browser this
-// product targets is.
 func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
 	t.Parallel()
 	forbidden := []struct {
@@ -308,21 +268,6 @@ func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
 
 // TestTheViewPageResolvesAGroundBeforeItDrawsOne is a source-shape guard
 // over the one wire that had no reader.
-//
-// backgroundOf takes the view row *and the asset row*, because the row
-// carries the reference and only the asset carries the URL and the pixel
-// size a renderer needs. The view page passed `undefined` for the asset
-// on every draw. Nothing failed: backgroundOf answers an entry with an
-// empty href, an empty href is how the page spells "the image is gone",
-// and a map view with a correctly placed background drew no ground and
-// said nothing about it. Found by opening one (Task 15).
-//
-// It is a source-shape guard because the fix lives in the *call site*
-// and not in a function: internal/web/jstest/pages_test.mjs drives
-// backgroundAssetFor from every angle, and every one of those checks
-// passed while the page called it nowhere. So this reads the second
-// argument backgroundOf is actually given and asserts the page assigns
-// that same expression from backgroundAssetFor.
 func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
@@ -354,19 +299,6 @@ func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 
 // TestTheViewPageResolvesAnAxisBeforeItDrawsOne is the same guard as
 // the one above, over the second wire that had no reader.
-//
-// render/timeline.js's axisFor takes the field's *declaration* and says
-// in its own comment why: "it arrives from the caller because it is not
-// in the envelope". The page passed a scene options object with no
-// `axis` in it at all, so every timeline fell back to a number axis, and
-// on a number axis every enum value is off-axis — a championship over
-// six declared stages drew one tick reading "0" and put all eighty-two
-// of its events in the "no value" region, which is a picture this
-// renderer draws deliberately and therefore never complains about.
-//
-// A source guard for the same reason as the ground's: the resolver is
-// driven from four angles by internal/web/jstest/pages_test.mjs, and all
-// four passed while nothing called it.
 func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))

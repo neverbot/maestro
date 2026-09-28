@@ -26,16 +26,6 @@ import (
 // registered that way would answer with no game-scope check at all — the
 // caller's token binding would never be consulted, and one game's agent
 // would be reading another game's content.
-//
-// It compares the tool list the server *actually serves*, read back over
-// the real transport by a real client, against the set addScopedTool
-// recorded. A tool that reaches the first list without appearing in the
-// second is exactly the bypass this test exists to catch, and it is a
-// bypass no amount of reading mcp.go can rule out.
-//
-// It runs against a server built with a metamodel service, because that
-// is the build with the most tools on it; without one, newMCPServer
-// registers only the Core three (MCPDeps.Metamodel).
 func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)

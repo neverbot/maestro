@@ -15,13 +15,6 @@ import (
 // c2 requires c3 requires c4 requires c5 — with min_level rising by ten
 // along it, so a step's own `where` can be told apart from its depth
 // bound.
-//
-// Five and not four: every depth assertion below has a negative half, and
-// the node one hop past the bound is what that half names. A fixture
-// whose chain ends exactly at the bound cannot tell "the walk stopped
-// where it was told" from "the walk stopped because it ran out of
-// content", which is the fixture-too-small-to-distinguish-any-policy
-// shape this plan keeps finding.
 func chainOfQuests(t *testing.T, g *game) {
 	t.Helper()
 	for i := 1; i <= 5; i++ {
@@ -147,18 +140,6 @@ func TestTraverseArea(t *testing.T) {
 		// the guard the cycle is re-entered once per level to the bound and
 		// past it, so a whole picture is reported partial — and that is the
 		// assertion the guard is red under.
-		//
-		// **It is a general detector, and it borrows its specificity from
-		// internal/graph.** "The walk went deeper than it should have" is
-		// what this flag says, and a mutation to the depth ceiling fires it
-		// too, so it does not name the path guard on its own. The test that
-		// does is
-		// TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt in
-		// internal/graph, whose row count is the guard's own signature —
-		// eleven rows for a three-node cycle against four. This assertion is
-		// the views-level half: it says the defect is visible in the
-		// envelope a designer reads, not that it is the only thing that could
-		// have caused it.
 		assert.Should(t, !res.Truncated.Depth, "the whole cycle is drawn and there is nothing past it, so this picture "+
 			"is not depth-truncated")
 	})
@@ -212,13 +193,6 @@ func TestTraverseArea(t *testing.T) {
 
 	// TestTraverseArea's "truncated depth is flagged" case is the field Task 7
 	// shipped false with a "not measured" note, measured.
-	//
-	// It is measured the way every other truncation flag in this package is:
-	// the walk is asked for one hop *more* than the step wants, the extra hop
-	// is dropped before the picture is built, and its existence is the flag.
-	// The control in the same test is a chain that ends exactly at the bound,
-	// which is the case an inferred flag ("the deepest node is at max depth")
-	// gets wrong.
 	t.Run("truncated depth is flagged", func(t *testing.T) {
 		g, _ := a.games(t)
 		chainOfQuests(t, g)
@@ -267,19 +241,6 @@ func TestTraverseArea(t *testing.T) {
 
 	// TestTraverseArea's "a complete picture of a dense graph is not depth
 	// truncated" case is the honest half of Truncated.Depth.
-	//
-	// The probe asks whether there is a node **or an edge** past the bound
-	// that the walk does not already hold within it. The weaker question —
-	// "did the recursion produce a row past the bound" — is true of every
-	// dense or cyclic graph at every bound, because a clique of six has
-	// simple paths of every length up to five and they reach nothing new.
-	// The whole graph came back, all six quests and all fifteen relations,
-	// and the designer was told their picture had been cut short.
-	//
-	// The negative half is in the same test and is what keeps the fix from
-	// being "never flag a dense graph": a chain hung off the clique puts a
-	// genuinely unreachable quest one hop past the bound, and that must
-	// flag while the deeper paths through the clique still do not.
 	t.Run("a complete picture of a dense graph is not depth truncated", func(t *testing.T) {
 		g, _ := a.games(t)
 		keys := clique(t, g, "k", 6)
@@ -325,19 +286,6 @@ func TestTraverseArea(t *testing.T) {
 
 	// TestTraverseArea's "a walk row cap is reported rather than losing
 	// content silently" case is the walk's own row cap, read.
-	//
-	// internal/graph caps a walk at MaxRows rows and emits LIMIT MaxRows + 1
-	// so that the caller can tell a full walk from a truncated one. A walk
-	// row is one **edge traversal**, so four times max_nodes rows collapse to
-	// far fewer than max_nodes nodes on a dense graph, and the node cap and
-	// the edge cap both stay unfired while relations disappear from the
-	// picture. Before this was read, the fixture below lost two of its
-	// twenty-two edges at max_nodes 8, got all of them back at 9, and
-	// reported {false false} for the element flags either way — silent
-	// content loss, which this plan calls its worst failure mode.
-	//
-	// The control at a large cap is what makes the flag mean "the walk was
-	// cut" rather than "this fixture is dense".
 	t.Run("a walk row cap is reported rather than losing content silently", func(t *testing.T) {
 		g, _ := a.games(t)
 		// a hangs off a seven-clique, so a walk from a spends its rows inside
@@ -379,10 +327,6 @@ func TestTraverseArea(t *testing.T) {
 	// that already has some, so a renumbering that is off by one does not fail
 	// — it compares the right column against the wrong value, and the wrong
 	// quest comes back with no error at all.
-	//
-	// The query carries a predicate bound *before* the walk (the selector's
-	// key) and one bound *after* it (the step's own where), with the walk's
-	// four arguments in between.
 	t.Run("a walk CT es binds are renumbered into the outer statement", func(t *testing.T) {
 		g, _ := a.games(t)
 		chainOfQuests(t, g)
@@ -482,13 +426,6 @@ func TestTraverseArea(t *testing.T) {
 
 	// TestTraverseArea's "max depth reached is what the walk reached not what
 	// it asked for" case is the arithmetic Task 6 shipped, replaced.
-	//
-	// A set's depth used to be its source set's depth plus the step's
-	// *declared* max, which is exact only while every step is one hop: a
-	// walk that asked for four and found two would have reported four, and a
-	// designer reading "max_depth_reached: 4" would conclude the bound was
-	// binding when it was not — the same over-report the node cap was fixed
-	// for. The depth now travels on the row.
 	t.Run("max depth reached is what the walk reached not what it asked for", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.entity(t, "quest", "m1", "Middle 1", nil)
@@ -539,13 +476,6 @@ func TestTraverseArea(t *testing.T) {
 	// TestTraverseArea's "a walk from a set that reached a node twice counts
 	// the shorter path" case is why the from-set is grouped by id before a
 	// walk's depth is added back to it.
-	//
-	// One row of a step is one edge traversal, so a set can hold the same
-	// quest at two depths — here d3, reached from d1 directly and through d2.
-	// Joined ungrouped, the walk that reads from it would produce one row per
-	// spelling of its seed, and the deeper spelling would be reported as the
-	// depth the picture reached. The seed's depth is its *shortest* path, and
-	// the grouping is what makes that a single number.
 	t.Run("a walk from a set that reached a node twice counts the shorter path", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, key := range []string{"d1", "d2", "d3", "d4"} {
@@ -601,13 +531,6 @@ func clique(t *testing.T, g *game, prefix string, n int) []string {
 // composite foreign keys put an edge, its type and both its endpoints in
 // one game by construction, so in a correct database every project filter
 // this compiler emits is redundant and deleting one fails nothing.
-//
-// **That is exactly why this test exists here.** A recursive term is the
-// first shape in this package whose filters are not redundant *by
-// construction* — the rows it walks are found by the walk itself rather
-// than by an id resolved in this game — so the invariant is asserted with
-// rows the shipped schema makes impossible, in this test's own throwaway
-// database, one row for each of the two filters in the recursive term.
 func TestAWalkStaysInsideOneGame(t *testing.T) {
 	g, other := newGame(t)
 	ctx := context.Background()

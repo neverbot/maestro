@@ -1,16 +1,5 @@
 // Package toolchain_test holds one fact: this repository names the Go
 // version it is built with in four places, and they have to agree.
-//
-// **They did not, and the disagreement was invisible for weeks.**
-// `go.mod` and the Dockerfile said 1.25.7 while both pinned tools had
-// moved to needing 1.26, and the only reason anything worked was that
-// `go install` was quietly downloading a newer toolchain to build them.
-// The day `actions/setup-go` started pinning the toolchain for real, CI
-// stopped 29 seconds in with a message about a version nobody had
-// looked at in months.
-//
-// A version spelled in four files is a fact with four sources. This is
-// the one place that reads all four and refuses to let them drift.
 package toolchain_test
 
 import (
@@ -67,11 +56,6 @@ func TestEveryFileNamingTheGoVersionNamesTheSameOne(t *testing.T) {
 
 // TestTheToolsAreInstallableWithThisProjectsGo is the other half, and
 // the one that actually broke.
-//
-// A pinned tool that needs a newer Go than this project declares can
-// only be installed by silently fetching another toolchain. That worked
-// until it did not, so the rule is now stated: the tools this gate
-// depends on must be buildable by the Go this project itself names.
 func TestTheToolsAreInstallableWithThisProjectsGo(t *testing.T) {
 	declared := read(t, "go.mod", goDirective)
 

@@ -15,20 +15,6 @@ import (
 )
 
 // Bounds on the fields decoded from an untrusted encoded hash string.
-//
-// The upper bounds guard availability: argon2.IDKey allocates memory
-// proportional to "m=", and the decoded key length is passed straight
-// through as its keyLen, so an oversized "m=", salt or key would force a
-// correspondingly large allocation before any password comparison happens.
-//
-// The lower bounds guard authentication, which is a different and more
-// serious failure: a key or salt shorter than these makes the comparison
-// narrow enough to pass by chance instead of by design. An empty key is the
-// extreme case and a total bypass (see the comment above the length check
-// below); a short-but-nonempty key is the same failure partially — a
-// 1-byte key makes a wrong password verify roughly 1 time in 256. This can
-// happen without any attacker at all: a truncating column type, a botched
-// migration, a partial write.
 const (
 	maxDecodedMemoryKiB = 1024 * 1024 // production cost is 64 MiB; a sanity ceiling, not a tuning knob
 	minDecodedSaltLen   = 8           // the argon2 spec's minimum salt length
@@ -80,17 +66,6 @@ type decodedHash struct {
 }
 
 // parseEncodedHash parses and validates an encoded argon2id hash string.
-//
-// The string is untrusted input as far as this function is concerned
-// (today it comes from the database, but nothing stops a future caller from
-// feeding it something else), so every field is checked before it is used
-// anywhere else: argon2.IDKey panics if time or threads is zero, and the
-// bounds in the const block above guard against both an oversized field
-// (availability) and an undersized one (authentication). The parser itself
-// is total — it uses strings.CutPrefix and strconv.ParseUint instead of
-// fmt.Sscanf, which silently accepts trailing garbage ("t=1XXXX") and
-// leading whitespace ("m= 8192") because it only requires its format string
-// to match a prefix of the input, not the whole thing.
 func parseEncodedHash(encoded string) (decodedHash, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
@@ -188,9 +163,6 @@ func parseEncodedHash(encoded string) (decodedHash, error) {
 }
 
 // VerifyPassword compares a password against an encoded hash in constant time.
-//
-// See parseEncodedHash for how the encoded hash is validated before any of
-// it is used.
 func VerifyPassword(password, encoded string) (bool, error) {
 	h, err := parseEncodedHash(encoded)
 	if err != nil {

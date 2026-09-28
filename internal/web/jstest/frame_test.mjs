@@ -1,20 +1,5 @@
 // The harness for internal/web/static/render/scene.js: it imports the
 // real, unmodified module and asserts over the plain data it returns.
-//
-// What this covers that no Go test can. The frame is the one place a
-// designer learns that the drawing in front of them is not the whole
-// truth, and every rule that makes it honest is a property of the
-// JavaScript: that three truncation flags are three sentences, that a
-// clean envelope produces **no** reassurance of any kind, that ambiguity
-// counts nodes rather than slots because the flag is on the node, that a
-// stale view under the failing policy draws no picture at all, that a
-// best-effort picture bands permanently and names what it lost in the
-// server's own words, that a rename is a quiet line and never a band,
-// that an unbound parameter is answered in the bar, and that an empty
-// answer is a success that guesses at no cause.
-//
-// Run directly: `node internal/web/jstest/frame_test.mjs`.
-// internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { readParams, writeParams } from "../static/client.js";
 import {
@@ -80,11 +65,6 @@ function codesOf(banners) {
 }
 
 // --- The fixtures ----------------------------------------------------
-//
-// Each of these is built so that it can produce **one** of the frame's
-// states and no other; everyThingHasItsOwnState below asserts exactly
-// that over the whole set, because a fixture too small to tell two
-// outcomes apart is a test that passes for the wrong reason.
 
 const view = { key: "world", name: "The world", renderer: "graph" };
 

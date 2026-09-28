@@ -41,11 +41,6 @@ func TestSearchArea(t *testing.T) {
 	// defect that survived nine review rounds on a relation's fields. Every
 	// field of DocumentHit is asserted here against a document seeded to give
 	// each of them a distinguishable value.
-	//
-	// Rank is asserted as "greater than zero" rather than as a number: it is
-	// a ts_rank score whose exact value is Postgres's business, and pinning
-	// it would pin the version of Postgres. What matters is that the
-	// projection reaches the caller at all.
 	t.Run("every field of a search hit reads back", func(t *testing.T) {
 		svc, entities, _, pool := a.service(t)
 		ctx := context.Background()
@@ -104,17 +99,6 @@ func TestSearchArea(t *testing.T) {
 	// is caught however it is renamed, and a scan of every field's rendered
 	// value for a body string actually written and read back, so a field under
 	// some other name that happens to carry prose is caught too.
-	//
-	// A search is the one call in this domain an agent makes against a whole
-	// game without knowing what it will get, and prose is the largest
-	// payload the system holds: fifty bodies would blow a context window on
-	// the first answer.
-	//
-	// The gap this shape shares with its two siblings, stated rather than
-	// implied: a field carrying a body under a name matching neither
-	// substring, left at its zero value, is caught by neither check. What
-	// catches a *populated* one is the value scan; what catches a named one
-	// is the name check.
 	t.Run("a search hit carries no body at all", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -277,9 +261,6 @@ func TestSearchArea(t *testing.T) {
 	// filter in both directions: the matching kind is kept and the other is
 	// dropped. A one-document fixture would be answered identically by a
 	// filter that did nothing.
-	//
-	// The spelling is folded, the way every other kind comparison in this
-	// domain folds it (ListDocumentsPage's own filter, documents_path_key).
 	t.Run("a search narrows to one kind", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -357,13 +338,6 @@ func TestSearchArea(t *testing.T) {
 	// of fifty, since a fixture smaller than the default cannot tell "the
 	// default applies" from "no bound applies" — and that a limit the caller
 	// asks for is passed through.
-	//
-	// What sixty documents cannot separate is "clamped at the cap" from "no
-	// cap at all", which would need more than metamodel.MaxSearchLimit rows;
-	// that policy is pinned against paging.Size itself, in
-	// internal/paging/cursor_test.go's
-	// TestSizeClampsRatherThanFoldingOntoTheDefault, and this test does not
-	// claim to cover it.
 	t.Run("a search limit defaults and is honoured", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()
@@ -394,22 +368,6 @@ func TestSearchArea(t *testing.T) {
 	// tool's description could claim a bound the database had stopped applying
 	// — the "documentation claiming more than the code does" defect this
 	// plan's header names first.
-	//
-	// **The bound is pinned from both sides, not just the "too far" one.**
-	// A first version of this test placed one word at offset zero and one
-	// at exactly MaxIndexedChars, and asserted the first findable and the
-	// second not — which is only the "the constant is not too large" half.
-	// Shrinking 0007_documents.sql's `left(body_md, 131072)` to
-	// `left(body_md, 1000)` left that version green: nothing in it ever
-	// asked whether a word placed deep inside the claimed bound, past a
-	// tighter one the migration might have drifted to, is still findable.
-	// `boundary` closes that side: its last character sits at index
-	// MaxIndexedChars-1, the tightest position "just inside the bound" can
-	// mean, and it must be findable for the constant and the migration's
-	// literal to actually agree. `early` and `late` are unchanged and still
-	// pin the other side: the earlier one findable, the later one not, and
-	// the whole body — the unfindable word included — reads back through
-	// Read. The tail is stored; it is only unsearchable.
 	t.Run("a word past the index bound is stored but not findable", func(t *testing.T) {
 		svc, _, _, pool := a.service(t)
 		ctx := context.Background()

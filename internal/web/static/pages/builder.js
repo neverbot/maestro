@@ -1,33 +1,4 @@
 // The query builder: a sentence in clauses, and the document it writes.
-//
-// **The decision this whole screen rests on** is in
-// `.superpowers/specs/2026-09-11-query-builder-design.md` §2: the
-// builder is closer to the sentence a designer says out loud than to the
-// document a query is. The example the language was designed around is
-// one sentence —
-//
-//   *the quests a Mage can reach between level 20 and 30, coloured by
-//   zone*
-//
-// — and read top to bottom the clauses here are exactly that. A form
-// that mirrored the document field by field would be the JSON with boxes
-// around it: a person can operate that and cannot think in it.
-//
-// Three properties follow, and none of them is decoration:
-//
-//   - **A clause is optional and says so by being absent**, not by being
-//     an empty box. Adding one is a single affordance at the bottom.
-//   - **A value control is a picker over the game's own vocabulary**,
-//     never a free-text key: a person choosing "available to" from a
-//     list cannot misspell `available_to`, and a misspelling is the
-//     commonest way a hand-written query fails.
-//   - **The words between the controls are the product's**, not the
-//     model's: "through" and "inwards", never `via` and
-//     `"direction": "in"`.
-//
-// It **generates and does not edit** (§4): this page composes a new
-// query and stores exactly what it emitted. Opening a stored document
-// is a different thing and is guarded by `roundTrips` in query/compose.js.
 
 import {
   DESTINATION_VIEWS,
@@ -131,10 +102,6 @@ export function stackOf() {
 
 // documentText is what the panel beside the sentence shows: the document
 // the stack currently writes, pretty-printed.
-//
-// Two spaces and not four: the panel is beside the sentence, not instead
-// of it, and a document that needed its own scrollbar at eight clauses
-// would be the thing being read.
 export function documentText(stack) {
   return JSON.stringify(compose(stack).document, null, 2);
 }
@@ -142,11 +109,6 @@ export function documentText(stack) {
 // saveProblems is what this page refuses on its own, before a round
 // trip: the three things a stored view needs that are not part of the
 // query document at all.
-//
-// **A refusal the page can make is a refusal the server should never
-// have to.** The first version of this screen let a save go out with no
-// renderer and showed the server's answer — a correct sentence about a
-// field the person had never been asked for.
 export function saveProblems(stack, name, key) {
   const draw = stack.find((clause) => clause.kind === CLAUSE_DRAW) ?? {};
   const problems = [];
@@ -158,13 +120,6 @@ export function saveProblems(stack, name, key) {
 
 // clauseOfPointer maps a diagnostic's JSON pointer back to the clause
 // that wrote it, through the map `compose` returns.
-//
-// **This is the whole reason the emitter returns a pointer map** (§5):
-// `views.validate` answers with a pointer, and the only thing that can
-// turn that pointer into the line of the sentence that produced it is
-// the mapping made while emitting. The longest matching prefix wins, so
-// a pointer at `/from/0/where/all/1/value` finds the condition rather
-// than the Start clause it sits under.
 export function clauseOfPointer(pointers, pointer) {
   const path = String(pointer ?? "");
   if (path === "") return "";
@@ -188,13 +143,6 @@ export function startedFrom(name) {
 }
 
 // openedFrom turns a stored view into a clause stack, or answers null.
-//
-// **Two checks and not one.** `decompose` refuses every shape the
-// builder has no line for, and `roundTrips` refuses a document that
-// would come back different — a field the builder does not know, a
-// spelling it would rewrite. The second is the one that keeps this safe
-// as the language grows: a clause the builder has not learned closes the
-// door by itself rather than being dropped on the way through.
 export function openedFrom(row) {
   const query = row && row.query !== undefined ? row.query : null;
   if (query === null) return null;

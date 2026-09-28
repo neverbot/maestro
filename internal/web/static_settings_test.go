@@ -21,11 +21,6 @@ func TestTheGameSettingsScreen(t *testing.T) {
 // JavaScript cannot be: the command on that screen tells a designer how
 // to reach *this* server, and every fact in it is a fact about Go code
 // three directories away.
-//
-// A transport renamed or an MCP route moved would leave a screen
-// confidently handing out a line that cannot work, with every test in
-// this package still green — prose about code, in the one place where a
-// reader cannot tell it is wrong until their agent fails to connect.
 func TestTheInstallCommandSaysWhatThisServerActuallySpeaks(t *testing.T) {
 	t.Parallel()
 	page, err := os.ReadFile("static/pages/settings.js")
@@ -74,11 +69,6 @@ func TestTheInstallCommandSaysWhatThisServerActuallySpeaks(t *testing.T) {
 // styles are invisible to every check in jstest/, which runs against a
 // stub with no CSS at all) and the fact that it is reached through one
 // shared component rather than hand-rolled per screen.
-//
-// The behaviour — Escape, the press outside, the secret leaving the page
-// on close, Tab staying inside — is pinned in jstest/settings_test.mjs,
-// which is where it belongs: it is behaviour, and it is mutation-checked
-// there.
 func TestTheDialogIsASurfaceAndTrapsItsOwnFocus(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/components/mst-dialog.js")

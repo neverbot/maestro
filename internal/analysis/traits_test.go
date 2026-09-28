@@ -94,13 +94,6 @@ func TestTraits(t *testing.T) {
 
 	// TestAGameThatDeclaredNothingIsRefusedRatherThanReportedHealthy is the
 	// fourth arm, and the most important behaviour in this file.
-	//
-	// A clean bill of health from an engine that had nothing to read is the
-	// worst output this package could produce: a designer would believe
-	// their prerequisites do not loop when the truth is that no relation
-	// type declares itself a prerequisite, so no walk had an edge to follow.
-	// The refusal carries the whole catalogue because the recovery is
-	// "declare something", and a caller cannot do that without the list.
 	t.Run("a game that declared nothing is refused rather than reported healthy", func(t *testing.T) {
 		g := a.game(t)
 		g.declareRelationType(t, "mentions", "", nil)
@@ -162,11 +155,6 @@ func TestTraits(t *testing.T) {
 	})
 
 	// TestACallerSuppliedTypeFromAnotherGameIsNotFoundAndNamesTheKey.
-	//
-	// The alternative — dropping an unmatched key — turns a narrowed run
-	// into a differently narrowed run with no way for the caller to tell,
-	// and in the limit into an empty filter that answers "your whole game is
-	// unreachable".
 	t.Run("a caller supplied type from another game is not found and names the key", func(t *testing.T) {
 		g := a.game(t)
 		g.declareRelationType(t, "requires", "", []string{"prerequisite_of"})
@@ -290,11 +278,6 @@ func TestTraits(t *testing.T) {
 
 	// TestTheTraitDescriptionNamesEveryTraitAndEveryTraitIsNamed is the
 	// bidirectional guard over the generated description's vocabulary half.
-	//
-	// Forwards: every word is offered, with a meaning. Backwards: every word
-	// the description explains is in the vocabulary — asserted through
-	// traitMeanings, which is the one hand-written table in the generator
-	// and therefore the one that can drift.
 	t.Run("the trait description names every trait and every trait is named", func(t *testing.T) {
 		description := TraitDescription()
 		for _, trait := range Traits {

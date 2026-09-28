@@ -15,36 +15,6 @@ import (
 
 // This file is one rule over four tables: **a version claim is a claim
 // about a row that exists.**
-//
-// Every upsert in this package used to read an `expected_version` that
-// reached its insert path as no claim at all. The locked read found
-// nothing, the call took the creation path, the guard on the DO UPDATE
-// was never evaluated, and a brand-new row appeared under a new id at
-// version 1 with the call returning nil. What that costs is not the
-// content — the caller was resending it anyway — but every relation,
-// view position, saved-view reference and attachment that named the row
-// that was removed: each of them now names nothing, while a row with the
-// same key sits there looking fine.
-//
-// The refusal says the row was **removed** and never that the version is
-// stale, because the two have different recoveries: stale means re-read
-// and merge, and removed means decide whether to re-create the row
-// deliberately, with no claim, accepting a new row with a new id.
-
-// holdRemoval opens a transaction of the test's own, deletes one row from
-// one table, and holds the lock until the returned function commits it.
-//
-// **This is what makes the refusal a raced test rather than a sequential
-// one.** The state the rule is about is produced by an update *parking
-// behind a committed removal*: the writer's locked read blocks on the row
-// lock the deletion holds, and only when the deletion commits does that
-// read come back empty and hand the writer the creation path. A test
-// that simply removes a row and then calls the upsert reaches the same
-// branch without ever proving the race, so a fix that only worked
-// sequentially would look identical. Staging one side as plain SQL is
-// the technique lock_order_test.go's holdEntityTypeRow uses, and for the
-// same reason: the interleaving is the test's to choose and not the
-// scheduler's.
 func holdRemoval(t *testing.T, pool *pgxpool.Pool, table string, id uuid.UUID) (commit func()) {
 	t.Helper()
 	ctx := context.Background()
@@ -88,20 +58,6 @@ func TestRemovedArea(t *testing.T) {
 	// TestRemovedArea's "an update that loses to a committed removal is told
 	// the row is gone" case is the test the whole rule exists for, and it
 	// races the state rather than producing it sequentially.
-	//
-	// A designer removes the type; an agent that read version 1 a moment
-	// earlier writes to it. The write's locked read parks on the row lock the
-	// removal holds. When the removal commits, that read comes back empty —
-	// and before this rule the write took the creation path from there, its
-	// version claim never evaluated, and stored the type again under a **new
-	// id**, silently undoing the removal and orphaning every entity, edge and
-	// saved-view reference that named the id that is gone.
-	//
-	// The three assertions are separate on purpose: that the call is
-	// refused, that it is refused as *removed* rather than as a stale
-	// version, and that nothing was written — a refusal reported after the
-	// row landed would be worse than no refusal, because the caller would
-	// stop looking.
 	t.Run("an update that loses to a committed removal is told the row is gone", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -155,12 +111,6 @@ func TestRemovedArea(t *testing.T) {
 	// rule is about the *claim* and not about the interleaving: a caller that
 	// states a version for a key this game has never had is making the same
 	// false statement as one that lost to a removal, and hears the same thing.
-	//
-	// It replaces TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing,
-	// which pinned the opposite outcome. That test's argument was that
-	// nothing is overwritten and the returned Version of 1 tells the caller
-	// it created — true, and beside the point: what is lost is not the
-	// content but every reference to the id that went away.
 	t.Run("a version claim against a type this game never had is refused too", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -270,8 +220,6 @@ func TestRemovedArea(t *testing.T) {
 	// by every view position placing it, so a resurrection under a new id
 	// leaves a designer's arranged diagram pointing at nothing while the
 	// entity list looks untouched.
-	//
-	// The race is the same one, staged against `entities`.
 	t.Run("an entity update that loses to a committed removal is told the row is gone", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)
@@ -320,12 +268,6 @@ func TestRemovedArea(t *testing.T) {
 	// surface" case pins the discrimination the two recoveries turn on, from
 	// the error's own side: a caller matching ErrVersionConflict must not
 	// catch this, and a caller matching ErrNotFound must.
-	//
-	// The Go-level assertion is here rather than only in internal/web
-	// because it is the domain's promise: internal/web's mcpErrorFor and
-	// writeDomainError both dispatch on these sentinels, so getting Is wrong
-	// would publish a not_found as a version_conflict on both surfaces at
-	// once with nothing in either of them to see.
 	t.Run("a removal refusal is not a conflict on either surface", func(t *testing.T) {
 		err := error(&metamodel.RemovedError{Subject: "entity type", Address: `"quest"`, Claimed: 4})
 		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "a RemovedError must read as not_found")

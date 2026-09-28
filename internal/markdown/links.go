@@ -22,20 +22,9 @@ import (
 // is not settled here; what is settled is that the link's key is
 // (document, entity), so free text cannot produce two attachments of one
 // pair under two spellings.
-//
-// TestLinksArea's "a link role is bounded as the callers own argument" case
-// pins the bound, its boundary, the control-character refusal, and that the
-// role is stored exactly as written.
 const MaxRoleLen = 64
 
 // MaxLinksPerWrite bounds the links array a single write may carry.
-//
-// A document about a hundred entities is not a document, it is a taxonomy
-// that should be entities and relations. The bound is here so that a caller
-// that has confused the two is told, at its own argument, rather than
-// discovering it as a slow write. TestLinksArea's "a write carrying too
-// many attachments is refused at links" case pins it, and pins that the
-// refusal lands before anything is written.
 const MaxLinksPerWrite = 100
 
 // LinkTarget is one end of an attachment: the entity, and the role the
@@ -55,17 +44,6 @@ type LinkInput struct {
 }
 
 // UnlinkInput is one detachment operation, from the document's side.
-//
-// It carries no Role, deliberately, rather than reusing LinkInput with
-// the field left to be ignored. The link's key is (document, entity)
-// (LinkAdd's doc comment argues why role is not part of it), so there is
-// no second link under another role for a role argument to choose
-// between — a caller passing one to detach cannot mean anything by it,
-// and a struct that accepted the field without using it would let a
-// caller believe otherwise with nothing to correct the belief.
-// Task 10's docs.links.remove tool must address the same decision: its
-// input schema must not carry a `role` field either, for the same
-// reason.
 type UnlinkInput struct {
 	Path       string
 	EntityType string
@@ -74,12 +52,6 @@ type UnlinkInput struct {
 
 // EntityLink is one attachment as seen from the document: which entity,
 // and in what role.
-//
-// EntityName is carried so a UI listing a document's attachments does
-// not have to fetch each entity to render a label. It is a *display*
-// value on a read, not an event payload, so the "carry identity only"
-// rule does not apply: a read is answered from the same transaction's
-// snapshot the caller asked for, and there is no ordering hazard.
 type EntityLink struct {
 	EntityID      uuid.UUID
 	EntityTypeKey string
@@ -100,21 +72,6 @@ type DocumentLink struct {
 
 // LinkAdd attaches a document to an entity, or updates the role of an
 // attachment that is already there.
-//
-// It does not take an expected_version and does not move the document's own
-// version, deliberately. A link is not the document's content: two people
-// attaching one script to two different quests are not editing the same
-// thing, and making them serialise on the document's version would turn an
-// independent operation into a conflict. What that costs is that a link
-// change is not in the version history, which is the right trade — the
-// history is the history of the *writing*. TestLinksArea's "linking is
-// announced" case reads the unmoved version back off the event.
-//
-// **Attachment is never inferred from content.** Not from frontmatter,
-// not from a heading that happens to match an entity's name. A wrong
-// attachment is invisible — the document simply shows up on the wrong
-// quest and nobody notices — so it is only ever what a caller asked for
-// here or in a write's links array.
 func (s *Service) LinkAdd(ctx context.Context, projectID uuid.UUID, in LinkInput) error {
 	// One pass over every argument, as Write and Delete do: a caller
 	// whose path and whose role are both wrong hears about both.
@@ -155,18 +112,6 @@ func (s *Service) LinkAdd(ctx context.Context, projectID uuid.UUID, in LinkInput
 }
 
 // LinkRemove detaches a document from an entity.
-//
-// Removing an attachment that is not there is not_found rather than
-// silence: an agent that detached the wrong pair, or that detached the
-// right pair twice, has made a mistake it can act on, and "it worked" tells
-// it nothing. TestLinksArea's "removing a link leaves the document and the
-// entity" case pins both the refusal and that neither endpoint is touched
-// by a removal.
-//
-// LinkRemove's argument carries no role, and the reason is the key: an
-// attachment is identified by (document, entity), so there is no second
-// link under another role for a role argument to choose between. See
-// UnlinkInput's doc comment.
 func (s *Service) LinkRemove(ctx context.Context, projectID uuid.UUID, in UnlinkInput) error {
 	problems := pathProblems(in.Path)
 	problems = append(problems, entityAddressProblems("", LinkTarget{
@@ -213,17 +158,6 @@ func (s *Service) LinkRemove(ctx context.Context, projectID uuid.UUID, in Unlink
 }
 
 // The bounds on one page of attachments, on either side of the join.
-//
-// Exported for the rule the metamodel established for MaxSearchQuery and
-// this package restates for DefaultDocumentPage: a bound a caller cannot
-// read is a bound a caller trips over, and docs.links.list's description
-// is built with these values interpolated rather than typed out. The
-// clamp policy — a limit above the cap is clamped to the cap and not
-// folded onto the default — is paging.Size's, pinned there.
-//
-// They are one pair rather than two because the two sides of one join
-// are one question asked twice, and a caller that learned the bound from
-// one side has learned it for the other.
 const (
 	// DefaultLinkPage and MaxLinkPage bound one page of LinksByDocument
 	// and of LinksByEntity.
@@ -234,10 +168,6 @@ const (
 // LinksFilter is the paging half of a link listing: where to continue
 // from, and how much to ask for. It is one type for both directions
 // because the two answer the same question from two ends.
-//
-// Cursor is the NextCursor of a previous call. It belongs to the game
-// and to the exact side and address it was issued for and to no other;
-// EntityLinkPage and DocumentLinkPage carry the contract.
 type LinksFilter struct {
 	Cursor string
 	Limit  int32
@@ -245,19 +175,6 @@ type LinksFilter struct {
 
 // EntityLinkPage is one page of a document's attachments plus the cursor
 // for the next.
-//
-// **NextCursor is set when the page came back full**, and empty
-// otherwise, so a caller looping until it is empty is correct and must
-// expect a final empty page rather than treating one as an error — the
-// same contract DocumentPage and HistoryPage state, and the rest of it
-// is paging.Cursor's.
-//
-// Cursor.Sort, for this listing, is the attached entity's key; the
-// listing's order and why the type key is not part of it are in
-// ListDocumentLinksByDocument's own comment.
-//
-// Links is never nil: "this document is attached to nothing" must not
-// reach a client as null.
 type EntityLinkPage struct {
 	Links      []EntityLink
 	NextCursor string
@@ -273,12 +190,6 @@ type DocumentLinkPage struct {
 
 // LinksByDocument lists one page of everything a document is attached
 // to.
-//
-// TestLinksArea's "a link attaches a document to an entity and reads back
-// from both sides" case reads every column back through it, TestLinksArea's
-// "a document is attached to several entities and listed in a stable order"
-// case pins the order, and TestLinksArea's "a documents attachments page
-// and the cursor belongs to its own side" case pins the paging.
 func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path string,
 	f LinksFilter,
 ) (EntityLinkPage, error) {
@@ -332,29 +243,6 @@ func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path
 // documentLinksFingerprint is the resolved listing one attachment cursor
 // belongs to: the game, this side of this domain's join, then the
 // document.
-//
-// **The project id is first, always**, which is paging.Fingerprint's
-// standing rule; here it is redundant in the same way historyFingerprint
-// records its own to be — the document id already tells two games apart,
-// since two games' documents at one path are two different rows — and it
-// is present for the same reason, that the redundancy is a property of
-// today's parts rather than of the rule.
-//
-// **"document_links_by_document" is what keeps a cursor from crossing to
-// the other side of the join**, which is this listing's own hazard
-// rather than an inherited one: the two directions answer the same
-// question from two ends, take the same LinksFilter, and sort on two
-// different columns, so a cursor carried across would be a path compared
-// against an entity key.
-//
-// **No behaviour test goes red when the two names are collapsed into
-// one**, and that is said here rather than left for someone to discover:
-// TestLinksArea's "a documents attachments page and the cursor belongs to
-// its own side" case refuses the crossing today because a document id and
-// an entity id are different uuids, which is arithmetic and not the rule.
-// The composition is pinned instead, by
-// TestTheTwoSidesOfTheJoinDoNotShareAFingerprint, which builds both sides
-// from one id.
 func documentLinksFingerprint(projectID, documentID uuid.UUID) string {
 	return paging.Fingerprint(projectID.String(), "document_links_by_document",
 		documentID.String())
@@ -363,12 +251,6 @@ func documentLinksFingerprint(projectID, documentID uuid.UUID) string {
 // LinksByEntity lists every document attached to one entity. This is how
 // the UI builds an entity page, and how an agent asked to rewrite the
 // Hogger dialogue finds the document from the quest.
-//
-// Soft-deleted documents are not listed: an entity page naming prose nobody
-// can read is a dead link on every quest it was attached to. The link row
-// itself survives the deletion and comes back with the document
-// (TestLinksArea's "an entity stops listing a document that was deleted"
-// case, which pins both halves).
 func (s *Service) LinksByEntity(ctx context.Context, projectID uuid.UUID,
 	entityType, entityKey string, f LinksFilter,
 ) (DocumentLinkPage, error) {
@@ -446,33 +328,6 @@ func (s *Service) documentForLinks(ctx context.Context, q *dbq.Queries, projectI
 // entityAddressKeyProblems bounds the two keys of an entity address —
 // type and key, nothing else — before either lookup runs, at the
 // argument's own path.
-//
-// Split out from entityAddressProblems below so that List, which has no
-// role argument to check, calls this half directly rather than the
-// whole of entityAddressProblems. Before this split, List built a
-// LinkTarget with Role left at its zero value and ran it through
-// entityAddressProblems anyway; the check passed because an empty role
-// is currently a valid one, not because List had no role to be wrong
-// about. That is a landmine rather than a bug today: the day
-// checkShortText's rule for an empty role changes — required, say, or
-// bounded some other way — List would start refusing callers at a
-// field named "role" that ListFilter does not have and no caller ever
-// sent.
-//
-// The two keys go through metamodel.RowKeyProblems rather than through a
-// rule written here, because they are the metamodel's keys: the rule that
-// decides which spellings can exist is the one that must decide which
-// spellings can be asked for, and a second copy of it in this package would
-// drift the day either one is loosened. The concrete thing it closes is an
-// address Postgres itself refuses — an entity key holding an invalid UTF-8
-// byte raises SQLSTATE 22021, which would reach an agent as internal_error
-// over a value the agent supplied, and this package's standing rule is that
-// nothing a caller can fix reports one. TestLinksArea's "an entity address
-// is bounded before postgres sees it" case pins it, at the single-link path
-// and inside a write's array.
-//
-// prefix is "" for the single-link calls and "links[i]." for an element
-// of a write's array.
 func entityAddressKeyProblems(prefix, entityType, entityKey string) []metamodel.FieldError {
 	problems := metamodel.RowKeyProblems(prefix+"entity_type", entityType)
 	return append(problems, metamodel.RowKeyProblems(prefix+"entity_key", entityKey)...)
@@ -490,18 +345,6 @@ func entityAddressProblems(prefix string, target LinkTarget) []metamodel.FieldEr
 
 // resolveEntity turns (entity type key, entity key) into an entity id,
 // naming *which* of the two was not found.
-//
-// prefix is "" for the single-link tools and "links[i]." for an element
-// of a write's array, so a caller sending twenty links is told which one
-// is wrong — the rule metamodel.parseIDs applies to a list of ids.
-//
-// **This is what the spec's proposed `entity_not_found` code was for**,
-// and it is why that code does not ship: the discrimination an agent needs
-// is *which argument*, and a path is that, as data. See MissingError's own
-// doc comment. TestLinksArea's "a mistyped entity type and a mistyped
-// entity key are told apart" case pins the two misses apart, and
-// TestLinksArea's "a bad link in a write rolls the whole write back" case
-// pins the prefix.
 func (s *Service) resolveEntity(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	prefix string, target LinkTarget,
 ) (uuid.UUID, error) {
@@ -536,19 +379,6 @@ func (s *Service) resolveEntity(ctx context.Context, q *dbq.Queries, projectID u
 // duplicateLinkTargets finds the elements of a write's links array that
 // address an entity an earlier element already addressed, folding case
 // the way the entity key's own unique index does.
-//
-// The metamodel's bulk writes settled the analogous question for a batch
-// that names one row twice: refused whole, up front, because a caller who
-// asked for two attachments to one entity cannot have that request
-// satisfied as submitted, and left to the writes the repetition would
-// surface as whichever spelling's UpsertDocumentLink ran last — the second
-// role silently winning over the first, with nothing telling the caller
-// half its array was discarded. That precedent is `metamodel.bulkAtomic`'s
-// `repeatedIdentities`, over rows in a batch call; this is the same
-// argument over targets in one write's array, where "the same row" is the
-// (entity type, entity key) pair the link's own key is built from
-// (LinkAdd's doc comment). TestLinksArea's "a links array naming one entity
-// twice is refused" case pins it, at two spellings of one key.
 func duplicateLinkTargets(targets []LinkTarget) []metamodel.FieldError {
 	first := make(map[string]int, len(targets))
 	var problems []metamodel.FieldError
@@ -607,15 +437,6 @@ func (s *Service) replaceLinks(ctx context.Context, q *dbq.Queries, projectID uu
 	// declared as a nil slice instead of the make above, the empty-array case
 	// of TestLinksArea's "a links array on a write replaces the set and
 	// omitting it preserves it" case fails with the-defias still attached.
-	//
-	// The make above is what actually avoids it, so **this branch cannot
-	// fire as the function stands** and it is not claimed to be doing
-	// work today. It is kept for the one edit it does catch — a later
-	// `var keep []uuid.UUID`, which reads as an equivalent
-	// "optimisation" and is not one — and it is stated as unreachable
-	// rather than left to look load-bearing, because a guard whose
-	// argument nobody can check is how Task 3's dead post-write path
-	// check survived a review round.
 	if keep == nil {
 		keep = []uuid.UUID{}
 	}

@@ -18,39 +18,6 @@ import (
 
 // This file is the saved-view surface: the tools an agent uses to
 // compose, save, run and arrange a picture of a game's content.
-//
-// **Every exported MCPViews* function starts with requireScope and
-// delegates to an unexported core of the same name**, which is the split
-// mcp_docs.go's header argues: requireScope asks "is this token bound to
-// this game", which a session caller cannot answer, and requireProject
-// asks the equivalent question of a session. One implementation of every
-// tool, two admission checks. TestEveryViewsToolRefusesAnotherGamesToken
-// drives every one of them from the *registered* tool list, so an
-// eleventh tool added tomorrow is covered without editing it.
-//
-// **Ten tools, and the plan's table named nine.** views.list_assets is
-// the tenth and it is not optional: an agent has no other way to learn an
-// asset's id, so without it views.set_background takes an argument no
-// caller on this surface can obtain — the mechanism-nothing-can-reach
-// this project refuses. Uploading stays REST-only and browser-only
-// (api_view_assets.go says why); discovering what has been uploaded does
-// not.
-//
-// **Every long description below is generated where the thing it
-// describes is data.** The renderer catalogue comes from
-// views.RendererDescription() and the operator table from
-// views.OperatorDescription(), because both *are* contracts and a
-// hand-written sentence beside a table is a sentence that goes false the
-// first time the table moves. What is written by hand here is only what
-// no table holds: the shape of the envelope, and the handful of rules an
-// agent cannot infer from the document's own shape.
-
-// --- The prose an agent cannot infer from the document ---
-
-// viewsQueryDoc is what a caller has to know about the query language
-// that the generated tables do not say. Every paragraph in it is a rule
-// this sub-project's own review rounds found an agent would otherwise
-// meet as an empty picture.
 var viewsQueryDoc = "A query is a JSON document with five stages. `from` is one or more " +
 	"selectors, each naming an entity type and optionally a `where`; `traverse` walks " +
 	"relations from a named set; `nodes` and `edges` say what to draw; `project` says how " +
@@ -148,15 +115,6 @@ var viewsStaleDoc = "**A saved view whose game has moved is the normal case, not
 
 // viewsKeyDoc is the fact about keys an agent will otherwise discover by
 // trying.
-//
-// **It used to say a key is permanent everywhere, and that stopped being
-// true**: types.rename and relation_types.rename move an entity type's
-// or a relation type's key, keeping the row, its id and its history. A
-// *view's* key has no rename, and that is what this paragraph is still
-// about — so it says which is which rather than repeating a blanket
-// claim the metamodel no longer honours. A description that told an
-// agent no rename exists would send it to the several-call workaround
-// for a job one call now does.
 var viewsKeyDoc = "**A view's key is permanent.** views.upsert is addressed *by key*, so " +
 	"upserting under a new one creates a second view and leaves the first standing. " +
 	"Fixing a misspelled view key means creating the new view, moving what pointed at the " +
@@ -185,23 +143,6 @@ type ViewsGetInput struct {
 }
 
 // ViewsUpsertInput creates or replaces one saved view.
-//
-// **Query is a json.RawMessage and not a string**, so an agent writes the
-// document as JSON in the tool call rather than as a string holding
-// escaped JSON. The domain stores the bytes it is given, semantically as
-// written; a second round of escaping would be a second place for a
-// document to be wrong.
-//
-// **ExpectedVersion is a *int32** because an omitted expected_version
-// must be distinguishable from `0`, which is the spelling of "this view
-// must not exist yet".
-//
-// **There is no seed member, and its absence is enforced.** The inferred
-// input schema closes this struct to additional properties and the REST
-// decoder refuses an unknown member, so a seed sent to either surface is
-// answered rather than dropped — TestNoSurfaceAcceptsALayoutSeed drives
-// both. Migration 0012 carries why the column went and what a future
-// seed would have to seed.
 type ViewsUpsertInput struct {
 	ScopedArgs
 	Key             string          `json:"key"`
@@ -221,10 +162,6 @@ type ViewsRemoveInput struct {
 }
 
 // ViewsRunInput executes a saved view by key, or an inline query.
-//
-// **Exactly one of Key and Query**, and naming both is refused rather
-// than resolved by precedence: a caller that sent both meant one of them,
-// and guessing which runs a picture nobody asked for.
 type ViewsRunInput struct {
 	ScopedArgs
 	Key           string          `json:"key,omitempty"`
@@ -245,10 +182,6 @@ type ViewsValidateInput struct {
 }
 
 // ViewsPositionInput is one node's coordinates.
-//
-// Pinned is a *bool because false is a value a caller means: a plain bool
-// would store the opposite of the column default for every caller that
-// said nothing.
 type ViewsPositionInput struct {
 	EntityType string  `json:"entity_type"`
 	EntityKey  string  `json:"entity_key"`
@@ -271,15 +204,6 @@ type ViewsEntityAddressInput struct {
 }
 
 // ViewsClearPositionsInput drops positions for one view.
-//
-// **Entities is a pointer, and the pointer is the whole safety of this
-// call.** Omitting it — or sending `null`, which means the same — clears
-// the *whole* view's arrangement; sending `[]` is refused. `omitempty` on
-// a plain slice cannot carry that distinction, because an absent field
-// and an explicit empty array unmarshal to the same Go value, and the two
-// mean opposite things here: said nothing is not said none, and a client
-// whose list of dirty nodes came out empty must not wipe a designer's
-// afternoon of map work.
 type ViewsClearPositionsInput struct {
 	ScopedArgs
 	Key      string                     `json:"key"`
@@ -287,25 +211,12 @@ type ViewsClearPositionsInput struct {
 }
 
 // ViewsPointInput is a background's offset, `{"x": …, "y": …}`.
-//
-// **An object and not the two-element array the spec's own table
-// implies.** The column is an object; the array spelling belonged to a
-// renderer parameter that was deleted when the background moved onto the
-// row (Task 14), and shipping the array here would be a second spelling
-// of one value with a conversion between them for nobody's benefit.
 type ViewsPointInput struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
 }
 
 // ViewsSetBackgroundInput points one view at one uploaded image.
-//
-// All three are pointers, and each for its own reason. AssetID nil is how
-// a background is **cleared** — it is the only spelling for it. Scale and
-// Offset nil mean "the defaults", not "leave what is there": a caller
-// that names a new image and says nothing about the arithmetic must not
-// inherit the previous image's, and an offset of {0,0} is a legal thing
-// to ask for, so a plain struct could not tell the two apart.
 type ViewsSetBackgroundInput struct {
 	ScopedArgs
 	Key     string           `json:"key"`
@@ -325,11 +236,6 @@ type ViewsListAssetsInput struct {
 
 // ViewSummaryOutput is one row of views.list: enough to choose a view,
 // and no query document.
-//
-// Stale is the flag, and it is a boolean by design: it answers "does this
-// view still resolve against the game as it stands", which is what a
-// picker needs, and views.run or views.get is where a caller learns
-// *what* moved and at which pointer.
 type ViewSummaryOutput struct {
 	Key      string `json:"key"`
 	Name     string `json:"name"`
@@ -345,10 +251,6 @@ type ViewsListOutput struct {
 }
 
 // ViewOutput is one saved view, whole.
-//
-// Query is a json.RawMessage so the document comes back as a document
-// rather than as a string of escaped JSON — the same reason the input
-// takes one.
 type ViewOutput struct {
 	ID                string          `json:"id"`
 	Key               string          `json:"key"`
@@ -418,17 +320,6 @@ type ViewsAssetsOutput struct {
 // viewOutput projects one stored row. It is the one place a view becomes
 // a wire value, so the MCP surface and the REST mirror cannot disagree
 // about what a view is.
-//
-// **renderer_params is `{}` and never null.** A nil Go map marshals to
-// `null`, and a client reading a view back would then have two spellings
-// of "no parameters" to handle. The initialiser here is unobservable
-// today and is kept anyway: the domain stores `{}` in the column rather
-// than a JSON null, and unmarshalling `{}` allocates the map, so the
-// nil is reachable only from a row written outside internal/views.
-// TestAViewWithNoRendererParametersReadsBackAsAnObjectAndNotNull asserts
-// the outcome rather than this line, so it holds whichever of the two
-// keeps the promise — which is what makes it worth having when the other
-// is a redundancy.
 func viewOutput(row dbq.View) (ViewOutput, error) {
 	out := ViewOutput{
 		ID: row.ID.String(), Key: row.Key, Name: row.Name, Description: row.Description,
@@ -459,13 +350,6 @@ func viewOutput(row dbq.View) (ViewOutput, error) {
 }
 
 // runOutput is the envelope as it goes on the wire.
-//
-// **positions is an array on every run of a saved key, empty or full, and
-// is absent on an inline query.** The domain's own struct cannot carry
-// that distinction — `omitempty` collapses "nothing was ever dragged"
-// into "this run has no arrangement at all" — and an agent that called
-// one tool either way needs it: absent means "positions do not apply
-// here", empty means "nobody has dragged anything yet".
 func runOutput(result views.Result, saved bool) map[string]any {
 	out := map[string]any{
 		"nodes": result.Nodes, "edges": result.Edges,
@@ -590,11 +474,6 @@ func MCPViewsRun(ctx context.Context, deps MCPDeps, caller Caller, projectID uui
 
 // viewsRun is the one tool with two entry points into the domain, and the
 // choice between them is the caller's alone.
-//
-// **Naming both a key and a query is refused, and so is naming
-// neither.** A precedence rule would run a picture the caller did not ask
-// for and say nothing, and this is a read whose whole value is that it
-// answers the question that was posed.
 func viewsRun(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	in ViewsRunInput) (map[string]any, error) {
 	req := views.RunRequest{
@@ -802,18 +681,6 @@ func viewsListAssets(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 // --- Registration ---
 
 // addViewsTools registers the ten saved-view tools.
-//
-// Every one goes through addScopedTool, so game isolation is enforced in
-// one place regardless of how many tools this file grows —
-// TestEveryMCPToolGoesThroughAddScopedTool walks the *served* tool list
-// and fails on any tool that reached the server another way.
-//
-// **The two long tables in these descriptions are generated.**
-// views.RendererDescription() and views.OperatorDescription() each read
-// the data their own package enforces against, guarded in both directions
-// by that package's own tests. A hand-written paragraph naming a renderer
-// parameter or an operator would be a paragraph that goes false the first
-// time either table moves, and an agent would find out by being refused.
 func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "views.list",
@@ -1067,12 +934,6 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 }
 
 // --- Hand-written output schemas ---
-//
-// Written by hand for the reason mcp.go's own schema block gives: the SDK
-// validates a tool's output against its *marshalled JSON*, and its
-// reflection-based inference gets that shape wrong for any type whose
-// marshalling comes from a method rather than from its literal Go
-// structure — a mismatch that surfaces only when the tool is called.
 
 var viewSummarySchema = &jsonschema.Schema{
 	Type:     "object",
@@ -1115,22 +976,6 @@ var viewOutputSchema = &jsonschema.Schema{
 // queryDocumentInput is the input schema of a tool that takes a query
 // document, and it exists because the SDK infers a schema from the Go
 // type and json.RawMessage is a []byte.
-//
-// Inferred, `query` arrives on the wire as `{"type": ["null", "array"]}`
-// — an array of bytes — so every call sending the document as the object
-// it is was refused by input validation before any handler ran. The three
-// tools that take one were therefore **uncallable over the real
-// transport**, while every test in this package passed: they call the
-// MCP* functions directly, which is where the isolation invariant is
-// pinned and where nothing crosses a schema.
-//
-// The substitution is made at the one type that has the problem rather
-// than by hand-writing three schemas, so a member added to any of these
-// inputs still appears without anybody remembering to add it — the drift
-// a hand-written schema invites. `{}` and not `{"type": "object"}`:
-// ParseQuery is what judges a document, at the pointers an agent can act
-// on, and a schema that refused a non-object first would answer the same
-// mistake with a worse message.
 func queryDocumentInput[T any](tool string) *jsonschema.Schema {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
@@ -1154,20 +999,6 @@ var viewsRemovedOutputSchema = &jsonschema.Schema{
 
 // viewsPositionSchema is one stored position as a run answers it, and it
 // is spelled out rather than left as an open object.
-//
-// **A position has one shape for every view**, which is what separates
-// it from a node: nothing about it depends on the query that drew the
-// picture. So the schema can say what it is, and saying it is what makes
-// the SDK's output validation refuse an envelope whose members drifted
-// from the ones views.set_positions takes.
-//
-// That drift is not hypothetical. internal/views.Position shipped
-// untagged, so a run answered `EntityType`/`EntityKey`/`X`/`Y`/`Pinned`
-// while the write took `entity_type`/`entity_key`/`x`/`y`/`pinned`, and
-// this member was an open object — so the one mechanism in this file
-// that had already caught exactly that class of mistake (see `stats`
-// below, whose two misspelled members failed every run over the real
-// transport) was looking the other way. It is not any more.
 var viewsPositionSchema = &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"entity_type", "entity_key", "x", "y", "pinned", "updated_at"},
@@ -1180,15 +1011,6 @@ var viewsPositionSchema = &jsonschema.Schema{
 
 // viewsRunOutputSchema leaves `nodes` and `edges` as arrays of open
 // objects rather than enumerating a node's members.
-//
-// That is a deliberate limit and not an omission. A node's `attrs` is
-// keyed by the *projection slots this document declared*, and its
-// `fields` by the *game's own field keys*, so the shape of one node is a
-// property of the query that drew it — a schema pinning it here would be
-// a schema that is wrong for every document but one. Everything that is
-// the same for every run — `stats`, `truncated`, a stored position, and
-// the distinction between an absent and an empty `positions` — is
-// pinned.
 var viewsRunOutputSchema = &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"nodes", "edges", "stats", "truncated"},

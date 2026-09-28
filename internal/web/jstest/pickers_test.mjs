@@ -1,19 +1,5 @@
 // The harness for the four pickers' sources: what a picker offers, and
 // where it gets it.
-//
-// The control itself is held by picker_test.mjs. What is here is the
-// half that decides *what may be chosen*, and it is worth its own file
-// because the whole point of a picker in this product is that a key
-// cannot be misspelled — which is a property of the mapping from a
-// game's vocabulary to a list of options, not of a menu.
-//
-// The entity picker is the one that cannot be a list: a game in this
-// instance holds a thousand entities of one type, so its source is a
-// search and the properties are about *when* it asks and *what it does
-// with an answer that arrived late*.
-//
-// Run directly: `node internal/web/jstest/pickers_test.mjs`.
-// internal/web/static_pickers_test.go shells out to it too.
 
 import { install } from "./svg_dom.mjs";
 

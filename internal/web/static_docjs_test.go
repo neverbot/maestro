@@ -39,19 +39,6 @@ var htmlSinks = regexp.MustCompile(`\.innerHTML\s*=|\.outerHTML\s*=|\.insertAdja
 // TestTheDocumentScriptHasExactlyOneHTMLSink is the counterpart of
 // TestAppScriptNeverWritesRawHTML, and it is deliberately a different
 // rule for a different file.
-//
-// The reading view is the one page in this product whose whole purpose
-// is to show markup: GET /docs/rendered and GET /docs/comparison answer
-// with HTML that internal/markdown produced — goldmark configured
-// without html.WithUnsafe, so a document body cannot contribute a tag at
-// all, and RenderDiff, which escapes every line it classes. Inserting
-// that as text would show a designer their own angle brackets.
-//
-// So doc.js may write markup, through exactly one function, and this
-// test is what keeps "exactly one" true: a second sink added anywhere —
-// to put a link inside a message, say — fails here rather than quietly
-// widening the one place in internal/web/static where a string becomes
-// markup.
 func TestTheDocumentScriptHasExactlyOneHTMLSink(t *testing.T) {
 	t.Parallel()
 	source := docScriptSource(t)
@@ -127,10 +114,6 @@ func TestTheDocumentPageDeclaresEveryElementItsScriptLooksUp(t *testing.T) {
 
 // TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp is the same
 // check for the five ids the prose lane needs on game.html.
-//
-// **It follows the code**: Task 15 moved the game page out of app.js and
-// into static/pages/home.js, and a test that kept reading app.js would
-// have gone on passing over a file that no longer contains the lane.
 func TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile("static/game.html")
@@ -155,11 +138,6 @@ func homeScriptSource(t *testing.T) string {
 // task states for a page: an empty state must not promise an action the
 // page cannot perform, and for a viewer the prose routes refuse every
 // write, so the sentence a viewer reads must be a different sentence.
-//
-// Asserted on the source of the two functions that write those
-// sentences, because both are branches on a role this test cannot reach
-// through an HTTP response: GET /summary carries the role, and the
-// branch is taken in the browser.
 func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
 	t.Parallel()
 	// The sentence moved with the page in Task 15, into
@@ -188,12 +166,6 @@ func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
 // of what the case asserts, so it can tell "doc.js set this" from "it
 // was already like that", and the price is that it no longer says
 // anything about what document.html itself ships.
-//
-// It matters on its own account too. These four sections are empty until
-// a request answers, so a shell that shipped them visible would show a
-// reader an empty article, an empty history and two empty pickers for
-// however long the network takes — and would leave all of them on screen
-// forever if the request never answered.
 func TestTheDocumentPageShipsItsSectionsHidden(t *testing.T) {
 	t.Parallel()
 	shell := documentPageSource(t)

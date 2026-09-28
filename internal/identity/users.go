@@ -174,30 +174,6 @@ func (s *Service) prepareUser(req CreateUserRequest) (preparedUser, error) {
 // prepareUser (still applying the allowlist) for an unbound one. That
 // split, not "every invite redemption", is deliberate: it turned out to
 // matter where the admin's authorization actually sits.
-//
-// A *bound* invite (one CreateInvite attached a specific email to) means
-// the admin typed that exact address when they created it — they named
-// the person, and CreateInvite already ran EmailAllowed once, at creation
-// time, against it (see CreateInvite's own check in invites.go, which is
-// unchanged and still enforced there). The domain policy has already been
-// applied to the admin's intent; skipping it again at redemption is what
-// makes "an invite wins over the instance's registration mode" true for
-// the case it exists to cover — an admin deliberately inviting a specific
-// outside contractor.
-//
-// An *unbound* invite only ever said "whoever holds this link gets in".
-// It names no domain, so ALLOWED_EMAIL_DOMAINS is still the only
-// statement anyone has made about who may hold an account on this
-// instance, and it should stand — an earlier version of this method
-// skipped the check unconditionally, which let any unbound invite's
-// holder register with any address at all, silently overriding a
-// configured allowlist the admin never actually opted out of for that
-// link. An unbound invite is also the one most likely to end up pasted
-// into a shared channel or forwarded on, which is exactly when that
-// second gate is worth having. A future admin who genuinely needs an
-// unbound link for an off-domain contractor needs a narrower, explicit
-// opt-out on InviteRequest — not a change to this default — and that is
-// deliberately not built here (see the plan's Task 11 corrections).
 func (s *Service) prepareUserForInvite(req CreateUserRequest) (preparedUser, error) {
 	return s.prepareUserChecked(req, false)
 }
@@ -242,10 +218,6 @@ func (s *Service) prepareUserChecked(req CreateUserRequest, checkDomain bool) (p
 }
 
 // insertUser writes an already-validated, already-hashed user through q.
-// Callers pass s.q outside a transaction (createUser) or a transaction-
-// scoped *dbq.Queries from withTx (invites.go's RedeemInvite), so the
-// insert can participate in a larger atomic write without itself knowing
-// or caring which.
 func (s *Service) insertUser(ctx context.Context, q *dbq.Queries, p preparedUser, isAdmin bool) (User, error) {
 	dbUser, err := q.CreateUser(ctx, dbq.CreateUserParams{
 		Email:        p.email,
@@ -363,58 +335,6 @@ var bootstrapRaceHook func()
 // BootstrapFirstAdmin creates the configured admin account when the instance
 // has no users yet, and is a no-op when unconfigured (FIRST_ADMIN_EMAIL or
 // FIRST_ADMIN_PASSWORD unset).
-//
-// When the instance is not empty, this used to be an unconditional no-op —
-// Task 21's own review found that left no recovery at all from the
-// instance's own last-admin guard (SetAdmin's ErrLastAdmin, admin.go):
-// nothing anywhere sets IsAdmin once every admin is gone, or once the one
-// admin account is simply unreachable (a forgotten password, with no
-// reset flow anywhere in this product by design). It now also
-// re-promotes: if a user with FIRST_ADMIN_EMAIL already exists and is not
-// currently an admin, this sets the flag (see repromoteConfiguredAdmin
-// below). This is deliberately narrower than "create the account if it's
-// missing" — a FIRST_ADMIN_EMAIL that matches nobody is left alone, not
-// used to conjure a brand-new admin account on every boot of an instance
-// that already has users, which would be a surprising escalation vector
-// for a misconfigured environment variable. The recovery this grants is
-// not a new capability: an operator who can set process environment
-// variables already has equivalent access to the database directly, so
-// this only turns a break-glass `psql UPDATE` into a documented restart.
-//
-// Task 22 found that "restores the flag only" was not actually a
-// working recovery path at all: the flag survives a password rotation
-// untouched, so the one scenario this exists to fix — a forgotten or
-// leaked admin password, with no reset flow anywhere else in this
-// product — left repromoteConfiguredAdmin returning immediately (the
-// account was already an admin) without the account ever regaining a
-// usable password. Verified live by restarting a real instance after
-// rotating the configured admin's password: login with the configured
-// password kept failing with 401 after the restart. Fixed by also
-// resetting the password hash through ChangePassword — which revokes
-// every session for the account in the same transaction as the hash
-// update, so a stale or stolen session cannot survive a recovery reset
-// any more than an ordinary password change survives one (see
-// ChangePassword's own doc comment, sessions.go).
-//
-// That reset is gated behind its own one-shot opt-in,
-// FIRST_ADMIN_PASSWORD_RESET (config.Config.FirstAdminPasswordReset),
-// added by Task 22's own review after it proved live what the
-// ungated version cost on an instance that keeps FIRST_ADMIN_EMAIL and
-// FIRST_ADMIN_PASSWORD set — which compose.yml ships and the readme
-// normalises. Without the opt-in FIRST_ADMIN_PASSWORD is exactly what
-// it always was, a seed for an empty instance, and a restart cannot
-// overwrite an existing account's password at all. Flag restoration is
-// not gated: see repromoteConfiguredAdmin below for the full reasoning
-// and for why the reset still verifies before it writes even once
-// opted in.
-//
-// The count-then-insert below is not atomic, so two replicas booting
-// simultaneously against an empty database can both pass the count check
-// and both attempt to insert. That race is resolved by the database, not by
-// this function: the users_email_key unique index makes the loser's insert
-// fail with a 23505, which createUser maps to ErrEmailTaken. That case is
-// treated as "someone already bootstrapped the admin" rather than an error,
-// so both replicas finish successfully and exactly one admin row exists.
 func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 	if s.cfg.FirstAdminEmail == "" || s.cfg.FirstAdminPassword == "" {
 		if s.cfg.FirstAdminPasswordReset {
@@ -477,50 +397,6 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 // FIRST_ADMIN_EMAIL matching no existing account is left alone — see
 // BootstrapFirstAdmin's own doc comment for why this never creates an
 // account here, only recovers one that already exists.
-//
-// Why the reset exists at all. Task 22 weighed the plan brief's two
-// honest options and chose to implement it rather than document a
-// forgotten admin password as unrecoverable: access to the process
-// environment already implies database access, so this grants an
-// attacker nothing new, and an instance that can never recover its only
-// admin is a trap.
-//
-// Why it needs an opt-in. Task 22 first shipped the reset gated on
-// nothing but "both FIRST_ADMIN_* variables are set", which is the
-// steady state of every instance that follows compose.yml. Its own
-// review then proved three consequences live, none of them theoretical:
-// an admin's deliberate password rotation was silently reverted by the
-// next restart, with every session for the account revoked at that
-// moment (so Task 21's self-service password change was not durable for
-// this one account); a typo'd FIRST_ADMIN_PASSWORD of at least twelve
-// characters destroyed a working password with no confirmation
-// anywhere; and a shorter one aborted start-up on instances that had
-// booted fine for as long as the value had only ever been a seed.
-// Requiring a separate FIRST_ADMIN_PASSWORD_RESET=true dissolves all
-// three at once by splitting the capability from the credential: the
-// standing configuration carries the password but not the permission to
-// apply it, so an operator opts in for exactly one restart and unsets
-// the flag afterwards.
-//
-// Why flag restoration stays ungated. Setting is_admin back on an
-// account that lost it destroys nothing an operator would miss, and it
-// is the half of the recovery an instance with zero admins cannot
-// perform any other way while the process runs (ErrLastAdmin's own doc
-// comment, admin.go). Only the destructive half needs a deliberate act.
-//
-// Why the verify-then-reset check survives inside the opted-in path.
-// Even with the opt-in it is worth not rewriting a hash that already
-// matches: an operator who leaves the flag set across several restarts
-// (or restores it from a script) would otherwise log the account out of
-// every device on every boot for a password that was never wrong. One
-// argon2 verification per boot is cheaper than that, and it makes a
-// redundant reset a true no-op.
-//
-// Both branches that actually change something log at WARN — a boot
-// that overwrites a password and revokes every session for an account,
-// or that hands an ordinary account instance-admin authority, is the
-// most privilege-sensitive thing this process does and used to leave no
-// trace between "maestro listening" and "maestro shutting down".
 func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 	dbUser, err := s.q.GetUserByEmail(ctx, s.cfg.FirstAdminEmail)
 	if err != nil {

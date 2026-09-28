@@ -37,8 +37,6 @@ const (
 var all = []Role{Owner, Editor, Viewer}
 
 // rank orders the three roles from least to most privileged, for AtLeast.
-// It is deliberately not exported: nothing outside this package needs the
-// numeric value itself, only the ordering question AtLeast answers.
 var rank = map[Role]int{Viewer: 0, Editor: 1, Owner: 2}
 
 // AtLeast reports whether role meets or exceeds min in privilege — for

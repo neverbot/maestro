@@ -16,10 +16,6 @@ const selfPath = "github.com/neverbot/maestro/internal/graph"
 
 // packageNames is every internal/<name> this package's own doc mentions
 // inside the paragraph beginning with marker.
-//
-// A paragraph and not a sentence: "see builder.adopt there" ends in a
-// period that is not a full stop, and a guard that mis-parses its own
-// input reads as green for the wrong reason.
 func packageNames(t *testing.T, marker string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -74,11 +70,6 @@ func importers(t *testing.T) []string {
 // bidirectional: an importer the comment does not name fails it, a name
 // the comment claims that imports nothing fails it, and a package listed
 // as "not a caller yet" that has since become one fails it too.
-//
-// It exists because the sentence it guards is this repository's cheapest
-// instance of its standing defect -- a rule established correctly and not
-// carried one step along. The commit that makes internal/analysis import
-// this package is red until the comment says so.
 func TestThePackageCommentNamesItsCallersAndOnlyItsCallers(t *testing.T) {
 	t.Parallel()
 	named := packageNames(t, "Callers as of this commit:")

@@ -1,17 +1,4 @@
 // Administration: who is waiting to join this instance, and who runs it.
-//
-// The only interface to four endpoints that have never had one — list,
-// create and revoke an account invitation, and name or unname an
-// administrator. Before this screen, inviting the second person to a
-// freshly installed Maestro meant calling the API by hand, which is a
-// thing a game designer does not do.
-//
-// **Admin-only, and the server is what enforces that.** This page is
-// served to anyone who asks for it and every call it makes is refused
-// with 403 for a caller who is not an admin; what the check below does
-// is say so in a sentence instead of drawing three dead forms. The menu
-// that leads here is not drawn for a non-admin either, so nobody reaches
-// this by accident.
 
 import {
   fetchAPI,
@@ -53,12 +40,6 @@ export function inviteRow(doc, invite, onRevoke) {
   // and types; an invitation has no such name, and a uuid in the column
   // where every other catalogue puts a slug is hex where a word goes.
   // The id is still what the revoke button sends.
-  //
-  // **A revoked invitation is still listed**, because the server's
-  // "outstanding" means not yet redeemed and not yet pruned, revoked or
-  // not — measured against a real instance, where revoking a row left it
-  // on screen looking exactly like a live one. So the row says which it
-  // is, and a dead one has nothing left to do to it.
   const dead = invite.revoked === true;
   const item = row(doc, {
     label: String(invite.email || "anyone with the link"),
@@ -142,11 +123,6 @@ export async function loadInvites(doc, onRevoke) {
   // **Every time the list is read, not only the first.** The count was
   // written once on load, so creating an invitation left "0 invitations
   // outstanding" over a row that had just appeared.
-  //
-  // It counts the ones somebody could still use: a revoked row is listed
-  // so an admin can see what they just did, and counting it as
-  // outstanding would make the sentence above the list disagree with the
-  // word inside it.
   const live = invites.filter((invite) => invite.revoked !== true).length;
   // Both numbers when they differ, because the list shows revoked rows:
   // "1 invitation outstanding" over two rows is a count that argues with
@@ -213,11 +189,6 @@ export const CANNOT_DEMOTE_YOURSELF =
 
 // personRow is one account: who they are, how they sign in, what they
 // may do, and the way in to changing it.
-//
-// **The standing is a word and not a tick.** A checkbox in a row reads
-// as something a stray click changes; this list is read far more often
-// than it is written, so the row states the fact and the editing happens
-// where a person went to edit.
 export function personRow(doc, user, onEdit) {
   const item = doc.createElement("li");
   item.className = "person";
@@ -252,13 +223,6 @@ export function personRow(doc, user, onEdit) {
 }
 
 // editAccount opens the one form that changes somebody else's account.
-//
-// **A dialog, and this is the third case the component admits.** It is
-// not a secret shown once and not a destructive question; it is a form
-// that belongs to *one row of a list* rather than to the screen. An
-// inline editor would push twenty rows down the page to change one, and
-// a screen with a form per row is a screen of forms. components/
-// mst-dialog.js's own header records the three.
 export function editAccount(doc, user, onSave) {
   const form = doc.createElement("form");
   form.setAttribute("id", "edit-account");

@@ -16,31 +16,6 @@ import (
 
 // **There is no recursion anywhere in this file, and that is a decision
 // rather than an accident of the question.**
-//
-// It is written down because three analyses of runtime-built recursive
-// SQL land beside it and make a fourth look inevitable. An orphan is an
-// entity with no edges; that is a degree, a degree is a count, and a
-// count is an aggregate. So the statement is static, it lives in
-// internal/db/queries/analysis.sql, and it goes through sqlc like every
-// other static statement in this repository -- no graph.WalkCTE, no
-// binder, no assembled SQL.
-//
-// It is also the cheapest of the four, and the one whose false positive
-// a designer meets most often: **an entity created seconds ago by an
-// agent that has not yet written its edges is an orphan**, and bulk
-// seeding routinely passes through a state where half the content is.
-// That is not worth solving with a heuristic -- any rule that hid
-// recently created entities would hide the real ones too -- it is worth
-// *saying*, in the tool description an agent reads before it panics
-// mid-seed and in whatever a UI does before it paints an orphan count
-// red. Task 11 puts the sentence on the tool.
-
-// OrphanMode is which shape of missing edge a report is about.
-//
-// The three are checkable against each other precisely because every
-// finding carries its two degrees: `sink` and `source` partition the
-// entities with exactly one direction of edge, and `isolated` is
-// disjoint from both.
 type OrphanMode string
 
 const (
@@ -83,11 +58,6 @@ type OrphansInput struct {
 
 // Orphan is one entity nothing points at, with the two degrees that make
 // the three modes checkable.
-//
-// **The degrees are read back and asserted.** They are the classic
-// "correct and unasserted" field -- computed, returned, and nothing
-// would notice if they were always zero -- which is what
-// TestTheDegreesReportedMatchTheEdgesInTheDatabase exists for.
 type Orphan struct {
 	EntityType string `json:"entity_type"`
 	Key        string `json:"key"`
@@ -127,26 +97,6 @@ const (
 )
 
 // Orphans answers "what does nothing point at".
-//
-// **An entity's edges are counted over every relation type except those
-// declared `annotation`**, and that exception is the entire reason the
-// `annotation` trait exists: a designer saying "I looked, and this type
-// is decoration" is what stops `is_illustrated_by` from keeping a
-// half-finished idea off the orphan list.
-//
-// Note what this analysis does **not** use: the trait resolver's gating
-// sets. Orphans counts edges of every type, gating or not, so the
-// resolver is asked for exactly one thing -- which types are
-// `annotation` -- and `semantics_undeclared` therefore has a different
-// trigger here. A game with no traits and no roles has no annotation
-// type, which is a perfectly meaningful input, so **this analysis does
-// not refuse an undeclared game**: it reports an empty
-// `excluded_relation_types` and an empty `semantics_source` and answers.
-// `analysis.cycles`, `analysis.unreachable` and `routes.check` all
-// refuse, because each of the three would otherwise report a clean bill
-// of health from an engine that had no edge it was allowed to walk.
-// TestOrphansOverAGameWithNoTraitsAnswersRatherThanRefusing pins the
-// asymmetry so it reads as a decision.
 func (s *Service) Orphans(ctx context.Context, projectID uuid.UUID, in OrphansInput) (
 	OrphansResult, error,
 ) {
@@ -265,17 +215,6 @@ func validOrphanMode(mode OrphanMode) bool {
 }
 
 // orphanFingerprint digests the listing a cursor was issued under.
-//
-// **The project id is first, always** -- internal/paging's contract,
-// stated in prose there and enforced by nothing, so every caller obeys
-// it and every listing has a test. The mode and the considered types
-// follow, because paging through the isolated entities and having page 2
-// answer with the sinks is a wrong answer with no error.
-//
-// It is asserted compositionally as well as behaviourally, because the
-// behavioural test can pass without the project id whenever another part
-// discriminates -- here the considered type keys do -- and that is
-// exactly how the original paging defect survived its first test.
 func orphanFingerprint(projectID uuid.UUID, mode OrphanMode, considered []string) string {
 	parts := []string{projectID.String(), "analysis.orphans", string(mode)}
 	parts = append(parts, considered...)

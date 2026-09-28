@@ -1,38 +1,5 @@
 // The composition rule: spec §5.3, and the answer to a question this
 // product has carried since positions were added.
-//
-// `views.layout_mode` is stored, validated and returned by the server,
-// and **read by no server code at all** — 0008_views.sql says so in as
-// many words: it is a contract with the client. This module is that
-// client. `compose` is the only reader of the column anywhere in the
-// product, which is what makes the column something other than a knob
-// that lies, and it is also why `auto` disables dragging: a drag in
-// `auto` would write a `view_positions` row that nothing would ever
-// read back, which is this project's oldest recurring defect wearing a
-// mouse.
-//
-// Everything here is pure: plain data in, plain data out, no DOM, no
-// time, no randomness. The engine is injected into `layoutView` so a
-// stub that never answers can be driven through the budget, and so this
-// whole file runs under `node internal/web/jstest/layout_test.mjs`.
-//
-// **Two honesties, stated here rather than only in a report.**
-//
-// 1. The separation pass is a **reduction** of overlap and not a
-//    guarantee of none. One pass, each unpinned node resolved once
-//    against the boxes already fixed, in address order. Pushing one node
-//    clear of a box can push it into another, and the pass does not go
-//    back. Anything built on "the layout does not overlap" is built on
-//    something this code does not provide, and `separate`'s own comment
-//    says it again where a reader would otherwise assume it.
-// 2. `manual` lays out the unplaced sub-graph and **never writes it
-//    back** — the nodes stay unpinned and absent from `view_positions`
-//    until a human drags one. That is only safe because the same
-//    unplaced node lands in the same spot on every load, and *that*
-//    rests on engine.js sorting its input by address before it inserts
-//    it. It does not rest on the envelope's node order, which is an
-//    order by uuid and not stable across a re-seed. See engine.js's
-//    header for the measurement.
 
 import { addressOf, layoutGraph, DEFAULT_NODE_WIDTH, DEFAULT_NODE_HEIGHT } from "./engine.js";
 // The wire spelling of a saved arrangement, and the vocabulary for where
@@ -83,18 +50,6 @@ const GRID_GAP = 24;
 
 // subgraphFor answers "what does the engine run over", which is the one
 // question that differs between the three modes before any arithmetic.
-//
-//   auto   — the whole graph. Stored positions are ignored entirely and
-//            **not deleted**; nothing here reads them and nothing here
-//            writes them.
-//   manual — the *unplaced* sub-graph only, with the edges whose two
-//            endpoints are both unplaced. Laying the whole graph out and
-//            then discarding the placed nodes' coordinates would give a
-//            different answer, and a worse one: adding a single stored
-//            position would move every other unplaced node.
-//   mixed  — the whole graph, ignoring stored positions, because step 1
-//            of §5.3 wants a *shape* to fit to the pins and a shape
-//            fitted to itself is not one.
 export function subgraphFor(mode, nodes, edges, stored) {
   const all = Array.isArray(nodes) ? nodes : [];
   if (normaliseMode(mode) !== MODE_MANUAL) {
@@ -125,44 +80,6 @@ function endpointKey(value) {
 // fitTransform is step 2 of §5.3: the similarity transform that carries
 // the computed shape onto the pinned coordinates, minimising squared
 // error, with **translation and uniform scale and no rotation**.
-//
-// `pairs` are `[{from: {x, y}, to: {x, y}}]` — a pinned node's computed
-// coordinate and the coordinate a designer dragged it to.
-//
-// The arithmetic, and why it is this and not the textbook similarity
-// fit. Writing p = s·c + t and minimising Σ|p − (s·c + t)|² over a
-// scalar s gives, with c̄ and p̄ the centroids,
-//
-//     s = Σ (cᵢ − c̄)·(pᵢ − p̄) / Σ |cᵢ − c̄|²          t = p̄ − s·c̄
-//
-// The textbook fit (Umeyama) solves for a rotation matrix as well, and
-// it is *strictly better* at minimising the error — which is exactly why
-// it is refused. A designer recognises a saved view by its shape; a
-// diagram silently rotated 60° because two pins happened to lie that way
-// is unrecognisable, and the error it minimised is not a quantity anyone
-// on the other side of the glass is measuring.
-//
-// Three degeneracies, three different answers, each of them a real
-// arrangement rather than a defensive branch:
-//
-//   0 pins            — the identity. `mixed` then behaves as `auto`,
-//                       which §5.3 states outright.
-//   every pin at one  — a translation. The denominator is zero: one pin
-//   computed point      is the ordinary way to reach this, and two pins
-//                       whose *computed* coordinates coincide is the
-//                       other, which is a division by zero rather than a
-//                       small number and so is answered by a branch and
-//                       not by a tolerance.
-//   a negative s      — a translation. A negative uniform scale is a
-//                       180° rotation composed with a flip, so admitting
-//                       it would let the fit do by the back door exactly
-//                       what "no rotation" forbids at the front.
-//
-// Collinear pins are **not** degenerate here, and that is the one place
-// refusing rotation pays for itself: a rotational fit needs the pins to
-// span two dimensions, and three pins in a row down the left margin —
-// which is what a designer who has tidied a column produces — is the
-// common case, not a corner one.
 export function fitTransform(pairs) {
   const usable = (Array.isArray(pairs) ? pairs : []).filter(
     (pair) =>
@@ -216,18 +133,6 @@ export function fitTransform(pairs) {
 // guarantee of none**. Said here as well as at the top of the file
 // because this is the function a later reader would otherwise read a
 // promise into.
-//
-// One pass. Each mover, in address order, is resolved once against every
-// box already fixed — the pinned nodes first, then the movers already
-// placed — and is pushed along the axis of least displacement, which is
-// what keeps a nudge a nudge instead of throwing a node across the
-// diagram. Pushing a node clear of one box can push it into another, and
-// the pass does not come back for it: a settling loop is a simulation,
-// which §5.2 refused when it refused a force layout, and it would make
-// the arrangement depend on an iteration count nobody could reason
-// about.
-//
-// Movers are mutated in place; `fixed` is not.
 function separate(fixed, movers) {
   const obstacles = fixed.slice();
   for (const mover of movers) {
@@ -255,38 +160,6 @@ function separate(fixed, movers) {
 // compose applies the layout_mode contract. The server reads none of
 // these values (0008_views.sql says so); this function is the reader,
 // which is the answer to "what reads that column".
-//
-// `computed` is the engine's answer — `{placements}` or a bare array of
-// `{key, x, y, width, height}` — for whatever `subgraphFor` said to lay
-// out. `stored` is `[{key, x, y, pinned}]`, already filtered to the
-// nodes in this picture (`layoutView` does the filtering: a stored row
-// for an entity the query no longer returns is not a node, and drawing
-// one would put a box on the canvas for something that is not in the
-// answer).
-//
-// The result covers exactly the union of the two, which in every mode is
-// the picture's node set. It carries:
-//
-//   placements  — `{key, x, y, pinned, source}`, in address order.
-//                 Coordinates are the box's centre. **No sizes**: the
-//                 engine takes measured sizes and returns coordinates,
-//                 and the canvas that measured them does not need them
-//                 handed back.
-//   transform   — what the fit did, so the canvas can say so and a test
-//                 can tell a translation from a scale of exactly 1.
-//   placedAutomatically — nodes the engine placed because the saved
-//                 arrangement has no row for them. This is
-//                 render/scene.js's `placedAutomatically` option and the
-//                 count in *"12 new nodes were placed automatically"*
-//                 (spec §4.2), which is what tells a designer in
-//                 `manual` mode that there is arranging to do. It is
-//                 **0 in `auto`**, where every node is placed
-//                 automatically and the sentence would be noise about a
-//                 saved arrangement that is not being honoured anyway.
-//   draggable   — false in `auto`, and only there. See the file header.
-//
-// Nothing here writes, asks for a write, or returns a write intent: the
-// only writer in this sub-project is a human dragging a node (Task 14).
 export function compose(mode, computed, stored) {
   const resolved = normaliseMode(mode);
   const laid = placementsOf(computed);
@@ -448,13 +321,6 @@ export function compose(mode, computed, stored) {
 // gridFallback is what the canvas draws when the budget ran out: a
 // deterministic grid, **ordered by node type then entity key**, which is
 // the order a designer can scan for the node they were looking for.
-//
-// It is deterministic and it is meant to look like what it is. A
-// fallback that looked like a layout would be worse than one that
-// obviously is not — a grid is unmistakably not a drawing of a graph,
-// which is exactly what makes budget.js's banner a sentence a designer
-// believes rather than one they argue with. Nothing here is tuned to
-// look good.
 export function gridFallback(nodes, options = {}) {
   const gap = Number.isFinite(options.gap) ? options.gap : GRID_GAP;
   const boxes = (Array.isArray(nodes) ? nodes : [])
@@ -491,23 +357,6 @@ export function gridFallback(nodes, options = {}) {
 
 // rerunPlan is spec §5.5: a re-run must not reshuffle a picture the
 // designer is working in.
-//
-// Layout is **incremental by identity**. A node present in both the old
-// and the new envelope keeps its coordinate; the engine runs over the
-// new nodes only, and the retained ones are obstacles. A full re-layout
-// happens in exactly two cases, and both are stated as rules rather than
-// left to an implementation: the designer asked for one (*re-arrange*),
-// or the retained set is **under half** the new one, at which point the
-// old arrangement is not a picture anybody recognises anyway.
-//
-// `previous` is the last composition's placements; `nodes` is the new
-// envelope's node list. The answer is a plan and not a layout, because
-// what to do with it differs: a full re-layout runs the mode's own
-// composition, and an incremental one runs `mixed` over the fresh
-// sub-graph with the retained nodes as pins — which needs no special
-// case anywhere, because a pin the engine was not asked to place
-// contributes nothing to the fit, so the transform degenerates to the
-// identity and the pass separates the fresh nodes against the old ones.
 export function rerunPlan(previous, nodes, options = {}) {
   const held = new Map();
   for (const placement of Array.isArray(previous) ? previous : []) {
@@ -551,18 +400,6 @@ export function rerunPlan(previous, nodes, options = {}) {
 // --- The one call the worker makes -----------------------------------
 
 // layoutView is everything above, in order, and is what worker.js calls.
-//
-// The worker holds no decisions — it is the one part of this layer no
-// Node harness can drive, so it receives a request, calls this, and
-// posts the answer back. Everything a test needs to reach is on this
-// side of that seam, `engine` included: it is injected so a stub that
-// never answers can be driven through budget.js's supervisor, and it
-// defaults to the real dagre wrapper.
-//
-// `stored` is filtered to the picture here and nowhere else: a stored
-// row for an entity this run did not return is not drawn, because it is
-// not in the answer, and a box on the canvas for something outside the
-// answer is the picture lying about what the query said.
 export function layoutView(request = {}, { engine = layoutGraph } = {}) {
   const mode = normaliseMode(request.mode);
   const nodes = (Array.isArray(request.nodes) ? request.nodes : []).filter(
@@ -583,11 +420,6 @@ export function layoutView(request = {}, { engine = layoutGraph } = {}) {
     // nodes are separated against them as obstacles. The fit degenerates
     // to the identity on its own — a pin the engine was not asked to
     // place contributes no pair — so no branch is needed for it.
-    //
-    // `auto` honours no stored row, here as everywhere, so its fresh
-    // nodes all go through the engine; what it retains is the previous
-    // *computed* arrangement, which is the picture in front of the
-    // designer and is what §5.5 is about.
     const honourStored = mode !== MODE_AUTO;
     const freshKeys = new Set(plan.fresh.map(addressOf));
     const freshStored = honourStored ? stored.filter((row) => freshKeys.has(row.key)) : [];

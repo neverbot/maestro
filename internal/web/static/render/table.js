@@ -19,10 +19,18 @@ import { CONTROL_COLUMN, CONTROL_COLUMNS, CONTROL_COUNT, CONTROL_SLOT, control }
 export const RENDERER = "table";
 
 // The renderer_params keys, spelled as the server spells them.
-export const PARAM_COLUMNS = "columns";
-export const PARAM_SORT = "sort";
-export const PARAM_GROUP_BY = "group_by";
-export const PARAM_PAGE_SIZE = "page_size";
+import {
+  PARAM_COLUMNS,
+  PARAM_SORT,
+  PARAM_GROUP_BY,
+  PARAM_PAGE_SIZE,
+} from "./params.js";
+export {
+  PARAM_COLUMNS,
+  PARAM_SORT,
+  PARAM_GROUP_BY,
+  PARAM_PAGE_SIZE,
+} from "./params.js";
 
 // The three built-in columns the envelope carries, in the catalogue's
 // own spellings (`envelopeBuiltins` in internal/views/renderers.go).

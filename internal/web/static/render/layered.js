@@ -23,10 +23,18 @@ import { CONTROL_BOOL, CONTROL_ENUM, CONTROL_RANK_BY, control } from "./controls
 export const RENDERER = "layered";
 
 // The renderer_params keys, spelled as the server spells them.
-export const PARAM_RANK_DIRECTION = "rank_direction";
-export const PARAM_RANK_BY = "rank_by";
-export const PARAM_LAYER_LABELS = "layer_labels";
-export const PARAM_ALIGN = "align";
+import {
+  PARAM_RANK_DIRECTION,
+  PARAM_RANK_BY,
+  PARAM_LAYER_LABELS,
+  PARAM_ALIGN,
+} from "./params.js";
+export {
+  PARAM_RANK_DIRECTION,
+  PARAM_RANK_BY,
+  PARAM_LAYER_LABELS,
+  PARAM_ALIGN,
+} from "./params.js";
 
 // The admitted values, in the catalogue's own spellings.
 export const DIRECTION_TB = "TB";

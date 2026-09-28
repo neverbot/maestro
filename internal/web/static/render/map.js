@@ -25,10 +25,18 @@ import { CONTROL_ENUM, CONTROL_NUMBER, CONTROL_NUMBER_FIELD, control } from "./c
 export const RENDERER = "map";
 
 // The renderer_params keys, spelled as the server spells them.
-export const PARAM_COORDINATE_SOURCE = "coordinate_source";
-export const PARAM_X_FIELD = "x_field";
-export const PARAM_Y_FIELD = "y_field";
-export const PARAM_SNAP = "snap";
+import {
+  PARAM_COORDINATE_SOURCE,
+  PARAM_X_FIELD,
+  PARAM_Y_FIELD,
+  PARAM_SNAP,
+} from "./params.js";
+export {
+  PARAM_COORDINATE_SOURCE,
+  PARAM_X_FIELD,
+  PARAM_Y_FIELD,
+  PARAM_SNAP,
+} from "./params.js";
 
 // The admitted values, in the catalogue's own spellings, and its own
 // default: `coordinate_source` unset is "manual", which is what

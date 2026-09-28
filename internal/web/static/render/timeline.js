@@ -19,10 +19,18 @@ import { CONTROL_AXIS_FIELD, CONTROL_SLOT, CONTROL_TEXT, control } from "./contr
 export const RENDERER = "timeline";
 
 // The renderer_params keys, spelled as the server spells them.
-export const PARAM_AXIS_FIELD = "axis_field";
-export const PARAM_AXIS_END_FIELD = "axis_end_field";
-export const PARAM_LANE_BY = "lane_by";
-export const PARAM_AXIS_LABEL = "axis_label";
+import {
+  PARAM_AXIS_FIELD,
+  PARAM_AXIS_END_FIELD,
+  PARAM_LANE_BY,
+  PARAM_AXIS_LABEL,
+} from "./params.js";
+export {
+  PARAM_AXIS_FIELD,
+  PARAM_AXIS_END_FIELD,
+  PARAM_LANE_BY,
+  PARAM_AXIS_LABEL,
+} from "./params.js";
 
 // The two kinds of axis, in the metamodel's own spellings for a declared
 // field's type (internal/metamodel's FieldNumber and FieldEnum).

@@ -20,9 +20,16 @@ import { CONTROL_COUNT, CONTROL_RELATION_TYPE, CONTROL_SLOT, control } from "./c
 export const RENDERER = "nested";
 
 // The renderer_params keys, spelled as the server spells them.
-export const PARAM_CONTAIN_VIA = "contain_via";
-export const PARAM_MAX_DEPTH = "max_depth";
-export const PARAM_LEAF_LABEL = "leaf_label";
+import {
+  PARAM_CONTAIN_VIA,
+  PARAM_MAX_DEPTH,
+  PARAM_LEAF_LABEL,
+} from "./params.js";
+export {
+  PARAM_CONTAIN_VIA,
+  PARAM_MAX_DEPTH,
+  PARAM_LEAF_LABEL,
+} from "./params.js";
 
 // The projection slot the tint reads. It is the conventional name the
 // query language already has for "the value this view colours by", not a

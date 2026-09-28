@@ -232,6 +232,12 @@ func NewServer(opts Options) *Server {
 	if opts.Projects == nil {
 		panic("web: NewServer requires a non-nil Projects service")
 	}
+	// The browser's knob names against the catalogue's, before a single
+	// request is served: a disagreement here draws a picture with a knob
+	// missing and fails nothing.
+	if err := checkRendererParams(); err != nil {
+		panic("web: " + err.Error())
+	}
 
 	hub := opts.Hub
 	if hub == nil {

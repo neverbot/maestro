@@ -23,7 +23,9 @@ var (
 	// The module spells each parameter key once, as an exported
 	// constant, and names the constant in its control list.
 	moduleParamConst = regexp.MustCompile(`(?m)^export const (PARAM_[A-Z_]+) = "([a-z_]+)";$`)
-	moduleControl    = regexp.MustCompile(`(?m)^  control\(\n    (PARAM_[A-Z_]+),`)
+	// moduleParamImport lifts the names a module imports from params.js.
+	moduleParamImport = regexp.MustCompile(`(?s)import \{([^{}]*)\} from "\./params\.js";`)
+	moduleControl     = regexp.MustCompile(`(?m)^  control\(\n    (PARAM_[A-Z_]+),`)
 	// The constants a module spells its admitted values with, and the
 	// list that gathers them.
 	moduleStringConst = regexp.MustCompile(`(?m)^export const ([A-Z][A-Z_]*) = "([^"]*)";$`)
@@ -87,10 +89,16 @@ func catalogueEnumValues(description, renderer, param string) ([]string, bool) {
 
 // moduleParamValues is every enum control a renderer module declares,
 // resolved from the constants the module spells them with.
-func moduleParamValues(source string) map[string][]string {
+func moduleParamValues(t *testing.T, source string) map[string][]string {
+	t.Helper()
 	strConst := map[string]string{}
 	for _, match := range moduleStringConst.FindAllStringSubmatch(source, -1) {
 		strConst[match[1]] = match[2]
+	}
+	// The parameter names come from render/params.js now, not from the
+	// module that draws with them.
+	for name, spelled := range paramSpellings(t, source) {
+		strConst[name] = spelled
 	}
 	listConst := map[string][]string{}
 	for _, match := range moduleListConst.FindAllStringSubmatch(source, -1) {
@@ -187,11 +195,13 @@ func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
 		t.Run(entry.renderer, func(t *testing.T) {
 			source := renderModule(t, entry.module)
 
-			byConstant := map[string]string{}
-			for _, match := range moduleParamConst.FindAllStringSubmatch(source, -1) {
-				byConstant[match[1]] = match[2]
-			}
-			assert.Must(t, len(byConstant) != 0, "read no PARAM_ constant out of render/%s: the module's parameter spellings moved and this guard did not", entry.module)
+			// The spellings live in render/params.js, which the server
+			// also reads at start-up (checkRendererParams); a module
+			// imports them and declares a control for each.
+			// Only the ones this module imports: params.js holds every
+			// renderer's knobs, and this case is about one renderer.
+			byConstant := paramSpellings(t, source)
+			assert.Must(t, len(byConstant) != 0, "read no PARAM_ constant out of render/params.js: the parameter spellings moved and this guard did not")
 
 			var controlled []string
 			for _, match := range moduleControl.FindAllStringSubmatch(source, -1) {
@@ -243,7 +253,7 @@ func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
 	checked := 0
 	for _, entry := range rendererModules {
 		source := renderModule(t, entry.module)
-		params := moduleParamValues(source)
+		params := moduleParamValues(t, source)
 		for name, values := range params {
 			want, ok := catalogueEnumValues(description, entry.renderer, name)
 			if !ok {
@@ -268,10 +278,7 @@ func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 	checked := 0
 	for _, entry := range rendererModules {
 		source := renderModule(t, entry.module)
-		byConstant := map[string]string{}
-		for _, match := range moduleParamConst.FindAllStringSubmatch(source, -1) {
-			byConstant[match[1]] = match[2]
-		}
+		byConstant := paramSpellings(t, source)
 		for _, match := range moduleControlKind.FindAllStringSubmatch(source, -1) {
 			param, ok := byConstant[match[1]]
 			if !ok {
@@ -298,4 +305,24 @@ func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 	// reader that resolved nothing would pass over every module ever
 	// written.
 	assert.Must(t, checked >= len(rendererModules), "read %d control kinds out of %d renderer modules; the modules' shape moved and this guard did not", checked, len(rendererModules))
+}
+
+// paramSpellings maps a module's imported PARAM_ constants to the strings
+// render/params.js gives them.
+func paramSpellings(t *testing.T, source string) map[string]string {
+	t.Helper()
+	spelling := map[string]string{}
+	for _, match := range moduleParamConst.FindAllStringSubmatch(renderModule(t, "params.js"), -1) {
+		spelling[match[1]] = match[2]
+	}
+	assert.Must(t, len(spelling) != 0, "read no PARAM_ constant out of render/params.js")
+	out := map[string]string{}
+	for _, match := range moduleParamImport.FindAllStringSubmatch(source, -1) {
+		for _, name := range strings.Split(match[1], ",") {
+			if spelled, ok := spelling[strings.TrimSpace(name)]; ok {
+				out[strings.TrimSpace(name)] = spelled
+			}
+		}
+	}
+	return out
 }

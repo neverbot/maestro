@@ -25,12 +25,22 @@ import { CONTROL_BOOL, CONTROL_SLOT, control } from "./controls.js";
 export const RENDERER = "graph";
 
 // The renderer_params keys, spelled as the server spells them.
-export const PARAM_COLOR_BY = "color_by";
-export const PARAM_GROUP_BY = "group_by";
-export const PARAM_SIZE_BY = "size_by";
-export const PARAM_CLUSTER_BY = "cluster_by";
-export const PARAM_EDGE_LABELS = "edge_labels";
-export const PARAM_ARROWS = "arrows";
+import {
+  PARAM_COLOR_BY,
+  PARAM_GROUP_BY,
+  PARAM_SIZE_BY,
+  PARAM_CLUSTER_BY,
+  PARAM_EDGE_LABELS,
+  PARAM_ARROWS,
+} from "./params.js";
+export {
+  PARAM_COLOR_BY,
+  PARAM_GROUP_BY,
+  PARAM_SIZE_BY,
+  PARAM_CLUSTER_BY,
+  PARAM_EDGE_LABELS,
+  PARAM_ARROWS,
+} from "./params.js";
 
 // The controls, in the order the catalogue prints them, each with the
 // sentence a designer reads beside it.

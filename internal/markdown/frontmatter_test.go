@@ -111,35 +111,11 @@ func TestAControlCharacterInTheBodyIsRefusedButNewlinesAndTabsAreNot(t *testing.
 	assert.Must(t, strings.Contains(problem.Message, "control character"), "message = %q, want it to name the control character", problem.Message)
 }
 
-func TestANulByteIsRefusedLikeAnyOtherControlCharacter(t *testing.T) {
-	// Postgres refuses a NUL in a text value with SQLSTATE 22021, the
-	// same code an invalid byte sequence raises, so it must not get past
-	// here either.
-	err := mustFail(t, "duskwood\x00history")
-	assert.Must(t, strings.Contains(fieldProblem(t, err).Message, "control character"), "message = %q, want it to name the control character",
-		fieldProblem(t, err).Message)
-}
-
-func TestInvalidUTF8IsRefusedBeforePostgresSeesIt(t *testing.T) {
-	// A lone continuation byte: not a NUL, decodes as U+FFFD, so a
-	// control-character scan alone would let it through — and Postgres
-	// refuses every invalid byte sequence with SQLSTATE 22021, which
-	// would reach an agent as internal_error over its own argument.
-	err := mustFail(t, "duskwood \x80 history")
-	assert.Must(t, strings.Contains(fieldProblem(t, err).Message, "valid UTF-8"), "message = %q, want it to name the encoding", fieldProblem(t, err).Message)
-}
-
 func TestMalformedFrontmatterIsTheCallersOwnProblem(t *testing.T) {
 	err := mustFail(t, "---\ntitle: [unclosed\n---\nbody\n")
 	problem := fieldProblem(t, err)
 	assert.Must(t, problem.Path == "content", "problem path = %q, want %q", problem.Path, "content")
 	assert.Must(t, strings.Contains(problem.Message, "frontmatter"), "message = %q, want it to name the frontmatter", problem.Message)
-}
-
-func TestFrontmatterThatIsNotAMappingIsRefused(t *testing.T) {
-	err := mustFail(t, "---\n- one\n- two\n---\nbody\n")
-	assert.Must(t, strings.Contains(fieldProblem(t, err).Message, "a set of key/value pairs"), "message = %q, want it to say what frontmatter must be",
-		fieldProblem(t, err).Message)
 }
 
 func TestAnUnterminatedFrontmatterFenceIsBody(t *testing.T) {
@@ -289,16 +265,6 @@ func TestAByteOrderMarkInsideTheBodyIsNotRefused(t *testing.T) {
 	}
 }
 
-func TestInvalidUTF8IsReportedBeforeAControlCharacter(t *testing.T) {
-	// Both problems in one input. The encoding must be reported first,
-	// because utf8.DecodeRune turns an invalid byte into U+FFFD, which is
-	// not a control character — a scan alone lets the sequence through to
-	// Postgres.
-	err := mustFail(t, "duskwood \x80 \a history")
-	assert.Must(t, strings.Contains(fieldProblem(t, err).Message, "valid UTF-8"), "message = %q, want the encoding reported first",
-		fieldProblem(t, err).Message)
-}
-
 func TestABlankFrontmatterBlockIsAnEmptyObjectAndNeverJSONNull(t *testing.T) {
 	// A block of blank lines decodes to a nil map, and a nil map marshals
 	// to JSON `null` — headed for a NOT NULL DEFAULT '{}' column, and
@@ -395,6 +361,24 @@ func TestTheTitleAndSummaryAreDerivedInOrder(t *testing.T) {
 			assert.NoErr(t, err, "SplitContent")
 			assert.Must(t, got.Title == tc.title, "Title = %q, want %q", got.Title, tc.title)
 			assert.Must(t, got.Summary == tc.summary, "Summary = %q, want %q", got.Summary, tc.summary)
+		})
+	}
+}
+
+// What SplitContent refuses, and the words it refuses with. The message
+// reaches a designer, and the order matters where a body is wrong twice:
+// the encoding is reported before the control character.
+func TestSplitContentRefusesABodyAndSaysWhy(t *testing.T) {
+	for _, tc := range []struct{ name, body, says string }{
+		{"a NUL byte", "duskwood\x00history", "control character"},
+		{"invalid UTF-8", "duskwood \x80 history", "valid UTF-8"},
+		{"frontmatter that is a list", "---\n- one\n- two\n---\nbody\n", "a set of key/value pairs"},
+		{"invalid UTF-8 before a control character", "duskwood \x80 \a history", "valid UTF-8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mustFail(t, tc.body)
+			got := fieldProblem(t, err).Message
+			assert.Must(t, strings.Contains(got, tc.says), "message = %q, want it to say %q", got, tc.says)
 		})
 	}
 }

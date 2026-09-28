@@ -81,17 +81,6 @@ func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
 	assert.Must(t, errors.Is(err, identity.ErrEmailNotAllowed), "err = %v, want ErrEmailNotAllowed", err)
 }
 
-func TestCreateUserRejectsShortPassword(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	svc := identity.New(pool, testConfig())
-
-	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "short@example.test", DisplayName: "Short", Password: "tooshort",
-	})
-	assert.Must(t, errors.Is(err, identity.ErrPasswordInvalid), "err = %v, want ErrPasswordInvalid", err)
-}
-
 func TestCreateUserCountsRunesNotBytes(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -130,31 +119,6 @@ func TestCreateUserRejectsOverlongPassword(t *testing.T) {
 		Email: "huge@example.test", DisplayName: "Huge", Password: string(huge),
 	})
 	assert.Must(t, errors.Is(err, identity.ErrPasswordInvalid), "err = %v, want ErrPasswordInvalid", err)
-}
-
-func TestCreateUserRejectsInvalidEmail(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	svc := identity.New(pool, testConfig())
-
-	// "@" alone: no local part, no domain, and far too short to be a real
-	// address. This must be rejected structurally, not merely rejected by
-	// coincidence of some other check.
-	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "@", DisplayName: "Nobody", Password: "password12345",
-	})
-	assert.Must(t, errors.Is(err, identity.ErrEmailInvalid), "err = %v, want ErrEmailInvalid", err)
-}
-
-func TestCreateUserRejectsEmptyDisplayName(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	svc := identity.New(pool, testConfig())
-
-	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "noname@example.test", DisplayName: "   ", Password: "password12345",
-	})
-	assert.Must(t, errors.Is(err, identity.ErrDisplayNameInvalid), "err = %v, want ErrDisplayNameInvalid", err)
 }
 
 func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
@@ -218,4 +182,33 @@ func dbNow(t *testing.T, pool *pgxpool.Pool) time.Time {
 		t.Fatalf("read the database clock: %v", err)
 	}
 	return at
+}
+
+// What CreateUser refuses, and the sentinel it refuses with: the HTTP
+// layer maps each of these to its own answer, so the value matters as
+// much as the refusal.
+func TestCreateUserRefusesABadAccount(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	for _, tc := range []struct {
+		name string
+		req  identity.CreateUserRequest
+		want error
+	}{
+		{"a password under the minimum", identity.CreateUserRequest{
+			Email: "short@example.test", DisplayName: "Short", Password: "tooshort",
+		}, identity.ErrPasswordInvalid},
+		{"an address that is not one", identity.CreateUserRequest{
+			Email: "@", DisplayName: "Nobody", Password: "password12345",
+		}, identity.ErrEmailInvalid},
+		{"a display name of only spaces", identity.CreateUserRequest{
+			Email: "noname@example.test", DisplayName: "   ", Password: "password12345",
+		}, identity.ErrDisplayNameInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.CreateUser(context.Background(), tc.req)
+			assert.Must(t, errors.Is(err, tc.want), "err = %v, want %v", err, tc.want)
+		})
+	}
 }

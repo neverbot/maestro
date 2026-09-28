@@ -439,16 +439,6 @@ func TestSchemaAcceptsAWellFormedKey(t *testing.T) {
 	}
 }
 
-func TestSchemaRejectsAnOverlongKey(t *testing.T) {
-	msg := checkProblems(t, Schema{{Key: strings.Repeat("a", maxKeyLen+1), Type: FieldText}})
-	assert.Must(t, strings.Contains(msg, "key must be at most"), "error = %q, want the key-length message", msg)
-}
-
-func TestSchemaRejectsAMinimumAboveItsMaximum(t *testing.T) {
-	msg := checkProblems(t, Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(70), Max: ptrFloat(1)}})
-	assert.Must(t, strings.Contains(msg, "min 70 is above max 1"), "error = %q, want it to name both bounds", msg)
-}
-
 func TestSchemaRejectsBoundsOnANonNumberField(t *testing.T) {
 	for _, ft := range []FieldType{FieldText, FieldLongText, FieldBool, FieldEnum, FieldListText} {
 		schema := Schema{{Key: "a", Type: ft, Options: []string{"x"}, Min: ptrFloat(1)}}
@@ -464,11 +454,6 @@ func TestSchemaRejectsOptionsOnANonEnumField(t *testing.T) {
 	}
 }
 
-func TestSchemaRejectsDuplicateEnumOptions(t *testing.T) {
-	msg := checkProblems(t, Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"normal", "normal"}}})
-	assert.Must(t, strings.Contains(msg, `duplicate option "normal"`), "error = %q, want it to name the duplicated option", msg)
-}
-
 func TestSchemaRejectsAnEmptyEnumOption(t *testing.T) {
 	for name, opts := range map[string][]string{
 		"empty string":    {"normal", ""},
@@ -481,14 +466,6 @@ func TestSchemaRejectsAnEmptyEnumOption(t *testing.T) {
 
 // --- M3: required and a default are mutually exclusive --------------------
 
-func TestSchemaRejectsARequiredFieldWithADefault(t *testing.T) {
-	// The default branch runs before the required branch, so declaring both
-	// makes Required dead: no row could ever fail for omitting the field. A
-	// field either has a fallback or it does not.
-	msg := checkProblems(t, Schema{{Key: "repeatable", Type: FieldBool, Required: true, HasDefault: true, Default: false}})
-	assert.Must(t, strings.Contains(msg, "a required field cannot also declare a default"), "error = %q, want the required-plus-default message", msg)
-}
-
 // --- M5: one pass reports every problem, including on a bad key -----------
 
 func TestSchemaReportsEveryProblemOnAFieldWithABadKey(t *testing.T) {
@@ -497,15 +474,6 @@ func TestSchemaReportsEveryProblemOnAFieldWithABadKey(t *testing.T) {
 	msg := checkProblems(t, Schema{{Key: "", Type: FieldType("rgb")}})
 	assert.Must(t, strings.Contains(msg, "key is required"), "error = %q, want the missing-key problem", msg)
 	assert.Must(t, strings.Contains(msg, "unknown type rgb"), "error = %q, want the unknown-type problem reported in the same pass", msg)
-}
-
-func TestSchemaStillRejectsDuplicateKeysWhenAnEarlierFieldIsBroken(t *testing.T) {
-	msg := checkProblems(t, Schema{
-		{Key: "", Type: FieldText},
-		{Key: "a", Type: FieldText},
-		{Key: "a", Type: FieldNumber},
-	})
-	assert.Must(t, strings.Contains(msg, "duplicate key a"), "error = %q, want the duplicate reported alongside the empty key", msg)
 }
 
 // --- a schema declaration failure is not a value failure ------------------
@@ -690,18 +658,6 @@ func TestParseSchemaWrapsAMalformedSchemaAsErrInvalidSchema(t *testing.T) {
 	}
 }
 
-func TestSchemaRejectsANonFiniteMinimum(t *testing.T) {
-	nan := math.NaN()
-	msg := checkProblems(t, Schema{{Key: "a", Type: FieldNumber, Min: &nan}})
-	assert.Must(t, strings.Contains(msg, "must be finite"), "error = %q, want a finiteness message for a non-finite min", msg)
-}
-
-func TestSchemaRejectsANonFiniteMaximum(t *testing.T) {
-	inf := math.Inf(1)
-	msg := checkProblems(t, Schema{{Key: "a", Type: FieldNumber, Max: &inf}})
-	assert.Must(t, strings.Contains(msg, "must be finite"), "error = %q, want a finiteness message for a non-finite max", msg)
-}
-
 func TestSchemaRejectsANonFiniteMinimumEvenReachedOnlyFromGo(t *testing.T) {
 	// Unreachable over JSON (json.Unmarshal never produces NaN/Inf), but
 	// reachable from any Go caller building a Schema in code — which Tasks
@@ -769,17 +725,6 @@ func TestNilSchemaJSONEncodesAsAnEmptyArrayNotNull(t *testing.T) {
 	assert.Must(t, string(raw) == "[]", "JSON() on a nil schema = %s, want []", raw)
 }
 
-func TestSchemaRejectsEnumWithoutOptionsMessage(t *testing.T) {
-	msg := checkProblems(t, Schema{{Key: "a", Type: FieldEnum}})
-	assert.Must(t, strings.Contains(msg, "an enum field needs options"), "error = %q, want the enum-needs-options message", msg)
-}
-
-func TestSchemaRejectsABadDefaultWithTheDefaultPrefix(t *testing.T) {
-	schema := Schema{{Key: "a", Type: FieldBool, HasDefault: true, Default: "yes"}}
-	msg := checkProblems(t, schema)
-	assert.Must(t, strings.Contains(msg, "default: "), "error = %q, want the \"default: \" prefix", msg)
-}
-
 // What Schema.Check admits and what it refuses. One field per case, so a
 // failure names the shape rather than the line.
 func TestSchemaCheckAdmitsAndRefuses(t *testing.T) {
@@ -839,6 +784,41 @@ func TestValidateRefusesARowAndSaysWhy(t *testing.T) {
 			assert.Must(t, strings.Contains(err.Error(), tc.says), "error = %q, want it to say %q", err, tc.says)
 			assert.Must(t, errors.Is(err, ErrSchemaViolation), "a refused row is not a schema violation: %v", err)
 			assert.Must(t, !errors.Is(err, ErrInvalidSchema), "a bad row was reported as a bad schema: %v", err)
+		})
+	}
+}
+
+// What Check says when it refuses a schema. The sentence is what an
+// agent reads back and corrects against, so each case pins the words.
+func TestCheckRefusesASchemaAndSaysWhy(t *testing.T) {
+	nan, inf := math.NaN(), math.Inf(1)
+	for _, tc := range []struct {
+		name   string
+		schema Schema
+		says   string
+	}{
+		{"an overlong key", Schema{{Key: strings.Repeat("a", maxKeyLen+1), Type: FieldText}},
+			"key must be at most"},
+		{"a minimum above its maximum", Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(70), Max: ptrFloat(1)}},
+			"min 70 is above max 1"},
+		{"a duplicated enum option", Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"normal", "normal"}}},
+			`duplicate option "normal"`},
+		{"a required field with a default", Schema{{Key: "repeatable", Type: FieldBool, Required: true, HasDefault: true, Default: false}},
+			"a required field cannot also declare a default"},
+		{"a non-finite minimum", Schema{{Key: "a", Type: FieldNumber, Min: &nan}}, "must be finite"},
+		{"a non-finite maximum", Schema{{Key: "a", Type: FieldNumber, Max: &inf}}, "must be finite"},
+		{"an enum without options", Schema{{Key: "a", Type: FieldEnum}}, "an enum field needs options"},
+		{"a bad default, under its own prefix", Schema{{Key: "a", Type: FieldBool, HasDefault: true, Default: "yes"}},
+			"default: "},
+		// The duplicate is still reported when an earlier field is broken:
+		// Check gathers problems rather than stopping at the first.
+		{"a duplicate key behind a broken field", Schema{
+			{Key: "", Type: FieldText}, {Key: "a", Type: FieldText}, {Key: "a", Type: FieldNumber},
+		}, "duplicate key a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := checkProblems(t, tc.schema)
+			assert.Must(t, strings.Contains(msg, tc.says), "error = %q, want it to say %q", msg, tc.says)
 		})
 	}
 }

@@ -10,101 +10,6 @@ import (
 	"github.com/neverbot/maestro/internal/assert"
 )
 
-func TestLoginPageIsServed(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/login", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("Content-Type = %q, want text/html", ct)
-	}
-	assert.Must(t, strings.Contains(rec.Body.String(), "form"), "the login page has no form")
-}
-
-func TestStylesheetIsServed(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/static/styles.css", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
-		t.Fatalf("Content-Type = %q, want text/css", ct)
-	}
-}
-
-func TestAppScriptIsServed(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
-		t.Fatalf("Content-Type = %q, want text/javascript", ct)
-	}
-}
-
-// TestGamePageIsServedForAnySlug pins that GET /g/{slug} always serves the
-// same static shell regardless of the slug in the URL — there is no
-// server-side slug resolution on this route (Task 8's Round 2 Correction
-// 12), so a slug that does not exist, or one for a game this caller
-// cannot reach, still gets the shell; app.js is what discovers, from GET
-// /api/games, whether the caller can actually reach it.
-func TestGamePageIsServedForAnySlug(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/g/does-not-exist", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("Content-Type = %q, want text/html", ct)
-	}
-	assert.Must(t, strings.Contains(rec.Body.String(), "game-name"), "the game page has no #game-name element")
-}
-
-// TestDocumentPageIsServedForAnySlug pins that GET /g/{slug}/doc serves
-// the reading view's shell whatever the slug is, exactly as /g/{slug}
-// serves the game page's: this route resolves nothing server-side
-// either, and doc.js is what discovers from GET /api/games whether the
-// caller can reach the game at all.
-func TestDocumentPageIsServedForAnySlug(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/g/does-not-exist/doc?path=lore%2Fduskwood", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("Content-Type = %q, want text/html", ct)
-	}
-	assert.Must(t, strings.Contains(rec.Body.String(), "doc-title"), "the document page has no #doc-title element")
-}
-
-// TestDocumentScriptIsServed pins the second ES module this product
-// ships. It is a separate file rather than more of app.js because it is
-// the only one allowed to write markup — see
-func TestDocumentScriptIsServed(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/static/doc.js", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
-		t.Fatalf("Content-Type = %q, want text/javascript", ct)
-	}
-}
-
 func TestUnknownStaticAssetIsNotFound(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)
@@ -191,4 +96,31 @@ func TestConfigEndpointIsPublicAndMinimal(t *testing.T) {
 		t.Fatal(`body has no "registration_mode" field`)
 	}
 	assert.Must(t, len(body) == 1, "body has %d fields, want exactly 1: %v", len(body), body)
+}
+
+// Every shell and asset a browser asks for on the way in: the status,
+// the content type the browser decides what to do by, and one element
+// each page would be useless without.
+func TestEveryShellAndAssetIsServed(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := newTestServer(t)
+	for _, tc := range []struct{ name, path, mediaType, holds string }{
+		{"the login page", "/login", "text/html", "form"},
+		{"a game page, for any slug", "/g/does-not-exist", "text/html", "game-name"},
+		{"a document page, for any slug", "/g/does-not-exist/doc?path=lore%2Fduskwood", "text/html", "doc-title"},
+		{"the stylesheet", "/static/styles.css", "text/css", ""},
+		{"the app module", "/static/app.js", "text/javascript", ""},
+		{"the document module", "/static/doc.js", "text/javascript", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
+			ct := rec.Header().Get("Content-Type")
+			assert.Must(t, strings.HasPrefix(ct, tc.mediaType), "Content-Type = %q, want %s", ct, tc.mediaType)
+			assert.Must(t, tc.holds == "" || strings.Contains(rec.Body.String(), tc.holds),
+				"%s does not carry %q", tc.path, tc.holds)
+		})
+	}
 }

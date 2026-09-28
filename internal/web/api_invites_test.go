@@ -120,9 +120,8 @@ func TestNonAdminCannotCreateAccountOnlyInvite(t *testing.T) {
 	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403: %s", rec.Code, rec.Body.String())
 }
 
-// TestTokenCallerCannotManageInstanceInvites mirrors
-// TestTokenEndpointsRejectTokenCaller: a bearer token is not a browser
-// session and has no business anywhere on this surface, admin-minted or
+// TestTokenCallerCannotManageInstanceInvites: a bearer token is not a
+// browser session and has no business on this surface, admin-minted or
 // not.
 func TestTokenCallerCannotManageInstanceInvites(t *testing.T) {
 	t.Parallel()

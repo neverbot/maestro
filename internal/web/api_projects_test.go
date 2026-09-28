@@ -70,28 +70,6 @@ func TestListGamesOnlyShowsMemberships(t *testing.T) {
 	}
 }
 
-func TestListGamesRejectsTokenCaller(t *testing.T) {
-	t.Parallel()
-	// A token caller's user may belong to other games its token knows
-	// nothing about; ListForUser has no way to filter those out by
-	// project, so this endpoint is human-only rather than risking a token
-	// enumerating games outside its own binding.
-	srv, ids, projSvc := newTestServer(t)
-	ctx := context.Background()
-
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/games", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
-}
-
 func TestCreateGameRejectsTokenCaller(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
@@ -500,27 +478,6 @@ func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
 	}
 }
 
-func TestTokenEndpointsRejectTokenCaller(t *testing.T) {
-	t.Parallel()
-	// Managing credentials — minting, listing or revoking tokens — is a
-	// human action; an agent authenticating with a token is not entitled
-	// to manage other tokens in its own project, itself included.
-	srv, ids, projSvc := newTestServer(t)
-	ctx := context.Background()
-
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/tokens", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
-}
-
 func TestListMembersRequiresMembership(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
@@ -822,24 +779,6 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
-func TestTokenCallerCannotManageMembers(t *testing.T) {
-	t.Parallel()
-	srv, ids, projSvc := newTestServer(t)
-	ctx := context.Background()
-
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
-}
-
 // TestProjectScopeLookupFailureIsInternalErrorNotForbidden pins the split
 // this task's own review demanded: a database failure while resolving a
 // session caller's membership (requireProject -> resolveProjectScope ->
@@ -968,27 +907,6 @@ func TestNonOwnerCannotDeleteGame(t *testing.T) {
 	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
 		t.Fatalf("RoleOf after refused delete: %v, want the game (and membership) to still exist", err)
 	}
-}
-
-// TestTokenCallerCannotDeleteGame confirms requireHumanCaller's own
-// boundary applies here too: an agent's token is scoped to a game's
-// content, never to deciding whether the game itself keeps existing.
-func TestTokenCallerCannotDeleteGame(t *testing.T) {
-	t.Parallel()
-	srv, ids, projSvc := newTestServer(t)
-	ctx := context.Background()
-
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 // TestNonMemberCannotDeleteGameAndLearnsNothing confirms a caller with
@@ -1218,4 +1136,32 @@ func TestOnlyAnOwnerChangesAGamesSettings(t *testing.T) {
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 	rec = getJSON(t, srv, ownerCookie, "/api/games")
 	assert.Should(t, strings.Contains(rec.Body.String(), `"the-ashfall"`), "the address changed anyway: %s", rec.Body.String())
+}
+
+// A token speaks for a game's content and never for the game itself:
+// every route that administers one refuses a bearer caller, whatever
+// role the person who minted the token holds.
+func TestAdministeringAGameRefusesATokenCaller(t *testing.T) {
+	t.Parallel()
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
+	assert.NoErr(t, err, "CreateAPIToken")
+
+	for _, tc := range []struct{ name, method, path string }{
+		{"listing the games a person is in", http.MethodGet, "/api/games"},
+		{"listing this game's tokens", http.MethodGet, "/api/games/" + project.Slug + "/tokens"},
+		{"listing this game's members", http.MethodGet, "/api/games/" + project.Slug + "/members"},
+		{"deleting the game", http.MethodDelete, "/api/games/" + project.Slug},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
+		})
+	}
 }

@@ -195,18 +195,6 @@ func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 	}
 }
 
-func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {
-	t.Parallel()
-	// Rejected before either rate limiter is ever touched: an empty
-	// normalized key would otherwise give every anonymous probe a single
-	// shared "" bucket to spend against.
-	srv, _, _ := newTestServer(t)
-	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"   ","password":"password12345"}`)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400", rec.Code)
-}
-
 func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 	t.Parallel()
 	srv, ids, _ := newTestServer(t)
@@ -351,16 +339,6 @@ func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
 	}
 }
 
-func TestRegisterIsRejectedInInviteOnlyMode(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"password12345"}`)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403 in invite_only mode", rec.Code)
-}
-
 func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
@@ -377,27 +355,6 @@ func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
 		}
 	}
 	assert.Must(t, found, "register did not set a session cookie")
-}
-
-func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
-	t.Parallel()
-	// The counterpart to TestRegisterSucceedsInDomainOpenMode: with a real
-	// allowlist in place (see domainOpenConfig's own doc comment on why
-	// the earlier version of these tests never actually exercised this),
-	// an address outside it must be refused, not silently admitted.
-	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@outside.test","display_name":"New","password":"password12345"}`)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403; body = %s", rec.Code, rec.Body.String())
-	var payload map[string]string
-	if err := decodeJSON(rec, &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if payload["error"] != "email_not_allowed" {
-		t.Fatalf("error code = %q, want email_not_allowed", payload["error"])
-	}
 }
 
 func TestRegisterWithTakenEmailInDomainOpenModeIsConflict(t *testing.T) {
@@ -421,38 +378,6 @@ func TestRegisterWithInvalidEmailIsUnprocessable(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422; body = %s", rec.Code, rec.Body.String())
-}
-
-func TestRegisterWithEmptyDisplayNameIsUnprocessable(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"","password":"password12345"}`)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422; body = %s", rec.Code, rec.Body.String())
-	var payload map[string]string
-	if err := decodeJSON(rec, &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if payload["error"] != "display_name_invalid" {
-		t.Fatalf("error code = %q, want display_name_invalid", payload["error"])
-	}
-}
-
-func TestRegisterWithShortPasswordIsUnprocessable(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"short"}`)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422; body = %s", rec.Code, rec.Body.String())
-	var payload map[string]string
-	if err := decodeJSON(rec, &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if payload["error"] != "password_invalid" {
-		t.Fatalf("error code = %q, want password_invalid", payload["error"])
-	}
 }
 
 func TestRegisterWithInviteTokenWinsOverInviteOnlyMode(t *testing.T) {
@@ -839,15 +764,6 @@ func TestOversizedRegisterBodyIsRejectedWith413(t *testing.T) {
 	assert.Must(t, rec.Code == http.StatusRequestEntityTooLarge, "status = %d, want 413 for an oversized body", rec.Code)
 }
 
-func TestLoginRejectsMalformedJSON(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := jsonRequest(http.MethodPost, "/api/auth/login", `{not json`)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400", rec.Code)
-}
-
 func TestLoginRejectsNonJSONContentType(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)
@@ -1045,4 +961,53 @@ func TestARefusalNamesEveryUnknownMemberAtOnce(t *testing.T) {
 	singleRec := httptest.NewRecorder()
 	srv.ServeHTTP(singleRec, single)
 	assert.Should(t, strings.Contains(singleRec.Body.String(), "titel is not a member of this request"), "one unknown member did not keep the singular: %s", singleRec.Body.String())
+}
+
+// What the two anonymous routes refuse, with the status and the code a
+// browser branches on. The code is the half a screen reads, so a case
+// that has one pins it.
+func TestTheAnonymousRoutesRefuseAndSayWhich(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, path, body string
+		domainOpen       bool
+		status           int
+		code             string
+	}{
+		{"an address outside the allowed domains", "/api/auth/register",
+			`{"email":"new@outside.test","display_name":"New","password":"password12345"}`,
+			true, http.StatusForbidden, "email_not_allowed"},
+		{"an empty display name", "/api/auth/register",
+			`{"email":"new@example.test","display_name":"","password":"password12345"}`,
+			true, http.StatusUnprocessableEntity, "display_name_invalid"},
+		{"a password under the minimum", "/api/auth/register",
+			`{"email":"new@example.test","display_name":"New","password":"short"}`,
+			true, http.StatusUnprocessableEntity, "password_invalid"},
+		{"registering at all, in invite_only mode", "/api/auth/register",
+			`{"email":"new@example.test","display_name":"New","password":"password12345"}`,
+			false, http.StatusForbidden, ""},
+		{"a login with no address", "/api/auth/login",
+			`{"email":"   ","password":"password12345"}`,
+			false, http.StatusBadRequest, ""},
+		{"a login that is not JSON", "/api/auth/login", `{not json`,
+			false, http.StatusBadRequest, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var srv http.Handler
+			if tc.domainOpen {
+				srv, _, _ = newTestServerWithConfig(t, domainOpenConfig)
+			} else {
+				srv, _, _ = newTestServer(t)
+			}
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, jsonRequest(http.MethodPost, tc.path, tc.body))
+			assert.Must(t, rec.Code == tc.status, "status = %d, want %d; body = %s", rec.Code, tc.status, rec.Body.String())
+			if tc.code == "" {
+				return
+			}
+			var payload map[string]string
+			assert.NoErr(t, decodeJSON(rec, &payload), "decode")
+			assert.Must(t, payload["error"] == tc.code, "error code = %q, want %q", payload["error"], tc.code)
+		})
+	}
 }

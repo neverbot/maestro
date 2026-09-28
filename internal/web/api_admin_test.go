@@ -83,26 +83,8 @@ func TestTokenCallerCannotSetAdmin(t *testing.T) {
 	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403: %s", rec.Code, rec.Body.String())
 }
 
-// TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse pins the guard
-// against a second party stranding the instance.
-func TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse(t *testing.T) {
-	t.Parallel()
-	srv, _, _, adminCookie := loginAsAdmin(t, nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@example.test","is_admin":false}`))
-	req.AddCookie(adminCookie)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusConflict, "status = %d, want 409: %s", rec.Code, rec.Body.String())
-}
-
-// TestLastAdminCannotDemoteThemselves is the HTTP-level pin for the case
-// this task's own decision explicitly argues for — the last admin
-// choosing, themselves, to step down — and that TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse
-// does not cover, since there the caller and the target are different
-// accounts. Here they are the same one.
+// TestLastAdminCannotDemoteThemselves is the last administrator choosing
+// to step down, where the caller and the target are the same account.
 func TestLastAdminCannotDemoteThemselves(t *testing.T) {
 	t.Parallel()
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
@@ -159,19 +141,6 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 	assert.Must(t, inviteRec.Code == http.StatusForbidden, "demoted colleague's POST /api/invites = %d, want 403", inviteRec.Code)
 }
 
-func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
-	t.Parallel()
-	srv, _, _, adminCookie := loginAsAdmin(t, nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"nobody@example.test","is_admin":true}`))
-	req.AddCookie(adminCookie)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404: %s", rec.Code, rec.Body.String())
-}
-
 // TestSetAdminMissingIsAdminIsBadRequest pins the bare-bool fix: an
 // absent is_admin field must be refused outright, never silently treated
 // as false (which would demote whoever the email named without the
@@ -203,15 +172,26 @@ func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
 	assert.Must(t, strings.Contains(meRec.Body.String(), `"is_admin":false`), "target's /api/me body = %s, want is_admin:false unchanged", meRec.Body.String())
 }
 
-func TestSetAdminEmptyBodyIsBadRequest(t *testing.T) {
+// What PATCH /api/admins refuses an administrator, and with which
+// status: the screen tells these three apart by the code alone.
+func TestSettingAnAdministratorRefusesABadRequest(t *testing.T) {
 	t.Parallel()
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{}`))
-	req.AddCookie(adminCookie)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400: %s", rec.Code, rec.Body.String())
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"demoting the last administrator", `{"email":"admin@example.test","is_admin":false}`, http.StatusConflict},
+		{"an address nobody holds", `{"email":"nobody@example.test","is_admin":true}`, http.StatusNotFound},
+		{"a body naming nobody", `{}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(tc.body))
+			req.AddCookie(adminCookie)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			assert.Must(t, rec.Code == tc.status, "status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+		})
+	}
 }

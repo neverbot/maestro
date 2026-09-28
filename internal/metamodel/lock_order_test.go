@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -31,9 +32,7 @@ func holdEntityTypeRow(t *testing.T, conn *pgx.Conn, id uuid.UUID, mode string) 
 	t.Helper()
 	ctx := context.Background()
 	tx, err := conn.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin the holding transaction: %v", err)
-	}
+	assert.Must(t, err == nil, "begin the holding transaction: %v", err)
 	released := false
 	t.Cleanup(func() {
 		if !released {
@@ -66,9 +65,7 @@ func entityRowIsUnlocked(t *testing.T, conn *pgx.Conn, id uuid.UUID) bool {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := conn.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin the probing transaction: %v", err)
-	}
+	assert.Must(t, err == nil, "begin the probing transaction: %v", err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, "SELECT id FROM entities WHERE id = $1 FOR UPDATE NOWAIT", id)
@@ -93,15 +90,11 @@ func seedTypeAndEntity(t *testing.T, svc *metamodel.Service, project uuid.UUID) 
 	typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 	})
-	if err != nil {
-		t.Fatalf("seed quest type: %v", err)
-	}
+	assert.Must(t, err == nil, "seed quest type: %v", err)
 	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
 	})
-	if err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
+	assert.Must(t, err == nil, "seed entity: %v", err)
 	return typ.ID, row.ID, row.Version
 }
 
@@ -193,9 +186,7 @@ func TestACascadingRemovalTakesTheTypeRowBeforeAnyEntity(t *testing.T) {
 	if err := <-removeErr; err != nil {
 		t.Fatalf("RemoveEntityType: %v", err)
 	}
-	if entityTypeExists(t, watcher, typeID) {
-		t.Fatal("the type is still there after a removal that reported success")
-	}
+	assert.Must(t, !entityTypeExists(t, watcher, typeID), "the type is still there after a removal that reported success")
 }
 
 // TestUpsertEntityAndACascadingRemovalDoNotDeadlock is the harness the
@@ -310,8 +301,6 @@ func TestUpsertEntityAndACascadingRemovalDoNotDeadlock(t *testing.T) {
 	// The race has to have actually happened. Both numbers being large
 	// is what says the workers were contending rather than, say, every
 	// write failing against a type that was never recreated.
-	if writes.Load() < 50 || removals.Load() < 50 {
-		t.Fatalf("the workers barely raced: %d entity writes, %d removals",
-			writes.Load(), removals.Load())
-	}
+	assert.Must(t, writes.Load() >= 50 && removals.Load() >= 50, "the workers barely raced: %d entity writes, %d removals",
+		writes.Load(), removals.Load())
 }

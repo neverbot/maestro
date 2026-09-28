@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -72,16 +73,10 @@ func seedDocument(t *testing.T, ctx context.Context, pool *pgxpool.Pool, project
 // because the statement was rejected for some unrelated reason.
 func assertUniqueViolation(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("expected a unique violation, but the statement succeeded")
-	}
+	assert.Must(t, err != nil, "expected a unique violation, but the statement succeeded")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
-	}
-	if pgErr.Code != "23505" {
-		t.Fatalf("expected SQLSTATE 23505 (unique_violation), got %s: %v", pgErr.Code, err)
-	}
+	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
+	assert.Must(t, pgErr.Code == "23505", "expected SQLSTATE 23505 (unique_violation), got %s: %v", pgErr.Code, err)
 }
 
 func TestDocumentTablesExist(t *testing.T) {
@@ -96,9 +91,7 @@ func TestDocumentTablesExist(t *testing.T) {
 			table).Scan(&exists); err != nil {
 			t.Fatalf("query %s: %v", table, err)
 		}
-		if !exists {
-			t.Fatalf("table %s was not created", table)
-		}
+		assert.Must(t, exists, "table %s was not created", table)
 	}
 }
 
@@ -341,10 +334,8 @@ func TestDeletingATokenClearsOnlyTheDocumentTokenColumn(t *testing.T) {
 			t.Fatalf("%s = %q, want NULL after the token was deleted", got.column, *got.value)
 		}
 	}
-	if docProject != azeroth.projectID || versionProject != azeroth.projectID {
-		t.Fatalf("project_id moved: document %q, version %q, want %q; the SET NULL must not touch it",
-			docProject, versionProject, azeroth.projectID)
-	}
+	assert.Must(t, docProject == azeroth.projectID && versionProject == azeroth.projectID, "project_id moved: document %q, version %q, want %q; the SET NULL must not touch it",
+		docProject, versionProject, azeroth.projectID)
 }
 
 // TestDeletingAnEntityDropsItsLinksAndKeepsTheDocument pins the CASCADE
@@ -426,9 +417,7 @@ func TestTheDocumentsUpdatedAtTriggerFires(t *testing.T) {
 	if err := pool.QueryRow(ctx, read, docID).Scan(&after); err != nil {
 		t.Fatalf("read updated_at after: %v", err)
 	}
-	if !after.After(before) {
-		t.Fatalf("updated_at did not move: %s -> %s", before, after)
-	}
+	assert.Must(t, after.After(before), "updated_at did not move: %s -> %s", before, after)
 }
 
 // TestTheDocumentSearchVectorIsGeneratedAndWeighted pins the generated
@@ -467,9 +456,7 @@ func TestTheDocumentSearchVectorIsGeneratedAndWeighted(t *testing.T) {
 		t.Fatalf("re-read search vector: %v", err)
 	}
 	assertLexemeWeight(t, vector, "gnolls", "C")
-	if regexp.MustCompile(`'worgen':`).MatchString(vector) {
-		t.Fatalf("the generated vector kept a lexeme the body no longer has: %q", vector)
-	}
+	assert.Must(t, !regexp.MustCompile(`'worgen':`).MatchString(vector), "the generated vector kept a lexeme the body no longer has: %q", vector)
 
 	// The column is generated, so it cannot be written to directly. That
 	// is the property the rest of this plan leans on: unlike
@@ -478,17 +465,11 @@ func TestTheDocumentSearchVectorIsGeneratedAndWeighted(t *testing.T) {
 	_, err := pool.Exec(ctx,
 		`UPDATE documents SET search = to_tsvector('simple', 'anything') WHERE project_id = $1`,
 		azeroth.projectID)
-	if err == nil {
-		t.Fatal("documents.search accepted a direct write; it must be a generated column")
-	}
+	assert.Must(t, err != nil, "documents.search accepted a direct write; it must be a generated column")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
-	}
+	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
 	// 428C9: cannot insert into a generated column.
-	if pgErr.Code != "428C9" {
-		t.Fatalf("expected SQLSTATE 428C9 (generated_always), got %s: %v", pgErr.Code, err)
-	}
+	assert.Must(t, pgErr.Code == "428C9", "expected SQLSTATE 428C9 (generated_always), got %s: %v", pgErr.Code, err)
 }
 
 // TestTheDocumentSearchVectorCannotBeSetOnInsert is
@@ -506,17 +487,11 @@ func TestTheDocumentSearchVectorCannotBeSetOnInsert(t *testing.T) {
 		`INSERT INTO documents (project_id, path, body_md, search)
 		 VALUES ($1, 'lore/insert-search', 'body', to_tsvector('simple', 'anything'))`,
 		azeroth.projectID)
-	if err == nil {
-		t.Fatal("INSERT into documents.search accepted a direct value; it must be a generated column")
-	}
+	assert.Must(t, err != nil, "INSERT into documents.search accepted a direct value; it must be a generated column")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
-	}
+	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
 	// 428C9: cannot insert into a generated column.
-	if pgErr.Code != "428C9" {
-		t.Fatalf("expected SQLSTATE 428C9 (generated_always), got %s: %v", pgErr.Code, err)
-	}
+	assert.Must(t, pgErr.Code == "428C9", "expected SQLSTATE 428C9 (generated_always), got %s: %v", pgErr.Code, err)
 }
 
 // TestDocumentKeysAreNotDeferrable pins that the composite keys this
@@ -538,9 +513,7 @@ func TestDocumentKeysAreNotDeferrable(t *testing.T) {
 	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
 
 	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
+	assert.Must(t, err == nil, "begin: %v", err)
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	_, err = tx.Exec(ctx,
@@ -578,9 +551,7 @@ func TestTheDocumentSearchVectorIsBounded(t *testing.T) {
 		azeroth.projectID).Scan(&indexed); err != nil {
 		t.Fatalf("query the bounded vector: %v", err)
 	}
-	if !indexed {
-		t.Fatal("the head of the body was not indexed")
-	}
+	assert.Must(t, indexed, "the head of the body was not indexed")
 }
 
 // TestAnOversizedTitleOrSummaryDoesNotFailTheInsert pins left(title,
@@ -620,9 +591,7 @@ func TestAnOversizedTitleOrSummaryDoesNotFailTheInsert(t *testing.T) {
 func assertLexemeWeight(t *testing.T, vector, lexeme, weight string) {
 	t.Helper()
 	pattern := regexp.MustCompile(`'` + regexp.QuoteMeta(lexeme) + `':(\d+[A-D],?)*\d+` + weight + `\b`)
-	if !pattern.MatchString(vector) {
-		t.Fatalf("search vector %q does not carry %q at weight %s", vector, lexeme, weight)
-	}
+	assert.Must(t, pattern.MatchString(vector), "search vector %q does not carry %q at weight %s", vector, lexeme, weight)
 }
 
 func assertRowCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query, arg string, want int) {
@@ -631,7 +600,5 @@ func assertRowCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query
 	if err := pool.QueryRow(ctx, query, arg).Scan(&got); err != nil {
 		t.Fatalf("count (%s): %v", query, err)
 	}
-	if got != want {
-		t.Fatalf("count (%s) = %d, want %d", query, got, want)
-	}
+	assert.Must(t, got == want, "count (%s) = %d, want %d", query, got, want)
 }

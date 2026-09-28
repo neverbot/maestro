@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/views"
 )
 
@@ -37,13 +38,9 @@ const groundModule = "static/components/mst-ground.js"
 func TestTheUploadPickerStatesTheServersOwnBounds(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(groundModule)
-	if err != nil {
-		t.Fatalf("read %s: %v", groundModule, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", groundModule, err)
 	source := string(raw)
-	if len(source) < 500 {
-		t.Fatalf("%s is %d bytes: this test would pass on an empty file", groundModule, len(source))
-	}
+	assert.Must(t, len(source) >= 500, "%s is %d bytes: this test would pass on an empty file", groundModule, len(source))
 	for _, want := range []struct {
 		value  string
 		reason string
@@ -53,22 +50,18 @@ func TestTheUploadPickerStatesTheServersOwnBounds(t *testing.T) {
 		{views.MimeJPEG, "one of the three mimes internal/views.sniffedMime admits"},
 		{views.MimeWebP, "one of the three mimes internal/views.sniffedMime admits"},
 	} {
-		if !strings.Contains(source, want.value) {
-			t.Errorf("%s never names %q, which is %s: the picker states the refusal before a file is "+
-				"chosen, and it may only state what the server will really do",
-				groundModule, want.value, want.reason)
-		}
+		assert.Should(t, strings.Contains(source, want.value), "%s never names %q, which is %s: the picker states the refusal before a file is "+
+			"chosen, and it may only state what the server will really do",
+			groundModule, want.value, want.reason)
 	}
 	// The SVG refusal is the one a designer cannot guess, and the reason
 	// is the whole of it: an SVG served to a browser can carry script.
 	// A picker that said only "SVG is not supported" would leave them
 	// looking for the setting that turns it on.
 	for _, phrase := range []string{"SVG", "script"} {
-		if !strings.Contains(source, phrase) {
-			t.Errorf("%s never says %q: internal/views refuses an SVG because one served to a browser "+
-				"can carry script, and repeating the reason is what stops a designer hunting for a setting",
-				groundModule, phrase)
-		}
+		assert.Should(t, strings.Contains(source, phrase), "%s never says %q: internal/views refuses an SVG because one served to a browser "+
+			"can carry script, and repeating the reason is what stops a designer hunting for a setting",
+			groundModule, phrase)
 	}
 }
 
@@ -80,17 +73,11 @@ func TestTheUploadPickerStatesTheServersOwnBounds(t *testing.T) {
 func TestTheGroundComponentReadsTheAssetCapItPromises(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(groundModule)
-	if err != nil {
-		t.Fatalf("read %s: %v", groundModule, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", groundModule, err)
 	const declaration = "export const MAX_ASSET_BYTES = 8 << 20;"
-	if !strings.Contains(string(raw), declaration) {
-		t.Fatalf("%s does not declare %s: the picker's cap is internal/views.MaxAssetBytes, which is "+
-			"%d, and it is declared in the same arithmetic so the two are read as one number",
-			groundModule, declaration, views.MaxAssetBytes)
-	}
-	if views.MaxAssetBytes != 8<<20 {
-		t.Fatalf("internal/views.MaxAssetBytes is %d and %s still promises %d",
-			views.MaxAssetBytes, groundModule, 8<<20)
-	}
+	assert.Must(t, strings.Contains(string(raw), declaration), "%s does not declare %s: the picker's cap is internal/views.MaxAssetBytes, which is "+
+		"%d, and it is declared in the same arithmetic so the two are read as one number",
+		groundModule, declaration, views.MaxAssetBytes)
+	assert.Must(t, views.MaxAssetBytes == 8<<20, "internal/views.MaxAssetBytes is %d and %s still promises %d",
+		views.MaxAssetBytes, groundModule, 8<<20)
 }

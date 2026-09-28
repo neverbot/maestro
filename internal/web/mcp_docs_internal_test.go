@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -65,16 +66,12 @@ func TestEveryMarkdownDomainErrorHasAWireCode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.err == nil {
-				t.Fatal("the case builds no error, so it asserts nothing")
-			}
+			assert.Must(t, tc.err != nil, "the case builds no error, so it asserts nothing")
 			body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.write", Caller{}, tc.err))
 			if body["error"] != tc.want {
 				t.Fatalf("error = %v, want %v (body %v)", body["error"], tc.want, body)
 			}
-			if body["error"] == errCodeInternal {
-				t.Fatal("nothing a caller can fix may report internal_error")
-			}
+			assert.Must(t, body["error"] != errCodeInternal, "nothing a caller can fix may report internal_error")
 		})
 	}
 }
@@ -90,9 +87,7 @@ func TestAMarkdownConflictIsAConflictOnBothSurfaces(t *testing.T) {
 	srv.writeDomainError(rec, httptest.NewRequest(http.MethodPut, "/api/games/x/documents/lore", nil),
 		&markdown.ConflictError{Current: 3, Include: true, Title: "T", BodyMD: "two\n"})
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusConflict, "status = %d, want 409: %s", rec.Code, rec.Body.String())
 	var body struct {
 		Error   string         `json:"error"`
 		Details map[string]any `json:"details"`
@@ -100,12 +95,8 @@ func TestAMarkdownConflictIsAConflictOnBothSurfaces(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)
 	}
-	if body.Error != errCodeVersionConflict {
-		t.Fatalf("error = %q, want %q", body.Error, errCodeVersionConflict)
-	}
-	if body.Details["current_body"] != "two\n" {
-		t.Fatalf("details = %v, want the current body", body.Details)
-	}
+	assert.Must(t, body.Error == errCodeVersionConflict, "error = %q, want %q", body.Error, errCodeVersionConflict)
+	assert.Must(t, body.Details["current_body"] == "two\n", "details = %v, want the current body", body.Details)
 }
 
 // TestAConflictCarriesTheBodyAsDataRatherThanProse asserts the details
@@ -116,12 +107,8 @@ func TestAConflictCarriesTheBodyAsDataRatherThanProse(t *testing.T) {
 	body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.write", Caller{},
 		&markdown.ConflictError{Current: 3, Include: true, Title: "T", BodyMD: "two\n"}))
 	details, ok := body["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("no details in %v", body)
-	}
-	if details["current_body"] != "two\n" || details["current_version"] != float64(3) {
-		t.Fatalf("details = %v, want the current version and body", details)
-	}
+	assert.Must(t, ok, "no details in %v", body)
+	assert.Must(t, details["current_body"] == "two\n" && details["current_version"] == float64(3), "details = %v, want the current version and body", details)
 	if _, present := details["deleted"]; present {
 		t.Fatalf("details = %v, want no deleted key on a live conflict", details)
 	}
@@ -138,16 +125,10 @@ func TestAConflictOnADeletedDocumentSaysSoOnTheWire(t *testing.T) {
 	body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.write", Caller{},
 		&markdown.ConflictError{Current: 4, Deleted: true}))
 	details, ok := body["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("no details in %v", body)
-	}
-	if details["deleted"] != true {
-		t.Fatalf("details = %v, want deleted true", details)
-	}
+	assert.Must(t, ok, "no details in %v", body)
+	assert.Must(t, details["deleted"] == true, "details = %v, want deleted true", details)
 	message, _ := body["message"].(string)
-	if !strings.Contains(message, "bring it back") {
-		t.Fatalf("message = %q, want the resurrection instruction", message)
-	}
+	assert.Must(t, strings.Contains(message, "bring it back"), "message = %q, want the resurrection instruction", message)
 }
 
 // TestANamedMissPublishesItsPath asserts the discrimination the spec
@@ -171,25 +152,17 @@ func TestANamedMissPublishesItsPath(t *testing.T) {
 		t.Fatalf("error = %v, want %v", body["error"], errCodeNotFound)
 	}
 	details, ok := body["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("no details in %v: a named miss must publish which address missed", body)
-	}
+	assert.Must(t, ok, "no details in %v: a named miss must publish which address missed", body)
 	fields, ok := details["fields"].([]any)
-	if !ok || len(fields) != 1 {
-		t.Fatalf("details = %v, want one field problem", details)
-	}
+	assert.Must(t, ok && len(fields) == 1, "details = %v, want one field problem", details)
 	field, _ := fields[0].(map[string]any)
-	if field["path"] != "entity_key" {
-		t.Fatalf("field = %v, want the path entity_key", field)
-	}
+	assert.Must(t, field["path"] == "entity_key", "field = %v, want the path entity_key", field)
 
 	srv := NewServer(stubOptions("test"))
 	rec := httptest.NewRecorder()
 	srv.writeDomainError(rec,
 		httptest.NewRequest(http.MethodPost, "/api/games/x/documents/lore/links", nil), missing)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404: %s", rec.Code, rec.Body.String())
 	var rest struct {
 		Error   string         `json:"error"`
 		Details map[string]any `json:"details"`
@@ -198,13 +171,9 @@ func TestANamedMissPublishesItsPath(t *testing.T) {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)
 	}
 	restFields, ok := rest.Details["fields"].([]any)
-	if !ok || len(restFields) != 1 {
-		t.Fatalf("details = %v, want one field problem on the REST surface", rest.Details)
-	}
+	assert.Must(t, ok && len(restFields) == 1, "details = %v, want one field problem on the REST surface", rest.Details)
 	restField, _ := restFields[0].(map[string]any)
-	if restField["path"] != "entity_key" {
-		t.Fatalf("field = %v, want the path entity_key", restField)
-	}
+	assert.Must(t, restField["path"] == "entity_key", "field = %v, want the path entity_key", restField)
 }
 
 // TestAPlainNotFoundCarriesNoFieldList is the other half of the arm
@@ -244,9 +213,7 @@ func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType(t *testing.T)
 	// pointer or the tag and leave the decode cases passing for a
 	// different reason.
 	field, ok := reflect.TypeOf(DocsWriteInput{}).FieldByName("Links")
-	if !ok {
-		t.Fatal("DocsWriteInput has no Links field at all")
-	}
+	assert.Must(t, ok, "DocsWriteInput has no Links field at all")
 	if got := field.Type.String(); got != "*[]web.DocsLinkInput" {
 		t.Fatalf("Links is %s, want *[]web.DocsLinkInput", got)
 	}
@@ -270,30 +237,22 @@ func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType(t *testing.T)
 			if err := json.Unmarshal([]byte(tc.body), &in); err != nil {
 				t.Fatalf("decode %s: %v", tc.body, err)
 			}
-			if (in.Links == nil) != tc.nil {
-				t.Fatalf("%s decoded to Links %v, want nil = %v", tc.body, in.Links, tc.nil)
-			}
+			assert.Must(t, (in.Links == nil) == tc.nil, "%s decoded to Links %v, want nil = %v", tc.body, in.Links, tc.nil)
 			if in.Links != nil && len(*in.Links) != tc.targets {
 				t.Fatalf("%s decoded to %d targets, want %d", tc.body, len(*in.Links), tc.targets)
 			}
 			// And what the domain is handed for each: nil preserves,
 			// non-nil replaces.
 			targets := linkTargetsOf(in.Links)
-			if (targets == nil) != tc.nil {
-				t.Fatalf("linkTargetsOf gave %v for %s, want nil = %v", targets, tc.body, tc.nil)
-			}
+			assert.Must(t, (targets == nil) == tc.nil, "linkTargetsOf gave %v for %s, want nil = %v", targets, tc.body, tc.nil)
 
 			// Out again, so an empty array does not re-encode as an
 			// omitted field.
 			raw, err := json.Marshal(in)
-			if err != nil {
-				t.Fatalf("encode: %v", err)
-			}
+			assert.Must(t, err == nil, "encode: %v", err)
 			hasKey := strings.Contains(string(raw), `"links"`)
-			if hasKey == tc.nil {
-				t.Fatalf("re-encoded as %s; a nil Links must omit the key and a "+
-					"non-nil one must carry it", raw)
-			}
+			assert.Must(t, hasKey != tc.nil, "re-encoded as %s; a nil Links must omit the key and a "+
+				"non-nil one must carry it", raw)
 		})
 	}
 }
@@ -311,9 +270,7 @@ func TestTheRemoveToolsInputCarriesNoRole(t *testing.T) {
 		t.Fatal("DocsLinkRemoveInput carries a Role that markdown.LinkRemove cannot read")
 	}
 	for _, name := range jsonKeysOf(reflect.TypeOf(DocsLinkRemoveInput{})) {
-		if name == "role" {
-			t.Fatal("docs.links.remove's input schema asks for a role it ignores")
-		}
+		assert.Must(t, name != "role", "docs.links.remove's input schema asks for a role it ignores")
 	}
 	if _, ok := reflect.TypeOf(DocsLinkAddInput{}).FieldByName("Role"); !ok {
 		t.Fatal("DocsLinkAddInput lost its Role, which markdown.LinkAdd does read")

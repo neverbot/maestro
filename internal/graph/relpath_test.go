@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/graph"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -29,9 +30,7 @@ func runCarrying(t *testing.T, ctx context.Context, pool *pgxpool.Pool, w graph.
 	stmt := "WITH RECURSIVE " + body +
 		"\nSELECT id, depth, rel_path, closed FROM " + graph.ReadFrom(w)
 	rows, err := pool.Query(ctx, stmt, args...)
-	if err != nil {
-		t.Fatalf("the walk must run: %v\n%s", err, stmt)
-	}
+	assert.Must(t, err == nil, "the walk must run: %v\n%s", err, stmt)
 	defer rows.Close()
 	var out []carried
 	for rows.Next() {
@@ -70,19 +69,13 @@ func TestARelationPathNamesEveryEdgeOfATwoCycleAndNotOnlyTheClosingOne(t *testin
 			closed = &rows[i]
 		}
 	}
-	if closed == nil {
-		t.Fatalf("the walk returned no closed row at all, so nothing below is being tested: %+v", rows)
-	}
+	assert.Must(t, closed != nil, "the walk returned no closed row at all, so nothing below is being tested: %+v", rows)
 	if closed.id != f.ids[0] {
 		t.Errorf("the closed row is %v, want the seed %v", closed.id, f.ids[0])
 	}
-	if len(closed.relPath) != 2 {
-		t.Fatalf("the closed row's rel_path has %d ids, want both edges of the two-cycle: %v",
-			len(closed.relPath), closed.relPath)
-	}
-	if closed.relPath[0] != rel[0] || closed.relPath[1] != rel[1] {
-		t.Errorf("rel_path = %v, want the outbound edge then the closing one %v", closed.relPath, rel)
-	}
+	assert.Must(t, len(closed.relPath) == 2, "the closed row's rel_path has %d ids, want both edges of the two-cycle: %v",
+		len(closed.relPath), closed.relPath)
+	assert.Should(t, closed.relPath[0] == rel[0] && closed.relPath[1] == rel[1], "rel_path = %v, want the outbound edge then the closing one %v", closed.relPath, rel)
 }
 
 // TestARelationPathDistinguishesTwoEdgesBetweenTheSamePair is what
@@ -146,13 +139,9 @@ func TestARelationPathDistinguishesTwoEdgesBetweenTheSamePair(t *testing.T) {
 		ab.String() + " " + first[1].String(),
 		ab.String() + " " + ba.String(),
 	}
-	if len(paths) != len(want) {
-		t.Fatalf("the walk returned %d distinct closed rel_paths, want %d: %v", len(paths), len(want), paths)
-	}
+	assert.Must(t, len(paths) == len(want), "the walk returned %d distinct closed rel_paths, want %d: %v", len(paths), len(want), paths)
 	for _, w := range want {
-		if !paths[w] {
-			t.Errorf("no closed row carries the rel_path %q; got %v", w, paths)
-		}
+		assert.Should(t, paths[w], "no closed row carries the rel_path %q; got %v", w, paths)
 	}
 }
 
@@ -171,23 +160,15 @@ func TestTheRelationPathIsEmptyAtTheSeedAndNotNull(t *testing.T) {
 		Name: "w", ProjectID: f.projectID, SeedSQL: seedWalk, SeedArgs: []any{f.projectID, f.ids[0]},
 		RelationTypeIDs: []uuid.UUID{f.relTypeID}, Direction: graph.Out, MaxDepth: 3,
 	})
-	if len(rows) != 2 {
-		t.Fatalf("the walk returned %d rows, want the seed and its one hop: %+v", len(rows), rows)
-	}
+	assert.Must(t, len(rows) == 2, "the walk returned %d rows, want the seed and its one hop: %+v", len(rows), rows)
 	for _, r := range rows {
 		if r.depth == 0 {
-			if r.relPath == nil {
-				t.Errorf("the seed's rel_path is NULL, which makes every path below it NULL")
-			}
-			if len(r.relPath) != 0 {
-				t.Errorf("the seed's rel_path is %v, want a zero-length array", r.relPath)
-			}
+			assert.Should(t, r.relPath != nil, "the seed's rel_path is NULL, which makes every path below it NULL")
+			assert.Should(t, len(r.relPath) == 0, "the seed's rel_path is %v, want a zero-length array", r.relPath)
 			continue
 		}
 		// The positive control: the hop below the seed did accumulate,
 		// so an all-empty column cannot pass this test.
-		if len(r.relPath) != 1 {
-			t.Errorf("the depth-1 row's rel_path is %v, want exactly the edge it walked", r.relPath)
-		}
+		assert.Should(t, len(r.relPath) == 1, "the depth-1 row's rel_path is %v, want exactly the edge it walked", r.relPath)
 	}
 }

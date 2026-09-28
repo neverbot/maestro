@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/paging"
 )
 
@@ -34,10 +35,8 @@ func TestTheDocumentListingFingerprintLeadsWithTheProjectId(t *testing.T) {
 	got := documentListingFingerprint(project, filter, entity)
 	want := paging.Fingerprint(project.String(), "documents",
 		"lore/", "lore", entity, "true")
-	if got != want {
-		t.Fatalf("fingerprint = %q, want the project id first, then the listing, "+
-			"then the prefix, the kind, the entity and the deleted flag, folded", got)
-	}
+	assert.Must(t, got == want, "fingerprint = %q, want the project id first, then the listing, "+
+		"then the prefix, the kind, the entity and the deleted flag, folded", got)
 
 	// Every part on its own must move the answer, or it is not part of
 	// it — a part that does not divide two listings is a filter a cursor
@@ -55,24 +54,18 @@ func TestTheDocumentListingFingerprintLeadsWithTheProjectId(t *testing.T) {
 		{"deleted documents", documentListingFingerprint(project,
 			ListFilter{PathPrefix: filter.PathPrefix, Kind: filter.Kind}, entity)},
 	} {
-		if got == part.other {
-			t.Fatalf("two listings differing in %s share one fingerprint", part.name)
-		}
+		assert.Must(t, got != part.other, "two listings differing in %s share one fingerprint", part.name)
 	}
 
 	// "no opinion" is a third state, not a spelling of one of the two:
 	// a listing with no entity filter is not a listing filtered on some
 	// entity, and its part must be its own string.
-	if documentListingFingerprint(project, filter, "") ==
-		documentListingFingerprint(project, filter, entity) {
-		t.Fatal("an unfiltered listing shares a fingerprint with an entity-filtered one")
-	}
+	assert.Must(t, documentListingFingerprint(project, filter, "") !=
+		documentListingFingerprint(project, filter, entity), "an unfiltered listing shares a fingerprint with an entity-filtered one")
 
 	// And the domain discriminator is really there: without it the parts
 	// are the game and a pile of filter strings, which is what another
 	// domain reaching for the same shape would spell.
-	if got == paging.Fingerprint(project.String(),
-		"lore/", "lore", entity, "true") {
-		t.Fatal("the fingerprint carries no domain discriminator")
-	}
+	assert.Must(t, got != paging.Fingerprint(project.String(),
+		"lore/", "lore", entity, "true"), "the fingerprint carries no domain discriminator")
 }

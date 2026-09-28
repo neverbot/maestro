@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The page budgets. They exist because the number an agent actually pays
@@ -184,20 +186,14 @@ func countLines(body []byte) int {
 // ships, one sub-test per file so a failure names the page.
 func TestEveryBundlePageFitsItsTier(t *testing.T) {
 	report, err := auditBudgets(Files())
-	if err != nil {
-		t.Fatalf("auditing the bundle: %v", err)
-	}
-	if report.Files == 0 {
-		t.Fatal("the walk found no files: every assertion below would pass vacuously")
-	}
+	assert.Must(t, err == nil, "auditing the bundle: %v", err)
+	assert.Must(t, report.Files != 0, "the walk found no files: every assertion below would pass vacuously")
 	for _, problem := range report.Overruns {
 		t.Errorf("%s: %s", problem.Path, problem.Detail)
 	}
 	for path, tier := range report.Tiers {
 		t.Run(path, func(t *testing.T) {
-			if tier == "" {
-				t.Fatalf("%s is in no tier", path)
-			}
+			assert.Must(t, tier != "", "%s is in no tier", path)
 		})
 	}
 }
@@ -207,12 +203,8 @@ func TestEveryBundlePageFitsItsTier(t *testing.T) {
 // green suite, because the tier table never named their directory.
 func TestEveryBundleFileIsInATier(t *testing.T) {
 	report, err := auditBudgets(Files())
-	if err != nil {
-		t.Fatalf("auditing the bundle: %v", err)
-	}
-	if report.Files == 0 {
-		t.Fatal("the walk found no files: an empty bundle has no untiered files either")
-	}
+	assert.Must(t, err == nil, "auditing the bundle: %v", err)
+	assert.Must(t, report.Files != 0, "the walk found no files: an empty bundle has no untiered files either")
 	for _, p := range report.Untiered {
 		t.Errorf("%s is in no budget tier: add it to budgetTiers, or put it where an existing tier already looks", p)
 	}
@@ -220,12 +212,8 @@ func TestEveryBundleFileIsInATier(t *testing.T) {
 	// The mutation, asserted here rather than run by hand once: a file
 	// the table does not claim must be reported.
 	scratch, err := auditBudgets(added(t, "notes.txt", "a scratch note somebody dropped in the bundle"))
-	if err != nil {
-		t.Fatalf("auditing the scratch overlay: %v", err)
-	}
-	if !contains(scratch.Untiered, "notes.txt") {
-		t.Fatalf("a file in no tier was not reported: untiered = %v", scratch.Untiered)
-	}
+	assert.Must(t, err == nil, "auditing the scratch overlay: %v", err)
+	assert.Must(t, contains(scratch.Untiered, "notes.txt"), "a file in no tier was not reported: untiered = %v", scratch.Untiered)
 }
 
 // TestTheBudgetGuardFailsOnAnEmptyTree is the precision fixture for the
@@ -236,15 +224,9 @@ func TestEveryBundleFileIsInATier(t *testing.T) {
 // auditBudgets and this test fails.
 func TestTheBudgetGuardFailsOnAnEmptyTree(t *testing.T) {
 	empty, err := auditBudgets(fstest.MapFS{})
-	if err != nil {
-		t.Fatalf("auditing an empty tree: %v", err)
-	}
-	if len(empty.Overruns) == 0 {
-		t.Fatal("an empty bundle passed the budget guard: the guard reads nothing and reports nothing")
-	}
-	if empty.Files != 0 {
-		t.Fatalf("an empty tree reported %d files", empty.Files)
-	}
+	assert.Must(t, err == nil, "auditing an empty tree: %v", err)
+	assert.Must(t, len(empty.Overruns) != 0, "an empty bundle passed the budget guard: the guard reads nothing and reports nothing")
+	assert.Must(t, empty.Files == 0, "an empty tree reported %d files", empty.Files)
 
 	// And a tree that has files but not the entry point: the tier that
 	// bounds skill.md would otherwise measure nothing and say so to
@@ -255,12 +237,8 @@ func TestTheBudgetGuardFailsOnAnEmptyTree(t *testing.T) {
 	tree := mutated(t, "skill.md", nil)
 	tree["reference/fields.md"] = &fstest.MapFile{Data: []byte("# Fields\n")}
 	headless, err := auditBudgets(tree)
-	if err != nil {
-		t.Fatalf("auditing a bundle without its entry point: %v", err)
-	}
-	if !mentions(headless.Overruns, "skill.md") {
-		t.Fatalf("a bundle with no skill.md passed the budget guard: overruns = %v", headless.Overruns)
-	}
+	assert.Must(t, err == nil, "auditing a bundle without its entry point: %v", err)
+	assert.Must(t, mentions(headless.Overruns, "skill.md"), "a bundle with no skill.md passed the budget guard: overruns = %v", headless.Overruns)
 }
 
 // TestTheBudgetGuardCatchesAnOversizedPage drives both caps, because
@@ -271,22 +249,14 @@ func TestTheBudgetGuardCatchesAnOversizedPage(t *testing.T) {
 	tall, err := auditBudgets(mutated(t, "skill.md", func(body []byte) []byte {
 		return append(body, []byte(strings.Repeat("a line of prose\n", 200))...)
 	}))
-	if err != nil {
-		t.Fatalf("auditing the tall overlay: %v", err)
-	}
-	if !mentions(tall.Overruns, "lines") {
-		t.Fatalf("a 200-line-longer skill.md passed the line cap: overruns = %v", tall.Overruns)
-	}
+	assert.Must(t, err == nil, "auditing the tall overlay: %v", err)
+	assert.Must(t, mentions(tall.Overruns, "lines"), "a 200-line-longer skill.md passed the line cap: overruns = %v", tall.Overruns)
 
 	wide, err := auditBudgets(mutated(t, "skill.md", func(body []byte) []byte {
 		return append(body, []byte(strings.Repeat("x", 20000)+"\n")...)
 	}))
-	if err != nil {
-		t.Fatalf("auditing the wide overlay: %v", err)
-	}
-	if !mentions(wide.Overruns, "bytes") {
-		t.Fatalf("a skill.md with one 20,000-byte line passed the byte cap: overruns = %v", wide.Overruns)
-	}
+	assert.Must(t, err == nil, "auditing the wide overlay: %v", err)
+	assert.Must(t, mentions(wide.Overruns, "bytes"), "a skill.md with one 20,000-byte line passed the byte cap: overruns = %v", wide.Overruns)
 }
 
 func contains(haystack []string, needle string) bool {
@@ -359,9 +329,7 @@ func isTranscript(p string) bool { return path.Ext(p) == ".json" }
 func TestTheRoutingTableNamesEveryPage(t *testing.T) {
 	fsys := Files()
 	routed, err := routedPages(fsys)
-	if err != nil {
-		t.Fatalf("reading skill.md's routing table: %v", err)
-	}
+	assert.Must(t, err == nil, "reading skill.md's routing table: %v", err)
 	if len(routed) == 0 {
 		t.Fatal("skill.md's \"Where to go next\" table names no page at all: both " +
 			"comparisons below would run over an empty set and pass")
@@ -382,17 +350,11 @@ func TestTheRoutingTableNamesEveryPage(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walking the bundle: %v", err)
-	}
-	if len(seen) == 0 {
-		t.Fatal("the walk found no routable pages: the check above passed by measuring nothing")
-	}
+	assert.Must(t, err == nil, "walking the bundle: %v", err)
+	assert.Must(t, len(seen) != 0, "the walk found no routable pages: the check above passed by measuring nothing")
 	for p, line := range routed {
-		if !seen[p] {
-			t.Errorf("skill.md:%d routes to %s, which is not in the bundle: a dead link sends "+
-				"an agent to read nothing", line, p)
-		}
+		assert.Should(t, seen[p], "skill.md:%d routes to %s, which is not in the bundle: a dead link sends "+
+			"an agent to read nothing", line, p)
 	}
 }
 
@@ -411,12 +373,8 @@ func TestTheRoutingGuardCatchesBothDirections(t *testing.T) {
 		"genres/mmorpg.json":  &fstest.MapFile{Data: []byte("{}\n")},
 	}
 	routed, err := routedPages(full)
-	if err != nil {
-		t.Fatalf("reading the fixture table: %v", err)
-	}
-	if len(routed) != 2 || routed["reference/tools.md"] == 0 || routed["modelling/naming.md"] == 0 {
-		t.Fatalf("the table reader did not read both rows: %v", routed)
-	}
+	assert.Must(t, err == nil, "reading the fixture table: %v", err)
+	assert.Must(t, len(routed) == 2 && routed["reference/tools.md"] != 0 && routed["modelling/naming.md"] != 0, "the table reader did not read both rows: %v", routed)
 
 	// Direction one: a page the table does not name. This is the
 	// mutation the plan asks for — delete the modelling/naming.md row —
@@ -428,9 +386,7 @@ func TestTheRoutingGuardCatchesBothDirections(t *testing.T) {
 	unrouted["skill.md"] = &fstest.MapFile{Data: []byte(
 		"# 7. Where to go next\n\n| A | B |\n|---|---|\n| find a tool | `reference/tools.md` |\n")}
 	short, err := routedPages(unrouted)
-	if err != nil {
-		t.Fatalf("reading the shortened table: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the shortened table: %v", err)
 	if _, ok := short["modelling/naming.md"]; ok {
 		t.Fatal("the shortened table still names modelling/naming.md")
 	}
@@ -441,9 +397,7 @@ func TestTheRoutingGuardCatchesBothDirections(t *testing.T) {
 	}
 	dead, err := routedPages(fstest.MapFS{"skill.md": &fstest.MapFile{Data: []byte(
 		table + "| nowhere | `modelling/does-not-exist.md` |\n")}})
-	if err != nil {
-		t.Fatalf("reading the dead-link table: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the dead-link table: %v", err)
 	if _, ok := dead["modelling/does-not-exist.md"]; !ok {
 		t.Fatalf("the reader did not see the dead link: %v", dead)
 	}
@@ -455,15 +409,11 @@ func TestTheRoutingGuardCatchesBothDirections(t *testing.T) {
 	elsewhere, err := routedPages(fstest.MapFS{"skill.md": &fstest.MapFile{Data: []byte(
 		"# 2. The primitives\n\n| A | B |\n|---|---|\n| a thing | `modelling/mistakes.md` |\n\n" +
 			table + "| find a tool | `reference/tools.md` and `types.upsert` |\n")}})
-	if err != nil {
-		t.Fatalf("reading the mixed page: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the mixed page: %v", err)
 	if _, ok := elsewhere["modelling/mistakes.md"]; ok {
 		t.Error("a table outside section 7 was read as routing")
 	}
-	if len(elsewhere) != 2 {
-		t.Errorf("a tool name in a routed cell was read as a page: %v", elsewhere)
-	}
+	assert.Should(t, len(elsewhere) == 2, "a tool name in a routed cell was read as a page: %v", elsewhere)
 	if !isTranscript("genres/mmorpg.json") || isTranscript("genres/mmorpg.md") {
 		t.Error("the transcript exemption does not tell a transcript from a page, so either " +
 			"every genre page escapes the routing rule or every transcript is demanded in it")

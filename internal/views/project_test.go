@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // nodesByKey indexes a result the way every assertion in this file reads
@@ -33,12 +35,8 @@ func TestProjectArea(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"quests"}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("three quests are seeded, got %d", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "three quests are seeded, got %d", len(res.Nodes))
 		for _, n := range res.Nodes {
 			if n.Attrs["label"] != n.Name {
 				t.Errorf("the node %q must be labelled with its name %q, got %#v",
@@ -60,12 +58,8 @@ func TestProjectArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q"}],
 				"project":{"color_by":"min_level"}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 1 {
-			t.Fatalf("one quest was selected, got %d", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 1, "one quest was selected, got %d", len(res.Nodes))
 		node := res.Nodes[0]
 		// A number stays a number: the attribute travels as jsonb, so 22 is
 		// 22 and not "22". A renderer sizing or ordering by this value would
@@ -74,10 +68,8 @@ func TestProjectArea(t *testing.T) {
 			t.Fatalf("color_by must carry hogger's min_level as a number, got %#v",
 				node.Attrs["color_by"])
 		}
-		if node.Fields != nil {
-			t.Fatalf("include_fields was not asked for, so the payload must stay out: %#v",
-				node.Fields)
-		}
+		assert.Must(t, node.Fields == nil, "include_fields was not asked for, so the payload must stay out: %#v",
+			node.Fields)
 	})
 
 	// TestProjectArea's "a one hop related attribute reads the far entity"
@@ -95,13 +87,9 @@ func TestProjectArea(t *testing.T) {
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 				"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
 				                                  "type":"zone","attr":"@name"}}}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		byKey := nodesByKey(res.Nodes)
-		if len(byKey) != 3 {
-			t.Fatalf("three quests must come back, got %v", keysOf(res.Nodes))
-		}
+		assert.Must(t, len(byKey) == 3, "three quests must come back, got %v", keysOf(res.Nodes))
 		for key, want := range map[string]string{
 			"hogger": "Elwynn Forest",
 			"defias": "Westfall",
@@ -111,18 +99,14 @@ func TestProjectArea(t *testing.T) {
 			}
 		}
 		cook, ok := byKey["cook"]
-		if !ok {
-			t.Fatalf("the quest with no zone must still be in the picture: %v", keysOf(res.Nodes))
-		}
+		assert.Must(t, ok, "the quest with no zone must still be in the picture: %v", keysOf(res.Nodes))
 		if _, present := cook.Attrs["color_by"]; present {
 			t.Fatalf("a quest with no zone must carry no color_by at all, not an empty one: %#v",
 				cook.Attrs)
 		}
 		// And it still carries the attribute every node has, so the missing
 		// one above is the hop and not a node whose attrs never arrived.
-		if cook.Attrs["label"] != cook.Name {
-			t.Fatalf("the zoneless quest must still be labelled: %#v", cook.Attrs)
-		}
+		assert.Must(t, cook.Attrs["label"] == cook.Name, "the zoneless quest must still be labelled: %#v", cook.Attrs)
 	})
 
 	// TestProjectArea's "an ambiguous hop is marked rather than silently
@@ -141,16 +125,12 @@ func TestProjectArea(t *testing.T) {
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 				"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
 				                                  "type":"zone","attr":"@name"}}}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		// Three quests, not four: a hop that came back as two rows would put
 		// hogger in the picture twice, count twice against max_nodes, and let
 		// capOf's dedupe pick an arbitrary one of its two zones.
-		if len(res.Nodes) != 3 {
-			t.Fatalf("a quest in two zones is still one node, got %d: %v",
-				len(res.Nodes), keysOf(res.Nodes))
-		}
+		assert.Must(t, len(res.Nodes) == 3, "a quest in two zones is still one node, got %d: %v",
+			len(res.Nodes), keysOf(res.Nodes))
 		byKey := nodesByKey(res.Nodes)
 		hogger := byKey["hogger"]
 		if got := hogger.Attrs["color_by"]; got != "Elwynn Forest" {
@@ -168,9 +148,7 @@ func TestProjectArea(t *testing.T) {
 			t.Error("the quest with exactly one zone must not be marked ambiguous; this is the " +
 				"control that stops an always-true flag passing")
 		}
-		if byKey["cook"].Ambiguous {
-			t.Error("a quest with no zone at all is not ambiguous either")
-		}
+		assert.Should(t, !byKey["cook"].Ambiguous, "a quest with no zone at all is not ambiguous either")
 	})
 
 	// TestProjectArea's "include fields returns the whole payload and the
@@ -182,27 +160,17 @@ func TestProjectArea(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q"}]}`
 		lean, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(lean.Nodes) != 1 || lean.Nodes[0].Fields != nil {
-			t.Fatalf("the default must carry no payload, got %#v", lean.Nodes)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(lean.Nodes) == 1 && lean.Nodes[0].Fields == nil, "the default must carry no payload, got %#v", lean.Nodes)
 		full, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, doc), IncludeFields: true})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(full.Nodes) != 1 {
-			t.Fatalf("one quest was selected, got %d", len(full.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(full.Nodes) == 1, "one quest was selected, got %d", len(full.Nodes))
 		fields := full.Nodes[0].Fields
 		if got, ok := fields["min_level"].(float64); !ok || got != 22 {
 			t.Fatalf("include_fields must return the whole payload, got %#v", fields)
 		}
-		if fields["rank"] != "rare" {
-			t.Fatalf("include_fields must return every declared field, got %#v", fields)
-		}
+		assert.Must(t, fields["rank"] == "rare", "include_fields must return every declared field, got %#v", fields)
 	})
 
 	// TestProjectArea's "a projected field of an undeclared key is refused at
@@ -215,19 +183,11 @@ func TestProjectArea(t *testing.T) {
 		g, _ := a.games(t)
 		_, err := g.views.Resolve(t.Context(), g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"quest","as":"q"}],"project":{"color_by":"no_such_field"}}`))
-		if err == nil {
-			t.Fatal("a projected field no type in the query declares must be refused")
-		}
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("must be query_invalid, got %v", err)
-		}
+		assert.Must(t, err != nil, "a projected field no type in the query declares must be refused")
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "must be query_invalid, got %v", err)
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("must be a *QueryError, got %T", err)
-		}
-		if len(qe.Fields) != 1 || qe.Fields[0].Path != "/project/color_by" {
-			t.Fatalf("must be reported at the reference the caller wrote, got %v", qe.Fields)
-		}
+		assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
+		assert.Must(t, len(qe.Fields) == 1 && qe.Fields[0].Path == "/project/color_by", "must be reported at the reference the caller wrote, got %v", qe.Fields)
 		// The control: the same query with a key the quest type declares
 		// resolves, so the refusal above is about the key and not about
 		// projections being refused wholesale.
@@ -253,10 +213,8 @@ func TestProjectArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"},{"type":"zone","as":"z"}],
 				"project":{"color_by":"min_level"}}`)})
-		if err != nil {
-			t.Fatalf("min_level is declared on quest and not on zone, which a projection allows: %v",
-				err)
-		}
+		assert.Must(t, err == nil, "min_level is declared on quest and not on zone, which a projection allows: %v",
+			err)
 		byKey := nodesByKey(res.Nodes)
 		if got, ok := byKey["hogger"].Attrs["color_by"].(float64); !ok || got != 22 {
 			t.Fatalf("the type that declares the key must carry the value, got %#v",
@@ -284,12 +242,8 @@ func TestProjectArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["defias"],"as":"q"}],
 				"project":{"group_by":{"related":{"via":"requires"}}}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 1 {
-			t.Fatalf("one quest was selected, got %d", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 1, "one quest was selected, got %d", len(res.Nodes))
 		// defias requires hogger, and the hop's attr defaults to @name.
 		if got := res.Nodes[0].Attrs["group_by"]; got != "Wanted: Hogger" {
 			t.Fatalf("a hop with no type must still read its neighbour, got %#v", got)
@@ -308,12 +262,8 @@ func TestProjectArea(t *testing.T) {
 				Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q"}],
 					"project":{"color_by":{"related":{"via":"takes_place_in","direction":"`+
 					direction+`","type":"zone","attr":"@name"}}}}`)})
-			if err != nil {
-				t.Fatalf("run %s: %v", direction, err)
-			}
-			if len(res.Nodes) != 1 {
-				t.Fatalf("one quest was selected, got %d", len(res.Nodes))
-			}
+			assert.Must(t, err == nil, "run %s: %v", direction, err)
+			assert.Must(t, len(res.Nodes) == 1, "one quest was selected, got %d", len(res.Nodes))
 			return res.Nodes[0]
 		}
 		if got := run("out").Attrs["color_by"]; got != "Elwynn Forest" {
@@ -336,12 +286,8 @@ func TestProjectArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 				"edges":[{"via":"requires","between":["q","q"],"label_from":"@type"}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Edges) != 1 {
-			t.Fatalf("one requires relation is seeded, got %d", len(res.Edges))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Edges) == 1, "one requires relation is seeded, got %d", len(res.Edges))
 		if res.Edges[0].Label != "requires" {
 			t.Fatalf("the edge must be labelled with its relation type, got %q", res.Edges[0].Label)
 		}
@@ -351,12 +297,8 @@ func TestProjectArea(t *testing.T) {
 		plain, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 				"edges":[{"via":"requires","between":["q","q"]}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(plain.Edges) != 1 || plain.Edges[0].Label != "" {
-			t.Fatalf("an edge entry with no label_from must carry no label, got %#v", plain.Edges)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(plain.Edges) == 1 && plain.Edges[0].Label == "", "an edge entry with no label_from must carry no label, got %#v", plain.Edges)
 	})
 
 	// TestProjectArea's "an edge label of an undeclared key is refused" case
@@ -367,28 +309,18 @@ func TestProjectArea(t *testing.T) {
 		_, err := g.views.Resolve(t.Context(), g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"quest","as":"q"}],
 			 "edges":[{"via":"requires","between":["q","q"],"label_from":"no_such_field"}]}`))
-		if err == nil {
-			t.Fatal("an edge label naming a field the relation type does not declare must be refused")
-		}
+		assert.Must(t, err != nil, "an edge label naming a field the relation type does not declare must be refused")
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("must be a *QueryError, got %T", err)
-		}
-		if len(qe.Fields) != 1 || qe.Fields[0].Path != "/edges/0/label_from" {
-			t.Fatalf("must be reported at /edges/0/label_from, got %v", qe.Fields)
-		}
+		assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
+		assert.Must(t, len(qe.Fields) == 1 && qe.Fields[0].Path == "/edges/0/label_from", "must be reported at /edges/0/label_from, got %v", qe.Fields)
 		// A relation carries no name and no key, so those built-ins name no
 		// column there and are refused as well — the same rule an edge
 		// predicate follows.
 		_, err = g.views.Resolve(t.Context(), g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"quest","as":"q"}],
 			 "edges":[{"via":"requires","between":["q","q"],"label_from":"@name"}]}`))
-		if err == nil {
-			t.Fatal("@name must be refused on a relation")
-		}
-		if !strings.Contains(err.Error(), "cannot be compared on a relation") {
-			t.Fatalf("must say why, got %v", err)
-		}
+		assert.Must(t, err != nil, "@name must be refused on a relation")
+		assert.Must(t, strings.Contains(err.Error(), "cannot be compared on a relation"), "must say why, got %v", err)
 	})
 
 	// TestProjectArea's "a projection slot is a lateral join ahead of its
@@ -404,26 +336,18 @@ func TestProjectArea(t *testing.T) {
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 			"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
 			                                  "type":"zone","attr":"@name"}}}}`)
-		if !strings.Contains(sql, "LEFT JOIN LATERAL") {
-			t.Fatalf("a related attribute is a lateral join, so a node with no far entity keeps "+
-				"its row:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "LEFT JOIN LATERAL"), "a related attribute is a lateral join, so a node with no far entity keeps "+
+			"its row:\n%s", sql)
 		// LIMIT 1 with the count taken over the whole match set, which is
 		// **not** what this task's plan prescribed: a LIMIT 2 lateral returns
 		// two rows and duplicates the node row. A window count is computed
 		// before ORDER BY and LIMIT, so this is one row whose matches is the
 		// true number of candidates — detected, and not capped at two either.
-		if !strings.Contains(sql, "count(*) OVER () AS matches") {
-			t.Fatalf("the ambiguity flag must be counted rather than inferred:\n%s", sql)
-		}
-		if !strings.Contains(sql, "LIMIT 1") {
-			t.Fatalf("the hop must contribute exactly one row, or a quest in two zones becomes "+
-				"two rows of one node:\n%s", sql)
-		}
-		if !strings.Contains(sql, "ORDER BY far.name, far.id") {
-			t.Fatalf("the hop must be ordered, or which of two zones a quest is painted with "+
-				"changes between runs:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "count(*) OVER () AS matches"), "the ambiguity flag must be counted rather than inferred:\n%s", sql)
+		assert.Must(t, strings.Contains(sql, "LIMIT 1"), "the hop must contribute exactly one row, or a quest in two zones becomes "+
+			"two rows of one node:\n%s", sql)
+		assert.Must(t, strings.Contains(sql, "ORDER BY far.name, far.id"), "the hop must be ordered, or which of two zones a quest is painted with "+
+			"changes between runs:\n%s", sql)
 		problems, _ := projectFilterProblems(sql)
 		for _, problem := range problems {
 			t.Error(problem)
@@ -443,12 +367,8 @@ func TestProjectArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q"}],
 				"project":{"fields":["min_level"]}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 1 {
-			t.Fatalf("one quest was selected, got %d", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 1, "one quest was selected, got %d", len(res.Nodes))
 		fields := res.Nodes[0].Fields
 		if got, ok := fields["min_level"].(float64); !ok || got != 22 {
 			t.Fatalf("the named key must be in the payload, got %#v", fields)
@@ -472,16 +392,10 @@ func TestProjectArea(t *testing.T) {
 		g, _ := a.games(t)
 		_, err := g.views.Resolve(t.Context(), g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"quest","as":"q"}],"project":{"fields":["min_level","nope"]}}`))
-		if err == nil {
-			t.Fatal("a payload key no type in the query declares must be refused")
-		}
+		assert.Must(t, err != nil, "a payload key no type in the query declares must be refused")
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("must be a *QueryError, got %T", err)
-		}
-		if len(qe.Fields) != 1 || qe.Fields[0].Path != "/project/fields/1" {
-			t.Fatalf("must be reported at the entry the caller wrote, got %v", qe.Fields)
-		}
+		assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
+		assert.Must(t, len(qe.Fields) == 1 && qe.Fields[0].Path == "/project/fields/1", "must be reported at the entry the caller wrote, got %v", qe.Fields)
 	})
 
 	// TestProjectArea's "a related hop does not colour with an invalid entity"
@@ -500,12 +414,8 @@ func TestProjectArea(t *testing.T) {
 		colour := func(doc string) any {
 			t.Helper()
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-			if err != nil {
-				t.Fatalf("run: %v", err)
-			}
-			if len(res.Nodes) != 1 {
-				t.Fatalf("one quest was selected, got %d", len(res.Nodes))
-			}
+			assert.Must(t, err == nil, "run: %v", err)
+			assert.Must(t, len(res.Nodes) == 1, "one quest was selected, got %d", len(res.Nodes))
 			return res.Nodes[0].Attrs["color_by"]
 		}
 		hop := `"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
@@ -546,9 +456,7 @@ func TestProjectArea(t *testing.T) {
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 				"project":{"color_by":{"related":{"via":"requires","direction":"any",
 				                                  "type":"quest","attr":"@name"}}}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		byKey := nodesByKey(res.Nodes)
 		hogger := byKey["hogger"]
 		if got := hogger.Attrs["color_by"]; got != "The Defias Brotherhood" {
@@ -558,8 +466,6 @@ func TestProjectArea(t *testing.T) {
 			t.Error("a reciprocal pair is two edges to one entity, and one entity is not a " +
 				"choice: the flag says an entity was picked out of several, so it must be false")
 		}
-		if byKey["defias"].Ambiguous {
-			t.Error("the other end of the same reciprocal pair is not ambiguous either")
-		}
+		assert.Should(t, !byKey["defias"].Ambiguous, "the other end of the same reciprocal pair is not ambiguous either")
 	})
 }

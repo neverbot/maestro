@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -39,9 +40,7 @@ func seedSearchableType(t *testing.T, svc *metamodel.Service, project uuid.UUID)
 			{Key: "faction", Type: metamodel.FieldEnum, Options: []string{"alliance", "horde"}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("seed searchable type: %v", err)
-	}
+	assert.Must(t, err == nil, "seed searchable type: %v", err)
 }
 
 func TestSearchArea(t *testing.T) {
@@ -83,9 +82,7 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rows, err := svc.Search(ctx, project, tc.query, "", 10)
-				if err != nil {
-					t.Fatalf("Search(%q): %v", tc.query, err)
-				}
+				assert.Must(t, err == nil, "Search(%q): %v", tc.query, err)
 				if got := searchKeys(rows); !equalStrings(got, tc.want) {
 					t.Fatalf("Search(%q) = %v, want %v", tc.query, got, tc.want)
 				}
@@ -111,17 +108,11 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		all, err := svc.Search(ctx, project, "Hogger", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
-		if len(all) != 2 {
-			t.Fatalf("an unfiltered search found %v, want the quest and the zone", searchKeys(all))
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
+		assert.Must(t, len(all) == 2, "an unfiltered search found %v, want the quest and the zone", searchKeys(all))
 
 		zones, err := svc.Search(ctx, project, "Hogger", "zone", 10)
-		if err != nil {
-			t.Fatalf("Search by type: %v", err)
-		}
+		assert.Must(t, err == nil, "Search by type: %v", err)
 		if got := searchKeys(zones); !equalStrings(got, []string{"hogger-den"}) {
 			t.Fatalf("a type-filtered search found %v, want only the zone", got)
 		}
@@ -138,12 +129,8 @@ func TestSearchArea(t *testing.T) {
 		seedWorld(t, svc, project)
 
 		_, err := svc.Search(ctx, project, "Hogger", "zonne", 10)
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want not_found", err)
-		}
-		if !strings.Contains(err.Error(), `"zonne"`) {
-			t.Fatalf("err = %v, want it to name the key", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found", err)
+		assert.Must(t, strings.Contains(err.Error(), `"zonne"`), "err = %v, want it to name the key", err)
 	})
 
 	// TestSearchArea's "a search with no word in it is refused" case pins the
@@ -163,16 +150,10 @@ func TestSearchArea(t *testing.T) {
 		for _, query := range []string{"", "   ", "...", "!?&", "-"} {
 			t.Run(query, func(t *testing.T) {
 				_, err := svc.Search(ctx, project, query, "", 10)
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("Search(%q): err = %v, want invalid_input", query, err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "Search(%q): err = %v, want invalid_input", query, err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("err = %v, want a ValidationError", err)
-				}
-				if len(ve.Fields) != 1 || ve.Fields[0].Path != "query" {
-					t.Fatalf("fields = %+v, want one problem at path \"query\"", ve.Fields)
-				}
+				assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+				assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "query", "fields = %+v, want one problem at path \"query\"", ve.Fields)
 				if !strings.Contains(ve.Fields[0].Message, "no word to search for") {
 					t.Fatalf("message = %q, want it to say the query holds no word", ve.Fields[0].Message)
 				}
@@ -249,9 +230,7 @@ func TestSearchArea(t *testing.T) {
 				}
 
 				rows, err := svc.Search(ctx, project, tc.query, "", 10)
-				if err != nil {
-					t.Fatalf("Search: %v", err)
-				}
+				assert.Must(t, err == nil, "Search: %v", err)
 				if got := searchKeys(rows); !equalStrings(got, []string{"named", "mentioned"}) {
 					t.Fatalf("ranking = %v, want the row the query names first", got)
 				}
@@ -287,9 +266,7 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		rows, err := svc.Search(ctx, project, "chieftain", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
 		if got := searchKeys(rows); !equalStrings(got, []string{"mentioned"}) {
 			t.Fatalf("found %v, want only the row whose field carries the word", got)
 		}
@@ -308,12 +285,8 @@ func TestSearchArea(t *testing.T) {
 		seedWorld(t, svc, theirs)
 
 		rows, err := svc.Search(ctx, mine, "Hogger", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
-		if len(rows) != 1 {
-			t.Fatalf("found %d rows, want only my own game's", len(rows))
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
+		assert.Must(t, len(rows) == 1, "found %d rows, want only my own game's", len(rows))
 		if rows[0].ProjectID != mine {
 			t.Fatalf("found a row of project %s", rows[0].ProjectID)
 		}
@@ -350,12 +323,8 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rows, err := svc.Search(ctx, project, "Quest", "", tc.limit)
-				if err != nil {
-					t.Fatalf("Search(limit %d): %v", tc.limit, err)
-				}
-				if len(rows) != tc.want {
-					t.Fatalf("Search(limit %d) found %d rows, want %d", tc.limit, len(rows), tc.want)
-				}
+				assert.Must(t, err == nil, "Search(limit %d): %v", tc.limit, err)
+				assert.Must(t, len(rows) == tc.want, "Search(limit %d) found %d rows, want %d", tc.limit, len(rows), tc.want)
 			})
 		}
 	})
@@ -390,53 +359,35 @@ func TestSearchArea(t *testing.T) {
 		// end mid-word with no trailing space, and without a separator that
 		// fuses onto boundary's own first character.
 		fillerN := metamodel.MaxIndexedText - len(prefix) - len(boundary) - 1
-		if fillerN < 0 || fillerN > len(filler) {
-			t.Fatalf("fixture arithmetic is out of range: fillerN=%d", fillerN)
-		}
+		assert.Must(t, fillerN >= 0 && fillerN <= len(filler), "fixture arithmetic is out of range: fillerN=%d", fillerN)
 		lore := prefix + filler[:fillerN] + " " + boundary + tail
 		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 			TypeKey: "quest", Key: "lore", Name: "The Long Story",
 			Fields: map[string]any{"min_level": float64(1), "summary": lore},
 		})
-		if err != nil {
-			t.Fatalf("seed: %v", err)
-		}
+		assert.Must(t, err == nil, "seed: %v", err)
 
 		found, err := svc.Search(ctx, project, "gnoll", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
 		if got := searchKeys(found); !equalStrings(got, []string{"lore"}) {
 			t.Fatalf("the head of the field found %v, want the row", got)
 		}
 		edge, err := svc.Search(ctx, project, "borderland", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
 		if got := searchKeys(edge); !equalStrings(got, []string{"lore"}) {
 			t.Fatalf("a word ending exactly at searchTextLimit-1 found %v, want the row: the "+
 				"constant claims more headroom than the code that truncates gives", got)
 		}
 		missed, err := svc.Search(ctx, project, "murloc", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
-		if len(missed) != 0 {
-			t.Fatalf("a word past the index bound was found: %v", searchKeys(missed))
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
+		assert.Must(t, len(missed) == 0, "a word past the index bound was found: %v", searchKeys(missed))
 
 		// The value itself is untouched: the index gives way, never the
 		// content.
 		stored, err := svc.EntityByKey(ctx, project, "quest", "lore")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
-		if !strings.Contains(string(stored.Fields), "murloc") {
-			t.Fatal("the stored value lost the text the index dropped")
-		}
-		if stored.ID != row.ID {
-			t.Fatal("read back a different row")
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
+		assert.Must(t, strings.Contains(string(stored.Fields), "murloc"), "the stored value lost the text the index dropped")
+		assert.Must(t, stored.ID == row.ID, "read back a different row")
 	})
 
 	// TestSearchArea's "a search query is bounded and reported as the callers
@@ -488,16 +439,10 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.Search(ctx, project, tc.query, "", 10)
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("err = %v, want a ValidationError", err)
-				}
-				if len(ve.Fields) != 1 || ve.Fields[0].Path != "query" {
-					t.Fatalf("fields = %+v, want one problem at path \"query\"", ve.Fields)
-				}
+				assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+				assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "query", "fields = %+v, want one problem at path \"query\"", ve.Fields)
 				if !strings.Contains(ve.Fields[0].Message, tc.wants) {
 					t.Fatalf("message = %q, want it to name %q", ve.Fields[0].Message, tc.wants)
 				}
@@ -565,9 +510,7 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rows, err := svc.Search(ctx, project, tc.query, "", 10)
-				if err != nil {
-					t.Fatalf("Search(%q): %v", tc.query, err)
-				}
+				assert.Must(t, err == nil, "Search(%q): %v", tc.query, err)
 				if got := searchKeys(rows); !equalStrings(got, tc.want) {
 					t.Fatalf("Search(%q) = %v, want %v", tc.query, got, tc.want)
 				}
@@ -613,20 +556,14 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		rows, err := svc.Search(ctx, project, "race", "", 10)
-		if err != nil {
-			t.Fatalf("Search: %v", err)
-		}
-		if len(rows) != 4 {
-			t.Fatalf("Search(\"race\") found %v, want all four rows", searchKeys(rows))
-		}
+		assert.Must(t, err == nil, "Search: %v", err)
+		assert.Must(t, len(rows) == 4, "Search(\"race\") found %v, want all four rows", searchKeys(rows))
 		if rows[0].Key != "opening" || !rows[0].NameMatch {
 			t.Fatalf("the top hit is %q (name_match %v), want the row actually named Race",
 				rows[0].Key, rows[0].NameMatch)
 		}
 		for _, row := range rows[1:] {
-			if row.NameMatch {
-				t.Fatalf("row %q was found by its key and reported name_match true", row.Key)
-			}
+			assert.Must(t, !row.NameMatch, "row %q was found by its key and reported name_match true", row.Key)
 		}
 	})
 
@@ -680,13 +617,9 @@ func TestSearchArea(t *testing.T) {
 		var seen []string
 		filter := metamodel.SearchFilter{Query: "gnoll", Limit: 7}
 		for page := 1; ; page++ {
-			if page > 20 {
-				t.Fatal("paging did not end")
-			}
+			assert.Must(t, page <= 20, "paging did not end")
 			got, err := svc.SearchPage(ctx, project, filter)
-			if err != nil {
-				t.Fatalf("page %d: %v", page, err)
-			}
+			assert.Must(t, err == nil, "page %d: %v", page, err)
 			for _, row := range got.Entities {
 				seen = append(seen, row.Key)
 			}
@@ -696,14 +629,10 @@ func TestSearchArea(t *testing.T) {
 			filter.Cursor = got.NextCursor
 		}
 
-		if len(seen) != 40 {
-			t.Fatalf("the walk saw %d rows, want 40: %v", len(seen), seen)
-		}
+		assert.Must(t, len(seen) == 40, "the walk saw %d rows, want 40: %v", len(seen), seen)
 		unique := map[string]bool{}
 		for _, key := range seen {
-			if unique[key] {
-				t.Fatalf("%s came back twice: %v", key, seen)
-			}
+			assert.Must(t, !(unique[key]), "%s came back twice: %v", key, seen)
 			unique[key] = true
 		}
 		// And the order the unpaged search promises survives paging: every
@@ -712,12 +641,8 @@ func TestSearchArea(t *testing.T) {
 		// page.
 		for i, key := range seen {
 			named := strings.HasPrefix(key, "named-")
-			if i < 20 && !named {
-				t.Fatalf("row %d of the walk is %s; the name matches should come first: %v", i, key, seen)
-			}
-			if i >= 20 && named {
-				t.Fatalf("row %d of the walk is %s; the name matches should be over by then: %v", i, key, seen)
-			}
+			assert.Must(t, i >= 20 || named, "row %d of the walk is %s; the name matches should come first: %v", i, key, seen)
+			assert.Must(t, i < 20 || !named, "row %d of the walk is %s; the name matches should be over by then: %v", i, key, seen)
 		}
 	})
 
@@ -742,12 +667,8 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		first, err := svc.SearchPage(ctx, project, metamodel.SearchFilter{Query: "gnoll", Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("a full page issued no cursor")
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page issued no cursor")
 		if _, err := svc.SearchPage(ctx, project,
 			metamodel.SearchFilter{Query: "kobolds", Limit: 3, Cursor: first.NextCursor}); err == nil {
 			t.Error("a cursor from one question paged another")
@@ -759,12 +680,8 @@ func TestSearchArea(t *testing.T) {
 		// The same question, from the same cursor, is the one call that works.
 		second, err := svc.SearchPage(ctx, project,
 			metamodel.SearchFilter{Query: "gnoll", Limit: 3, Cursor: first.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
-		if len(second.Entities) != 3 {
-			t.Fatalf("second page held %d rows, want 3", len(second.Entities))
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
+		assert.Must(t, len(second.Entities) == 3, "second page held %d rows, want 3", len(second.Entities))
 	})
 
 	// A cursor whose fingerprint agrees and whose position is not a search
@@ -787,18 +704,14 @@ func TestSearchArea(t *testing.T) {
 			}
 		}
 		page, err := svc.SearchPage(ctx, project, metamodel.SearchFilter{Query: "gnoll", Limit: 2})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
 
 		// The same forging ListRelations' own malformed-cursor test does:
 		// keep the fingerprint, replace the position half. A cursor whose
 		// fingerprint disagrees is refused one step earlier and would not
 		// reach the arm this test is about.
 		raw, err := base64.RawURLEncoding.DecodeString(page.NextCursor)
-		if err != nil {
-			t.Fatalf("decode cursor: %v", err)
-		}
+		assert.Must(t, err == nil, "decode cursor: %v", err)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			t.Fatalf("unmarshal cursor: %v", err)
@@ -808,19 +721,13 @@ func TestSearchArea(t *testing.T) {
 			"i": fields["i"],
 			"f": fields["f"],
 		})
-		if err != nil {
-			t.Fatalf("marshal forged cursor: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal forged cursor: %v", err)
 		forged := base64.RawURLEncoding.EncodeToString(forgedRaw)
 		_, err = svc.SearchPage(ctx, project,
 			metamodel.SearchFilter{Query: "gnoll", Limit: 2, Cursor: forged})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) {
-			t.Fatalf("got %v, want a validation error", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "cursor" {
-			t.Fatalf("refused at %+v, want one problem at path cursor", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid), "got %v, want a validation error", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "cursor", "refused at %+v, want one problem at path cursor", invalid.Fields)
 	})
 }
 

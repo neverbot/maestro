@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -15,9 +16,7 @@ import (
 func (g game) unreachable(t *testing.T, in UnreachableInput) UnreachableResult {
 	t.Helper()
 	got, err := g.analysis.Unreachable(context.Background(), g.projectID, in)
-	if err != nil {
-		t.Fatalf("unreachable: %v", err)
-	}
+	assert.Must(t, err == nil, "unreachable: %v", err)
 	return got
 }
 
@@ -72,30 +71,18 @@ func TestUnreachable(t *testing.T) {
 		g.edge(t, "unlocks", "quest", "g", "h")
 
 		got := g.unreachable(t, UnreachableInput{})
-		if len(got.Findings) != 0 {
-			t.Errorf("a fully reachable game reported %v as unreachable", got.keys())
-		}
-		if got.ReachableTotal != 12 {
-			t.Errorf("reachable_total = %d, want 12: an empty findings list over a walk that "+
-				"reached nothing is the same JSON as a healthy game, and this count is what "+
-				"separates them", got.ReachableTotal)
-		}
-		if got.UnreachableTotal != 0 {
-			t.Errorf("unreachable_total = %d, want 0", got.UnreachableTotal)
-		}
+		assert.Should(t, len(got.Findings) == 0, "a fully reachable game reported %v as unreachable", got.keys())
+		assert.Should(t, got.ReachableTotal == 12, "reachable_total = %d, want 12: an empty findings list over a walk that "+
+			"reached nothing is the same JSON as a healthy game, and this count is what "+
+			"separates them", got.ReachableTotal)
+		assert.Should(t, got.UnreachableTotal == 0, "unreachable_total = %d, want 0", got.UnreachableTotal)
 		perType := map[string]TypeCount{}
 		for _, count := range got.PerType {
 			perType[count.EntityType] = count
 		}
-		if perType["quest"].Reachable != 8 || perType["zone"].Reachable != 4 {
-			t.Errorf("per_type = %v, want 8 quests and 4 zones, each with its own count", got.PerType)
-		}
-		if got.Seeds.Total == 0 {
-			t.Error("the report names no seed at all, so the walk it rests on started nowhere")
-		}
-		if got.EdgesWalked != 7 {
-			t.Errorf("edges_walked = %d, want the seven edges of the fixture", got.EdgesWalked)
-		}
+		assert.Should(t, perType["quest"].Reachable == 8 && perType["zone"].Reachable == 4, "per_type = %v, want 8 quests and 4 zones, each with its own count", got.PerType)
+		assert.Should(t, got.Seeds.Total != 0, "the report names no seed at all, so the walk it rests on started nowhere")
+		assert.Should(t, got.EdgesWalked == 7, "edges_walked = %d, want the seven edges of the fixture", got.EdgesWalked)
 	})
 
 	// TestUnreachableFindsTheOneQuestNothingUnlocks is the positive case.
@@ -109,22 +96,12 @@ func TestUnreachable(t *testing.T) {
 		g.edge(t, "unlocks", "quest", "locked", "orphaned-gate")
 
 		got := g.unreachable(t, UnreachableInput{})
-		if len(got.Findings) != 2 {
-			t.Fatalf("the report names %v, want the two entities of the mutual lock", got.keys())
-		}
+		assert.Must(t, len(got.Findings) == 2, "the report names %v, want the two entities of the mutual lock", got.keys())
 		finding := got.find(t, "locked")
-		if finding.EntityType != "quest" {
-			t.Errorf("the finding names entity type %q, want quest", finding.EntityType)
-		}
-		if finding.Reason != ReasonNoPath {
-			t.Errorf("reason = %q, want %q", finding.Reason, ReasonNoPath)
-		}
-		if len(finding.Blockers) != 1 || finding.Blockers[0].Key != "orphaned-gate" {
-			t.Errorf("blockers = %v, want the specific gating entity", finding.Blockers)
-		}
-		if got.ReachableTotal != 1 {
-			t.Errorf("reachable_total = %d, want the one open quest", got.ReachableTotal)
-		}
+		assert.Should(t, finding.EntityType == "quest", "the finding names entity type %q, want quest", finding.EntityType)
+		assert.Should(t, finding.Reason == ReasonNoPath, "reason = %q, want %q", finding.Reason, ReasonNoPath)
+		assert.Should(t, len(finding.Blockers) == 1 && finding.Blockers[0].Key == "orphaned-gate", "blockers = %v, want the specific gating entity", finding.Blockers)
+		assert.Should(t, got.ReachableTotal == 1, "reachable_total = %d, want the one open quest", got.ReachableTotal)
 	})
 
 	// TestTheReasonsAreOrderedMostSpecificFirst builds an entity that
@@ -161,11 +138,9 @@ func TestUnreachable(t *testing.T) {
 
 		got := g.unreachable(t, UnreachableInput{})
 		inside := got.find(t, "inside")
-		if inside.Reason != ReasonContainerUnreachable {
-			t.Errorf("reason = %q, want %q: an entity whose only way in is a container nobody "+
-				"can reach gets the reason whose fix is the container",
-				inside.Reason, ReasonContainerUnreachable)
-		}
+		assert.Should(t, inside.Reason == ReasonContainerUnreachable, "reason = %q, want %q: an entity whose only way in is a container nobody "+
+			"can reach gets the reason whose fix is the container",
+			inside.Reason, ReasonContainerUnreachable)
 		// The control: the two zones, which have gates and no container, get
 		// the less specific reason, so the ordering is doing work.
 		if sealed := got.find(t, "sealed"); sealed.Reason != ReasonNoPath {
@@ -181,10 +156,8 @@ func TestUnreachable(t *testing.T) {
 		g.entity(t, "quest", "floating")
 
 		byDefault := g.unreachable(t, UnreachableInput{})
-		if len(byDefault.Findings) != 0 {
-			t.Fatalf("with include_ungated on, an entity with no gates is a start point, so "+
-				"nothing should be unreachable; got %v", byDefault.keys())
-		}
+		assert.Must(t, len(byDefault.Findings) == 0, "with include_ungated on, an entity with no gates is a start point, so "+
+			"nothing should be unreachable; got %v", byDefault.keys())
 		off := g.unreachable(t, UnreachableInput{Reach: Params{
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "seed"}},
 			IncludeUngated: boolPtr(false),
@@ -210,13 +183,9 @@ func TestUnreachable(t *testing.T) {
 
 		any := g.unreachable(t, UnreachableInput{})
 		all := g.unreachable(t, UnreachableInput{Reach: Params{Gating: GatingAll}})
-		if len(any.Findings) >= len(all.Findings) {
-			t.Errorf("`any` reported %v and `all` reported %v; the stricter reading must not "+
-				"report fewer", any.keys(), all.keys())
-		}
-		if len(any.Findings) == 0 && len(all.Findings) == 0 {
-			t.Fatal("neither reading reported anything, so the comparison above is vacuous")
-		}
+		assert.Should(t, len(any.Findings) < len(all.Findings), "`any` reported %v and `all` reported %v; the stricter reading must not "+
+			"report fewer", any.keys(), all.keys())
+		assert.Must(t, len(any.Findings) != 0 || len(all.Findings) != 0, "neither reading reported anything, so the comparison above is vacuous")
 	})
 
 	// TestIgnoredEntityTypesAreNeitherReportedNorCounted holds the totals to
@@ -233,9 +202,7 @@ func TestUnreachable(t *testing.T) {
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "seed"}},
 			IncludeUngated: boolPtr(false),
 		}})
-		if len(full.Findings) != 2 {
-			t.Fatalf("without the filter the two lore rows must be unreachable; got %v", full.keys())
-		}
+		assert.Must(t, len(full.Findings) == 2, "without the filter the two lore rows must be unreachable; got %v", full.keys())
 
 		ignored := g.unreachable(t, UnreachableInput{
 			Reach: Params{
@@ -244,21 +211,13 @@ func TestUnreachable(t *testing.T) {
 			},
 			IgnoreEntityTypes: []string{"lore"},
 		})
-		if len(ignored.Findings) != 0 {
-			t.Errorf("an ignored type is still reported: %v", ignored.keys())
-		}
-		if ignored.UnreachableTotal != 0 {
-			t.Errorf("unreachable_total = %d over an ignored type", ignored.UnreachableTotal)
-		}
+		assert.Should(t, len(ignored.Findings) == 0, "an ignored type is still reported: %v", ignored.keys())
+		assert.Should(t, ignored.UnreachableTotal == 0, "unreachable_total = %d over an ignored type", ignored.UnreachableTotal)
 		for _, count := range ignored.PerType {
-			if count.EntityType == "lore" {
-				t.Errorf("per_type still names the ignored type: %v", ignored.PerType)
-			}
+			assert.Should(t, count.EntityType != "lore", "per_type still names the ignored type: %v", ignored.PerType)
 		}
-		if ignored.ReachableTotal != 1 {
-			t.Errorf("reachable_total = %d, want the one seeded quest: the totals must count "+
-				"exactly what the report considers", ignored.ReachableTotal)
-		}
+		assert.Should(t, ignored.ReachableTotal == 1, "reachable_total = %d, want the one seeded quest: the totals must count "+
+			"exactly what the report considers", ignored.ReachableTotal)
 	})
 
 	// TestATruncatedUnreachableReportSaysItIsTruncated has both halves in
@@ -268,25 +227,15 @@ func TestUnreachable(t *testing.T) {
 		g := blockedGame(t, a)
 
 		capped := g.unreachable(t, UnreachableInput{MaxResults: 2})
-		if len(capped.Findings) != 2 {
-			t.Fatalf("max_results 2 returned %d findings", len(capped.Findings))
-		}
-		if !capped.Truncated {
-			t.Error("a report capped below the number of findings does not say it is truncated")
-		}
-		if capped.UnreachableTotal != 6 {
-			t.Errorf("unreachable_total = %d, want all six even though only two are named: a "+
-				"truncated report that also truncated its totals says nothing about what it "+
-				"left out", capped.UnreachableTotal)
-		}
+		assert.Must(t, len(capped.Findings) == 2, "max_results 2 returned %d findings", len(capped.Findings))
+		assert.Should(t, capped.Truncated, "a report capped below the number of findings does not say it is truncated")
+		assert.Should(t, capped.UnreachableTotal == 6, "unreachable_total = %d, want all six even though only two are named: a "+
+			"truncated report that also truncated its totals says nothing about what it "+
+			"left out", capped.UnreachableTotal)
 
 		whole := g.unreachable(t, UnreachableInput{MaxResults: 6})
-		if len(whole.Findings) != 6 {
-			t.Fatalf("max_results 6 returned %d findings, want all six", len(whole.Findings))
-		}
-		if whole.Truncated {
-			t.Error("a report that named every finding says it is truncated")
-		}
+		assert.Must(t, len(whole.Findings) == 6, "max_results 6 returned %d findings, want all six", len(whole.Findings))
+		assert.Should(t, !whole.Truncated, "a report that named every finding says it is truncated")
 	})
 
 	// TestADepthLimitedReportSaysSo pins that a walk which stopped looking
@@ -301,21 +250,15 @@ func TestUnreachable(t *testing.T) {
 		g.edge(t, "unlocks", "quest", "c", "d")
 
 		got := g.unreachable(t, UnreachableInput{Reach: Params{MaxDepth: 2}})
-		if !got.DepthLimited {
-			t.Error("the report does not say the walk stopped at its depth bound")
-		}
+		assert.Should(t, got.DepthLimited, "the report does not say the walk stopped at its depth bound")
 		finding := got.find(t, "d")
-		if finding.Reason != ReasonDepthLimited {
-			t.Errorf("reason = %q, want %q: the walk stopped looking, which is not the same "+
-				"statement as `no player can reach this`", finding.Reason, ReasonDepthLimited)
-		}
+		assert.Should(t, finding.Reason == ReasonDepthLimited, "reason = %q, want %q: the walk stopped looking, which is not the same "+
+			"statement as `no player can reach this`", finding.Reason, ReasonDepthLimited)
 		// The control: at a bound the chain fits under, nothing is
 		// unreachable and nothing claims to be depth-limited.
 		whole := g.unreachable(t, UnreachableInput{Reach: Params{MaxDepth: 10}})
-		if whole.DepthLimited || len(whole.Findings) != 0 {
-			t.Errorf("with room to finish, the report says depth_limited=%t and names %v",
-				whole.DepthLimited, whole.keys())
-		}
+		assert.Should(t, !whole.DepthLimited && len(whole.Findings) == 0, "with room to finish, the report says depth_limited=%t and names %v",
+			whole.DepthLimited, whole.keys())
 	})
 
 	// TestAnAnalysisOverAGameWithNoTraitsRefusesRatherThanReportingHealth is
@@ -331,23 +274,15 @@ func TestUnreachable(t *testing.T) {
 		g.edge(t, "relates_to", "quest", "a", "b")
 
 		_, err := g.analysis.Unreachable(context.Background(), g.projectID, UnreachableInput{})
-		if !errors.Is(err, ErrSemanticsUndeclared) {
-			t.Fatalf("err = %v, want semantics_undeclared: a game that declared nothing must "+
-				"be refused, never reported healthy", err)
-		}
+		assert.Must(t, errors.Is(err, ErrSemanticsUndeclared), "err = %v, want semantics_undeclared: a game that declared nothing must "+
+			"be refused, never reported healthy", err)
 		var undeclared *UndeclaredError
-		if !errors.As(err, &undeclared) {
-			t.Fatalf("the refusal does not carry the catalogue: %v", err)
-		}
-		if len(undeclared.Types) != 1 || undeclared.Types[0].Key != "relates_to" {
-			t.Errorf("the refusal names %v, want the game's one relation type", undeclared.Types)
-		}
+		assert.Must(t, errors.As(err, &undeclared), "the refusal does not carry the catalogue: %v", err)
+		assert.Should(t, len(undeclared.Types) == 1 && undeclared.Types[0].Key == "relates_to", "the refusal names %v, want the game's one relation type", undeclared.Types)
 		// It names what is missing rather than that something is: the
 		// recovery is in the message and the payload, not left to guesswork.
 		for _, word := range []string{"analysis_traits", "semantic_role", "relates_to"} {
-			if !strings.Contains(err.Error(), word) {
-				t.Errorf("the refusal does not name %q: %v", word, err)
-			}
+			assert.Should(t, strings.Contains(err.Error(), word), "the refusal does not name %q: %v", word, err)
 		}
 	})
 
@@ -364,14 +299,10 @@ func TestUnreachable(t *testing.T) {
 
 		got, err := theirs.analysis.Unreachable(context.Background(), theirs.projectID,
 			UnreachableInput{})
-		if err != nil {
-			t.Fatalf("unreachable over the second game: %v", err)
-		}
-		if got.ReachableTotal != 1 || got.UnreachableTotal != 0 {
-			t.Errorf("the second game's report counted %d reachable and %d unreachable; it holds "+
-				"one entity and must see none of the first game's seven",
-				got.ReachableTotal, got.UnreachableTotal)
-		}
+		assert.Must(t, err == nil, "unreachable over the second game: %v", err)
+		assert.Should(t, got.ReachableTotal == 1 && got.UnreachableTotal == 0, "the second game's report counted %d reachable and %d unreachable; it holds "+
+			"one entity and must see none of the first game's seven",
+			got.ReachableTotal, got.UnreachableTotal)
 		// The control: the first game's own report still finds its six, so
 		// the emptiness above is isolation and not a broken fixture.
 		if mineReport := mine.unreachable(t, UnreachableInput{}); mineReport.UnreachableTotal != 6 {
@@ -388,21 +319,15 @@ func TestUnreachable(t *testing.T) {
 
 		_, err := g.analysis.Unreachable(ctx, g.projectID,
 			UnreachableInput{MaxResults: MaxMaxResults + 1})
-		if !errors.Is(err, ErrLimitExceeded) {
-			t.Fatalf("err = %v, want limit_exceeded for a declared bound above its cap", err)
-		}
-		if !strings.Contains(err.Error(), "max_results") {
-			t.Errorf("the refusal does not name the argument at fault: %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrLimitExceeded), "err = %v, want limit_exceeded for a declared bound above its cap", err)
+		assert.Should(t, strings.Contains(err.Error(), "max_results"), "the refusal does not name the argument at fault: %v", err)
 
 		// A page size above its cap is clamped and answers, because a page
 		// is explicitly one slice of an answer whose remainder the cursor
 		// promises.
 		clamped := g.unreachable(t, UnreachableInput{Limit: maxUnreachablePage + 1000})
-		if len(clamped.Findings) != 6 {
-			t.Errorf("the clamped page returned %d findings, want the six the game has",
-				len(clamped.Findings))
-		}
+		assert.Should(t, len(clamped.Findings) == 6, "the clamped page returned %d findings, want the six the game has",
+			len(clamped.Findings))
 	})
 
 	// TestACursorFromAnotherGameIsRefusedByTheUnreachableListing is the
@@ -419,14 +344,10 @@ func TestUnreachable(t *testing.T) {
 		theirs.edge(t, "requires", "quest", "c", "b")
 
 		page := theirs.unreachable(t, UnreachableInput{Limit: 1})
-		if page.NextCursor == "" {
-			t.Fatal("the second game's first page issued no cursor, so nothing below is tested")
-		}
+		assert.Must(t, page.NextCursor != "", "the second game's first page issued no cursor, so nothing below is tested")
 		_, err := mine.analysis.Unreachable(context.Background(), mine.projectID,
 			UnreachableInput{Limit: 1, Cursor: page.NextCursor})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input for a cursor from another game", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input for a cursor from another game", err)
 	})
 
 	// TestTheUnreachableFingerprintIsProjectIdFirstAndCarriesItsParameters
@@ -451,10 +372,8 @@ func TestUnreachable(t *testing.T) {
 				"answer from the other")
 		}
 		sibling := g.sibling(t)
-		if unreachableFingerprint(g.projectID, base, nil) ==
-			unreachableFingerprint(sibling.projectID, base, nil) {
-			t.Error("two games share a fingerprint for the same parameters")
-		}
+		assert.Should(t, unreachableFingerprint(g.projectID, base, nil) !=
+			unreachableFingerprint(sibling.projectID, base, nil), "two games share a fingerprint for the same parameters")
 	})
 
 	// TestACursorIssuedForOneParameterSetIsRefusedAgainstAnother is the
@@ -462,22 +381,16 @@ func TestUnreachable(t *testing.T) {
 	t.Run("a cursor issued for one parameter set is refused against another", func(t *testing.T) {
 		g := blockedGame(t, a)
 		page := g.unreachable(t, UnreachableInput{Limit: 1})
-		if page.NextCursor == "" {
-			t.Fatal("the first page issued no cursor")
-		}
+		assert.Must(t, page.NextCursor != "", "the first page issued no cursor")
 		// The control: the same cursor against the same parameters pages on.
 		second := g.unreachable(t, UnreachableInput{Limit: 1, Cursor: page.NextCursor})
-		if len(second.Findings) != 1 || second.Findings[0].Key == page.Findings[0].Key {
-			t.Fatalf("the cursor did not advance: page 1 %v, page 2 %v",
-				page.keys(), second.keys())
-		}
+		assert.Must(t, len(second.Findings) == 1 && second.Findings[0].Key != page.Findings[0].Key, "the cursor did not advance: page 1 %v, page 2 %v",
+			page.keys(), second.keys())
 		_, err := g.analysis.Unreachable(context.Background(), g.projectID, UnreachableInput{
 			Limit: 1, Cursor: page.NextCursor, Reach: Params{Gating: GatingAll},
 		})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input: paging through one question and having "+
-				"page 2 answer another is a wrong answer with no error", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input: paging through one question and having "+
+			"page 2 answer another is a wrong answer with no error", err)
 	})
 
 	// TestAnUnreachableReportSerialisesWithItsDocumentedWireNames is the
@@ -489,9 +402,7 @@ func TestUnreachable(t *testing.T) {
 	t.Run("an unreachable report serialises with its documented wire names", func(t *testing.T) {
 		g := blockedGame(t, a)
 		raw, err := json.Marshal(g.unreachable(t, UnreachableInput{}))
-		if err != nil {
-			t.Fatalf("marshal the report: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal the report: %v", err)
 		var document map[string]any
 		if err := json.Unmarshal(raw, &document); err != nil {
 			t.Fatalf("decode the report: %v", err)
@@ -506,9 +417,7 @@ func TestUnreachable(t *testing.T) {
 			}
 		}
 		findings, _ := document["unreachable"].([]any)
-		if len(findings) == 0 {
-			t.Fatal("the fixture produced no finding, so the finding's own names are unasserted")
-		}
+		assert.Must(t, len(findings) != 0, "the fixture produced no finding, so the finding's own names are unasserted")
 		first, _ := findings[0].(map[string]any)
 		for _, name := range []string{"entity_type", "key", "name", "reason", "blockers"} {
 			if _, ok := first[name]; !ok {

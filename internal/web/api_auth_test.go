@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -52,9 +53,7 @@ func TestLoginSetsSessionCookieAndLogoutClearsIt(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	cookies := rec.Result().Cookies()
 	var session *http.Cookie
 	for _, c := range cookies {
@@ -62,39 +61,27 @@ func TestLoginSetsSessionCookieAndLogoutClearsIt(t *testing.T) {
 			session = c
 		}
 	}
-	if session == nil {
-		t.Fatal("login did not set a session cookie")
-	}
-	if !session.HttpOnly {
-		t.Fatal("the session cookie must be HttpOnly")
-	}
-	if session.SameSite != http.SameSiteLaxMode {
-		t.Fatal("the session cookie must be SameSite=Lax")
-	}
+	assert.Must(t, session != nil, "login did not set a session cookie")
+	assert.Must(t, session.HttpOnly, "the session cookie must be HttpOnly")
+	assert.Must(t, session.SameSite == http.SameSiteLaxMode, "the session cookie must be SameSite=Lax")
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	meReq.AddCookie(session)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("/api/me with the session cookie = %d, want 200", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "/api/me with the session cookie = %d, want 200", meRec.Code)
 
 	outReq := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	outReq.AddCookie(session)
 	outRec := httptest.NewRecorder()
 	srv.ServeHTTP(outRec, outReq)
-	if outRec.Code != http.StatusNoContent {
-		t.Fatalf("logout status = %d, want 204", outRec.Code)
-	}
+	assert.Must(t, outRec.Code == http.StatusNoContent, "logout status = %d, want 204", outRec.Code)
 
 	afterReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	afterReq.AddCookie(session)
 	afterRec := httptest.NewRecorder()
 	srv.ServeHTTP(afterRec, afterReq)
-	if afterRec.Code != http.StatusUnauthorized {
-		t.Fatalf("/api/me after logout = %d, want 401", afterRec.Code)
-	}
+	assert.Must(t, afterRec.Code == http.StatusUnauthorized, "/api/me after logout = %d, want 401", afterRec.Code)
 }
 
 func TestLogoutWithoutCookieIsNoContent(t *testing.T) {
@@ -103,9 +90,7 @@ func TestLogoutWithoutCookieIsNoContent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("logout without a cookie = %d, want 204", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNoContent, "logout without a cookie = %d, want 204", rec.Code)
 }
 
 func TestLoginWithWrongPasswordIsUnauthorized(t *testing.T) {
@@ -119,9 +104,7 @@ func TestLoginWithWrongPasswordIsUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
@@ -142,12 +125,8 @@ func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
 	unknownEmailRec := httptest.NewRecorder()
 	srv.ServeHTTP(unknownEmailRec, unknownEmail)
 
-	if wrongPasswordRec.Code != http.StatusUnauthorized || unknownEmailRec.Code != http.StatusUnauthorized {
-		t.Fatalf("status codes = %d, %d, want both 401", wrongPasswordRec.Code, unknownEmailRec.Code)
-	}
-	if wrongPasswordRec.Body.String() != unknownEmailRec.Body.String() {
-		t.Fatalf("response bodies differ: %q vs %q; login must not reveal which case applied", wrongPasswordRec.Body.String(), unknownEmailRec.Body.String())
-	}
+	assert.Must(t, wrongPasswordRec.Code == http.StatusUnauthorized && unknownEmailRec.Code == http.StatusUnauthorized, "status codes = %d, %d, want both 401", wrongPasswordRec.Code, unknownEmailRec.Code)
+	assert.Must(t, wrongPasswordRec.Body.String() == unknownEmailRec.Body.String(), "response bodies differ: %q vs %q; login must not reveal which case applied", wrongPasswordRec.Body.String(), unknownEmailRec.Body.String())
 }
 
 // TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized pins Task
@@ -190,9 +169,7 @@ func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 for a database failure, not 401 (indistinguishable from a wrong password); body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusInternalServerError, "status = %d, want 500 for a database failure, not 401 (indistinguishable from a wrong password); body = %s", rec.Code, rec.Body.String())
 	var body map[string]string
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -219,12 +196,8 @@ func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 		retry := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@example.test","password":"password12345"}`)
 		retryRec := httptest.NewRecorder()
 		srv.ServeHTTP(retryRec, retry)
-		if retryRec.Code == http.StatusTooManyRequests {
-			t.Fatalf("attempt %d during the outage = 429: a database failure charged a rate limiter for an attempt that was never evaluated", i+2)
-		}
-		if retryRec.Code != http.StatusInternalServerError {
-			t.Fatalf("attempt %d during the outage = %d, want 500; body = %s", i+2, retryRec.Code, retryRec.Body.String())
-		}
+		assert.Must(t, retryRec.Code != http.StatusTooManyRequests, "attempt %d during the outage = 429: a database failure charged a rate limiter for an attempt that was never evaluated", i+2)
+		assert.Must(t, retryRec.Code == http.StatusInternalServerError, "attempt %d during the outage = %d, want 500; body = %s", i+2, retryRec.Code, retryRec.Body.String())
 	}
 }
 
@@ -237,9 +210,7 @@ func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"   ","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400", rec.Code)
 }
 
 func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
@@ -285,9 +256,7 @@ func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"other@example.test","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("a different account's login = %d, want 200 (its own budget must be untouched)", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "a different account's login = %d, want 200 (its own budget must be untouched)", rec.Code)
 }
 
 func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
@@ -313,25 +282,19 @@ func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
 		req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"target@example.test","password":"nope"}`)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("attempt %d against target = %d, want 401", i, rec.Code)
-		}
+		assert.Must(t, rec.Code == http.StatusUnauthorized, "attempt %d against target = %d, want 401", i, rec.Code)
 	}
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"target@example.test","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("target's own budget after 10 failures = %d, want 429", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusTooManyRequests, "target's own budget after 10 failures = %d, want 429", rec.Code)
 
 	// A colleague logging in correctly from the same source IP is
 	// unaffected: only 10 of the IP's 40/min budget has been spent.
 	req = jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"colleague@example.test","password":"password12345"}`)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("colleague's login from the same IP = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "colleague's login from the same IP = %d, want 200", rec.Code)
 }
 
 func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
@@ -366,9 +329,7 @@ func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
 			t.Fatalf("attempt %d (%s) = %d, want 401 or 429", i, email, rec.Code)
 		}
 	}
-	if !blocked {
-		t.Fatal("spreading failed attempts across five accounts from one IP never hit the shared IP budget")
-	}
+	assert.Must(t, blocked, "spreading failed attempts across five accounts from one IP never hit the shared IP budget")
 
 	// A correct password for an entirely different, untouched account,
 	// from the same now-exhausted IP, must still be refused — not
@@ -377,9 +338,7 @@ func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"victim@example.test","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("correct password from an IP-exhausted source = %d, want 429 (must not leak a right password via a 200)", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusTooManyRequests, "correct password from an IP-exhausted source = %d, want 429 (must not leak a right password via a 200)", rec.Code)
 }
 
 func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
@@ -394,9 +353,7 @@ func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
 		req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@example.test","password":"password12345"}`)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("login %d = %d, want 200 (a successful login must never spend rate-limit budget)", i, rec.Code)
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "login %d = %d, want 200 (a successful login must never spend rate-limit budget)", i, rec.Code)
 	}
 }
 
@@ -407,9 +364,7 @@ func TestRegisterIsRejectedInInviteOnlyMode(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 in invite_only mode", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403 in invite_only mode", rec.Code)
 }
 
 func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
@@ -419,9 +374,7 @@ func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 	cookies := rec.Result().Cookies()
 	found := false
 	for _, c := range cookies {
@@ -429,9 +382,7 @@ func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Fatal("register did not set a session cookie")
-	}
+	assert.Must(t, found, "register did not set a session cookie")
 }
 
 func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
@@ -445,9 +396,7 @@ func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -463,16 +412,12 @@ func TestRegisterWithTakenEmailInDomainOpenModeIsConflict(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("first register = %d, want 201", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "first register = %d, want 201", rec.Code)
 
 	req2 := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"Again","password":"password12345"}`)
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, req2)
-	if rec2.Code != http.StatusConflict {
-		t.Fatalf("second register = %d, want 409", rec2.Code)
-	}
+	assert.Must(t, rec2.Code == http.StatusConflict, "second register = %d, want 409", rec2.Code)
 }
 
 func TestRegisterWithInvalidEmailIsUnprocessable(t *testing.T) {
@@ -481,9 +426,7 @@ func TestRegisterWithInvalidEmailIsUnprocessable(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"a","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422; body = %s", rec.Code, rec.Body.String())
 }
 
 func TestRegisterWithEmptyDisplayNameIsUnprocessable(t *testing.T) {
@@ -492,9 +435,7 @@ func TestRegisterWithEmptyDisplayNameIsUnprocessable(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -510,9 +451,7 @@ func TestRegisterWithShortPasswordIsUnprocessable(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"short"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -527,17 +466,13 @@ func TestRegisterWithInviteTokenWinsOverInviteOnlyMode(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@example.test","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 }
 
 func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
@@ -548,17 +483,13 @@ func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
 	srv, ids, _ := newTestServerWithConfig(t, domainOpenConfig)
 	ctx := context.Background()
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@example.test","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 }
 
 // TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership
@@ -574,9 +505,7 @@ func TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership(t 
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	existing, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "existing@example.test", DisplayName: "Existing", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	cookie := loginAs(t, srv, "existing@example.test")
 
 	// A fresh project existing is not already a member of, created by a
@@ -587,18 +516,14 @@ func TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership(t 
 	ownerCookie := loginAsFreshOwner(t, srv, ids, "owner-of-second-game@example.test")
 	secondProjectID := createTestProjectForRegisterTest(t, srv, ownerCookie, "clicked-invite-game")
 	inviteToken, _, err := ids.CreateInvite(ctx, identity.InviteRequest{ProjectID: &secondProjectID, Role: "editor"})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"invite_token":"`+inviteToken+`"}`)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (granted to the existing account, nothing created); body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200 (granted to the existing account, nothing created); body = %s", rec.Code, rec.Body.String())
 	var body struct {
 		UserID    string `json:"user_id"`
 		ProjectID string `json:"project_id"`
@@ -606,24 +531,18 @@ func TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership(t 
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.UserID != existing.ID.String() {
-		t.Fatalf("user_id = %q, want the existing account's id %q", body.UserID, existing.ID.String())
-	}
+	assert.Must(t, body.UserID == existing.ID.String(), "user_id = %q, want the existing account's id %q", body.UserID, existing.ID.String())
 
 	// No new session was issued — the same cookie must still work, and
 	// no second cookie appears in the response.
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == web.SessionCookie {
-			t.Fatal("granting membership to an existing, logged-in caller must not issue a new session cookie")
-		}
+		assert.Must(t, c.Name != web.SessionCookie, "granting membership to an existing, logged-in caller must not issue a new session cookie")
 	}
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	meReq.AddCookie(cookie)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("the original session must still work, /api/me = %d", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "the original session must still work, /api/me = %d", meRec.Code)
 }
 
 // TestRegisterWithInviteTokenAndLiveSessionRejectsBoundInviteForAnotherEmail
@@ -642,18 +561,14 @@ func TestRegisterWithInviteTokenAndLiveSessionRejectsBoundInviteForAnotherEmail(
 	ownerCookie := loginAsFreshOwner(t, srv, ids, "owner-of-bound-game@example.test")
 	projectID := createTestProjectForRegisterTest(t, srv, ownerCookie, "bound-invite-game")
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{Email: "someone-else@example.test", ProjectID: &projectID, Role: "viewer"})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"invite_token":"`+token+`"}`)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (invite_invalid); body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403 (invite_invalid); body = %s", rec.Code, rec.Body.String())
 }
 
 // TestRegisterWithInviteTokenAndLiveSessionRejectsAccountOnlyInvite pins
@@ -669,18 +584,14 @@ func TestRegisterWithInviteTokenAndLiveSessionRejectsAccountOnlyInvite(t *testin
 	cookie := loginAs(t, srv, "already-has-account@example.test")
 
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"invite_token":"`+token+`"}`)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (invite_invalid); body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403 (invite_invalid); body = %s", rec.Code, rec.Body.String())
 }
 
 // loginAsFreshOwner creates a brand-new account and logs it in, purely
@@ -705,9 +616,7 @@ func createTestProjectForRegisterTest(t *testing.T, srv *web.Server, cookie *htt
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create game status = %d, want 201: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "create game status = %d, want 201: %s", rec.Code, rec.Body.String())
 	var body struct {
 		ID string `json:"id"`
 	}
@@ -715,9 +624,7 @@ func createTestProjectForRegisterTest(t *testing.T, srv *web.Server, cookie *htt
 		t.Fatalf("decode create game response: %v", err)
 	}
 	id, err := uuid.Parse(body.ID)
-	if err != nil {
-		t.Fatalf("parse project id: %v", err)
-	}
+	assert.Must(t, err == nil, "parse project id: %v", err)
 	return id
 }
 
@@ -734,17 +641,13 @@ func TestRegisterWithOffDomainUnboundInviteIsForbidden(t *testing.T) {
 	srv, ids, _ := newTestServerWithConfig(t, domainOpenConfig)
 	ctx := context.Background()
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.test","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -775,9 +678,7 @@ func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
 	permissiveCfg := testConfig()
 	creator := identity.New(pool, permissiveCfg)
 	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@outside.test"})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	// The HTTP server's own identity.Service shares the same pool as
 	// creator above, but is wired with the strict allowlist domain_open
@@ -798,9 +699,7 @@ func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 }
 
 func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
@@ -810,9 +709,7 @@ func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -843,9 +740,7 @@ func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
 	srv, ids, _, pool := newTestServerWithPool(t)
 	ctx := context.Background()
 	token, invite, err := ids.CreateInvite(ctx, identity.InviteRequest{})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 	if _, err := pool.Exec(ctx,
 		`UPDATE invites SET expires_at = now() - interval '1 hour' WHERE id = $1`,
 		invite.ID); err != nil {
@@ -856,9 +751,7 @@ func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -879,23 +772,17 @@ func TestDoubleRedemptionOverHTTPFailsTheSecondTime(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateInvite: %v", err)
 
 	first := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@example.test","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
 	firstRec := httptest.NewRecorder()
 	srv.ServeHTTP(firstRec, first)
-	if firstRec.Code != http.StatusCreated {
-		t.Fatalf("first redemption = %d, want 201; body = %s", firstRec.Code, firstRec.Body.String())
-	}
+	assert.Must(t, firstRec.Code == http.StatusCreated, "first redemption = %d, want 201; body = %s", firstRec.Code, firstRec.Body.String())
 
 	second := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@example.test","display_name":"Invited Again","password":"password12345","invite_token":"`+token+`"}`)
 	secondRec := httptest.NewRecorder()
 	srv.ServeHTTP(secondRec, second)
-	if secondRec.Code != http.StatusForbidden {
-		t.Fatalf("second redemption = %d, want 403; body = %s", secondRec.Code, secondRec.Body.String())
-	}
+	assert.Must(t, secondRec.Code == http.StatusForbidden, "second redemption = %d, want 403; body = %s", secondRec.Code, secondRec.Body.String())
 	var payload map[string]string
 	if err := decodeJSON(secondRec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -970,9 +857,7 @@ func TestOversizedRegisterBodyIsRejectedWith413(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"`+huge+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want 413 for an oversized body", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusRequestEntityTooLarge, "status = %d, want 413 for an oversized body", rec.Code)
 }
 
 func TestLoginRejectsMalformedJSON(t *testing.T) {
@@ -981,9 +866,7 @@ func TestLoginRejectsMalformedJSON(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{not json`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400", rec.Code)
 }
 
 func TestLoginRejectsNonJSONContentType(t *testing.T) {
@@ -993,9 +876,7 @@ func TestLoginRejectsNonJSONContentType(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("status = %d, want 415", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnsupportedMediaType, "status = %d, want 415", rec.Code)
 }
 
 func TestLoginRejectsMissingContentType(t *testing.T) {
@@ -1004,9 +885,7 @@ func TestLoginRejectsMissingContentType(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"a@b.test","password":"password12345"}`))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("status = %d, want 415", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnsupportedMediaType, "status = %d, want 415", rec.Code)
 }
 
 func TestClientIPIgnoresXForwardedForByDefault(t *testing.T) {
@@ -1093,13 +972,9 @@ func TestSessionCookieNotSecureOverForwardedProtoWithoutTrustedProxy(t *testing.
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == web.SessionCookie && c.Secure {
-			t.Fatal("session cookie is Secure from an untrusted X-Forwarded-Proto claim")
-		}
+		assert.Must(t, c.Name != web.SessionCookie || !c.Secure, "session cookie is Secure from an untrusted X-Forwarded-Proto claim")
 	}
 }
 
@@ -1118,21 +993,15 @@ func TestSessionCookieSecureOverForwardedProtoBehindTrustedProxy(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	found := false
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == web.SessionCookie {
 			found = true
-			if !c.Secure {
-				t.Fatal("session cookie is not Secure despite a trusted X-Forwarded-Proto: https")
-			}
+			assert.Must(t, c.Secure, "session cookie is not Secure despite a trusted X-Forwarded-Proto: https")
 		}
 	}
-	if !found {
-		t.Fatal("login did not set a session cookie")
-	}
+	assert.Must(t, found, "login did not set a session cookie")
 }
 
 func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
@@ -1144,9 +1013,7 @@ func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@example.test","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if strings.Contains(rec.Body.String(), "argon2") {
-		t.Fatalf("login response leaks the password hash: %s", rec.Body.String())
-	}
+	assert.Must(t, !strings.Contains(rec.Body.String(), "argon2"), "login response leaks the password hash: %s", rec.Body.String())
 	var payload map[string]json.RawMessage
 	if err := decodeJSON(rec, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -1178,9 +1045,7 @@ func TestARefusalNamesEveryUnknownMemberAtOnce(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400: %s", rec.Code, rec.Body.String())
 	var body struct {
 		Message string `json:"message"`
 		Details struct {
@@ -1195,26 +1060,20 @@ func TestARefusalNamesEveryUnknownMemberAtOnce(t *testing.T) {
 	}
 
 	want := []string{"titel", "bodyy", "markdownn"}
-	if len(body.Details.Fields) != len(want) {
-		t.Fatalf("%d field(s) named, want %d: an agent fixing one member per round trip pays "+
-			"one round trip per typo, which is what this promise exists to prevent: %s",
-			len(body.Details.Fields), len(want), rec.Body.String())
-	}
+	assert.Must(t, len(body.Details.Fields) == len(want), "%d field(s) named, want %d: an agent fixing one member per round trip pays "+
+		"one round trip per typo, which is what this promise exists to prevent: %s",
+		len(body.Details.Fields), len(want), rec.Body.String())
 	for i, name := range want {
 		if body.Details.Fields[i].Path != name {
 			t.Errorf("field %d is %q, want %q: the order is the body's own", i, body.Details.Fields[i].Path, name)
 		}
 	}
 	// The sentence is read by people too.
-	if !strings.Contains(body.Message, "are not members of this request") {
-		t.Errorf("message = %q, want a plural sentence over three members", body.Message)
-	}
+	assert.Should(t, strings.Contains(body.Message, "are not members of this request"), "message = %q, want a plural sentence over three members", body.Message)
 
 	// One unknown member keeps the singular.
 	single := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"a@b.c","password":"x","titel":1}`)
 	singleRec := httptest.NewRecorder()
 	srv.ServeHTTP(singleRec, single)
-	if !strings.Contains(singleRec.Body.String(), "titel is not a member of this request") {
-		t.Errorf("one unknown member did not keep the singular: %s", singleRec.Body.String())
-	}
+	assert.Should(t, strings.Contains(singleRec.Body.String(), "titel is not a member of this request"), "one unknown member did not keep the singular: %s", singleRec.Body.String())
 }

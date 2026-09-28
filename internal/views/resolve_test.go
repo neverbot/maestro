@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -20,12 +21,8 @@ func TestResolveArea(t *testing.T) {
 			"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"}]}`)
 
 		r, err := g.views.Resolve(context.Background(), g.projectID, q)
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		if r.Sets[0].EntityTypeID == nil {
-			t.Fatal("the seed selector's type must resolve to an id")
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
+		assert.Must(t, r.Sets[0].EntityTypeID != nil, "the seed selector's type must resolve to an id")
 		if len(r.Steps[0].RelationTypeIDs) != 1 {
 			t.Fatalf("the step's via must resolve to one relation type id, got %v",
 				r.Steps[0].RelationTypeIDs)
@@ -55,12 +52,8 @@ func TestResolveArea(t *testing.T) {
 		}
 		_, err := g.views.Resolve(ctx, g.projectID,
 			mustParse(t, `{"v":1,"from":[{"type":"vehicle"}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a type from another game must not resolve, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `no entity type "vehicle" in this game`) {
-			t.Fatalf("must name the key back, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a type from another game must not resolve, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `no entity type "vehicle" in this game`), "must name the key back, got %v", err)
 	})
 
 	// TestResolveArea's "a relation type from another game does not resolve"
@@ -82,28 +75,18 @@ func TestResolveArea(t *testing.T) {
 			t.Fatalf("drives must resolve in the game that declares it: %v", err)
 		}
 		_, err := g.views.Resolve(ctx, g.projectID, mustParse(t, doc))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a relation type from another game must not resolve, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `no relation type "drives" in this game`) {
-			t.Fatalf("must name the key back, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a relation type from another game must not resolve, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `no relation type "drives" in this game`), "must name the key back, got %v", err)
 	})
 
 	t.Run("an operator the field type cannot answer is refused at save time", func(t *testing.T) {
 		g, _ := a.games(t)
 		_, err := g.views.Resolve(context.Background(), g.projectID,
 			mustParse(t, `{"v":1,"from":[{"type":"quest","where":{"field":"rank","op":"gt","value":"rare"}}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("gt on an enum must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(),
-			`the field "rank" is declared enum, which answers eq, neq, in, exists`) {
-			t.Fatalf("must name the type and the operators it does answer, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "/from/0/where/op") {
-			t.Fatalf("must point at the operator, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "gt on an enum must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(),
+			`the field "rank" is declared enum, which answers eq, neq, in, exists`), "must name the type and the operators it does answer, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), "/from/0/where/op"), "must point at the operator, got %v", err)
 	})
 
 	// TestResolveArea's "an enum value outside its options is refused rather
@@ -113,12 +96,8 @@ func TestResolveArea(t *testing.T) {
 		g, _ := a.games(t)
 		_, err := g.views.Resolve(context.Background(), g.projectID,
 			mustParse(t, `{"v":1,"from":[{"type":"quest","where":{"field":"rank","op":"eq","value":"legendary"}}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("an option outside the declaration must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `"legendary" is not one of [common rare epic]`) {
-			t.Fatalf("must list the options, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "an option outside the declaration must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `"legendary" is not one of [common rare epic]`), "must list the options, got %v", err)
 	})
 
 	t.Run("a parameter is type checked against the operator it feeds", func(t *testing.T) {
@@ -127,9 +106,7 @@ func TestResolveArea(t *testing.T) {
 		q := mustParse(t, `{"v":1,"params":[{"key":"floor","type":"number","default":20}],
 			"from":[{"type":"quest","where":{"field":"min_level","op":"gte","value":{"param":"floor"}}}]}`)
 		r, err := g.views.Resolve(ctx, g.projectID, q)
-		if err != nil {
-			t.Fatalf("a number param feeding gte on a number field must resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "a number param feeding gte on a number field must resolve: %v", err)
 		if got := r.Params["floor"]; got != float64(20) {
 			t.Fatalf("the default must be coerced to the declared type, got %#v", got)
 		}
@@ -140,20 +117,14 @@ func TestResolveArea(t *testing.T) {
 		bad := mustParse(t, `{"v":1,"params":[{"key":"who","type":"text","default":"mage"}],
 			"from":[{"type":"quest","where":{"field":"min_level","op":"gte","value":{"param":"who"}}}]}`)
 		_, err = g.views.Resolve(ctx, g.projectID, bad)
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a text param feeding a number field must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `the parameter "who" is declared text and the field `+
-			`"min_level" is declared number`) {
-			t.Fatalf("must name both sides, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a text param feeding a number field must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `the parameter "who" is declared text and the field `+
+			`"min_level" is declared number`), "must name both sides, got %v", err)
 
 		unbound := mustParse(t, `{"v":1,"from":[{"type":"quest",
 			"where":{"field":"min_level","op":"gte","value":{"param":"nowhere"}}}]}`)
 		_, err = g.views.Resolve(ctx, g.projectID, unbound)
-		if !strings.Contains(err.Error(), `no parameter named "nowhere" is declared`) {
-			t.Fatalf("an unbound param must be named back, got %v", err)
-		}
+		assert.Must(t, strings.Contains(err.Error(), `no parameter named "nowhere" is declared`), "an unbound param must be named back, got %v", err)
 	})
 
 	// TestResolveArea's "a parameter default is coerced to its declared type"
@@ -169,9 +140,7 @@ func TestResolveArea(t *testing.T) {
 		ok := mustParse(t, `{"v":1,"params":[{"key":"who","type":"text","default":"mage"}],
 			"from":[{"type":"quest"}]}`)
 		r, err := g.views.Resolve(ctx, g.projectID, ok)
-		if err != nil {
-			t.Fatalf("a text default on a text parameter must resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "a text default on a text parameter must resolve: %v", err)
 		if r.Params["who"] != "mage" {
 			t.Fatalf("the default must be carried through, got %#v", r.Params["who"])
 		}
@@ -179,13 +148,8 @@ func TestResolveArea(t *testing.T) {
 		bad := mustParse(t, `{"v":1,"params":[{"key":"floor","type":"number","default":"twenty"}],
 			"from":[{"type":"quest"}]}`)
 		_, err = g.views.Resolve(ctx, g.projectID, bad)
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a text default on a number parameter must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "/params/0/default") ||
-			!strings.Contains(err.Error(), "expected number, got string") {
-			t.Fatalf("must report the metamodel's own wording at the default's pointer, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a text default on a number parameter must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), "/params/0/default") && strings.Contains(err.Error(), "expected number, got string"), "must report the metamodel's own wording at the default's pointer, got %v", err)
 	})
 
 	// TestResolveArea's "resolution lists every type reference with its
@@ -197,9 +161,7 @@ func TestResolveArea(t *testing.T) {
 			"traverse":[{"from":"q","via":["available_to","requires"],"to_type":"class","as":"c"}],
 			"project":{"color_by":{"related":{"via":"takes_place_in","type":"zone","attr":"@name"}}}}`)
 		r, err := g.views.Resolve(context.Background(), g.projectID, q)
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		want := map[string]string{
 			"/from/0/type":                   "quest",
 			"/traverse/0/via/0":              "available_to",
@@ -211,13 +173,9 @@ func TestResolveArea(t *testing.T) {
 		got := map[string]string{}
 		for _, ref := range r.Refs {
 			got[ref.Pointer] = ref.Key
-			if ref.ID == nil {
-				t.Errorf("%s resolved to no id, and every key here exists", ref.Pointer)
-			}
+			assert.Should(t, ref.ID != nil, "%s resolved to no id, and every key here exists", ref.Pointer)
 		}
-		if len(got) != len(want) {
-			t.Fatalf("listed %d references, want %d: %v", len(got), len(want), got)
-		}
+		assert.Must(t, len(got) == len(want), "listed %d references, want %d: %v", len(got), len(want), got)
 		for ptr, key := range want {
 			if got[ptr] != key {
 				t.Errorf("%s: got %q want %q", ptr, got[ptr], key)
@@ -239,29 +197,21 @@ func TestResolveArea(t *testing.T) {
 		q := mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 			"traverse":[{"from":"q","via":"gone_missing","to_type":"also_gone","as":"m"}]}`)
 		r, err := ResolveAgainst(g.projectID, mustCatalogue(t, g), q)
-		if r != nil {
-			t.Fatalf("an unresolvable key must refuse the query, got %#v", r)
-		}
+		assert.Must(t, r == nil, "an unresolvable key must refuse the query, got %#v", r)
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("want a *QueryError, got %v", err)
-		}
+		assert.Must(t, errors.As(err, &qe), "want a *QueryError, got %v", err)
 		// The refusal is what a caller sees; the listing is what Task 11
 		// stores. Resolve refuses, so the listing is read from a second pass
 		// over the same catalogue, which is exactly what stale.go will do.
 		refs, err := ReferencesOf(g.projectID, mustCatalogue(t, g), q)
-		if err != nil {
-			t.Fatalf("the listing pass must not refuse its own game: %v", err)
-		}
+		assert.Must(t, err == nil, "the listing pass must not refuse its own game: %v", err)
 		var found *TypeRef
 		for i := range refs {
 			if refs[i].Pointer == "/traverse/0/via/0" {
 				found = &refs[i]
 			}
 		}
-		if found == nil {
-			t.Fatalf("the unresolvable reference must still be listed: %#v", refs)
-		}
+		assert.Must(t, found != nil, "the unresolvable reference must still be listed: %#v", refs)
 		if found.Key != "gone_missing" || found.ID != nil || found.Kind != KindRelationType {
 			t.Fatalf("want the key kept and the id nil, got %#v", *found)
 		}
@@ -271,18 +221,14 @@ func TestResolveArea(t *testing.T) {
 				found = &refs[i]
 			}
 		}
-		if found == nil {
-			t.Fatalf("the unresolvable entity type must be listed too: %#v", refs)
-		}
+		assert.Must(t, found != nil, "the unresolvable entity type must be listed too: %#v", refs)
 		if found.Key != "also_gone" || found.ID != nil || found.Kind != KindEntityType {
 			t.Fatalf("want the key kept and the id nil, got %#v", *found)
 		}
 		// Positive control in the same test: a reference that does resolve is
 		// listed with an id, so a listing that nils everything cannot pass.
 		for _, ref := range refs {
-			if ref.Pointer == "/from/0/type" && ref.ID == nil {
-				t.Fatalf("quest resolves and must carry its id: %#v", ref)
-			}
+			assert.Must(t, ref.Pointer != "/from/0/type" || ref.ID != nil, "quest resolves and must carry its id: %#v", ref)
 		}
 	})
 
@@ -305,12 +251,8 @@ func TestResolveArea(t *testing.T) {
 			`{"v":1,"from":[{"type":"quest","as":"q"}],
 			  "traverse":[{"from":"q","via":"available_to","as":"c",
 			               "where":{"field":"min_level","op":"gte","value":10}}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a declared field on an open step must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "reaches entities of any type") {
-			t.Fatalf("must say why rather than blaming a type, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a declared field on an open step must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), "reaches entities of any type"), "must say why rather than blaming a type, got %v", err)
 	})
 
 	// TestResolveArea's "a field must be declared the same way on every type a
@@ -335,12 +277,8 @@ func TestResolveArea(t *testing.T) {
 			  "traverse":[{"from":"q","via":["requires","takes_place_in"],
 			               "to_type":["quest","zone"],"as":"p",
 			               "where":{"field":"min_level","op":"gte","value":10}}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a field declared on one of two reached types must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `"zone" does not declare it`) {
-			t.Fatalf("must name the type that lacks it, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a field declared on one of two reached types must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `"zone" does not declare it`), "must name the type that lacks it, got %v", err)
 	})
 
 	// TestResolveArea's "a declared range does not refuse a comparison outside
@@ -360,12 +298,8 @@ func TestResolveArea(t *testing.T) {
 		// so this is not a pass that stopped checking.
 		_, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"quest","where":{"field":"difficulty","op":"gte","value":"hard"}}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("text against a number field must still be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "expected number, got string") {
-			t.Fatalf("must keep the metamodel's own wording, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "text against a number field must still be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), "expected number, got string"), "must keep the metamodel's own wording, got %v", err)
 	})
 
 	// TestResolveArea's "every problem in one query is reported in one pass"
@@ -379,12 +313,8 @@ func TestResolveArea(t *testing.T) {
 			                {"type":"quest","as":"q","where":{"field":"rank","op":"gt","value":"rare"}}],
 			  "traverse":[{"from":"q","via":"drives","as":"d"}]}`))
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("want a *QueryError, got %v", err)
-		}
-		if len(qe.Fields) != 3 {
-			t.Fatalf("want three problems in one pass, got %d: %v", len(qe.Fields), qe.Fields)
-		}
+		assert.Must(t, errors.As(err, &qe), "want a *QueryError, got %v", err)
+		assert.Must(t, len(qe.Fields) == 3, "want three problems in one pass, got %d: %v", len(qe.Fields), qe.Fields)
 		wantPaths := []string{"/from/0/type", "/from/1/where/op", "/traverse/0/via/0"}
 		for i, path := range wantPaths {
 			if qe.Fields[i].Path != path {
@@ -409,15 +339,9 @@ func TestResolveArea(t *testing.T) {
 		_, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"quest","as":"q"}],
 			  "traverse":[{"from":"q","via":"requires","depth":6,"as":"p"}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("depth 6 under the default max_depth of 4 must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "asks for depth 6 and this query's max_depth is 4") {
-			t.Fatalf("must name both numbers, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "/traverse/0/depth") {
-			t.Fatalf("must point at the step's depth, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "depth 6 under the default max_depth of 4 must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), "asks for depth 6 and this query's max_depth is 4"), "must name both numbers, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), "/traverse/0/depth"), "must point at the step's depth, got %v", err)
 	})
 
 	// TestResolveArea's "resolution takes the querys limits and defaults the
@@ -427,20 +351,12 @@ func TestResolveArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		r, err := g.views.Resolve(ctx, g.projectID, mustParse(t, `{"v":1,"from":[{"type":"quest"}]}`))
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		if r.Limits != (ResolvedLimits{DefaultMaxDepth, DefaultMaxNodes, DefaultMaxEdges}) {
-			t.Fatalf("an unset limits block must take every default, got %#v", r.Limits)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
+		assert.Must(t, r.Limits == (ResolvedLimits{DefaultMaxDepth, DefaultMaxNodes, DefaultMaxEdges}), "an unset limits block must take every default, got %#v", r.Limits)
 		r, err = g.views.Resolve(ctx, g.projectID, mustParse(t,
 			`{"v":1,"limits":{"max_nodes":7},"from":[{"type":"quest"}]}`))
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		if r.Limits != (ResolvedLimits{DefaultMaxDepth, 7, DefaultMaxEdges}) {
-			t.Fatalf("one override must not disturb the other two, got %#v", r.Limits)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
+		assert.Must(t, r.Limits == (ResolvedLimits{DefaultMaxDepth, 7, DefaultMaxEdges}), "one override must not disturb the other two, got %#v", r.Limits)
 	})
 
 	// TestResolveArea's "a catalogue from another game is refused" case is the
@@ -463,16 +379,9 @@ func TestResolveArea(t *testing.T) {
 			t.Fatalf("a catalogue must resolve against the game it was read for: %v", err)
 		}
 		r, err := ResolveAgainst(other.projectID, cat, q)
-		if !errors.Is(err, ErrWrongGame) {
-			t.Fatalf("a catalogue from another game must be refused, got %#v and %v", r, err)
-		}
-		if r != nil {
-			t.Fatalf("a refused pair must resolve to nothing, got %#v", r)
-		}
-		if !strings.Contains(err.Error(), g.projectID.String()) ||
-			!strings.Contains(err.Error(), other.projectID.String()) {
-			t.Fatalf("must name both games, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrWrongGame), "a catalogue from another game must be refused, got %#v and %v", r, err)
+		assert.Must(t, r == nil, "a refused pair must resolve to nothing, got %#v", r)
+		assert.Must(t, strings.Contains(err.Error(), g.projectID.String()) && strings.Contains(err.Error(), other.projectID.String()), "must name both games, got %v", err)
 		// The dependency list is the other door into the same catalogue, and
 		// it is the one Task 12 reads.
 		if _, err := ReferencesOf(other.projectID, cat, q); !errors.Is(err, ErrWrongGame) {
@@ -481,9 +390,7 @@ func TestResolveArea(t *testing.T) {
 		if refs, err := ReferencesOf(g.projectID, cat, q); err != nil || len(refs) != 1 {
 			t.Fatalf("its own game must still be listed, got %v and %#v", err, refs)
 		}
-		if cat.ProjectID != g.projectID {
-			t.Fatalf("a catalogue must carry the game it was read for, got %v", cat.ProjectID)
-		}
+		assert.Must(t, cat.ProjectID == g.projectID, "a catalogue must carry the game it was read for, got %v", cat.ProjectID)
 	})
 
 	// TestResolveArea's "a field declared two ways names each type with its
@@ -503,18 +410,12 @@ func TestResolveArea(t *testing.T) {
 		}
 		// quest declares min_level number, region declares it enum.
 		_, err := g.views.Resolve(ctx, g.projectID, mustParse(t, doc("quest", "region")))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a field declared two ways must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(),
-			`the field "min_level" is declared number on "quest" and enum on "region"`) {
-			t.Fatalf("each type must be named beside its own declaration, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a field declared two ways must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(),
+			`the field "min_level" is declared number on "quest" and enum on "region"`), "each type must be named beside its own declaration, got %v", err)
 		_, err = g.views.Resolve(ctx, g.projectID, mustParse(t, doc("region", "quest")))
-		if !strings.Contains(err.Error(),
-			`the field "min_level" is declared enum on "region" and number on "quest"`) {
-			t.Fatalf("reversing the list must reverse the message, got %v", err)
-		}
+		assert.Must(t, strings.Contains(err.Error(),
+			`the field "min_level" is declared enum on "region" and number on "quest"`), "reversing the list must reverse the message, got %v", err)
 
 		// The enum-options branch says the same thing about its own two
 		// operands: quest's options belong to quest and faction's to faction.
@@ -524,18 +425,12 @@ func TestResolveArea(t *testing.T) {
 				`"],"as":"p","where":{"field":"rank","op":"eq","value":"rare"}}]}`
 		}
 		_, err = g.views.Resolve(ctx, g.projectID, mustParse(t, rank("quest", "faction")))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("two different option sets must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `on "quest" ([common rare epic]) and on "faction" `+
-			`([common rare])`) {
-			t.Fatalf("each type must carry its own options, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "two different option sets must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `on "quest" ([common rare epic]) and on "faction" `+
+			`([common rare])`), "each type must carry its own options, got %v", err)
 		_, err = g.views.Resolve(ctx, g.projectID, mustParse(t, rank("faction", "quest")))
-		if !strings.Contains(err.Error(), `on "faction" ([common rare]) and on "quest" `+
-			`([common rare epic])`) {
-			t.Fatalf("reversing the list must reverse the message, got %v", err)
-		}
+		assert.Must(t, strings.Contains(err.Error(), `on "faction" ([common rare]) and on "quest" `+
+			`([common rare epic])`), "reversing the list must reverse the message, got %v", err)
 	})
 
 	// TestResolveArea's "enum options are compared as a set not a sequence"
@@ -561,9 +456,7 @@ func TestResolveArea(t *testing.T) {
 			`{"v":1,"from":[{"type":"quest","as":"q"}],
 			  "traverse":[{"from":"q","via":"takes_place_in","to_type":["quest","faction"],"as":"p",
 			               "where":{"field":"rank","op":"eq","value":"rare"}}]}`))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a different option set must still be refused, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a different option set must still be refused, got %v", err)
 	})
 
 	// TestResolveArea's "a parameter cannot feed an enum or a list field" case
@@ -584,12 +477,8 @@ func TestResolveArea(t *testing.T) {
 				`{"v":1,"params":[{"key":"which","type":"text"}],
 				  "from":[{"type":"quest","where":{"field":"`+field+`","op":"`+op+
 					`","value":{"param":"which"}}}]}`))
-			if !errors.Is(err, ErrQueryInvalid) {
-				t.Fatalf("%s: a parameter must not feed this field, got %v", field, err)
-			}
-			if !strings.Contains(err.Error(), "a parameter cannot stand in for one") {
-				t.Fatalf("%s: must say the language cannot express it, got %v", field, err)
-			}
+			assert.Must(t, errors.Is(err, ErrQueryInvalid), "%s: a parameter must not feed this field, got %v", field, err)
+			assert.Must(t, strings.Contains(err.Error(), "a parameter cannot stand in for one"), "%s: must say the language cannot express it, got %v", field, err)
 		}
 		// Positive control in the same test: a text parameter still feeds a
 		// text-typed built-in, so this is not a blanket refusal.
@@ -618,16 +507,12 @@ func TestResolveArea(t *testing.T) {
 		// Positive control first: the well-shaped operands resolve and land
 		// where Task 6 binds them, typed.
 		r, err := ResolveAgainst(g.projectID, cat, hand("min_level", "exists", true))
-		if err != nil {
-			t.Fatalf("a bool beside exists must resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "a bool beside exists must resolve: %v", err)
 		if v, ok := r.Sets[0].Where.Leaf.Value.(bool); !ok || !v {
 			t.Fatalf("exists must carry a bool, got %#v", r.Sets[0].Where.Leaf.Value)
 		}
 		r, err = ResolveAgainst(g.projectID, cat, hand("tags", "length_gte", float64(2)))
-		if err != nil {
-			t.Fatalf("a number beside length_gte must resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "a number beside length_gte must resolve: %v", err)
 		if v, ok := r.Sets[0].Where.Leaf.Value.(float64); !ok || v != 2 {
 			t.Fatalf("length_gte must carry a float64, got %#v", r.Sets[0].Where.Leaf.Value)
 		}
@@ -638,12 +523,8 @@ func TestResolveArea(t *testing.T) {
 		}
 		_, err = ResolveAgainst(g.projectID, cat,
 			hand("tags", "length_gte", map[string]any{"deep": true}))
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a map beside length_gte must be refused, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `must be a number, because the operator is "length_gte"`) {
-			t.Fatalf("must say what the operator takes, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "a map beside length_gte must be refused, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `must be a number, because the operator is "length_gte"`), "must say what the operator takes, got %v", err)
 	})
 
 	// TestResolveArea's "a catalogue folds case on both sides" case pins the
@@ -657,13 +538,8 @@ func TestResolveArea(t *testing.T) {
 		r, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"QUEST","as":"q"}],
 			  "traverse":[{"from":"q","via":"Available_To","to_type":"Class","as":"c"}]}`))
-		if err != nil {
-			t.Fatalf("a key spelled in another case must resolve: %v", err)
-		}
-		if r.Sets[0].EntityTypeID == nil || len(r.Steps[0].RelationTypeIDs) != 1 ||
-			len(r.Steps[0].ToTypeIDs) != 1 {
-			t.Fatalf("every key must have resolved, got %#v", r)
-		}
+		assert.Must(t, err == nil, "a key spelled in another case must resolve: %v", err)
+		assert.Must(t, r.Sets[0].EntityTypeID != nil && len(r.Steps[0].RelationTypeIDs) == 1 && len(r.Steps[0].ToTypeIDs) == 1, "every key must have resolved, got %#v", r)
 		// The reference keeps the query's own spelling, which is what a rename
 		// diagnostic compares against the stored one.
 		if r.Refs[0].Key != "QUEST" {
@@ -675,12 +551,8 @@ func TestResolveArea(t *testing.T) {
 		r, err = g.views.Resolve(ctx, g.projectID, mustParse(t,
 			`{"v":1,"from":[{"type":"boss","as":"b"}],
 			  "traverse":[{"from":"b","via":"guards","as":"g"}]}`))
-		if err != nil {
-			t.Fatalf("a type stored with a capital must resolve in lower case: %v", err)
-		}
-		if r.Sets[0].EntityTypeID == nil || len(r.Steps[0].RelationTypeIDs) != 1 {
-			t.Fatalf("boss and guards must both have resolved, got %#v", r)
-		}
+		assert.Must(t, err == nil, "a type stored with a capital must resolve in lower case: %v", err)
+		assert.Must(t, r.Sets[0].EntityTypeID != nil && len(r.Steps[0].RelationTypeIDs) == 1, "boss and guards must both have resolved, got %#v", r)
 		cat := mustCatalogue(t, g)
 		if _, ok := cat.EntityTypes["boss"]; !ok {
 			t.Fatalf("the catalogue must be keyed by the folded entity-type key")
@@ -714,14 +586,10 @@ func TestResolveArea(t *testing.T) {
 		b.WriteString(`]}`)
 		_, err := g.views.Resolve(context.Background(), g.projectID, mustParse(t, b.String()))
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("want a *QueryError, got %v", err)
-		}
+		assert.Must(t, errors.As(err, &qe), "want a *QueryError, got %v", err)
 		got := []string{qe.Fields[0].Path, qe.Fields[1].Path}
 		want := []string{"/from/2/type", "/from/10/type"}
-		if len(qe.Fields) != 2 || got[0] != want[0] || got[1] != want[1] {
-			t.Fatalf("want %v in document order, got %v", want, qe.Fields)
-		}
+		assert.Must(t, len(qe.Fields) == 2 && got[0] == want[0] && got[1] == want[1], "want %v in document order, got %v", want, qe.Fields)
 	})
 }
 
@@ -730,8 +598,6 @@ func TestResolveArea(t *testing.T) {
 func mustCatalogue(t *testing.T, g *game) *Catalogue {
 	t.Helper()
 	cat, err := g.views.LoadCatalogue(context.Background(), g.projectID)
-	if err != nil {
-		t.Fatalf("load catalogue: %v", err)
-	}
+	assert.Must(t, err == nil, "load catalogue: %v", err)
 	return cat
 }

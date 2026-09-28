@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/paging"
 )
@@ -31,9 +32,7 @@ func (g *game) seedViews(t *testing.T, n int, name, renderer string) []uuid.UUID
 			in.Query = []byte(questsToZones)
 		}
 		row, err := g.views.UpsertView(context.Background(), g.projectID, in)
-		if err != nil {
-			t.Fatalf("seed view %d: %v", i, err)
-		}
+		assert.Must(t, err == nil, "seed view %d: %v", i, err)
 		ids = append(ids, row.ID)
 	}
 	return ids
@@ -62,28 +61,20 @@ func TestListArea(t *testing.T) {
 		seen := make([]uuid.UUID, 0, len(ids))
 		cursor := ""
 		for pages := 0; ; pages++ {
-			if pages > 10 {
-				t.Fatal("the listing did not terminate: a cursor that never empties is a loop")
-			}
+			assert.Must(t, pages <= 10, "the listing did not terminate: a cursor that never empties is a loop")
 			page, err := g.views.ListViews(ctx, g.projectID, ViewFilter{Cursor: cursor, Limit: 3})
-			if err != nil {
-				t.Fatalf("page %d: %v", pages, err)
-			}
+			assert.Must(t, err == nil, "page %d: %v", pages, err)
 			for _, row := range page.Views {
 				seen = append(seen, row.ID)
 			}
 			if page.NextCursor == "" {
-				if len(page.Views) == 3 {
-					t.Fatal("a full page must carry a cursor, even when the next one is empty")
-				}
+				assert.Must(t, len(page.Views) != 3, "a full page must carry a cursor, even when the next one is empty")
 				break
 			}
 			cursor = page.NextCursor
 		}
 
-		if len(seen) != len(ids) {
-			t.Fatalf("the walk returned %d rows, want %d: %v", len(seen), len(ids), seen)
-		}
+		assert.Must(t, len(seen) == len(ids), "the walk returned %d rows, want %d: %v", len(seen), len(ids), seen)
 		// Every row exactly once, and in the id order the tie-break imposes,
 		// since every name is the same.
 		sorted := append([]uuid.UUID(nil), ids...)
@@ -120,35 +111,21 @@ func TestListArea(t *testing.T) {
 		}
 
 		all, err := g.views.ListViews(ctx, g.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
-		if len(all.Views) != 4 {
-			t.Fatalf("%d views unfiltered, want 4", len(all.Views))
-		}
+		assert.Must(t, err == nil, "list: %v", err)
+		assert.Must(t, len(all.Views) == 4, "%d views unfiltered, want 4", len(all.Views))
 		only, err := g.views.ListViews(ctx, g.projectID, ViewFilter{Renderer: RendererLayered})
-		if err != nil {
-			t.Fatalf("list filtered: %v", err)
-		}
-		if len(only.Views) != 1 || only.Views[0].Key != "layers" {
-			t.Fatalf("filtered listing = %+v, want the one layered view", only.Views)
-		}
+		assert.Must(t, err == nil, "list filtered: %v", err)
+		assert.Must(t, len(only.Views) == 1 && only.Views[0].Key == "layers", "filtered listing = %+v, want the one layered view", only.Views)
 
 		// A cursor from the unfiltered listing does not belong to the
 		// filtered one.
 		first, err := g.views.ListViews(ctx, g.projectID, ViewFilter{Limit: 1})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("a full page must carry a cursor")
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page must carry a cursor")
 		_, err = g.views.ListViews(ctx, g.projectID,
 			ViewFilter{Renderer: RendererLayered, Cursor: first.NextCursor, Limit: 1})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input: a cursor belongs to the listing that "+
-				"issued it", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input: a cursor belongs to the listing that "+
+			"issued it", err)
 	})
 
 	// TestListArea's "a cursor from another game is refused by the view
@@ -169,12 +146,8 @@ func TestListArea(t *testing.T) {
 		outland.seedViews(t, 3, "Shared name", RendererGraph)
 
 		page, err := azeroth.views.ListViews(ctx, azeroth.projectID, ViewFilter{Limit: 2})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if page.NextCursor == "" {
-			t.Fatal("a full page must carry a cursor")
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, page.NextCursor != "", "a full page must carry a cursor")
 		// The positive control: the cursor pages the listing it came from.
 		if _, err := azeroth.views.ListViews(ctx, azeroth.projectID,
 			ViewFilter{Cursor: page.NextCursor, Limit: 2}); err != nil {
@@ -182,10 +155,8 @@ func TestListArea(t *testing.T) {
 		}
 		_, err = outland.views.ListViews(ctx, outland.projectID,
 			ViewFilter{Cursor: page.NextCursor, Limit: 2})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input: one game's position means nothing in "+
-				"another game's listing", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input: one game's position means nothing in "+
+			"another game's listing", err)
 	})
 
 	// TestListArea's "the view listing fingerprint is project id first and
@@ -199,22 +170,16 @@ func TestListArea(t *testing.T) {
 		projectID := uuid.New()
 		got := viewListingFingerprint(projectID, ViewFilter{Renderer: "graph"})
 		want := paging.Fingerprint(projectID.String(), "views", "graph")
-		if got != want {
-			t.Fatalf("the fingerprint must be project id first, then the domain discriminator, "+
-				"then the filter: got %q want %q", got, want)
-		}
+		assert.Must(t, got == want, "the fingerprint must be project id first, then the domain discriminator, "+
+			"then the filter: got %q want %q", got, want)
 		// A different game must not produce the same fingerprint even with an
 		// identical filter — which is what the project-id-first rule buys and
 		// what a behavioural test cannot isolate.
-		if viewListingFingerprint(uuid.New(), ViewFilter{Renderer: "graph"}) == got {
-			t.Fatal("two games share a fingerprint")
-		}
+		assert.Must(t, viewListingFingerprint(uuid.New(), ViewFilter{Renderer: "graph"}) != got, "two games share a fingerprint")
 		// And the domain discriminator: without it, a views cursor and an
 		// entities cursor over the same game and an empty filter would be
 		// interchangeable.
-		if got == paging.Fingerprint(projectID.String(), "graph") {
-			t.Fatal("the fingerprint carries no domain discriminator")
-		}
+		assert.Must(t, got != paging.Fingerprint(projectID.String(), "graph"), "the fingerprint carries no domain discriminator")
 	})
 
 	// TestListArea's "a view listing is scoped to its own game" case is the
@@ -227,21 +192,13 @@ func TestListArea(t *testing.T) {
 		outland.seedViews(t, 2, "Shared name", RendererGraph)
 
 		mine, err := azeroth.views.ListViews(ctx, azeroth.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
+		assert.Must(t, err == nil, "list: %v", err)
 		theirs, err := outland.views.ListViews(ctx, outland.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
-		if len(mine.Views) != 3 || len(theirs.Views) != 2 {
-			t.Fatalf("listings = %d and %d rows, want 3 and 2: neither game may see the "+
-				"other's views", len(mine.Views), len(theirs.Views))
-		}
+		assert.Must(t, err == nil, "list: %v", err)
+		assert.Must(t, len(mine.Views) == 3 && len(theirs.Views) == 2, "listings = %d and %d rows, want 3 and 2: neither game may see the "+
+			"other's views", len(mine.Views), len(theirs.Views))
 		for _, row := range mine.Views {
-			if row.ProjectID != azeroth.projectID {
-				t.Fatalf("a row of another game reached this listing: %s", row.ID)
-			}
+			assert.Must(t, row.ProjectID == azeroth.projectID, "a row of another game reached this listing: %s", row.ID)
 		}
 	})
 
@@ -253,12 +210,8 @@ func TestListArea(t *testing.T) {
 		g, _ := a.games(t)
 		_, err := g.views.ListViews(context.Background(), g.projectID,
 			ViewFilter{Cursor: "not-a-cursor"})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input", err)
 		var ve *metamodel.ValidationError
-		if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Path != "/cursor" {
-			t.Fatalf("err = %#v, want one problem at the cursor's own path", err)
-		}
+		assert.Must(t, errors.As(err, &ve) && len(ve.Fields) == 1 && ve.Fields[0].Path == "/cursor", "err = %#v, want one problem at the cursor's own path", err)
 	})
 }

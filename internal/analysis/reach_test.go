@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -75,14 +76,10 @@ func TestReach(t *testing.T) {
 			t.Error("c unlocks d and c is a seed, so d must be reached: an unlocks edge is " +
 				"followed source→target")
 		}
-		if got.SeedCount != 2 {
-			t.Errorf("the walk started from %d entities, want the two seeds: a closure that "+
-				"started nowhere reaches nothing and reads exactly like a healthy game",
-				got.SeedCount)
-		}
-		if got.EdgesWalked != 2 {
-			t.Errorf("the walk traversed %d edges, want 2", got.EdgesWalked)
-		}
+		assert.Should(t, got.SeedCount == 2, "the walk started from %d entities, want the two seeds: a closure that "+
+			"started nowhere reaches nothing and reads exactly like a healthy game",
+			got.SeedCount)
+		assert.Should(t, got.EdgesWalked == 2, "the walk traversed %d edges, want 2", got.EdgesWalked)
 	})
 
 	// TestANormalisedWalkWillNotFollowAGatingEdgeAgainstItsDirection is the
@@ -130,9 +127,7 @@ func TestReach(t *testing.T) {
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "p"}},
 			IncludeUngated: boolPtr(false),
 		})
-		if !g.reached(t, fromP, "quest", "q") {
-			t.Error("a symmetric edge was not followed source→target")
-		}
+		assert.Should(t, g.reached(t, fromP, "quest", "q"), "a symmetric edge was not followed source→target")
 		fromQ := g.reach(t, Params{
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "q"}},
 			IncludeUngated: boolPtr(false),
@@ -193,9 +188,7 @@ func TestReach(t *testing.T) {
 			SeedEntities:   []SeedRef{{EntityType: "zone", Key: "elwynn"}},
 			IncludeUngated: boolPtr(false),
 		})
-		if !g.reached(t, got, "quest", "wolves") {
-			t.Error("reaching a zone must reach what it contains")
-		}
+		assert.Should(t, g.reached(t, got, "quest", "wolves"), "reaching a zone must reach what it contains")
 	})
 
 	t.Run("containment propagation can be switched off", func(t *testing.T) {
@@ -205,9 +198,7 @@ func TestReach(t *testing.T) {
 			IncludeUngated:       boolPtr(false),
 			PropagateContainment: boolPtr(false),
 		})
-		if g.reached(t, got, "quest", "wolves") {
-			t.Error("propagate_containment is off and the walk still descended into the zone")
-		}
+		assert.Should(t, !g.reached(t, got, "quest", "wolves"), "propagate_containment is off and the walk still descended into the zone")
 		if !g.reached(t, got, "zone", "elwynn") {
 			t.Fatal("the seed itself is not in the closure, so the assertion above passed over " +
 				"an empty walk")
@@ -226,15 +217,11 @@ func TestReach(t *testing.T) {
 
 		seeds := []SeedRef{{EntityType: "quest", Key: "gate-one"}}
 		any := g.reach(t, Params{SeedEntities: seeds, IncludeUngated: boolPtr(false)})
-		if !g.reached(t, any, "quest", "x") {
-			t.Error("under `any` one reachable gate is enough and x must be reached")
-		}
+		assert.Should(t, g.reached(t, any, "quest", "x"), "under `any` one reachable gate is enough and x must be reached")
 		all := g.reach(t, Params{
 			SeedEntities: seeds, IncludeUngated: boolPtr(false), Gating: GatingAll,
 		})
-		if g.reached(t, all, "quest", "x") {
-			t.Error("under `all` x needs both of its gates and only one is reachable")
-		}
+		assert.Should(t, !g.reached(t, all, "quest", "x"), "under `all` x needs both of its gates and only one is reachable")
 		if !g.reached(t, all, "quest", "gate-one") {
 			t.Fatal("the seed is not admitted under `all` either, so the assertion above " +
 				"passed over an empty answer")
@@ -264,19 +251,13 @@ func TestReach(t *testing.T) {
 			IncludeUngated: boolPtr(false),
 			Gating:         GatingAll,
 		})
-		if !g.reached(t, got, "quest", "start") {
-			t.Fatal("the seed is not admitted, so nothing below is being tested")
-		}
+		assert.Must(t, g.reached(t, got, "quest", "start"), "the seed is not admitted, so nothing below is being tested")
 		if g.reached(t, got, "quest", "loop-a") || g.reached(t, got, "quest", "loop-b") {
 			t.Error("a mutually gating pair was admitted under `all`; each of them waits for " +
 				"the other and neither can ever be satisfied")
 		}
-		if !strings.Contains(got.Note, "analysis.cycles") {
-			t.Errorf("the answer does not name analysis.cycles as where to look; it says %q", got.Note)
-		}
-		if got.Passes == 0 {
-			t.Error("the fixpoint reports no passes at all, so its own bound is unasserted")
-		}
+		assert.Should(t, strings.Contains(got.Note, "analysis.cycles"), "the answer does not name analysis.cycles as where to look; it says %q", got.Note)
+		assert.Should(t, got.Passes != 0, "the fixpoint reports no passes at all, so its own bound is unasserted")
 	})
 
 	// TestAnInvalidEdgeStillGatesUnlessTheCallerExcludesIt is this package's
@@ -296,23 +277,17 @@ func TestReach(t *testing.T) {
 			t.Error("an invalid edge was not followed by default; `invalid` means a row's " +
 				"fields stopped fitting, and this walk reads only endpoints and relation type")
 		}
-		if followed.InvalidEdgesFollowed != 1 {
-			t.Errorf("invalid_edges_followed = %d, want 1: a verdict that rests on flagged "+
-				"rows must say so", followed.InvalidEdgesFollowed)
-		}
+		assert.Should(t, followed.InvalidEdgesFollowed == 1, "invalid_edges_followed = %d, want 1: a verdict that rests on flagged "+
+			"rows must say so", followed.InvalidEdgesFollowed)
 
 		excluded := g.reach(t, Params{
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "a"}},
 			IncludeUngated: boolPtr(false),
 			ExcludeInvalid: true,
 		})
-		if g.reached(t, excluded, "quest", "b") {
-			t.Error("exclude_invalid was set and the invalid edge was followed anyway")
-		}
-		if excluded.InvalidEdgesFollowed != 0 {
-			t.Errorf("invalid_edges_followed = %d under exclude_invalid, want 0",
-				excluded.InvalidEdgesFollowed)
-		}
+		assert.Should(t, !g.reached(t, excluded, "quest", "b"), "exclude_invalid was set and the invalid edge was followed anyway")
+		assert.Should(t, excluded.InvalidEdgesFollowed == 0, "invalid_edges_followed = %d under exclude_invalid, want 0",
+			excluded.InvalidEdgesFollowed)
 	})
 
 	// TestASeedKeyThatDoesNotResolveIsNotFoundAndNotAnEmptySeedSet is the
@@ -330,23 +305,17 @@ func TestReach(t *testing.T) {
 			},
 			IncludeUngated: boolPtr(false),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("err = %v, want not_found: a seed key that resolves to nothing must be "+
-				"named, never dropped, or 'you gave me a bad key' becomes 'your entire game "+
-				"is unreachable'", err)
-		}
-		if !strings.Contains(err.Error(), "ghost") {
-			t.Errorf("the refusal does not name the key that failed: %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "err = %v, want not_found: a seed key that resolves to nothing must be "+
+			"named, never dropped, or 'you gave me a bad key' becomes 'your entire game "+
+			"is unreachable'", err)
+		assert.Should(t, strings.Contains(err.Error(), "ghost"), "the refusal does not name the key that failed: %v", err)
 		// The control: the good key in the same call resolves, so the
 		// refusal above is about the bad one and not about the call shape.
 		good := g.reach(t, Params{
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "real"}},
 			IncludeUngated: boolPtr(false),
 		})
-		if good.SeedCount != 1 {
-			t.Fatalf("the good key alone seeded %d entities, want 1", good.SeedCount)
-		}
+		assert.Must(t, good.SeedCount == 1, "the good key alone seeded %d entities, want 1", good.SeedCount)
 	})
 
 	// TestASeedKeyFromAnotherGameIsNotFound is the isolation case the spec
@@ -364,18 +333,14 @@ func TestReach(t *testing.T) {
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "theirs"}},
 			IncludeUngated: boolPtr(false),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("err = %v, want not_found for another game's entity key", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "err = %v, want not_found for another game's entity key", err)
 		// The control: the same call shape against this game's own key
 		// works, so the refusal is about the game and not about the key.
 		ok := mine.reach(t, Params{
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "mine"}},
 			IncludeUngated: boolPtr(false),
 		})
-		if ok.SeedCount != 1 {
-			t.Fatalf("this game's own seed resolved to %d entities, want 1", ok.SeedCount)
-		}
+		assert.Must(t, ok.SeedCount == 1, "this game's own seed resolved to %d entities, want 1", ok.SeedCount)
 	})
 
 	// TestAnEmptySeedSetWithUngatedOffIsRefused pins O8's answer: an
@@ -389,18 +354,11 @@ func TestReach(t *testing.T) {
 			Semantics:      g.semantics(t),
 			IncludeUngated: boolPtr(false),
 		})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input", err)
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || len(invalid.Fields) != 1 ||
-			invalid.Fields[0].Path != "seed_entities" {
-			t.Fatalf("the refusal is not reported at seed_entities: %v", err)
-		}
+		assert.Must(t, errors.As(err, &invalid) && len(invalid.Fields) == 1 && invalid.Fields[0].Path == "seed_entities", "the refusal is not reported at seed_entities: %v", err)
 		for _, source := range []string{"seed_entities", "seed_entity_types", "seed_route"} {
-			if !strings.Contains(err.Error(), source) {
-				t.Errorf("the refusal does not name the seed source %q: %v", source, err)
-			}
+			assert.Should(t, strings.Contains(err.Error(), source), "the refusal does not name the seed source %q: %v", source, err)
 		}
 		// The control: the same call with the default seeding answers rather
 		// than refusing, so the refusal is about the empty set and not about
@@ -426,16 +384,12 @@ func TestReach(t *testing.T) {
 		})
 
 		got := g.reach(t, Params{SeedRoute: "levelling", IncludeUngated: boolPtr(false)})
-		if got.SeedCount != 2 {
-			t.Errorf("the route contributed %d seeds, want its two steps", got.SeedCount)
-		}
+		assert.Should(t, got.SeedCount == 2, "the route contributed %d seeds, want its two steps", got.SeedCount)
 		if !g.reached(t, got, "quest", "behind") {
 			t.Error("the walk did not continue from a route step, so the steps were counted " +
 				"and not used")
 		}
-		if len(got.Seeds) != 2 || got.Seeds[0].Key != "first" || got.Seeds[1].Key != "second" {
-			t.Errorf("the resolved seed set is %v, want the route's two steps by key", got.Seeds)
-		}
+		assert.Should(t, len(got.Seeds) == 2 && got.Seeds[0].Key == "first" && got.Seeds[1].Key == "second", "the resolved seed set is %v, want the route's two steps by key", got.Seeds)
 	})
 
 	// TestASeedRouteFromAnotherGameIsNotFound is the isolation half of the
@@ -456,14 +410,10 @@ func TestReach(t *testing.T) {
 			SeedRoute:      "their-route",
 			IncludeUngated: boolPtr(false),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("err = %v, want not_found for another game's route key", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "err = %v, want not_found for another game's route key", err)
 		// The control: the route resolves for the game that owns it.
 		got := theirs.reach(t, Params{SeedRoute: "their-route", IncludeUngated: boolPtr(false)})
-		if got.SeedCount != 1 {
-			t.Fatalf("the owning game's route seeded %d entities, want 1", got.SeedCount)
-		}
+		assert.Must(t, got.SeedCount == 1, "the owning game's route seeded %d entities, want 1", got.SeedCount)
 	})
 
 	// TestAReachWalkCannotLeaveItsProjectThroughARogueEdge is this package's
@@ -493,9 +443,7 @@ func TestReach(t *testing.T) {
 		}
 		ids := func(g game, typeKey, key string) uuid.UUID {
 			row, err := g.meta.EntityByKey(ctx, g.projectID, typeKey, key)
-			if err != nil {
-				t.Fatalf("read back %s: %v", key, err)
-			}
+			assert.Must(t, err == nil, "read back %s: %v", key, err)
 			return row.ID
 		}
 		var unlocksID uuid.UUID
@@ -525,15 +473,9 @@ func TestReach(t *testing.T) {
 			SeedEntities:   []SeedRef{{EntityType: "quest", Key: "seed"}},
 			IncludeUngated: boolPtr(false),
 		})
-		if !mine.reached(t, got, "quest", "near") {
-			t.Fatal("the legitimate edge was not walked, so nothing below is being tested")
-		}
-		if got.Reached[ids(theirs, "quest", "elsewhere")] {
-			t.Error("the closure left the game through an edge whose far end lives elsewhere")
-		}
-		if mine.reached(t, got, "quest", "far") {
-			t.Error("the closure followed another game's edge between two of this game's entities")
-		}
+		assert.Must(t, mine.reached(t, got, "quest", "near"), "the legitimate edge was not walked, so nothing below is being tested")
+		assert.Should(t, !(got.Reached[ids(theirs, "quest", "elsewhere")]), "the closure left the game through an edge whose far end lives elsewhere")
+		assert.Should(t, !mine.reached(t, got, "quest", "far"), "the closure followed another game's edge between two of this game's entities")
 	})
 
 	// TestADepthAboveTheCapIsRefusedRatherThanClamped keeps the refusal the
@@ -544,12 +486,8 @@ func TestReach(t *testing.T) {
 		_, err := g.analysis.Reach(context.Background(), Params{
 			ProjectID: g.projectID, Semantics: g.semantics(t), MaxDepth: MaxMaxDepth + 1,
 		})
-		if !errors.Is(err, ErrLimitExceeded) {
-			t.Fatalf("err = %v, want limit_exceeded naming the cap", err)
-		}
-		if !strings.Contains(err.Error(), "max_depth") {
-			t.Errorf("the refusal does not name the argument at fault: %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrLimitExceeded), "err = %v, want limit_exceeded naming the cap", err)
+		assert.Should(t, strings.Contains(err.Error(), "max_depth"), "the refusal does not name the argument at fault: %v", err)
 	})
 
 	// TestADepthLimitedWalkSaysSo pins the flag the unreachable report turns
@@ -565,19 +503,11 @@ func TestReach(t *testing.T) {
 
 		seeds := []SeedRef{{EntityType: "quest", Key: "a"}}
 		short := g.reach(t, Params{SeedEntities: seeds, IncludeUngated: boolPtr(false), MaxDepth: 2})
-		if !short.DepthLimited {
-			t.Error("a walk that stopped at its bound does not say so")
-		}
-		if g.reached(t, short, "quest", "d") {
-			t.Error("the walk reached past its depth bound")
-		}
+		assert.Should(t, short.DepthLimited, "a walk that stopped at its bound does not say so")
+		assert.Should(t, !g.reached(t, short, "quest", "d"), "the walk reached past its depth bound")
 		long := g.reach(t, Params{SeedEntities: seeds, IncludeUngated: boolPtr(false), MaxDepth: 10})
-		if long.DepthLimited {
-			t.Error("a walk that ran out of graph before its bound reports itself depth-limited")
-		}
-		if !g.reached(t, long, "quest", "d") {
-			t.Fatal("the unbounded control did not reach the end of the chain either")
-		}
+		assert.Should(t, !long.DepthLimited, "a walk that ran out of graph before its bound reports itself depth-limited")
+		assert.Must(t, g.reached(t, long, "quest", "d"), "the unbounded control did not reach the end of the chain either")
 	})
 }
 
@@ -594,8 +524,6 @@ func containmentGame(t *testing.T, a area) game {
 		Source:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 		Target:  metamodel.Ref{TypeKey: "quest", Key: "wolves"},
 	})
-	if err != nil {
-		t.Fatalf("write the containment edge: %v", err)
-	}
+	assert.Must(t, err == nil, "write the containment edge: %v", err)
 	return g
 }

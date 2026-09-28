@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/paging"
 )
 
@@ -25,17 +26,11 @@ func TestTheHistoryFingerprintLeadsWithTheProjectId(t *testing.T) {
 	}
 	// Each part on its own must move the answer, or it is not part of it.
 	other := uuid.MustParse("33333333-3333-3333-3333-333333333333")
-	if historyFingerprint(project, document) == historyFingerprint(other, document) {
-		t.Fatal("two games share one history fingerprint")
-	}
-	if historyFingerprint(project, document) == historyFingerprint(project, other) {
-		t.Fatal("two documents share one history fingerprint")
-	}
+	assert.Must(t, historyFingerprint(project, document) != historyFingerprint(other, document), "two games share one history fingerprint")
+	assert.Must(t, historyFingerprint(project, document) != historyFingerprint(project, other), "two documents share one history fingerprint")
 	// And the discriminator is really there: without it the parts are the
 	// game and the document alone, which is what another domain reaching
 	// for the same shape would spell.
-	if historyFingerprint(project, document) ==
-		paging.Fingerprint(project.String(), document.String()) {
-		t.Fatal("the fingerprint carries no domain discriminator")
-	}
+	assert.Must(t, historyFingerprint(project, document) !=
+		paging.Fingerprint(project.String(), document.String()), "the fingerprint carries no domain discriminator")
 }

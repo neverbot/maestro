@@ -17,6 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -50,9 +51,7 @@ func readAll(t *testing.T, response *http.Response) []byte {
 	t.Helper()
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatalf("reading the response body: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the response body: %v", err)
 	return body
 }
 
@@ -72,9 +71,7 @@ func TestASignedSkillURLServesTheBundle(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
 	response := get(t, srv, srv.SignedSkillURLForTest("", time.Now().Add(time.Minute).Unix()))
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("a live signed URL answered %d, want 200", response.StatusCode)
-	}
+	assert.Must(t, response.StatusCode == http.StatusOK, "a live signed URL answered %d, want 200", response.StatusCode)
 	if got := response.Header.Get("Content-Type"); got != "application/zip" {
 		t.Errorf("Content-Type = %q, want application/zip", got)
 	}
@@ -88,13 +85,9 @@ func TestASkillURLWithoutASignatureIsRefused(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
 	response := get(t, srv, web.SkillZipPathForTest())
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("an unsigned URL answered %d, want 401", response.StatusCode)
-	}
+	assert.Must(t, response.StatusCode == http.StatusUnauthorized, "an unsigned URL answered %d, want 401", response.StatusCode)
 	body := readAll(t, response)
-	if len(body) != 0 {
-		t.Errorf("a refusal carried a %d-byte body: %q", len(body), body)
-	}
+	assert.Should(t, len(body) == 0, "a refusal carried a %d-byte body: %q", len(body), body)
 }
 
 // TestASkillURLSignedForAnotherPathIsRefused presents a signature that
@@ -108,14 +101,10 @@ func TestASkillURLSignedForAnotherPathIsRefused(t *testing.T) {
 	srv := newSkillServer(t)
 	exp := time.Now().Add(time.Minute).Unix()
 	elsewhere := srv.SkillURLSignatureForTest("/some/other/download", exp)
-	if elsewhere == srv.SkillURLSignatureForTest(web.SkillZipPathForTest(), exp) {
-		t.Fatal("two paths signed to the same value: the path is not inside the MAC at all")
-	}
+	assert.Must(t, elsewhere != srv.SkillURLSignatureForTest(web.SkillZipPathForTest(), exp), "two paths signed to the same value: the path is not inside the MAC at all")
 	response := get(t, srv, web.SkillZipPathForTest()+
 		"?exp="+strconv.FormatInt(exp, 10)+"&sig="+elsewhere)
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a signature minted for another path answered %d, want 401", response.StatusCode)
-	}
+	assert.Must(t, response.StatusCode == http.StatusUnauthorized, "a signature minted for another path answered %d, want 401", response.StatusCode)
 }
 
 // TestAnExpiredSkillURLIsRefused.
@@ -123,9 +112,7 @@ func TestAnExpiredSkillURLIsRefused(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
 	response := get(t, srv, srv.SignedSkillURLForTest("", time.Now().Add(-time.Second).Unix()))
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("an expired URL answered %d, want 401", response.StatusCode)
-	}
+	assert.Must(t, response.StatusCode == http.StatusUnauthorized, "an expired URL answered %d, want 401", response.StatusCode)
 }
 
 // TestASkillURLFromAnotherProcessIsRefused signs with a second server's
@@ -167,24 +154,16 @@ func TestTheSkillZipIsTheEmbeddedBundle(t *testing.T) {
 	t.Parallel()
 	srv := newSkillServer(t)
 	response := get(t, srv, srv.SignedSkillURLForTest("", time.Now().Add(time.Minute).Unix()))
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("the signed URL answered %d, want 200", response.StatusCode)
-	}
+	assert.Must(t, response.StatusCode == http.StatusOK, "the signed URL answered %d, want 200", response.StatusCode)
 	served := readAll(t, response)
 
 	packed, err := skill.Zip()
-	if err != nil {
-		t.Fatalf("packing the bundle: %v", err)
-	}
-	if !bytes.Equal(served, packed) {
-		t.Fatalf("the served archive is %d bytes and skill.Zip() is %d: the route packs "+
-			"something other than the embedded bundle", len(served), len(packed))
-	}
+	assert.Must(t, err == nil, "packing the bundle: %v", err)
+	assert.Must(t, bytes.Equal(served, packed), "the served archive is %d bytes and skill.Zip() is %d: the route packs "+
+		"something other than the embedded bundle", len(served), len(packed))
 
 	archive, err := zip.NewReader(bytes.NewReader(served), int64(len(served)))
-	if err != nil {
-		t.Fatalf("reading the served archive: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the served archive: %v", err)
 	inZip := map[string]bool{}
 	for _, entry := range archive.File {
 		inZip[entry.Name] = true
@@ -211,13 +190,9 @@ func TestTheSkillZipIsTheEmbeddedBundle(t *testing.T) {
 			missing = append(missing, path)
 		}
 	}
-	if len(missing) > 0 {
-		t.Errorf("the served archive is missing %d of the bundle's %d files:\n%s",
-			len(missing), len(want), strings.Join(missing, "\n"))
-	}
-	if len(inZip) != len(want) {
-		t.Errorf("the archive holds %d entries and the bundle holds %d files", len(inZip), len(want))
-	}
+	assert.Should(t, len(missing) <= 0, "the served archive is missing %d of the bundle's %d files:\n%s",
+		len(missing), len(want), strings.Join(missing, "\n"))
+	assert.Should(t, len(inZip) == len(want), "the archive holds %d entries and the bundle holds %d files", len(inZip), len(want))
 }
 
 // TestTheInstallDescriptorCarriesNoBundleBytes is the whole reason this
@@ -232,25 +207,17 @@ func TestTheInstallDescriptorCarriesNoBundleBytes(t *testing.T) {
 	srv := newSkillServer(t)
 	descriptor := web.MCPSkillInstall(context.Background(), srv)
 	encoded, err := json.Marshal(descriptor)
-	if err != nil {
-		t.Fatalf("marshalling the descriptor: %v", err)
-	}
-	if len(encoded) > 2048 {
-		t.Errorf("the install descriptor marshals to %d bytes, over the 2 KB this mechanism "+
-			"exists to stay under:\n%s", len(encoded), encoded)
-	}
+	assert.Must(t, err == nil, "marshalling the descriptor: %v", err)
+	assert.Should(t, len(encoded) <= 2048, "the install descriptor marshals to %d bytes, over the 2 KB this mechanism "+
+		"exists to stay under:\n%s", len(encoded), encoded)
 	if bytes.Contains(encoded, []byte("PK\x03\x04")) {
 		t.Error("the install descriptor carries a zip's local file header: the bundle bytes " +
 			"are travelling through the MCP response, which is the one thing download_url " +
 			"exists to prevent")
 	}
-	if descriptor.BundleVersion != skill.Version() {
-		t.Errorf("bundle_version = %q, want the bundle's own hash %q",
-			descriptor.BundleVersion, skill.Version())
-	}
-	if !strings.Contains(descriptor.DownloadURL, web.SkillZipPathForTest()) {
-		t.Errorf("download_url %q does not point at the download route", descriptor.DownloadURL)
-	}
+	assert.Should(t, descriptor.BundleVersion == skill.Version(), "bundle_version = %q, want the bundle's own hash %q",
+		descriptor.BundleVersion, skill.Version())
+	assert.Should(t, strings.Contains(descriptor.DownloadURL, web.SkillZipPathForTest()), "download_url %q does not point at the download route", descriptor.DownloadURL)
 }
 
 // TestTheInstallDescriptorURLIsFetchable closes the loop between the two
@@ -268,12 +235,8 @@ func TestTheInstallDescriptorURLIsFetchable(t *testing.T) {
 		t.Fatalf("the URL skill.install handed out answered %d, want 200", response.StatusCode)
 	}
 	expires, err := time.Parse(time.RFC3339, descriptor.ExpiresAt)
-	if err != nil {
-		t.Fatalf("expires_at %q is not RFC3339: %v", descriptor.ExpiresAt, err)
-	}
-	if time.Until(expires) <= 0 {
-		t.Errorf("expires_at %q is already past", descriptor.ExpiresAt)
-	}
+	assert.Must(t, err == nil, "expires_at %q is not RFC3339: %v", descriptor.ExpiresAt, err)
+	assert.Should(t, time.Until(expires) > 0, "expires_at %q is already past", descriptor.ExpiresAt)
 }
 
 // TestWhoamiReportsTheVersionSkillInstallServes is the version
@@ -295,18 +258,12 @@ func TestWhoamiReportsTheVersionSkillInstallServes(t *testing.T) {
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "handshake@example.test", DisplayName: "Owner", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "handshake", "Handshake", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	session := connectMCP(t, httpSrv.URL, token)
 
@@ -314,9 +271,7 @@ func TestWhoamiReportsTheVersionSkillInstallServes(t *testing.T) {
 		SkillBundleVersion string `json:"skill_bundle_version"`
 	}
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "whoami"})
-	if err != nil {
-		t.Fatalf("CallTool(whoami): %v", err)
-	}
+	assert.Must(t, err == nil, "CallTool(whoami): %v", err)
 	decodeStructured(t, result, &who)
 
 	var install struct {
@@ -324,39 +279,25 @@ func TestWhoamiReportsTheVersionSkillInstallServes(t *testing.T) {
 		DownloadURL   string `json:"download_url"`
 	}
 	result, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "skill.install"})
-	if err != nil {
-		t.Fatalf("CallTool(skill.install): %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("skill.install reported an error: %+v", result.Content)
-	}
+	assert.Must(t, err == nil, "CallTool(skill.install): %v", err)
+	assert.Must(t, !result.IsError, "skill.install reported an error: %+v", result.Content)
 	decodeStructured(t, result, &install)
 
-	if who.SkillBundleVersion == "" || install.BundleVersion == "" {
-		t.Fatalf("one of the two versions is empty (whoami %q, skill.install %q): a "+
-			"comparison of two empty strings passes against anything",
-			who.SkillBundleVersion, install.BundleVersion)
-	}
-	if who.SkillBundleVersion != install.BundleVersion {
-		t.Fatalf("whoami reports skill_bundle_version %q and skill.install reports "+
-			"bundle_version %q: two fields carrying one fact have two sources",
-			who.SkillBundleVersion, install.BundleVersion)
-	}
+	assert.Must(t, who.SkillBundleVersion != "" && install.BundleVersion != "", "one of the two versions is empty (whoami %q, skill.install %q): a "+
+		"comparison of two empty strings passes against anything",
+		who.SkillBundleVersion, install.BundleVersion)
+	assert.Must(t, who.SkillBundleVersion == install.BundleVersion, "whoami reports skill_bundle_version %q and skill.install reports "+
+		"bundle_version %q: two fields carrying one fact have two sources",
+		who.SkillBundleVersion, install.BundleVersion)
 
 	// And the URL an agent actually receives over the transport is
 	// absolute, so it can be fetched without guessing a host. This is the
 	// half that a direct call to MCPSkillInstall cannot see, since
 	// nothing stashes an origin on a context a test built itself.
-	if !strings.HasPrefix(install.DownloadURL, httpSrv.URL+web.SkillZipPathForTest()) {
-		t.Errorf("download_url over the transport is %q, want it rooted at %q",
-			install.DownloadURL, httpSrv.URL+web.SkillZipPathForTest())
-	}
+	assert.Should(t, strings.HasPrefix(install.DownloadURL, httpSrv.URL+web.SkillZipPathForTest()), "download_url over the transport is %q, want it rooted at %q",
+		install.DownloadURL, httpSrv.URL+web.SkillZipPathForTest())
 	response, err := http.Get(install.DownloadURL) //nolint:gosec,noctx // the URL is this test's own server, and the fetch carries no header by design.
-	if err != nil {
-		t.Fatalf("fetching the download URL: %v", err)
-	}
+	assert.Must(t, err == nil, "fetching the download URL: %v", err)
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("fetching the URL an agent was handed answered %d, want 200", response.StatusCode)
-	}
+	assert.Must(t, response.StatusCode == http.StatusOK, "fetching the URL an agent was handed answered %d, want 200", response.StatusCode)
 }

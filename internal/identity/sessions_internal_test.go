@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestMaxSessionLifetimeMatchesExtendSessionSQL pins the agreement
@@ -23,20 +25,14 @@ import (
 func TestMaxSessionLifetimeMatchesExtendSessionSQL(t *testing.T) {
 	t.Parallel()
 	sqlBytes, err := os.ReadFile("../db/queries/identity.sql")
-	if err != nil {
-		t.Fatalf("read identity.sql: %v", err)
-	}
+	assert.Must(t, err == nil, "read identity.sql: %v", err)
 	re := regexp.MustCompile(`created_at \+ interval '(\d+) days'`)
 	m := re.FindStringSubmatch(string(sqlBytes))
-	if m == nil {
-		t.Fatal(`identity.sql: could not find ExtendSession's "created_at + interval 'N days'" cap expression`)
-	}
+	assert.Must(t, m != nil, `identity.sql: could not find ExtendSession's "created_at + interval 'N days'" cap expression`)
 	days, err := strconv.Atoi(m[1])
 	if err != nil {
 		t.Fatalf("parse day count %q: %v", m[1], err)
 	}
 	got := time.Duration(days) * 24 * time.Hour
-	if got != maxSessionLifetime {
-		t.Fatalf("identity.sql caps renewal at %d days (%v), but maxSessionLifetime = %v — these must match", days, got, maxSessionLifetime)
-	}
+	assert.Must(t, got == maxSessionLifetime, "identity.sql caps renewal at %d days (%v), but maxSessionLifetime = %v — these must match", days, got, maxSessionLifetime)
 }

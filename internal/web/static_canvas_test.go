@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The escaping perimeter, for the context the canvas draws in.
@@ -133,18 +135,14 @@ func scanForSVGHazards(t *testing.T) (scanned []string, offences []string) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
 	return scanned, offences
 }
 
 func TestNoOwnModuleNamesAScriptableSVGElement(t *testing.T) {
 	t.Parallel()
 	scanned, offences := scanForSVGHazards(t)
-	if len(scanned) == 0 {
-		t.Fatal("scanned no module under internal/web/static: a walk that reads nothing guards nothing")
-	}
+	assert.Must(t, len(scanned) != 0, "scanned no module under internal/web/static: a walk that reads nothing guards nothing")
 	if len(offences) > 0 {
 		sort.Strings(offences)
 		t.Fatalf("%d SVG hazard(s) in this front end's own modules:\n%s\n"+
@@ -163,13 +161,9 @@ func TestNoOwnModuleNamesAScriptableSVGElement(t *testing.T) {
 func TestTheEmitterContractNamesNoScriptableElement(t *testing.T) {
 	t.Parallel()
 	elements := markElements(t)
-	if len(elements) == 0 {
-		t.Fatal("read no element out of render/scene.js's MARK_ELEMENTS: a contract nobody could read guards nothing")
-	}
+	assert.Must(t, len(elements) != 0, "read no element out of render/scene.js's MARK_ELEMENTS: a contract nobody could read guards nothing")
 	for _, name := range elements {
-		if scriptableSVG[name] {
-			t.Errorf("MARK_ELEMENTS lets a mark become <%s>, which is not a drawing", name)
-		}
+		assert.Should(t, !(scriptableSVG[name]), "MARK_ELEMENTS lets a mark become <%s>, which is not a drawing", name)
 	}
 	t.Logf("the emitter contract names %v", elements)
 }
@@ -178,19 +172,13 @@ func TestTheEmitterContractNamesNoScriptableElement(t *testing.T) {
 func markElements(t *testing.T) []string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("static", "render", "scene.js"))
-	if err != nil {
-		t.Fatalf("read scene.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read scene.js: %v", err)
 	const marker = "export const MARK_ELEMENTS = {"
 	at := strings.Index(string(raw), marker)
-	if at < 0 {
-		t.Fatal("render/scene.js declares no MARK_ELEMENTS: the emitter contract moved and this guard did not")
-	}
+	assert.Must(t, at >= 0, "render/scene.js declares no MARK_ELEMENTS: the emitter contract moved and this guard did not")
 	rest := string(raw)[at+len(marker):]
 	end := strings.Index(rest, "}")
-	if end < 0 {
-		t.Fatal("render/scene.js's MARK_ELEMENTS block does not close")
-	}
+	assert.Must(t, end >= 0, "render/scene.js's MARK_ELEMENTS block does not close")
 	var found []string
 	for _, hit := range regexp.MustCompile(`:\s*"([^"]*)"`).FindAllStringSubmatch(rest[:end], -1) {
 		found = append(found, hit[1])
@@ -212,9 +200,7 @@ func TestTheSVGHazardScanReadsWhatItClaimsTo(t *testing.T) {
 		"the legacy href":     `element.setAttributeNS(XLINK, "xlink:href", mark.href);`,
 		"the wrong namespace": `const rect = doc.createElementNS(HTML_NS, "rect");`,
 	} {
-		if !hazardous(planted) {
-			t.Errorf("the scan missed %s: %q", name, planted)
-		}
+		assert.Should(t, hazardous(planted), "the scan missed %s: %q", name, planted)
 	}
 
 	for name, benign := range map[string]string{
@@ -223,18 +209,14 @@ func TestTheSVGHazardScanReadsWhatItClaimsTo(t *testing.T) {
 		"a group":           `const group = doc.createElementNS(SVG_NS, "g");`,
 		"an image":          `const image = doc.createElementNS(SVG_NS, "image");`,
 	} {
-		if hazardous(benign) {
-			t.Errorf("the scan read %s as a hazard: %q", name, benign)
-		}
+		assert.Should(t, !hazardous(benign), "the scan read %s as a hazard: %q", name, benign)
 	}
 
 	// The comment strip is what keeps this file and mst-canvas.js from
 	// failing on their own prose: both name every element they refuse.
 	commented := "// <foreignObject> re-enters the HTML parser and is never emitted\nconst a = 1;\n"
 	for _, line := range codeLines(commented) {
-		if hazardous(line.code) {
-			t.Errorf("the scan read a comment as a call: %q", line.text)
-		}
+		assert.Should(t, !hazardous(line.code), "the scan read a comment as a call: %q", line.text)
 	}
 
 	// And it really did open the canvas, rather than passing because the
@@ -247,9 +229,7 @@ func TestTheSVGHazardScanReadsWhatItClaimsTo(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Errorf("the SVG hazard scan never read %s; it read %v", want, scanned)
-	}
+	assert.Should(t, found, "the SVG hazard scan never read %s; it read %v", want, scanned)
 }
 
 // literalTag unwraps a quoted tag argument. A tag held in a variable —

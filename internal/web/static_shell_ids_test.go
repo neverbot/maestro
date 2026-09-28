@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // **app.js binds by id at module scope, and every shell imports it.**
@@ -29,9 +31,7 @@ import (
 func TestNoShellStealsAnIdAppJSBindsAtModuleScope(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatalf("read app.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read app.js: %v", err)
 
 	// Only the module-scope lookups: a `getElementById` inside a
 	// function runs when that function is called, on the page that
@@ -42,9 +42,7 @@ func TestNoShellStealsAnIdAppJSBindsAtModuleScope(t *testing.T) {
 	for _, m := range moduleScope.FindAllStringSubmatch(withoutComments(string(source)), -1) {
 		bound[m[1]] = true
 	}
-	if len(bound) == 0 {
-		t.Fatal("app.js binds nothing at module scope, so this guard holds nothing")
-	}
+	assert.Must(t, len(bound) != 0, "app.js binds nothing at module scope, so this guard holds nothing")
 
 	// The two shells app.js drives, and the only ones allowed to carry
 	// the ids it binds.
@@ -53,18 +51,14 @@ func TestNoShellStealsAnIdAppJSBindsAtModuleScope(t *testing.T) {
 	idRE := regexp.MustCompile(`id="([a-z0-9-]+)"`)
 	htmlComments := regexp.MustCompile(`(?s)<!--.*?-->`)
 	entries, err := os.ReadDir("static")
-	if err != nil {
-		t.Fatalf("read static/: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/: %v", err)
 	var offences []string
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") || itsOwn[entry.Name()] {
 			continue
 		}
 		body, err := os.ReadFile(filepath.Join("static", entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", entry.Name(), err)
 		// Comments out first: this guard's own first run failed on the
 		// note in admin.html explaining why the id is not `invite`,
 		// which is the same shape of mistake as the one it catches.

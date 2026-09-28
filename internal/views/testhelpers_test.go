@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -184,9 +185,7 @@ func (g *game) entity(t *testing.T, typeKey, key, name string, fields map[string
 	row, err := g.meta.UpsertEntity(context.Background(), g.projectID, metamodel.EntityInput{
 		TypeKey: typeKey, Key: key, Name: name, Fields: fields,
 	})
-	if err != nil {
-		t.Fatalf("seed entity %s/%s: %v", typeKey, key, err)
-	}
+	assert.Must(t, err == nil, "seed entity %s/%s: %v", typeKey, key, err)
 	return row.ID
 }
 
@@ -197,9 +196,7 @@ func (g *game) relate(t *testing.T, relKey, srcType, srcKey, tgtType, tgtKey str
 		Source:  metamodel.Ref{TypeKey: srcType, Key: srcKey},
 		Target:  metamodel.Ref{TypeKey: tgtType, Key: tgtKey},
 	})
-	if err != nil {
-		t.Fatalf("seed relation %s: %v", relKey, err)
-	}
+	assert.Must(t, err == nil, "seed relation %s: %v", relKey, err)
 }
 
 // mustParse parses a query that the test asserts is well-formed. A test
@@ -208,9 +205,7 @@ func (g *game) relate(t *testing.T, relKey, srcType, srcKey, tgtType, tgtKey str
 func mustParse(t *testing.T, doc string) *Query {
 	t.Helper()
 	q, err := ParseQuery([]byte(doc))
-	if err != nil {
-		t.Fatalf("this query must parse; the test means to exercise resolution: %v", err)
-	}
+	assert.Must(t, err == nil, "this query must parse; the test means to exercise resolution: %v", err)
 	return q
 }
 
@@ -229,9 +224,7 @@ func newUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 		`INSERT INTO users (email, display_name, password_hash)
 		 VALUES ($1, 'Designer', 'x') RETURNING id`,
 		uuid.NewString()[:8]+"@example.test").Scan(&id)
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
+	assert.Must(t, err == nil, "create user: %v", err)
 	return id
 }
 
@@ -246,8 +239,6 @@ func newToken(t *testing.T, pool *pgxpool.Pool, project uuid.UUID) uuid.UUID {
 		`INSERT INTO api_tokens (project_id, user_id, label, token_hint, token_hash)
 		 VALUES ($1, $2, 'seeder', 'abcd', $3) RETURNING id`,
 		project, user, []byte(uuid.NewString())).Scan(&id)
-	if err != nil {
-		t.Fatalf("create token: %v", err)
-	}
+	assert.Must(t, err == nil, "create token: %v", err)
 	return id
 }

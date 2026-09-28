@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -80,13 +81,9 @@ func newGame(t *testing.T, pool *pgxpool.Pool, slug string) uuid.UUID {
 // metamodel package.
 func requireFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("want a refusal at %q, got nil", wantPath)
-	}
+	assert.Must(t, err != nil, "want a refusal at %q, got nil", wantPath)
 	var v *metamodel.ValidationError
-	if !errors.As(err, &v) {
-		t.Fatalf("want a *metamodel.ValidationError, got %#v", err)
-	}
+	assert.Must(t, errors.As(err, &v), "want a *metamodel.ValidationError, got %#v", err)
 	for _, f := range v.Fields {
 		if f.Path == wantPath && strings.Contains(f.Message, wantMessage) {
 			return
@@ -105,13 +102,9 @@ func requireFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 func requireMissing(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Helper()
 	var missing *markdown.MissingError
-	if !errors.As(err, &missing) {
-		t.Fatalf("want a *markdown.MissingError, got %#v", err)
-	}
-	if missing.Path != wantPath || !strings.Contains(missing.Message, wantMessage) {
-		t.Fatalf("missing = (%q, %q), want path %q with a message containing %q",
-			missing.Path, missing.Message, wantPath, wantMessage)
-	}
+	assert.Must(t, errors.As(err, &missing), "want a *markdown.MissingError, got %#v", err)
+	assert.Must(t, missing.Path == wantPath && strings.Contains(missing.Message, wantMessage), "missing = (%q, %q), want path %q with a message containing %q",
+		missing.Path, missing.Message, wantPath, wantMessage)
 }
 
 // requireConflict is requireFieldError for a *markdown.ConflictError,
@@ -121,9 +114,7 @@ func requireMissing(t *testing.T, err error, wantPath, wantMessage string) {
 func requireConflict(t *testing.T, err error) *markdown.ConflictError {
 	t.Helper()
 	var conflict *markdown.ConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("want a *markdown.ConflictError, got %#v", err)
-	}
+	assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError, got %#v", err)
 	return conflict
 }
 

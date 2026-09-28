@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The arithmetic half of the interface's identity.
@@ -73,15 +75,11 @@ var (
 func themeTokens(t *testing.T) (light, dark map[string]string) {
 	t.Helper()
 	raw, err := os.ReadFile(stylesheetPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", stylesheetPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", stylesheetPath, err)
 	src := string(raw)
 
 	boundary := strings.Index(src, darkBlockMarker)
-	if boundary < 0 {
-		t.Fatalf("%s declares no %q block: the dark set is half the token layer", stylesheetPath, darkBlockMarker)
-	}
+	assert.Must(t, boundary >= 0, "%s declares no %q block: the dark set is half the token layer", stylesheetPath, darkBlockMarker)
 
 	light = map[string]string{}
 	dark = map[string]string{}
@@ -95,9 +93,7 @@ func themeTokens(t *testing.T) (light, dark map[string]string) {
 			target[decl[1]] = strings.TrimSpace(decl[2])
 		}
 	}
-	if len(light) == 0 || len(dark) == 0 {
-		t.Fatalf("parsed %d light and %d dark tokens: the parser found nothing to guard", len(light), len(dark))
-	}
+	assert.Must(t, len(light) != 0 && len(dark) != 0, "parsed %d light and %d dark tokens: the parser found nothing to guard", len(light), len(dark))
 	return light, dark
 }
 
@@ -140,9 +136,7 @@ func TestEveryTokenIsDeclaredInBothThemes(t *testing.T) {
 	// (it is in both sets) while meaning nothing; say so rather than let
 	// the exemption above become a hiding place.
 	for name, value := range dark {
-		if !isColour(value) {
-			t.Errorf("%s is redeclared in the dark block with a non-colour value %q: only colours have a theme", name, value)
-		}
+		assert.Should(t, isColour(value), "%s is redeclared in the dark block with a non-colour value %q: only colours have a theme", name, value)
 	}
 }
 
@@ -171,12 +165,8 @@ func staticAssets(t *testing.T) map[string]string {
 		assets[path] = string(raw)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if len(assets) == 0 {
-		t.Fatal("scanned no assets under internal/web/static: the walk found nothing to guard")
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Must(t, len(assets) != 0, "scanned no assets under internal/web/static: the walk found nothing to guard")
 	return assets
 }
 
@@ -321,14 +311,10 @@ type rgb struct{ r, g, b float64 } // gamma-encoded sRGB, 0..1
 
 func parseHex(t *testing.T, name, value string) rgb {
 	t.Helper()
-	if !hexRE.MatchString(value) {
-		t.Fatalf("%s = %q is not a six-digit hex colour", name, value)
-	}
+	assert.Must(t, hexRE.MatchString(value), "%s = %q is not a six-digit hex colour", name, value)
 	component := func(i int) float64 {
 		n, err := strconv.ParseInt(value[i:i+2], 16, 32)
-		if err != nil {
-			t.Fatalf("%s = %q: %v", name, value, err)
-		}
+		assert.Must(t, err == nil, "%s = %q: %v", name, value, err)
 		return float64(n) / 255
 	}
 	return rgb{component(1), component(3), component(5)}
@@ -445,9 +431,7 @@ func themes(t *testing.T) []theme {
 func (th theme) colour(t *testing.T, name string) rgb {
 	t.Helper()
 	value, ok := th.tokens[name]
-	if !ok {
-		t.Fatalf("%s theme declares no %s", th.name, name)
-	}
+	assert.Must(t, ok, "%s theme declares no %s", th.name, name)
 	return parseHex(t, name, value)
 }
 
@@ -498,10 +482,8 @@ func TestANodesNameIsLegibleOnItsOwnFill(t *testing.T) {
 		for i := 1; i <= dataSlots; i++ {
 			name := fmt.Sprintf("--data-%d", i)
 			got := contrastRatio(label, th.colour(t, name))
-			if got < 4.5 {
-				t.Errorf("%s theme: a label in --paper on %s is %.2f:1, want >= 4.5:1 — "+
-					"a node whose name cannot be read is a node with no name", th.name, name, got)
-			}
+			assert.Should(t, got >= 4.5, "%s theme: a label in --paper on %s is %.2f:1, want >= 4.5:1 — "+
+				"a node whose name cannot be read is a node with no name", th.name, name, got)
 		}
 	}
 }
@@ -514,9 +496,7 @@ func TestANodesNameIsLegibleOnItsOwnFill(t *testing.T) {
 func TestTheLabelOnAHueIsTheTokenTheGuardMeasures(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile("static/palette.js")
-	if err != nil {
-		t.Fatalf("read palette.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read palette.js: %v", err)
 	if !strings.Contains(string(source), `const HUE_LABEL_FILL = "var(--paper)"`) {
 		t.Error("palette.js no longer sets a label on a hue in --paper, which is the pair " +
 			"TestANodesNameIsLegibleOnItsOwnFill measures")
@@ -546,9 +526,7 @@ func TestMeaningfulOutlinesMeetThreeToOne(t *testing.T) {
 		ground := th.colour(t, "--ground")
 		for _, name := range names {
 			got := contrastRatio(th.colour(t, name), ground)
-			if got < 3 {
-				t.Errorf("%s theme: %s on --ground is %.2f:1, want >= 3:1", th.name, name, got)
-			}
+			assert.Should(t, got >= 3, "%s theme: %s on --ground is %.2f:1, want >= 3:1", th.name, name, got)
 		}
 	}
 }
@@ -594,10 +572,8 @@ func TestTheDataHuesSeparateUnderDeuteranopiaAndProtanopia(t *testing.T) {
 			for i := 0; i < dataSlots; i++ {
 				for j := i + 1; j < dataSlots; j++ {
 					got := deltaE76(mode.of(hues[i]), mode.of(hues[j]))
-					if got < minSeparation {
-						t.Errorf("%s theme, %s: --data-%d and --data-%d are %.1f apart, want >= %.1f",
-							th.name, mode.name, i+1, j+1, got, minSeparation)
-					}
+					assert.Should(t, got >= minSeparation, "%s theme, %s: --data-%d and --data-%d are %.1f apart, want >= %.1f",
+						th.name, mode.name, i+1, j+1, got, minSeparation)
 				}
 			}
 		}
@@ -619,14 +595,10 @@ func TestThePaletteModuleAndTheStylesheetAgreeOnEight(t *testing.T) {
 			declared++
 		}
 	}
-	if declared != dataSlots {
-		t.Errorf("styles.css declares %d --data-n tokens, want %d", declared, dataSlots)
-	}
+	assert.Should(t, declared == dataSlots, "styles.css declares %d --data-n tokens, want %d", declared, dataSlots)
 
 	raw, err := os.ReadFile("static/palette.js")
-	if err != nil {
-		t.Fatalf("read palette.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read palette.js: %v", err)
 	src := string(raw)
 	if want := fmt.Sprintf("export const DATA_SLOTS = %d;", dataSlots); !strings.Contains(src, want) {
 		t.Errorf("palette.js does not declare %q", want)
@@ -637,9 +609,7 @@ func TestThePaletteModuleAndTheStylesheetAgreeOnEight(t *testing.T) {
 			named++
 		}
 	}
-	if named != dataSlots {
-		t.Errorf("palette.js names %d data tokens, want %d", named, dataSlots)
-	}
+	assert.Should(t, named == dataSlots, "palette.js names %d data tokens, want %d", named, dataSlots)
 }
 
 // --- The chrome spends no hue, and that is arithmetic too -------------
@@ -673,9 +643,7 @@ var diffRuleRE = regexp.MustCompile(`(?s)(\.diff[a-z-]*)\s*\{([^}]*)\}`)
 func TestNoRuleSpellsAColourLiterally(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", stylesheetPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", stylesheetPath, err)
 	src := stripComments(string(raw))
 
 	// The token declarations are the one place a literal is the point.
@@ -693,12 +661,10 @@ func TestNoRuleSpellsAColourLiterally(t *testing.T) {
 			offenders = append(offenders, fmt.Sprintf("%q spells %s", trimmed, hit))
 		}
 	}
-	if len(offenders) > 0 {
-		t.Fatalf("%d rule(s) spell a colour literally instead of naming a token:\n  %s\n"+
-			"a literal is a colour that is never contrast-checked, never checked for colour-blind "+
-			"separation and has no dark value at all",
-			len(offenders), strings.Join(offenders, "\n  "))
-	}
+	assert.Must(t, len(offenders) <= 0, "%d rule(s) spell a colour literally instead of naming a token:\n  %s\n"+
+		"a literal is a colour that is never contrast-checked, never checked for colour-blind "+
+		"separation and has no dark value at all",
+		len(offenders), strings.Join(offenders, "\n  "))
 }
 
 // TestTheDiffReadsNoChromaticToken is the second half, and it is the one
@@ -714,9 +680,7 @@ func TestNoRuleSpellsAColourLiterally(t *testing.T) {
 func TestTheDiffReadsNoChromaticToken(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", stylesheetPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", stylesheetPath, err)
 	src := stripComments(string(raw))
 
 	chromatic := map[string]bool{"--danger": true, "--focus": true, "--focus-ink": true}
@@ -725,9 +689,7 @@ func TestTheDiffReadsNoChromaticToken(t *testing.T) {
 	}
 
 	rules := diffRuleRE.FindAllStringSubmatch(src, -1)
-	if len(rules) < 5 {
-		t.Fatalf("found %d .diff rules; RenderDiff writes five classes and the container, so this test has stopped reading the thing it names", len(rules))
-	}
+	assert.Must(t, len(rules) >= 5, "found %d .diff rules; RenderDiff writes five classes and the container, so this test has stopped reading the thing it names", len(rules))
 	for _, rule := range rules {
 		for _, hit := range referenceRE.FindAllStringSubmatch(rule[2], -1) {
 			if chromatic[hit[1]] {
@@ -769,10 +731,8 @@ func TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies(t *testing.T) {
 		removed := th.colour(t, "--muted")
 		for _, mode := range vision {
 			got := deltaE76(mode.of(added), mode.of(removed))
-			if got < minSeparation {
-				t.Errorf("%s theme, %s: an added line's --ink and a removed line's --muted are %.1f apart, want >= %.1f",
-					th.name, mode.name, got, minSeparation)
-			}
+			assert.Should(t, got >= minSeparation, "%s theme, %s: an added line's --ink and a removed line's --muted are %.1f apart, want >= %.1f",
+				th.name, mode.name, got, minSeparation)
 		}
 	}
 }
@@ -831,19 +791,13 @@ func TestTheDiffsGroundsAndItsGutterAreLegible(t *testing.T) {
 func TestTheDiffsGutterOutranksItsOwnDefault(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", stylesheetPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", stylesheetPath, err)
 	src := stripComments(string(raw))
 
-	if !strings.Contains(src, ".diff > div {") {
-		t.Fatal("the diff no longer draws a gutter on every line: this guard is about the rule that one outranks, and there is no longer one")
-	}
+	assert.Must(t, strings.Contains(src, ".diff > div {"), "the diff no longer draws a gutter on every line: this guard is about the rule that one outranks, and there is no longer one")
 	for _, class := range []string{".diff-added", ".diff-removed"} {
-		if !strings.Contains(src, ".diff > "+class+" {") {
-			t.Errorf("%s is not written as `.diff > %s`: `.diff > div` outranks a bare class, so its gutter silently computes to transparent and added and removed look the same",
-				class, class)
-		}
+		assert.Should(t, strings.Contains(src, ".diff > "+class+" {"), "%s is not written as `.diff > %s`: `.diff > div` outranks a bare class, so its gutter silently computes to transparent and added and removed look the same",
+			class, class)
 	}
 }
 
@@ -863,14 +817,10 @@ var colourLineRE = regexp.MustCompile(`(?m)^  ([a-z0-9-]+):\s*"(#[0-9a-fA-F]{6})
 func statedColours(t *testing.T) map[string]string {
 	t.Helper()
 	raw, err := os.ReadFile(designDocPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", designDocPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", designDocPath, err)
 	src := string(raw)
 	start := strings.Index(src, "\ncolors:\n")
-	if start < 0 {
-		t.Fatalf("%s has no `colors:` map in its frontmatter: this guard reads it", designDocPath)
-	}
+	assert.Must(t, start >= 0, "%s has no `colors:` map in its frontmatter: this guard reads it", designDocPath)
 	rest := src[start+len("\ncolors:\n"):]
 	// The map ends at the next key in column zero.
 	if end := regexp.MustCompile(`(?m)^[a-z]`).FindStringIndex(rest); end != nil {
@@ -880,9 +830,7 @@ func statedColours(t *testing.T) map[string]string {
 	for _, m := range colourLineRE.FindAllStringSubmatch(rest, -1) {
 		out[m[1]] = strings.ToLower(m[2])
 	}
-	if len(out) == 0 {
-		t.Fatalf("parsed no colours out of %s: the guard found nothing to hold", designDocPath)
-	}
+	assert.Must(t, len(out) != 0, "parsed no colours out of %s: the guard found nothing to hold", designDocPath)
 	return out
 }
 
@@ -891,9 +839,7 @@ func statedColours(t *testing.T) map[string]string {
 func statedDarkColours(t *testing.T) map[string]string {
 	t.Helper()
 	raw, err := os.ReadFile(designTokensPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", designTokensPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", designTokensPath, err)
 	var doc struct {
 		Extensions struct {
 			ColorMeta map[string]struct {
@@ -910,9 +856,7 @@ func statedDarkColours(t *testing.T) map[string]string {
 			out[name] = strings.ToLower(meta.DarkHex)
 		}
 	}
-	if len(out) == 0 {
-		t.Fatalf("parsed no dark colours out of %s: the guard found nothing to hold", designTokensPath)
-	}
+	assert.Must(t, len(out) != 0, "parsed no dark colours out of %s: the guard found nothing to hold", designTokensPath)
 	return out
 }
 

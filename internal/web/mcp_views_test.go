@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -65,27 +66,17 @@ func newViewsFixture(t *testing.T) viewsFixture {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create the second game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create the second game: %v", err)
 	secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: owner.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	caller, err := web.CallerForToken(ctx, ids, secret)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	f := viewsFixture{
 		pool:   pool,
 		deps:   web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Views: vs},
@@ -159,12 +150,8 @@ func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T
 		LayoutMode:      "manual",
 		ExpectedVersion: int32Of(0),
 	})
-	if err != nil {
-		t.Fatalf("views.upsert: %v", err)
-	}
-	if saved.Version != 1 {
-		t.Fatalf("Version = %d, want 1", saved.Version)
-	}
+	assert.Must(t, err == nil, "views.upsert: %v", err)
+	assert.Must(t, saved.Version == 1, "Version = %d, want 1", saved.Version)
 
 	// A background, so background_scale and background_offset are the
 	// stored values and not the column defaults.
@@ -176,28 +163,13 @@ func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T
 	}
 
 	got, err := web.MCPViewsGet(ctx, f.deps, f.caller, f.game, web.ViewsGetInput{Key: "route"})
-	if err != nil {
-		t.Fatalf("views.get: %v", err)
-	}
-	if got.Description != "How a Mage gets from 20 to 30" {
-		t.Errorf("description = %q", got.Description)
-	}
-	if got.RendererParams["snap"] != float64(16) ||
-		got.RendererParams["coordinate_source"] != "manual" {
-		t.Errorf("renderer_params = %v, want both parameters back", got.RendererParams)
-	}
-	if got.LayoutMode != "manual" {
-		t.Errorf("layout_mode = %q, want manual", got.LayoutMode)
-	}
-	if got.BackgroundScale != 2.5 {
-		t.Errorf("background_scale = %v, want 2.5", got.BackgroundScale)
-	}
-	if got.BackgroundOffset != (web.ViewsPointInput{X: 10, Y: -4}) {
-		t.Errorf("background_offset = %+v, want {10, -4}", got.BackgroundOffset)
-	}
-	if got.BackgroundAssetID == nil || *got.BackgroundAssetID != asset {
-		t.Errorf("background_asset_id = %v, want %s", got.BackgroundAssetID, asset)
-	}
+	assert.Must(t, err == nil, "views.get: %v", err)
+	assert.Should(t, got.Description == "How a Mage gets from 20 to 30", "description = %q", got.Description)
+	assert.Should(t, got.RendererParams["snap"] == float64(16) && got.RendererParams["coordinate_source"] == "manual", "renderer_params = %v, want both parameters back", got.RendererParams)
+	assert.Should(t, got.LayoutMode == "manual", "layout_mode = %q, want manual", got.LayoutMode)
+	assert.Should(t, got.BackgroundScale == 2.5, "background_scale = %v, want 2.5", got.BackgroundScale)
+	assert.Should(t, got.BackgroundOffset == (web.ViewsPointInput{X: 10, Y: -4}), "background_offset = %+v, want {10, -4}", got.BackgroundOffset)
+	assert.Should(t, got.BackgroundAssetID != nil && *got.BackgroundAssetID == asset, "background_asset_id = %v, want %s", got.BackgroundAssetID, asset)
 	// The query comes back as a document rather than as a string of
 	// escaped JSON, which is the whole reason it is a json.RawMessage on
 	// both sides.
@@ -205,9 +177,7 @@ func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T
 	if err := json.Unmarshal(got.Query, &document); err != nil {
 		t.Fatalf("the query did not come back as a document: %v", err)
 	}
-	if document["v"] != float64(1) {
-		t.Errorf("query = %v, want the document that was saved", document)
-	}
+	assert.Should(t, document["v"] == float64(1), "query = %v, want the document that was saved", document)
 }
 
 // TestPositionsAreWrittenAndReadBackThroughTheTools is the second clause
@@ -227,21 +197,13 @@ func TestPositionsAreWrittenAndReadBackThroughTheTools(t *testing.T) {
 			{EntityType: "quest", EntityKey: "hogger", X: 12.5, Y: -40.25},
 			{EntityType: "quest", EntityKey: "defias", X: 0, Y: 0, Pinned: &pinned},
 		}})
-	if err != nil {
-		t.Fatalf("views.set_positions: %v", err)
-	}
-	if written.Written != 2 {
-		t.Fatalf("written = %d, want 2", written.Written)
-	}
+	assert.Must(t, err == nil, "views.set_positions: %v", err)
+	assert.Must(t, written.Written == 2, "written = %d, want 2", written.Written)
 
 	run, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game, web.ViewsRunInput{Key: "route"})
-	if err != nil {
-		t.Fatalf("views.run: %v", err)
-	}
+	assert.Must(t, err == nil, "views.run: %v", err)
 	positions := positionsOf(t, run)
-	if len(positions) != 2 {
-		t.Fatalf("positions = %v, want the two that were dragged", positions)
-	}
+	assert.Must(t, len(positions) == 2, "positions = %v, want the two that were dragged", positions)
 	// **Read back in the spelling the call was written in.** The members
 	// are named here as literal strings, deliberately: this is the one
 	// assertion in the package that would have failed while Position
@@ -257,10 +219,8 @@ func TestPositionsAreWrittenAndReadBackThroughTheTools(t *testing.T) {
 			got = append(got, name)
 		}
 		sort.Strings(got)
-		if !slices.Equal(got, want) {
-			t.Errorf("a stored position came back as %v, want the spelling "+
-				"views.set_positions takes, %v", got, want)
-		}
+		assert.Should(t, slices.Equal(got, want), "a stored position came back as %v, want the spelling "+
+			"views.set_positions takes, %v", got, want)
 	}
 
 	byKey := map[string]map[string]any{}
@@ -280,20 +240,12 @@ func TestPositionsAreWrittenAndReadBackThroughTheTools(t *testing.T) {
 	one := []web.ViewsEntityAddressInput{{EntityType: "quest", EntityKey: "hogger"}}
 	removed, err := web.MCPViewsClearPositions(ctx, f.deps, f.caller, f.game,
 		web.ViewsClearPositionsInput{Key: "route", Entities: &one})
-	if err != nil {
-		t.Fatalf("views.clear_positions: %v", err)
-	}
-	if removed.Removed != 1 {
-		t.Fatalf("removed = %d, want the one node named", removed.Removed)
-	}
+	assert.Must(t, err == nil, "views.clear_positions: %v", err)
+	assert.Must(t, removed.Removed == 1, "removed = %d, want the one node named", removed.Removed)
 	all, err := web.MCPViewsClearPositions(ctx, f.deps, f.caller, f.game,
 		web.ViewsClearPositionsInput{Key: "route"})
-	if err != nil {
-		t.Fatalf("views.clear_positions (whole view): %v", err)
-	}
-	if all.Removed != 1 {
-		t.Fatalf("removed = %d, want the one that was left", all.Removed)
-	}
+	assert.Must(t, err == nil, "views.clear_positions (whole view): %v", err)
+	assert.Must(t, all.Removed == 1, "removed = %d, want the one that was left", all.Removed)
 	// An empty array is refused, which is the half a client with an empty
 	// dirty-list depends on.
 	empty := []web.ViewsEntityAddressInput{}
@@ -315,24 +267,14 @@ func TestAnAssetIsReadBackThroughTheToolWithItsDecodedShape(t *testing.T) {
 
 	got, err := web.MCPViewsListAssets(context.Background(), f.deps, f.caller, f.game,
 		web.ViewsListAssetsInput{})
-	if err != nil {
-		t.Fatalf("views.list_assets: %v", err)
-	}
-	if len(got.Items) != 1 {
-		t.Fatalf("items = %+v, want the one asset", got.Items)
-	}
+	assert.Must(t, err == nil, "views.list_assets: %v", err)
+	assert.Must(t, len(got.Items) == 1, "items = %+v, want the one asset", got.Items)
 	asset := got.Items[0]
-	if asset.ID != id {
-		t.Errorf("id = %s, want %s", asset.ID, id)
-	}
-	if asset.Mime != "image/png" || asset.Width != 8 || asset.Height != 4 {
-		t.Errorf("asset = %+v, want the decoded 8x4 png", asset)
-	}
+	assert.Should(t, asset.ID == id, "id = %s, want %s", asset.ID, id)
+	assert.Should(t, asset.Mime == "image/png" && asset.Width == 8 && asset.Height == 4, "asset = %+v, want the decoded 8x4 png", asset)
 	// The URL is what makes the id usable at all: a client draws the
 	// background from it, and it has to name this game.
-	if !strings.Contains(asset.URL, "/api/games/azeroth/view-assets/"+id) {
-		t.Errorf("url = %q, want this game's own serving route", asset.URL)
-	}
+	assert.Should(t, strings.Contains(asset.URL, "/api/games/azeroth/view-assets/"+id), "url = %q, want this game's own serving route", asset.URL)
 }
 
 // TestEveryViewsToolRefusesAnotherGamesToken is the isolation sweep for
@@ -427,22 +369,16 @@ func TestEveryViewsToolRefusesAnotherGamesToken(t *testing.T) {
 		}
 		registered++
 		call, ok := calls[name]
-		if !ok {
-			t.Fatalf("%s is registered and this test does not drive it: add it to the table, "+
-				"or one game's agent reaches another game's views unnoticed", name)
-		}
+		assert.Must(t, ok, "%s is registered and this test does not drive it: add it to the table, "+
+			"or one game's agent reaches another game's views unnoticed", name)
 		t.Run(name, func(t *testing.T) {
 			if err := call(); !errors.Is(err, web.ErrScopeViolation) {
 				t.Fatalf("err = %v, want a scope violation", err)
 			}
 		})
 	}
-	if registered != len(calls) {
-		t.Fatalf("%d views tools are registered and the table has %d entries", registered, len(calls))
-	}
-	if registered == 0 {
-		t.Fatal("no views tool is registered at all; this test would pass vacuously")
-	}
+	assert.Must(t, registered == len(calls), "%d views tools are registered and the table has %d entries", registered, len(calls))
+	assert.Must(t, registered != 0, "no views tool is registered at all; this test would pass vacuously")
 	// The other game's view is still there: a refusal that had deleted or
 	// rewritten it first would satisfy every assertion above.
 	if _, err := f.views.ViewByKey(ctx, f.other, "route"); err != nil {
@@ -460,15 +396,11 @@ func TestTheViewsToolsAreAbsentWithoutAViewsService(t *testing.T) {
 		Identity: identity.New(nil, config.Config{}), Projects: projects.New(nil),
 	})
 	for _, name := range srv.ScopedToolNamesForTest() {
-		if strings.HasPrefix(name, "views.") {
-			t.Errorf("%s is registered on a server built with no views service", name)
-		}
+		assert.Should(t, !strings.HasPrefix(name, "views."), "%s is registered on a server built with no views service", name)
 	}
 	// The control: the server really did register its other tools, so
 	// this is not passing because nothing is registered at all.
-	if len(srv.ScopedToolNamesForTest()) == 0 {
-		t.Fatal("no tool at all is registered; this test would pass vacuously")
-	}
+	assert.Must(t, len(srv.ScopedToolNamesForTest()) != 0, "no tool at all is registered; this test would pass vacuously")
 }
 
 // --- helpers ---
@@ -493,9 +425,7 @@ func (f viewsFixture) upload(t *testing.T, game uuid.UUID) string {
 	t.Helper()
 	asset, err := f.views.CreateAsset(context.Background(), game, views.Actor{},
 		"world.png", bytes.NewReader(testPNG(t, 8, 4)))
-	if err != nil {
-		t.Fatalf("upload an asset: %v", err)
-	}
+	assert.Must(t, err == nil, "upload an asset: %v", err)
 	return asset.ID.String()
 }
 
@@ -505,13 +435,9 @@ func (f viewsFixture) upload(t *testing.T, game uuid.UUID) string {
 func positionsOf(t *testing.T, run map[string]any) []map[string]any {
 	t.Helper()
 	raw, ok := run["positions"]
-	if !ok {
-		t.Fatal("the run carried no positions member at all")
-	}
+	assert.Must(t, ok, "the run carried no positions member at all")
 	encoded, err := json.Marshal(raw)
-	if err != nil {
-		t.Fatalf("marshal positions: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal positions: %v", err)
 	var out []map[string]any
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		t.Fatalf("decode positions: %v", err)
@@ -532,12 +458,8 @@ func TestARunNamesEitherASavedViewOrAQueryAndNeverBoth(t *testing.T) {
 	both, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game, web.ViewsRunInput{
 		Key: "route", Query: json.RawMessage(questsQuery),
 	})
-	if err == nil {
-		t.Fatalf("naming both was accepted and drew %v", both)
-	}
-	if !strings.Contains(err.Error(), "one or the other") {
-		t.Errorf("err = %v, want it to say which of the two to send", err)
-	}
+	assert.Must(t, err != nil, "naming both was accepted and drew %v", both)
+	assert.Should(t, strings.Contains(err.Error(), "one or the other"), "err = %v, want it to say which of the two to send", err)
 	if _, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game, web.ViewsRunInput{}); err == nil {
 		t.Fatal("naming neither was accepted: this tool cannot run nothing")
 	}
@@ -567,18 +489,14 @@ func TestAnInlineRunCarriesNoPositionsMemberAndASavedOneAlwaysDoes(t *testing.T)
 
 	inline, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
 		web.ViewsRunInput{Query: json.RawMessage(questsQuery)})
-	if err != nil {
-		t.Fatalf("inline run: %v", err)
-	}
+	assert.Must(t, err == nil, "inline run: %v", err)
 	if _, present := inline["positions"]; present {
 		t.Errorf("an inline run carried positions = %v: there is no saved view for one to "+
 			"belong to", inline["positions"])
 	}
 
 	saved, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game, web.ViewsRunInput{Key: "route"})
-	if err != nil {
-		t.Fatalf("saved run: %v", err)
-	}
+	assert.Must(t, err == nil, "saved run: %v", err)
 	raw, present := saved["positions"]
 	if !present {
 		t.Fatal("a saved run carried no positions member: absent means \"not applicable\", " +
@@ -589,9 +507,7 @@ func TestAnInlineRunCarriesNoPositionsMemberAndASavedOneAlwaysDoes(t *testing.T)
 	}
 	// And the two runs drew the same picture, so the difference really is
 	// the member and not the query.
-	if len(saved["nodes"].([]views.Node)) != len(inline["nodes"].([]views.Node)) {
-		t.Fatalf("the two runs drew different pictures; the control does not hold")
-	}
+	assert.Must(t, len(saved["nodes"].([]views.Node)) == len(inline["nodes"].([]views.Node)), "the two runs drew different pictures; the control does not hold")
 }
 
 // TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated is the
@@ -615,10 +531,8 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 
 	renderers := views.RendererDescription()
 	operators := views.OperatorDescription()
-	if len(renderers) < 200 || len(operators) < 200 {
-		t.Fatalf("the generated tables are %d and %d characters; this test would pass over "+
-			"nothing", len(renderers), len(operators))
-	}
+	assert.Must(t, len(renderers) >= 200 && len(operators) >= 200, "the generated tables are %d and %d characters; this test would pass over "+
+		"nothing", len(renderers), len(operators))
 
 	// **Both tools that judge a renderer carry the catalogue**, and
 	// views.validate is the one that would be missed: it is the tool
@@ -628,20 +542,16 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 	// requiring the catalogue on the upsert alone is a guard against
 	// exactly the drift it let through.
 	for _, name := range []string{"views.upsert", "views.validate"} {
-		if strings.Count(descriptions[name], renderers) != 1 {
-			t.Errorf("%s does not carry the generated renderer catalogue verbatim, exactly "+
-				"once: an agent choosing a renderer or a parameter is then reading a "+
-				"hand-written copy that can lie", name)
-		}
+		assert.Should(t, strings.Count(descriptions[name], renderers) == 1, "%s does not carry the generated renderer catalogue verbatim, exactly "+
+			"once: an agent choosing a renderer or a parameter is then reading a "+
+			"hand-written copy that can lie", name)
 	}
 
 	if _, ok := descriptions["views.upsert"]; !ok {
 		t.Fatal("views.upsert is not registered")
 	}
 	for _, name := range []string{"views.upsert", "views.run", "views.validate"} {
-		if strings.Count(descriptions[name], operators) != 1 {
-			t.Errorf("%s does not carry the generated operator table verbatim", name)
-		}
+		assert.Should(t, strings.Count(descriptions[name], operators) == 1, "%s does not carry the generated operator table verbatim", name)
 	}
 
 	// The hand-written half is the rules a table cannot state, and each
@@ -670,9 +580,7 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 			"otherwise would take the several-call workaround for a one-call job"},
 		{"views.get", "A view's key is permanent", "the tool a caller reads a key from says so too"},
 	} {
-		if !strings.Contains(descriptions[want.tool], want.phrase) {
-			t.Errorf("%s does not say %q — %s", want.tool, want.phrase, want.why)
-		}
+		assert.Should(t, strings.Contains(descriptions[want.tool], want.phrase), "%s does not say %q — %s", want.tool, want.phrase, want.why)
 	}
 
 	// Nothing only this repository knows, on every views tool. Task 14
@@ -706,10 +614,8 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 	// coverage — the failure mode of the substring list it replaces,
 	// one level up.
 	for _, guard := range repositoryOnly {
-		if !guard.re.MatchString(guard.leaks) {
-			t.Errorf("the guard for %s does not match %q, so it guards nothing",
-				guard.what, guard.leaks)
-		}
+		assert.Should(t, guard.re.MatchString(guard.leaks), "the guard for %s does not match %q, so it guards nothing",
+			guard.what, guard.leaks)
 	}
 	swept := 0
 	for name, text := range descriptions {
@@ -724,9 +630,7 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 			}
 		}
 	}
-	if swept == 0 {
-		t.Fatal("no views tool description was swept; this test would pass vacuously")
-	}
+	assert.Must(t, swept != 0, "no views tool description was swept; this test would pass vacuously")
 }
 
 // TestAViewWithNoRendererParametersReadsBackAsAnObjectAndNotNull is the
@@ -747,19 +651,11 @@ func TestAViewWithNoRendererParametersReadsBackAsAnObjectAndNotNull(t *testing.T
 	f.save(t, "plain", questsQuery, "graph")
 
 	got, err := web.MCPViewsGet(ctx, f.deps, f.caller, f.game, web.ViewsGetInput{Key: "plain"})
-	if err != nil {
-		t.Fatalf("views.get: %v", err)
-	}
-	if got.RendererParams == nil {
-		t.Fatal("renderer_params is a nil map and will marshal as null")
-	}
+	assert.Must(t, err == nil, "views.get: %v", err)
+	assert.Must(t, got.RendererParams != nil, "renderer_params is a nil map and will marshal as null")
 	encoded, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(encoded), `"renderer_params":{}`) {
-		t.Errorf("on the wire: %s", encoded)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Should(t, strings.Contains(string(encoded), `"renderer_params":{}`), "on the wire: %s", encoded)
 }
 
 // TestTheListingFlagsAStaleViewAndNotAHealthyOne is the control the
@@ -777,27 +673,19 @@ func TestTheListingFlagsAStaleViewAndNotAHealthyOne(t *testing.T) {
 	// The relation type the second view walks, deleted: the game moved
 	// under a document nobody edited, which is what stale means.
 	relation, err := f.meta.RelationTypeByKey(ctx, f.game, "takes_place_in")
-	if err != nil {
-		t.Fatalf("read the relation type: %v", err)
-	}
+	assert.Must(t, err == nil, "read the relation type: %v", err)
 	if err := f.meta.RemoveRelationType(ctx, f.game, relation.ID, false); err != nil {
 		t.Fatalf("delete the relation type: %v", err)
 	}
 
 	listing, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game, web.ViewsListInput{})
-	if err != nil {
-		t.Fatalf("views.list: %v", err)
-	}
+	assert.Must(t, err == nil, "views.list: %v", err)
 	flags := map[string]bool{}
 	for _, item := range listing.Items {
 		flags[item.Key] = item.Stale
 	}
-	if len(flags) != 2 {
-		t.Fatalf("listing = %+v, want both views", listing.Items)
-	}
-	if !flags["broken"] {
-		t.Error("the view whose relation type was deleted is not flagged stale")
-	}
+	assert.Must(t, len(flags) == 2, "listing = %+v, want both views", listing.Items)
+	assert.Should(t, flags["broken"], "the view whose relation type was deleted is not flagged stale")
 	if flags["healthy"] {
 		t.Error("a view nothing touched is flagged stale: the flag says nothing if it says " +
 			"the same for both")
@@ -832,9 +720,7 @@ func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
 	// The game moves under a document nobody edited: the relation type
 	// the second step walks is gone.
 	relation, err := f.meta.RelationTypeByKey(ctx, f.game, "takes_place_in")
-	if err != nil {
-		t.Fatalf("read the relation type: %v", err)
-	}
+	assert.Must(t, err == nil, "read the relation type: %v", err)
 	if err := f.meta.RemoveRelationType(ctx, f.game, relation.ID, false); err != nil {
 		t.Fatalf("delete the relation type: %v", err)
 	}
@@ -847,9 +733,7 @@ func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
 
 	run, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
 		web.ViewsRunInput{Key: "route", OnStale: "best_effort"})
-	if err != nil {
-		t.Fatalf("best_effort was not honoured: %v", err)
-	}
+	assert.Must(t, err == nil, "best_effort was not honoured: %v", err)
 	// What survived the pruning: the quests are still drawn, so this is
 	// a picture and not an empty answer that satisfies the next
 	// assertion by drawing nothing.
@@ -866,12 +750,8 @@ func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
 			"told the caller nothing")
 	}
 	encoded, err := json.Marshal(stale)
-	if err != nil {
-		t.Fatalf("marshal stale: %v", err)
-	}
-	if !strings.Contains(string(encoded), "takes_place_in") {
-		t.Errorf("stale = %s, want the relation type that broke", encoded)
-	}
+	assert.Must(t, err == nil, "marshal stale: %v", err)
+	assert.Should(t, strings.Contains(string(encoded), "takes_place_in"), "stale = %s, want the relation type that broke", encoded)
 }
 
 // TestARunCarriesItsIncludeFieldsFlag: the flag selects each node's
@@ -886,9 +766,7 @@ func TestARunCarriesItsIncludeFieldsFlag(t *testing.T) {
 
 	with, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
 		web.ViewsRunInput{Key: "route", IncludeFields: true})
-	if err != nil {
-		t.Fatalf("views.run with fields: %v", err)
-	}
+	assert.Must(t, err == nil, "views.run with fields: %v", err)
 	nodes, ok := with["nodes"].([]views.Node)
 	if !ok || len(nodes) == 0 {
 		t.Fatalf("the run drew nothing: %v", with["nodes"])
@@ -899,20 +777,14 @@ func TestARunCarriesItsIncludeFieldsFlag(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Error("include_fields was sent and no node carried its declared fields")
-	}
+	assert.Should(t, found, "include_fields was sent and no node carried its declared fields")
 
 	without, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
 		web.ViewsRunInput{Key: "route"})
-	if err != nil {
-		t.Fatalf("views.run without fields: %v", err)
-	}
+	assert.Must(t, err == nil, "views.run without fields: %v", err)
 	for _, node := range without["nodes"].([]views.Node) {
-		if len(node.Fields) != 0 {
-			t.Errorf("a run that did not ask for fields carried %v: the flag says nothing "+
-				"if the answer is the same either way", node.Fields)
-		}
+		assert.Should(t, len(node.Fields) == 0, "a run that did not ask for fields carried %v: the flag says nothing "+
+			"if the answer is the same either way", node.Fields)
 	}
 }
 
@@ -945,12 +817,8 @@ func TestValidateJudgesTheRendererAndTheParametersTheCallSent(t *testing.T) {
 		Query: json.RawMessage(projected), Renderer: "map",
 		RendererParams: map[string]any{"coordinate_source": "fields"},
 	})
-	if err == nil {
-		t.Fatal("a map view in \"fields\" mode naming no coordinate fields validated")
-	}
-	if !strings.Contains(err.Error(), "x_field") {
-		t.Errorf("err = %v, want it to name the parameter that is missing", err)
-	}
+	assert.Must(t, err != nil, "a map view in \"fields\" mode naming no coordinate fields validated")
+	assert.Should(t, strings.Contains(err.Error(), "x_field"), "err = %v, want it to name the parameter that is missing", err)
 
 	// The same renderer, the same query, two more parameters: accepted.
 	// The verdict moved on the binding, so the binding arrived.
@@ -995,12 +863,8 @@ func TestAnUpsertRecordsTheCallerWhoMadeIt(t *testing.T) {
 		t.Fatal("a view saved by an agent has no updated_by_token_id: the tool dropped " +
 			"the caller on the way into the domain")
 	}
-	if f.caller.TokenID == nil || *token != *f.caller.TokenID {
-		t.Errorf("updated_by_token_id = %v, want this call's own token %v", token, f.caller.TokenID)
-	}
-	if user == nil || *user != f.ownerID {
-		t.Errorf("updated_by_user_id = %v, want the token's owner %s", user, f.ownerID)
-	}
+	assert.Should(t, f.caller.TokenID != nil && *token == *f.caller.TokenID, "updated_by_token_id = %v, want this call's own token %v", token, f.caller.TokenID)
+	assert.Should(t, user != nil && *user == f.ownerID, "updated_by_user_id = %v, want the token's owner %s", user, f.ownerID)
 }
 
 // TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces is a
@@ -1020,40 +884,24 @@ func TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces(t *testing.T) {
 
 	only, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
 		web.ViewsListInput{Renderer: "map"})
-	if err != nil {
-		t.Fatalf("views.list filtered: %v", err)
-	}
-	if len(only.Items) != 1 || only.Items[0].Key != "atlas" {
-		t.Fatalf("the renderer filter answered %+v, want only the map view", only.Items)
-	}
+	assert.Must(t, err == nil, "views.list filtered: %v", err)
+	assert.Must(t, len(only.Items) == 1 && only.Items[0].Key == "atlas", "the renderer filter answered %+v, want only the map view", only.Items)
 	// The control in the same test: the two graph views really are
 	// there, so the assertion above cannot pass on an empty listing.
 	whole, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game, web.ViewsListInput{})
-	if err != nil {
-		t.Fatalf("views.list: %v", err)
-	}
-	if len(whole.Items) != 3 {
-		t.Fatalf("the unfiltered listing answered %+v, want all three", whole.Items)
-	}
+	assert.Must(t, err == nil, "views.list: %v", err)
+	assert.Must(t, len(whole.Items) == 3, "the unfiltered listing answered %+v, want all three", whole.Items)
 
 	// The cursor, through the filter it was issued for.
 	page, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
 		web.ViewsListInput{Renderer: "graph", Limit: 1})
-	if err != nil {
-		t.Fatalf("views.list paged: %v", err)
-	}
-	if len(page.Items) != 1 || page.NextCursor == nil {
-		t.Fatalf("page one = %+v with cursor %v, want one row and a cursor",
-			page.Items, page.NextCursor)
-	}
+	assert.Must(t, err == nil, "views.list paged: %v", err)
+	assert.Must(t, len(page.Items) == 1 && page.NextCursor != nil, "page one = %+v with cursor %v, want one row and a cursor",
+		page.Items, page.NextCursor)
 	next, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
 		web.ViewsListInput{Renderer: "graph", Limit: 1, Cursor: *page.NextCursor})
-	if err != nil {
-		t.Fatalf("views.list page two: %v", err)
-	}
-	if len(next.Items) != 1 || next.Items[0].Key == page.Items[0].Key {
-		t.Fatalf("page two = %+v, want the other graph view", next.Items)
-	}
+	assert.Must(t, err == nil, "views.list page two: %v", err)
+	assert.Must(t, len(next.Items) == 1 && next.Items[0].Key != page.Items[0].Key, "page two = %+v, want the other graph view", next.Items)
 
 	// And the claim the description makes about a cursor: it belongs to
 	// the filter it was issued for. A page-one cursor replayed against a
@@ -1083,45 +931,27 @@ func TestTheAssetListingToolPagesWithItsOwnCursor(t *testing.T) {
 
 	whole, err := web.MCPViewsListAssets(ctx, f.deps, f.caller, f.game,
 		web.ViewsListAssetsInput{})
-	if err != nil {
-		t.Fatalf("views.list_assets: %v", err)
-	}
-	if len(whole.Items) != 3 || whole.NextCursor != nil {
-		t.Fatalf("the unpaged listing = %d items with cursor %v, want all three and none",
-			len(whole.Items), whole.NextCursor)
-	}
+	assert.Must(t, err == nil, "views.list_assets: %v", err)
+	assert.Must(t, len(whole.Items) == 3 && whole.NextCursor == nil, "the unpaged listing = %d items with cursor %v, want all three and none",
+		len(whole.Items), whole.NextCursor)
 
 	page, err := web.MCPViewsListAssets(ctx, f.deps, f.caller, f.game,
 		web.ViewsListAssetsInput{Limit: 2})
-	if err != nil {
-		t.Fatalf("views.list_assets paged: %v", err)
-	}
-	if len(page.Items) != 2 {
-		t.Fatalf("page one carried %d assets, want the limit of 2 honoured", len(page.Items))
-	}
-	if page.NextCursor == nil {
-		t.Fatal("page one carried no next_cursor and there is a third asset to reach")
-	}
+	assert.Must(t, err == nil, "views.list_assets paged: %v", err)
+	assert.Must(t, len(page.Items) == 2, "page one carried %d assets, want the limit of 2 honoured", len(page.Items))
+	assert.Must(t, page.NextCursor != nil, "page one carried no next_cursor and there is a third asset to reach")
 	next, err := web.MCPViewsListAssets(ctx, f.deps, f.caller, f.game,
 		web.ViewsListAssetsInput{Limit: 2, Cursor: *page.NextCursor})
-	if err != nil {
-		t.Fatalf("views.list_assets page two: %v", err)
-	}
-	if len(next.Items) != 1 {
-		t.Fatalf("page two carried %d assets, want the one that was left", len(next.Items))
-	}
+	assert.Must(t, err == nil, "views.list_assets page two: %v", err)
+	assert.Must(t, len(next.Items) == 1, "page two carried %d assets, want the one that was left", len(next.Items))
 	// The walk saw each asset once: a cursor that started over would
 	// satisfy every count above and hand the same page back forever.
 	seen := map[string]bool{}
 	for _, item := range append(append([]web.ViewAssetOutput{}, page.Items...), next.Items...) {
-		if seen[item.ID] {
-			t.Fatalf("asset %s came back on both pages", item.ID)
-		}
+		assert.Must(t, !(seen[item.ID]), "asset %s came back on both pages", item.ID)
 		seen[item.ID] = true
 	}
-	if len(seen) != len(all) {
-		t.Fatalf("the paged walk saw %d assets, the unpaged listing %d", len(seen), len(all))
-	}
+	assert.Must(t, len(seen) == len(all), "the paged walk saw %d assets, the unpaged listing %d", len(seen), len(all))
 }
 
 // TestRemovingAViewSaysSoAndThenTheViewIsGone. views.remove's whole
@@ -1136,12 +966,8 @@ func TestRemovingAViewSaysSoAndThenTheViewIsGone(t *testing.T) {
 
 	out, err := web.MCPViewsRemove(ctx, f.deps, f.caller, f.game,
 		web.ViewsRemoveInput{Key: "route"})
-	if err != nil {
-		t.Fatalf("views.remove: %v", err)
-	}
-	if !out.Removed {
-		t.Error("views.remove answered removed false for a view it deleted")
-	}
+	assert.Must(t, err == nil, "views.remove: %v", err)
+	assert.Should(t, out.Removed, "views.remove answered removed false for a view it deleted")
 	// And it really is gone, so the boolean is not the only thing being
 	// asserted here.
 	if _, err := web.MCPViewsGet(ctx, f.deps, f.caller, f.game,

@@ -5,41 +5,33 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 func TestLimiterBlocksAfterMaxAttempts(t *testing.T) {
 	t.Parallel()
 	l := NewLimiter(3, time.Minute)
 	for i := 0; i < 3; i++ {
-		if !l.Allowed("designer@example.test") {
-			t.Fatalf("attempt %d was blocked too early", i+1)
-		}
+		assert.Must(t, l.Allowed("designer@example.test"), "attempt %d was blocked too early", i+1)
 		l.Record("designer@example.test")
 	}
-	if l.Allowed("designer@example.test") {
-		t.Fatal("the fourth attempt should have been blocked")
-	}
-	if !l.Allowed("someone-else@example.test") {
-		t.Fatal("a different key must not be affected")
-	}
+	assert.Must(t, !l.Allowed("designer@example.test"), "the fourth attempt should have been blocked")
+	assert.Must(t, l.Allowed("someone-else@example.test"), "a different key must not be affected")
 }
 
 func TestLimiterNormalizesKeyCasingAndWhitespace(t *testing.T) {
 	t.Parallel()
 	l := NewLimiter(1, time.Minute)
 	l.Record("Bob@Example.test")
-	if l.Allowed(" bob@example.test ") {
-		t.Fatal("a differently-cased, differently-spaced key must share the same budget")
-	}
+	assert.Must(t, !l.Allowed(" bob@example.test "), "a differently-cased, differently-spaced key must share the same budget")
 }
 
 func TestLimiterAllowedDoesNotCharge(t *testing.T) {
 	t.Parallel()
 	l := NewLimiter(1, time.Minute)
 	for i := 0; i < 5; i++ {
-		if !l.Allowed("k") {
-			t.Fatalf("Allowed call %d should never itself spend the budget", i+1)
-		}
+		assert.Must(t, l.Allowed("k"), "Allowed call %d should never itself spend the budget", i+1)
 	}
 }
 
@@ -50,13 +42,9 @@ func TestLimiterForgetsAfterWindow(t *testing.T) {
 	l.now = clock.now
 
 	l.Record("k")
-	if l.Allowed("k") {
-		t.Fatal("second attempt inside the window should be blocked")
-	}
+	assert.Must(t, !l.Allowed("k"), "second attempt inside the window should be blocked")
 	clock.advance(20 * time.Millisecond)
-	if !l.Allowed("k") {
-		t.Fatal("the window should have expired")
-	}
+	assert.Must(t, l.Allowed("k"), "the window should have expired")
 }
 
 // TestLimiterSweepsStaleKeys checks that a sweep boundary actually removes
@@ -84,9 +72,7 @@ func TestLimiterSweepsStaleKeys(t *testing.T) {
 	n := len(l.attempts)
 	l.mu.Unlock()
 
-	if n != sweepEvery {
-		t.Fatalf("attempts map holds %d keys after a sweep boundary, want exactly %d (only the fresh ones)", n, sweepEvery)
-	}
+	assert.Must(t, n == sweepEvery, "attempts map holds %d keys after a sweep boundary, want exactly %d (only the fresh ones)", n, sweepEvery)
 }
 
 // TestLimiterConcurrentAccess exercises Allowed and Record from many

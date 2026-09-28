@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -28,21 +29,13 @@ func TestValidateArea(t *testing.T) {
 		got, err := g.views.Validate(context.Background(), g.projectID, ValidateRequest{
 			Query: mustParse(t, questsToZones),
 		})
-		if err != nil {
-			t.Fatalf("Validate: %v", err)
-		}
-		if len(got.Refs) != 3 {
-			t.Fatalf("Refs = %+v, want one per type reference in the document", got.Refs)
-		}
+		assert.Must(t, err == nil, "Validate: %v", err)
+		assert.Must(t, len(got.Refs) == 3, "Refs = %+v, want one per type reference in the document", got.Refs)
 		for _, ref := range got.Refs {
-			if ref.Pointer == "" || ref.Key == "" {
-				t.Errorf("ref %+v carries no address: the pointer is what makes the list useful", ref)
-			}
+			assert.Should(t, ref.Pointer != "" && ref.Key != "", "ref %+v carries no address: the pointer is what makes the list useful", ref)
 		}
-		if got.Limits != (ResolvedLimits{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes,
-			MaxEdges: DefaultMaxEdges}) {
-			t.Errorf("Limits = %+v, want the defaults a document that set none runs under", got.Limits)
-		}
+		assert.Should(t, got.Limits == (ResolvedLimits{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes,
+			MaxEdges: DefaultMaxEdges}), "Limits = %+v, want the defaults a document that set none runs under", got.Limits)
 	})
 
 	// TestValidateArea's "validate refuses what a run would refuse" case is
@@ -122,19 +115,11 @@ func TestValidateArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := g.views.Validate(ctx, g.projectID, tc.req)
-				if err == nil {
-					t.Fatal("the document was accepted; views.run would then refuse it")
-				}
+				assert.Must(t, err != nil, "the document was accepted; views.run would then refuse it")
 				var qe *QueryError
-				if !errors.As(err, &qe) {
-					t.Fatalf("err = %v (%T), want a *QueryError", err, err)
-				}
-				if qe.Code != tc.code {
-					t.Fatalf("code = %q, want %q: %v", qe.Code, tc.code, err)
-				}
-				if tc.message != "" && !strings.Contains(err.Error(), tc.message) {
-					t.Fatalf("err = %v, want it to name %s", err, tc.message)
-				}
+				assert.Must(t, errors.As(err, &qe), "err = %v (%T), want a *QueryError", err, err)
+				assert.Must(t, qe.Code == tc.code, "code = %q, want %q: %v", qe.Code, tc.code, err)
+				assert.Must(t, tc.message == "" || strings.Contains(err.Error(), tc.message), "err = %v, want it to name %s", err, tc.message)
 				if tc.point == "" {
 					return
 				}
@@ -144,9 +129,7 @@ func TestValidateArea(t *testing.T) {
 						found = true
 					}
 				}
-				if !found {
-					t.Fatalf("no problem at %s: %+v", tc.point, qe.Fields)
-				}
+				assert.Must(t, found, "no problem at %s: %+v", tc.point, qe.Fields)
 			})
 		}
 	})
@@ -164,12 +147,8 @@ func TestValidateArea(t *testing.T) {
 
 		_, validateErr := g.views.Validate(ctx, g.projectID, ValidateRequest{Query: mustParse(t, doc)})
 		_, runErr := g.views.Run(ctx, g.projectID, RunRequest{Query: mustParse(t, doc)})
-		if validateErr == nil || runErr == nil {
-			t.Fatalf("validate = %v, run = %v: this test needs both to refuse", validateErr, runErr)
-		}
-		if validateErr.Error() != runErr.Error() {
-			t.Fatalf("validate said %q and run said %q for one document", validateErr, runErr)
-		}
+		assert.Must(t, validateErr != nil && runErr != nil, "validate = %v, run = %v: this test needs both to refuse", validateErr, runErr)
+		assert.Must(t, validateErr.Error() == runErr.Error(), "validate said %q and run said %q for one document", validateErr, runErr)
 
 		// And the control, so the pair is not "both always refuse": the same
 		// query with a spelling this game declares is accepted by both.
@@ -198,12 +177,8 @@ func TestValidateArea(t *testing.T) {
 			t.Fatalf("Validate: %v", err)
 		}
 		page, err := g.views.ListViews(ctx, g.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("ListViews: %v", err)
-		}
-		if len(page.Views) != 0 {
-			t.Fatalf("validation stored %d views", len(page.Views))
-		}
+		assert.Must(t, err == nil, "ListViews: %v", err)
+		assert.Must(t, len(page.Views) == 0, "validation stored %d views", len(page.Views))
 	})
 
 	// TestValidateArea's "the stale flag agrees with what a run reports" case
@@ -244,38 +219,26 @@ func TestValidateArea(t *testing.T) {
 		}
 
 		page, err := g.views.ListViews(ctx, g.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("ListViews: %v", err)
-		}
-		if len(page.Views) != 3 {
-			t.Fatalf("%d views listed, want the three saved", len(page.Views))
-		}
+		assert.Must(t, err == nil, "ListViews: %v", err)
+		assert.Must(t, len(page.Views) == 3, "%d views listed, want the three saved", len(page.Views))
 		flags, err := g.views.StaleViews(ctx, g.projectID, page.Views)
-		if err != nil {
-			t.Fatalf("StaleViews: %v", err)
-		}
+		assert.Must(t, err == nil, "StaleViews: %v", err)
 
 		flagged := 0
 		for _, row := range page.Views {
 			flag, ok := flags[row.ID]
-			if !ok {
-				t.Fatalf("%s has no flag at all", row.Key)
-			}
+			assert.Must(t, ok, "%s has no flag at all", row.Key)
 			if flag {
 				flagged++
 			}
 			res, runErr := g.views.RunView(ctx, g.projectID, row.Key, RunRequest{})
 			reported := runErr != nil || len(res.Stale) > 0
-			if flag != reported {
-				t.Errorf("%s: the listing says stale=%v and a run says %v (err=%v, stale=%+v)",
-					row.Key, flag, reported, runErr, res.Stale)
-			}
+			assert.Should(t, flag == reported, "%s: the listing says stale=%v and a run says %v (err=%v, stale=%+v)",
+				row.Key, flag, reported, runErr, res.Stale)
 		}
 		// The controls, so the agreement is not "everything is stale" or
 		// "nothing is": exactly the two that were moved under are flagged.
-		if flagged != 2 {
-			t.Fatalf("%d of 3 views are stale, want the renamed one and the filtered one", flagged)
-		}
+		assert.Must(t, flagged == 2, "%d of 3 views are stale, want the renamed one and the filtered one", flagged)
 	})
 
 	// TestValidateArea's "a deleted and recreated type is not stale in the
@@ -298,16 +261,10 @@ func TestValidateArea(t *testing.T) {
 			t.Fatalf("delete the relation type: %v", err)
 		}
 		page, err := g.views.ListViews(ctx, g.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("ListViews: %v", err)
-		}
+		assert.Must(t, err == nil, "ListViews: %v", err)
 		gone, err := g.views.StaleViews(ctx, g.projectID, page.Views)
-		if err != nil {
-			t.Fatalf("StaleViews: %v", err)
-		}
-		if !gone[page.Views[0].ID] {
-			t.Fatal("a view whose relation type was deleted must be stale")
-		}
+		assert.Must(t, err == nil, "StaleViews: %v", err)
+		assert.Must(t, gone[page.Views[0].ID], "a view whose relation type was deleted must be stale")
 
 		// Re-declared under the same key: a different id, no ref to follow,
 		// and the by-key step of the resolution order answers.
@@ -316,12 +273,8 @@ func TestValidateArea(t *testing.T) {
 			t.Fatalf("re-declare requires: %v", err)
 		}
 		back, err := g.views.StaleViews(ctx, g.projectID, page.Views)
-		if err != nil {
-			t.Fatalf("StaleViews: %v", err)
-		}
-		if back[page.Views[0].ID] {
-			t.Fatal("a type deleted and re-declared under the same key resolves by key: not stale")
-		}
+		assert.Must(t, err == nil, "StaleViews: %v", err)
+		assert.Must(t, !(back[page.Views[0].ID]), "a type deleted and re-declared under the same key resolves by key: not stale")
 	})
 
 	// TestValidateArea's "a parameterised view is not stale" case is the
@@ -340,16 +293,10 @@ func TestValidateArea(t *testing.T) {
 			t.Fatalf("save: %v", err)
 		}
 		page, err := g.views.ListViews(ctx, g.projectID, ViewFilter{})
-		if err != nil {
-			t.Fatalf("ListViews: %v", err)
-		}
+		assert.Must(t, err == nil, "ListViews: %v", err)
 		flags, err := g.views.StaleViews(ctx, g.projectID, page.Views)
-		if err != nil {
-			t.Fatalf("StaleViews: %v", err)
-		}
-		if flags[page.Views[0].ID] {
-			t.Fatal("a view declaring an unbound parameter is not stale: the game did not move")
-		}
+		assert.Must(t, err == nil, "StaleViews: %v", err)
+		assert.Must(t, !(flags[page.Views[0].ID]), "a view declaring an unbound parameter is not stale: the game did not move")
 		// The control that the parameter really is unbound, so this test is
 		// not passing over a document that binds itself from a default.
 		if _, err := g.views.RunView(ctx, g.projectID, "byLevel", RunRequest{}); err == nil {
@@ -363,11 +310,7 @@ func TestValidateArea(t *testing.T) {
 	t.Run("stale views is empty rather than nil for an empty page", func(t *testing.T) {
 		g, _ := a.games(t)
 		flags, err := g.views.StaleViews(context.Background(), g.projectID, []dbq.View{})
-		if err != nil {
-			t.Fatalf("StaleViews: %v", err)
-		}
-		if flags == nil {
-			t.Fatal("an empty page answered nil rather than an empty map")
-		}
+		assert.Must(t, err == nil, "StaleViews: %v", err)
+		assert.Must(t, flags != nil, "an empty page answered nil rather than an empty map")
 	})
 }

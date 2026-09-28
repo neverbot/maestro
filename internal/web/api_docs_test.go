@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -46,9 +47,7 @@ func writeDocREST(t *testing.T, f restFixture, path, content string, expected in
 		"path": path, "content": content, "expected_version": expected,
 		"message": "seed",
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("write %q = %d: %s", path, rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "write %q = %d: %s", path, rec.Code, rec.Body.String())
 	var out map[string]any
 	decodeBody(t, rec, &out)
 	return out
@@ -73,9 +72,7 @@ func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
 			map[string]any{"path": "lore/elwynn", "content": "# Elwynn\n", "expected_version": 0},
 		},
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("batch = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "batch = %d: %s", rec.Code, rec.Body.String())
 	var out struct {
 		Count   int `json:"count"`
 		Written []struct {
@@ -89,25 +86,16 @@ func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
 		} `json:"failed"`
 	}
 	decodeBody(t, rec, &out)
-	if out.Count != 2 || len(out.Written) != 2 {
-		t.Fatalf("count = %d over %d written, want 2 and 2", out.Count, len(out.Written))
-	}
-	if len(out.Failed) != 1 || out.Failed[0].Index != 1 ||
-		out.Failed[0].Key != "lore//westfall" || out.Failed[0].Code != "invalid_input" {
-		t.Fatalf("failed = %+v, want the middle item named and coded", out.Failed)
-	}
+	assert.Must(t, out.Count == 2 && len(out.Written) == 2, "count = %d over %d written, want 2 and 2", out.Count, len(out.Written))
+	assert.Must(t, len(out.Failed) == 1 && out.Failed[0].Index == 1 && out.Failed[0].Key == "lore//westfall" && out.Failed[0].Code == "invalid_input", "failed = %+v, want the middle item named and coded", out.Failed)
 	for _, w := range out.Written {
 		got := f.as(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": w.Path}), nil)
-		if got.Code != http.StatusOK {
-			t.Fatalf("read %q = %d: %s", w.Path, got.Code, got.Body.String())
-		}
+		assert.Must(t, got.Code == http.StatusOK, "read %q = %d: %s", w.Path, got.Code, got.Body.String())
 		var doc struct {
 			Version int32 `json:"version"`
 		}
 		decodeBody(t, got, &doc)
-		if doc.Version != w.Version {
-			t.Fatalf("%q is at v%d and the batch reported v%d", w.Path, doc.Version, w.Version)
-		}
+		assert.Must(t, doc.Version == w.Version, "%q is at v%d and the batch reported v%d", w.Path, doc.Version, w.Version)
 	}
 
 	// An unknown mode is a refusal of the call, so it does carry a status
@@ -118,9 +106,7 @@ func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
 			map[string]any{"path": "lore/redridge", "content": "# R\n", "expected_version": 0},
 		},
 	})
-	if bad.Code != http.StatusBadRequest {
-		t.Fatalf("an unknown mode = %d: %s", bad.Code, bad.Body.String())
-	}
+	assert.Must(t, bad.Code == http.StatusBadRequest, "an unknown mode = %d: %s", bad.Code, bad.Body.String())
 	if got := f.as(t, http.MethodGet,
 		docsPath("/docs/one", map[string]string{"path": "lore/redridge"}), nil); got.Code == http.StatusOK {
 		t.Fatal("a batch refused for its mode wrote a document")
@@ -138,9 +124,7 @@ func TestTheProseSurfaceWritesReadsAndListsThroughREST(t *testing.T) {
 	writeDocREST(t, f, "lore/duskwood", "---\ntitle: Duskwood\n---\n# Duskwood\n\nDark.\n", 0)
 
 	rec := f.as(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": "lore/duskwood"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("read = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "read = %d: %s", rec.Code, rec.Body.String())
 	var doc struct {
 		Path    string `json:"path"`
 		Title   string `json:"title"`
@@ -148,34 +132,24 @@ func TestTheProseSurfaceWritesReadsAndListsThroughREST(t *testing.T) {
 		Body    string `json:"body"`
 	}
 	decodeBody(t, rec, &doc)
-	if doc.Path != "lore/duskwood" || doc.Title != "Duskwood" || doc.Version != 1 {
-		t.Fatalf("read answered %+v", doc)
-	}
-	if !strings.Contains(doc.Body, "# Duskwood") {
-		t.Fatalf("body = %q, want the raw markdown", doc.Body)
-	}
+	assert.Must(t, doc.Path == "lore/duskwood" && doc.Title == "Duskwood" && doc.Version == 1, "read answered %+v", doc)
+	assert.Must(t, strings.Contains(doc.Body, "# Duskwood"), "body = %q, want the raw markdown", doc.Body)
 
 	rec = f.as(t, http.MethodGet, "/docs", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "list = %d: %s", rec.Code, rec.Body.String())
 	var listing struct {
 		Items []struct {
 			Path string `json:"path"`
 		} `json:"items"`
 	}
 	decodeBody(t, rec, &listing)
-	if len(listing.Items) != 1 || listing.Items[0].Path != "lore/duskwood" {
-		t.Fatalf("listing = %s", rec.Body.String())
-	}
+	assert.Must(t, len(listing.Items) == 1 && listing.Items[0].Path == "lore/duskwood", "listing = %s", rec.Body.String())
 
 	// History, version, diff and comparison all need a second version.
 	writeDocREST(t, f, "lore/duskwood", "---\ntitle: Duskwood\n---\n# Duskwood\n\nDarker.\n", 1)
 
 	rec = f.as(t, http.MethodGet, docsPath("/docs/history", map[string]string{"path": "lore/duskwood"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("history = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "history = %d: %s", rec.Code, rec.Body.String())
 	var history struct {
 		Items []struct {
 			Version    int32  `json:"version"`
@@ -183,71 +157,51 @@ func TestTheProseSurfaceWritesReadsAndListsThroughREST(t *testing.T) {
 		} `json:"items"`
 	}
 	decodeBody(t, rec, &history)
-	if len(history.Items) != 2 || history.Items[0].Version != 2 {
-		t.Fatalf("history = %s", rec.Body.String())
-	}
+	assert.Must(t, len(history.Items) == 2 && history.Items[0].Version == 2, "history = %s", rec.Body.String())
 	if history.Items[0].AuthorKind != "user" {
 		t.Fatalf("author_kind = %q, want user for a session caller", history.Items[0].AuthorKind)
 	}
 
 	rec = f.as(t, http.MethodGet, docsPath("/docs/version",
 		map[string]string{"path": "lore/duskwood", "version": "1"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("read_version = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "read_version = %d: %s", rec.Code, rec.Body.String())
 	var version struct {
 		Version int32  `json:"version"`
 		Body    string `json:"body"`
 	}
 	decodeBody(t, rec, &version)
-	if version.Version != 1 || !strings.Contains(version.Body, "Dark.") {
-		t.Fatalf("read_version answered %+v", version)
-	}
+	assert.Must(t, version.Version == 1 && strings.Contains(version.Body, "Dark."), "read_version answered %+v", version)
 
 	rec = f.as(t, http.MethodGet, docsPath("/docs/diff",
 		map[string]string{"path": "lore/duskwood", "from_version": "1", "to_version": "2"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("diff = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "diff = %d: %s", rec.Code, rec.Body.String())
 	var diff struct {
 		Unified string `json:"unified"`
 		Coarse  bool   `json:"coarse"`
 	}
 	decodeBody(t, rec, &diff)
-	if !strings.Contains(diff.Unified, "+Darker.") {
-		t.Fatalf("diff = %q", diff.Unified)
-	}
-	if diff.Coarse {
-		t.Fatalf("diff of two tiny bodies reported coarse: %s", rec.Body.String())
-	}
+	assert.Must(t, strings.Contains(diff.Unified, "+Darker."), "diff = %q", diff.Unified)
+	assert.Must(t, !diff.Coarse, "diff of two tiny bodies reported coarse: %s", rec.Body.String())
 
 	// Revert, back to version 1, and read the result back.
 	rec = f.as(t, http.MethodPost, "/docs/revert", map[string]any{
 		"path": "lore/duskwood", "to_version": 1, "expected_version": 2, "message": "undo",
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("revert = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "revert = %d: %s", rec.Code, rec.Body.String())
 	rec = f.as(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": "lore/duskwood"}), nil)
 	decodeBody(t, rec, &doc)
-	if doc.Version != 3 || !strings.Contains(doc.Body, "Dark.\n") || strings.Contains(doc.Body, "Darker") {
-		t.Fatalf("after the revert the document is %+v", doc)
-	}
+	assert.Must(t, doc.Version == 3 && strings.Contains(doc.Body, "Dark.\n") && !strings.Contains(doc.Body, "Darker"), "after the revert the document is %+v", doc)
 
 	// Delete, through the query string, and see the tombstone's version.
 	rec = f.as(t, http.MethodDelete, docsPath("/docs/one",
 		map[string]string{"path": "lore/duskwood", "expected_version": "3", "message": "gone"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("delete = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "delete = %d: %s", rec.Code, rec.Body.String())
 	var deleted struct {
 		Version int32 `json:"version"`
 		Deleted bool  `json:"deleted"`
 	}
 	decodeBody(t, rec, &deleted)
-	if deleted.Version != 4 || !deleted.Deleted {
-		t.Fatalf("delete answered %+v", deleted)
-	}
+	assert.Must(t, deleted.Version == 4 && deleted.Deleted, "delete answered %+v", deleted)
 	rec = f.as(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": "lore/duskwood"}), nil)
 	assertError(t, rec, http.StatusNotFound, "not_found", "")
 }
@@ -263,9 +217,7 @@ func TestTheProseLinkRoutesReadTheirOwnResultBack(t *testing.T) {
 	rec := f.as(t, http.MethodPost, "/entities", map[string]any{
 		"items": []any{map[string]any{"type_key": "quest", "key": "hogger", "name": "Hogger"}},
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("seed entity = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "seed entity = %d: %s", rec.Code, rec.Body.String())
 	writeDocREST(t, f, "scripts/hogger", "# Act I\n", 0)
 
 	type linksBody struct {
@@ -282,43 +234,29 @@ func TestTheProseLinkRoutesReadTheirOwnResultBack(t *testing.T) {
 	rec = f.as(t, http.MethodPost, "/docs/links", map[string]any{
 		"path": "scripts/hogger", "entity_type": "quest", "entity_key": "hogger", "role": "script",
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("link add = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "link add = %d: %s", rec.Code, rec.Body.String())
 	var added linksBody
 	decodeBody(t, rec, &added)
-	if len(added.Entities) != 1 || added.Entities[0].EntityKey != "hogger" || added.Entities[0].Role != "script" {
-		t.Fatalf("link add answered %s", rec.Body.String())
-	}
+	assert.Must(t, len(added.Entities) == 1 && added.Entities[0].EntityKey == "hogger" && added.Entities[0].Role == "script", "link add answered %s", rec.Body.String())
 
 	// The join from the entity side, which is the question an entity
 	// page asks.
 	rec = f.as(t, http.MethodGet, docsPath("/docs/links",
 		map[string]string{"entity_type": "quest", "entity_key": "hogger"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("links by entity = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "links by entity = %d: %s", rec.Code, rec.Body.String())
 	var byEntity linksBody
 	decodeBody(t, rec, &byEntity)
-	if len(byEntity.Documents) != 1 || byEntity.Documents[0].Path != "scripts/hogger" {
-		t.Fatalf("links by entity = %s", rec.Body.String())
-	}
+	assert.Must(t, len(byEntity.Documents) == 1 && byEntity.Documents[0].Path == "scripts/hogger", "links by entity = %s", rec.Body.String())
 
 	rec = f.as(t, http.MethodDelete, docsPath("/docs/links",
 		map[string]string{"path": "scripts/hogger", "entity_type": "quest", "entity_key": "hogger"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("link remove = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "link remove = %d: %s", rec.Code, rec.Body.String())
 	var removed linksBody
 	decodeBody(t, rec, &removed)
-	if len(removed.Entities) != 0 {
-		t.Fatalf("link remove answered %s, want an empty attachment set", rec.Body.String())
-	}
+	assert.Must(t, len(removed.Entities) == 0, "link remove answered %s, want an empty attachment set", rec.Body.String())
 	// Marshalled as [] and never as null, which a client rendering a
 	// list has to be able to rely on.
-	if !strings.Contains(rec.Body.String(), `"entities":[]`) {
-		t.Fatalf("link remove body = %s, want entities as an empty array", rec.Body.String())
-	}
+	assert.Must(t, strings.Contains(rec.Body.String(), `"entities":[]`), "link remove body = %s, want entities as an empty array", rec.Body.String())
 }
 
 // TestADocumentPathIsNeverAURLSegment is the counterpart of the
@@ -334,25 +272,19 @@ func TestADocumentPathIsNeverAURLSegment(t *testing.T) {
 	}
 	for _, path := range []string{"one", "history", "version", "revert", "diff", "links", "rendered", "comparison"} {
 		rec := f.as(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": path}), nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("read %q = %d: %s", path, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "read %q = %d: %s", path, rec.Code, rec.Body.String())
 		var doc struct {
 			Path string `json:"path"`
 		}
 		decodeBody(t, rec, &doc)
-		if doc.Path != path {
-			t.Fatalf("read %q answered path %q", path, doc.Path)
-		}
+		assert.Must(t, doc.Path == path, "read %q answered path %q", path, doc.Path)
 	}
 	// And a nested path, whose slashes would have needed a {path...}
 	// wildcard: the shape ServeMux refuses to put a sub-resource behind.
 	writeDocREST(t, f, "lore/regions/duskwood", "# D\n", 0)
 	rec := f.as(t, http.MethodGet, docsPath("/docs/one",
 		map[string]string{"path": "lore/regions/duskwood"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("read a nested path = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "read a nested path = %d: %s", rec.Code, rec.Body.String())
 }
 
 // TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets reads one document
@@ -369,9 +301,7 @@ func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
 
 	rec := f.as(t, http.MethodGet, docsPath("/docs/rendered",
 		map[string]string{"path": "lore/duskwood"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rendered = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "rendered = %d: %s", rec.Code, rec.Body.String())
 	var rendered struct {
 		Path      string `json:"path"`
 		Title     string `json:"title"`
@@ -385,25 +315,14 @@ func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
 		} `json:"updated_by"`
 	}
 	decodeBody(t, rec, &rendered)
-	if !strings.Contains(rendered.HTML, "<h1>Duskwood</h1>") || !strings.Contains(rendered.HTML, "<em>worgen</em>") {
-		t.Fatalf("html = %q, want the rendered markdown", rendered.HTML)
-	}
-	if rendered.Body != "" {
-		t.Fatalf("the reading view answered a body too (%q); it publishes html only", rendered.Body)
-	}
-	if rendered.Path != "lore/duskwood" || rendered.Title != "Duskwood" || rendered.Version != 1 {
-		t.Fatalf("rendered answered %+v", rendered)
-	}
+	assert.Must(t, strings.Contains(rendered.HTML, "<h1>Duskwood</h1>") && strings.Contains(rendered.HTML, "<em>worgen</em>"), "html = %q, want the rendered markdown", rendered.HTML)
+	assert.Must(t, rendered.Body == "", "the reading view answered a body too (%q); it publishes html only", rendered.Body)
+	assert.Must(t, rendered.Path == "lore/duskwood" && rendered.Title == "Duskwood" && rendered.Version == 1, "rendered answered %+v", rendered)
 	// The reading view's meta line says when the document last changed
 	// and who changed it, which is what the page could not say without a
 	// history call of its own.
-	if rendered.UpdatedAt == "" {
-		t.Fatal("the reading view does not say when the document last changed")
-	}
-	if rendered.UpdatedBy == nil || rendered.UpdatedBy.Kind != "user" ||
-		rendered.UpdatedBy.Label == "" {
-		t.Fatalf("updated_by = %+v, want the session designer named", rendered.UpdatedBy)
-	}
+	assert.Must(t, rendered.UpdatedAt != "", "the reading view does not say when the document last changed")
+	assert.Must(t, rendered.UpdatedBy != nil && rendered.UpdatedBy.Kind == "user" && rendered.UpdatedBy.Label != "", "updated_by = %+v, want the session designer named", rendered.UpdatedBy)
 
 	// The same document through the tool an agent calls.
 	fx := newMetamodelFixture(t)
@@ -413,12 +332,8 @@ func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
 		Body string `json:"body"`
 	}
 	decodeBody(t, rec, &raw)
-	if raw.Body != body {
-		t.Fatalf("docs.read's body = %q, want the markdown byte for byte (%q)", raw.Body, body)
-	}
-	if strings.Contains(raw.Body, "<h1>") {
-		t.Fatalf("docs.read answered rendered HTML: %q", raw.Body)
-	}
+	assert.Must(t, raw.Body == body, "docs.read's body = %q, want the markdown byte for byte (%q)", raw.Body, body)
+	assert.Must(t, !strings.Contains(raw.Body, "<h1>"), "docs.read answered rendered HTML: %q", raw.Body)
 }
 
 // TestTheComparisonViewRendersADiff pins the second rendered route: the
@@ -432,28 +347,18 @@ func TestTheComparisonViewRendersADiff(t *testing.T) {
 
 	rec := f.as(t, http.MethodGet, docsPath("/docs/comparison",
 		map[string]string{"path": "lore/duskwood", "from_version": "1", "to_version": "2"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("comparison = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "comparison = %d: %s", rec.Code, rec.Body.String())
 	var out struct {
 		Unified string `json:"unified"`
 		HTML    string `json:"html"`
 		Coarse  bool   `json:"coarse"`
 	}
 	decodeBody(t, rec, &out)
-	if !strings.Contains(out.HTML, `class="diff-removed"`) || !strings.Contains(out.HTML, `class="diff-added"`) {
-		t.Fatalf("html = %q, want classed lines", out.HTML)
-	}
+	assert.Must(t, strings.Contains(out.HTML, `class="diff-removed"`) && strings.Contains(out.HTML, `class="diff-added"`), "html = %q, want classed lines", out.HTML)
 	// A diff's lines are markdown source: escaped, never rendered.
-	if strings.Contains(out.HTML, "<b>new</b>") {
-		t.Fatalf("html = %q: the diff's own source must be escaped", out.HTML)
-	}
-	if !strings.Contains(out.HTML, "&lt;b&gt;") {
-		t.Fatalf("html = %q, want the source escaped and visible", out.HTML)
-	}
-	if !strings.Contains(out.Unified, "+# <b>new</b>") {
-		t.Fatalf("unified = %q, want the diff text beside the markup", out.Unified)
-	}
+	assert.Must(t, !strings.Contains(out.HTML, "<b>new</b>"), "html = %q: the diff's own source must be escaped", out.HTML)
+	assert.Must(t, strings.Contains(out.HTML, "&lt;b&gt;"), "html = %q, want the source escaped and visible", out.HTML)
+	assert.Must(t, strings.Contains(out.Unified, "+# <b>new</b>"), "unified = %q, want the diff text beside the markup", out.Unified)
 }
 
 // TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML
@@ -476,9 +381,7 @@ func TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML(t *test
 			"<script>alert(2)</script>\n", 0)
 
 	rec := f.as(t, http.MethodGet, docsPath("/docs/rendered", map[string]string{"path": "lore/trap"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rendered = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "rendered = %d: %s", rec.Code, rec.Body.String())
 	var rendered struct {
 		HTML string `json:"html"`
 	}
@@ -492,13 +395,9 @@ func TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML(t *test
 		`href="javascript:`, `href="vbscript:`, `href="data:`,
 		`href="file:`, "<script>",
 	} {
-		if strings.Contains(rendered.HTML, forbidden) {
-			t.Fatalf("html = %q still carries %q", rendered.HTML, forbidden)
-		}
+		assert.Must(t, !strings.Contains(rendered.HTML, forbidden), "html = %q still carries %q", rendered.HTML, forbidden)
 	}
-	if !strings.Contains(rendered.HTML, `href="#"`) {
-		t.Fatalf("html = %q, want the refused destinations neutralised", rendered.HTML)
-	}
+	assert.Must(t, strings.Contains(rendered.HTML, `href="#"`), "html = %q, want the refused destinations neutralised", rendered.HTML)
 }
 
 // TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes asserts
@@ -514,9 +413,7 @@ func TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes(t *testing.T) {
 
 	rec := f.as(t, http.MethodGet, docsPath("/docs/rendered",
 		map[string]string{"path": "lore/duskwood"}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rendered = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "rendered = %d: %s", rec.Code, rec.Body.String())
 	// Asserted against a *plain page's* headers rather than against a
 	// literal, which is the property the name claims: not "the policy is
 	// this string" — a string that has to be re-typed every time the
@@ -530,9 +427,7 @@ func TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes(t *testing.T) {
 		"Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy",
 	} {
 		want := page.Header().Get(header)
-		if want == "" {
-			t.Fatalf("a plain page carries no %s: this test would pass on a server with no policy at all", header)
-		}
+		assert.Must(t, want != "", "a plain page carries no %s: this test would pass on a server with no policy at all", header)
 		if got := rec.Header().Get(header); got != want {
 			t.Errorf("%s = %q, want %q — the same value every page carries", header, got, want)
 		}
@@ -557,9 +452,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -577,9 +470,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 		docsPath("/docs/rendered", map[string]string{"path": "lore/duskwood"}),
 	} {
 		rec := f.call(t, cookie, http.MethodGet, f.path(suffix), nil)
-		if rec.Code != http.StatusOK {
-			t.Errorf("viewer GET %s = %d: %s", suffix, rec.Code, rec.Body.String())
-		}
+		assert.Should(t, rec.Code == http.StatusOK, "viewer GET %s = %d: %s", suffix, rec.Code, rec.Body.String())
 	}
 
 	// And is refused every write, naming the role that cannot write.
@@ -587,9 +478,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 		"path": "lore/duskwood", "content": "# Mine now\n", "expected_version": 1,
 	})
 	body := assertError(t, rec, http.StatusForbidden, "forbidden", "")
-	if !strings.Contains(body.Message, "viewer") {
-		t.Errorf("refusal said %q, want it to name the role", body.Message)
-	}
+	assert.Should(t, strings.Contains(body.Message, "viewer"), "refusal said %q, want it to name the role", body.Message)
 	// The refusal is real and not merely reported: the document did not
 	// move. This is the "read it back" half — a gate that answered 403
 	// after writing would pass the assertion above.
@@ -599,9 +488,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 		Body    string `json:"body"`
 	}
 	decodeBody(t, rec, &doc)
-	if doc.Version != 1 || strings.Contains(doc.Body, "Mine now") {
-		t.Fatalf("the viewer's refused write landed anyway: %+v", doc)
-	}
+	assert.Must(t, doc.Version == 1 && !strings.Contains(doc.Body, "Mine now"), "the viewer's refused write landed anyway: %+v", doc)
 }
 
 // TestTheRESTMirrorAnswersTheSameCodesAsTheTools drives every refusal
@@ -776,23 +663,15 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create other game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create other game: %v", err)
 	secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: owner.ID, Label: "lore agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -806,39 +685,25 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
 		ts.URL+"/api/games/"+game.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequestWithContext: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequestWithContext: %v", err)
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("stream status = %d", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "stream status = %d", resp.StatusCode)
 
 	post := func(suffix string, body any) *http.Response {
 		t.Helper()
 		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
 		req, err := http.NewRequest(http.MethodPost,
 			ts.URL+"/api/games/"+game.Slug+suffix, strings.NewReader(string(raw)))
-		if err != nil {
-			t.Fatalf("NewRequest: %v", err)
-		}
+		assert.Must(t, err == nil, "NewRequest: %v", err)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(cookie)
 		out, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("Do %s: %v", suffix, err)
-		}
-		if out.StatusCode != http.StatusOK {
-			t.Fatalf("%s = %d", suffix, out.StatusCode)
-		}
+		assert.Must(t, err == nil, "Do %s: %v", suffix, err)
+		assert.Must(t, out.StatusCode == http.StatusOK, "%s = %d", suffix, out.StatusCode)
 		return out
 	}
 
@@ -849,9 +714,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	otherReq, err := http.NewRequest(http.MethodPost,
 		ts.URL+"/api/games/"+other.ID.String()+"/docs",
 		strings.NewReader(`{"path":"noise","content":"# noise\n","expected_version":0}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	otherReq.Header.Set("Content-Type", "application/json")
 	otherReq.AddCookie(cookie)
 	if out, err := http.DefaultClient.Do(otherReq); err != nil {
@@ -867,9 +730,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 
 	reader := bufio.NewReader(resp.Body)
 	kind, _, data := readOneSSEFrame(t, reader)
-	if kind != "document.written" {
-		t.Fatalf("kind = %q, want document.written (a cross-game leak, or the write announced nothing)", kind)
-	}
+	assert.Must(t, kind == "document.written", "kind = %q, want document.written (a cross-game leak, or the write announced nothing)", kind)
 	var payload struct {
 		Path    string `json:"path"`
 		Version int32  `json:"version"`
@@ -877,9 +738,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		t.Fatalf("decode %q: %v", data, err)
 	}
-	if payload.Path != "lore/duskwood" || payload.Version != 1 {
-		t.Fatalf("document.written payload = %s", data)
-	}
+	assert.Must(t, payload.Path == "lore/duskwood" && payload.Version == 1, "document.written payload = %s", data)
 
 	// A revert is its own kind, carrying the version it restored — the
 	// whole reason RevertEvent is a second payload type.
@@ -895,9 +754,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	})
 	_ = resp3.Body.Close()
 	kind, _, data = readOneSSEFrame(t, reader)
-	if kind != "document.reverted" {
-		t.Fatalf("kind = %q, want document.reverted", kind)
-	}
+	assert.Must(t, kind == "document.reverted", "kind = %q, want document.reverted", kind)
 	var revert struct {
 		Version     int32 `json:"version"`
 		FromVersion int32 `json:"from_version"`
@@ -905,38 +762,26 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	if err := json.Unmarshal([]byte(data), &revert); err != nil {
 		t.Fatalf("decode %q: %v", data, err)
 	}
-	if revert.Version != 3 || revert.FromVersion != 1 {
-		t.Fatalf("document.reverted payload = %s", data)
-	}
+	assert.Must(t, revert.Version == 3 && revert.FromVersion == 1, "document.reverted payload = %s", data)
 
 	// And a delete, over the route whose arguments travel in the query
 	// string.
 	del, err := http.NewRequest(http.MethodDelete,
 		ts.URL+"/api/games/"+game.Slug+
 			"/docs/one?path=lore%2Fduskwood&expected_version=3", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	del.AddCookie(cookie)
 	out, err := http.DefaultClient.Do(del)
-	if err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if out.StatusCode != http.StatusOK {
-		t.Fatalf("delete = %d", out.StatusCode)
-	}
+	assert.Must(t, err == nil, "delete: %v", err)
+	assert.Must(t, out.StatusCode == http.StatusOK, "delete = %d", out.StatusCode)
 	_ = out.Body.Close()
 
 	kind, _, data = readOneSSEFrame(t, reader)
-	if kind != "document.deleted" {
-		t.Fatalf("kind = %q, want document.deleted", kind)
-	}
+	assert.Must(t, kind == "document.deleted", "kind = %q, want document.deleted", kind)
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		t.Fatalf("decode %q: %v", data, err)
 	}
-	if payload.Path != "lore/duskwood" || payload.Version != 4 {
-		t.Fatalf("document.deleted payload = %s (want the tombstone's own version)", data)
-	}
+	assert.Must(t, payload.Path == "lore/duskwood" && payload.Version == 4, "document.deleted payload = %s (want the tombstone's own version)", data)
 }
 
 // TestADocumentLinkEventReachesAnSSESubscriber is the fourth kind, kept
@@ -964,19 +809,13 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: owner.ID, Label: "lore agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -986,19 +825,13 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 		t.Helper()
 		req, err := http.NewRequest(http.MethodPost,
 			ts.URL+"/api/games/"+game.Slug+suffix, strings.NewReader(body))
-		if err != nil {
-			t.Fatalf("NewRequest: %v", err)
-		}
+		assert.Must(t, err == nil, "NewRequest: %v", err)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(cookie)
 		out, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("Do %s: %v", suffix, err)
-		}
+		assert.Must(t, err == nil, "Do %s: %v", suffix, err)
 		defer func() { _ = out.Body.Close() }()
-		if out.StatusCode != http.StatusOK {
-			t.Fatalf("%s = %d", suffix, out.StatusCode)
-		}
+		assert.Must(t, out.StatusCode == http.StatusOK, "%s = %d", suffix, out.StatusCode)
 	}
 	post("/types", `{"key":"quest","label":"Quest","label_plural":"Quests"}`)
 	post("/entities", `{"items":[{"type_key":"quest","key":"hogger","name":"Hogger"}]}`)
@@ -1008,26 +841,18 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
 		ts.URL+"/api/games/"+game.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequestWithContext: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequestWithContext: %v", err)
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("stream status = %d", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "stream status = %d", resp.StatusCode)
 
 	post("/docs/links", `{"path":"scripts/hogger","entity_type":"quest","entity_key":"hogger"}`)
 
 	reader := bufio.NewReader(resp.Body)
 	kind, _, data := readOneSSEFrame(t, reader)
-	if kind != "document.linked" {
-		t.Fatalf("kind = %q, want document.linked", kind)
-	}
+	assert.Must(t, kind == "document.linked", "kind = %q, want document.linked", kind)
 	var payload struct {
 		Path    string `json:"path"`
 		Version int32  `json:"version"`
@@ -1035,15 +860,11 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		t.Fatalf("decode %q: %v", data, err)
 	}
-	if payload.Path != "scripts/hogger" {
-		t.Fatalf("document.linked payload = %s", data)
-	}
+	assert.Must(t, payload.Path == "scripts/hogger", "document.linked payload = %s", data)
 	// The document's version is *unmoved*: a link is not the document's
 	// content, so a subscriber comparing this number against what it
 	// holds learns nothing and must re-read the links.
-	if payload.Version != 1 {
-		t.Fatalf("document.linked carried version %d, want the document's unmoved 1", payload.Version)
-	}
+	assert.Must(t, payload.Version == 1, "document.linked carried version %d, want the document's unmoved 1", payload.Version)
 }
 
 // TestTheProseRoutesAreVisibleToTheConventionTests is requirement 1 of
@@ -1096,16 +917,12 @@ func TestTheProseRoutesAreVisibleToTheConventionTests(t *testing.T) {
 		content[pattern] = true
 	}
 	for _, pattern := range want {
-		if !registered[pattern] {
-			t.Errorf("%q is missing from a server built without a Markdown service — "+
-				"the prose routes must be registered unconditionally, or "+
-				"TestEveryGameScopedRouteGoesThroughRequireProject goes blind to every one of them",
-				pattern)
-		}
-		if !content[pattern] {
-			t.Errorf("%q is not recorded as a content route — "+
-				"TestEveryContentRouteIsRegisteredAsContent cannot see it", pattern)
-		}
+		assert.Should(t, registered[pattern], "%q is missing from a server built without a Markdown service — "+
+			"the prose routes must be registered unconditionally, or "+
+			"TestEveryGameScopedRouteGoesThroughRequireProject goes blind to every one of them",
+			pattern)
+		assert.Should(t, content[pattern], "%q is not recorded as a content route — "+
+			"TestEveryContentRouteIsRegisteredAsContent cannot see it", pattern)
 	}
 }
 
@@ -1127,23 +944,15 @@ func TestAProseRouteOnAnInstanceWithoutTheServiceIsRefused(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+game.Slug+"/docs", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "prose") {
-		t.Fatalf("body = %s, want it to say what this instance does not serve", rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404: %s", rec.Code, rec.Body.String())
+	assert.Must(t, strings.Contains(rec.Body.String(), "prose"), "body = %s, want it to say what this instance does not serve", rec.Body.String())
 }

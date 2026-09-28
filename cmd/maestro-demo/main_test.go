@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -33,65 +34,41 @@ func TestTheDemoSeedsTheCasesTheScreensNeed(t *testing.T) {
 	owner := seedUser(t, pool)
 
 	slug, err := seed(ctx, pool, owner, "demo")
-	if err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if slug != "demo" {
-		t.Fatalf("seeded %q", slug)
-	}
+	assert.Must(t, err == nil, "seed: %v", err)
+	assert.Must(t, slug == "demo", "seeded %q", slug)
 
 	game := gameID(t, pool, "demo")
 	engine := analysis.New(pool, nil)
 
 	cycles, err := engine.Cycles(ctx, game, analysis.CyclesInput{})
-	if err != nil {
-		t.Fatalf("cycles: %v", err)
-	}
-	if len(cycles.Cycles) == 0 {
-		t.Error("the demo has no prerequisite loop, so the Loops report draws nothing on it")
-	}
+	assert.Must(t, err == nil, "cycles: %v", err)
+	assert.Should(t, len(cycles.Cycles) != 0, "the demo has no prerequisite loop, so the Loops report draws nothing on it")
 
 	unreachable, err := engine.Unreachable(ctx, game, analysis.UnreachableInput{})
-	if err != nil {
-		t.Fatalf("unreachable: %v", err)
-	}
+	assert.Must(t, err == nil, "unreachable: %v", err)
 	if len(unreachable.Findings) == 0 {
 		t.Error("the demo has nothing out of reach, so Out of reach draws nothing on it — " +
 			"which is the exact state that hid a whole grouping until it was hand-seeded")
 	}
 
 	orphans, err := engine.Orphans(ctx, game, analysis.OrphansInput{Mode: analysis.OrphanIsolated})
-	if err != nil {
-		t.Fatalf("orphans: %v", err)
-	}
-	if len(orphans.Findings) != 1 {
-		t.Errorf("the demo has %d isolated entities; one is what the verdict's singular case needs, "+
-			"and that sentence shipped reading \"1 entity are connected to nothing\"", len(orphans.Findings))
-	}
+	assert.Must(t, err == nil, "orphans: %v", err)
+	assert.Should(t, len(orphans.Findings) == 1, "the demo has %d isolated entities; one is what the verdict's singular case needs, "+
+		"and that sentence shipped reading \"1 entity are connected to nothing\"", len(orphans.Findings))
 
 	// The screens that only exist with enough rows: the pager, the
 	// ordering and the "showing 3 of 6 declared fields" sentence.
 	meta := metamodel.New(pool, nil)
 	page, err := meta.ListEntities(ctx, game, metamodel.EntityFilter{TypeKey: "creature", Limit: 500})
-	if err != nil {
-		t.Fatalf("list creatures: %v", err)
-	}
-	if len(page.Entities) < 100 {
-		t.Errorf("the demo holds %d creatures; the catalogue's paging and ordering need a type "+
-			"that does not fit one page", len(page.Entities))
-	}
+	assert.Must(t, err == nil, "list creatures: %v", err)
+	assert.Should(t, len(page.Entities) >= 100, "the demo holds %d creatures; the catalogue's paging and ordering need a type "+
+		"that does not fit one page", len(page.Entities))
 	quest, err := meta.EntityTypeByKey(ctx, game, "quest")
-	if err != nil {
-		t.Fatalf("read the quest type: %v", err)
-	}
+	assert.Must(t, err == nil, "read the quest type: %v", err)
 	schema, err := metamodel.ParseSchema(quest.FieldSchema)
-	if err != nil {
-		t.Fatalf("parse the quest schema: %v", err)
-	}
-	if len(schema) <= 3 {
-		t.Errorf("the quest type declares %d fields; the catalogue draws three and says how many "+
-			"it is not showing, and that sentence needs a type with more", len(schema))
-	}
+	assert.Must(t, err == nil, "parse the quest schema: %v", err)
+	assert.Should(t, len(schema) > 3, "the quest type declares %d fields; the catalogue draws three and says how many "+
+		"it is not showing, and that sentence needs a type with more", len(schema))
 }
 
 // **A failed seed leaves nothing behind.** Each domain service opens its
@@ -119,10 +96,8 @@ func TestAFailedSeedRemovesTheGameItStarted(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM projects WHERE slug = 'demo'`).Scan(&games); err != nil {
 		t.Fatalf("count the games: %v", err)
 	}
-	if games != 0 {
-		t.Errorf("a failed seed left %d game(s) behind: the next run would meet a half-demo "+
-			"under the slug it wants", games)
-	}
+	assert.Should(t, games == 0, "a failed seed left %d game(s) behind: the next run would meet a half-demo "+
+		"under the slug it wants", games)
 }
 
 // seedUser writes the account the demo game belongs to. The demo
@@ -132,9 +107,7 @@ func seedUser(t *testing.T, pool *pgxpool.Pool) string {
 	const email = "demo-owner@example.test"
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO users (email, password_hash, display_name) VALUES ($1, 'x', 'Demo owner')`, email)
-	if err != nil {
-		t.Fatalf("seed the owner: %v", err)
-	}
+	assert.Must(t, err == nil, "seed the owner: %v", err)
 	return email
 }
 

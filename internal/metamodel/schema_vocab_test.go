@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -44,23 +45,17 @@ func TestSchemaVocabArea(t *testing.T) {
 		// have found the constants it claims to be comparing. Two empty sets
 		// compare equal, which is how a guard of this shape passes against a
 		// file it can no longer read.
-		if len(declared) != len(metamodel.FieldTypes) || len(declared) < 6 {
-			t.Fatalf("schema.go declares %d FieldType constants (%v) and metamodel.FieldTypes "+
-				"carries %d (%v)", len(declared), declared, len(metamodel.FieldTypes),
-				metamodel.FieldTypes)
-		}
+		assert.Must(t, len(declared) == len(metamodel.FieldTypes) && len(declared) >= 6, "schema.go declares %d FieldType constants (%v) and metamodel.FieldTypes "+
+			"carries %d (%v)", len(declared), declared, len(metamodel.FieldTypes),
+			metamodel.FieldTypes)
 
 		for _, value := range declared {
-			if !slices.Contains(metamodel.FieldTypes, metamodel.FieldType(value)) {
-				t.Errorf("schema.go declares the field type %q and metamodel.FieldTypes does not "+
-					"list it: a type nothing offers is a type no agent can ask for", value)
-			}
+			assert.Should(t, slices.Contains(metamodel.FieldTypes, metamodel.FieldType(value)), "schema.go declares the field type %q and metamodel.FieldTypes does not "+
+				"list it: a type nothing offers is a type no agent can ask for", value)
 		}
 		for _, listed := range metamodel.FieldTypes {
-			if !slices.Contains(declared, string(listed)) {
-				t.Errorf("metamodel.FieldTypes offers %q and schema.go declares no such constant: "+
-					"the list is offering a word the package does not know", listed)
-			}
+			assert.Should(t, slices.Contains(declared, string(listed)), "metamodel.FieldTypes offers %q and schema.go declares no such constant: "+
+				"the list is offering a word the package does not know", listed)
 		}
 	})
 
@@ -70,9 +65,7 @@ func TestSchemaVocabArea(t *testing.T) {
 	// that enforces it. Every type the list offers must be a type Validate
 	// accepts, or the bundle would name a value the server refuses as unknown.
 	t.Run("every listed field type is accepted by validate", func(t *testing.T) {
-		if len(metamodel.FieldTypes) == 0 {
-			t.Fatal("metamodel.FieldTypes is empty, so every assertion below is vacuous")
-		}
+		assert.Must(t, len(metamodel.FieldTypes) != 0, "metamodel.FieldTypes is empty, so every assertion below is vacuous")
 		for _, fieldType := range metamodel.FieldTypes {
 			field := metamodel.Field{Key: "f", Type: fieldType}
 			if fieldType == metamodel.FieldEnum {
@@ -130,32 +123,24 @@ func TestSchemaVocabArea(t *testing.T) {
 			  WHERE t.relname = 'relation_types'
 			    AND c.contype = 'c'
 			    AND pg_get_constraintdef(c.oid) LIKE '%semantic_role%'`).Scan(&definition)
-		if err != nil {
-			t.Fatalf("read the semantic_role constraint definition: %v", err)
-		}
+		assert.Must(t, err == nil, "read the semantic_role constraint definition: %v", err)
 
 		matches := roleLiteral.FindAllStringSubmatch(definition, -1)
-		if len(matches) == 0 {
-			t.Fatalf("no role literals found in %q: this test's own reading of the constraint "+
-				"is broken, which would make it pass against anything", definition)
-		}
+		assert.Must(t, len(matches) != 0, "no role literals found in %q: this test's own reading of the constraint "+
+			"is broken, which would make it pass against anything", definition)
 		inDatabase := make([]string, 0, len(matches))
 		for _, match := range matches {
 			inDatabase = append(inDatabase, match[1])
 		}
 
 		for _, role := range inDatabase {
-			if !slices.Contains(metamodel.SemanticRoles, role) {
-				t.Errorf("the column admits %q and metamodel.SemanticRoles does not offer it: a "+
-					"role the database accepts that no Go reader knows about is a classification "+
-					"no view will ever draw. Constraint: %s", role, definition)
-			}
+			assert.Should(t, slices.Contains(metamodel.SemanticRoles, role), "the column admits %q and metamodel.SemanticRoles does not offer it: a "+
+				"role the database accepts that no Go reader knows about is a classification "+
+				"no view will ever draw. Constraint: %s", role, definition)
 		}
-		if len(inDatabase) != len(metamodel.SemanticRoles) {
-			t.Errorf("the constraint lists %d roles and metamodel.SemanticRoles carries %d: %v "+
-				"against %v", len(inDatabase), len(metamodel.SemanticRoles), inDatabase,
-				metamodel.SemanticRoles)
-		}
+		assert.Should(t, len(inDatabase) == len(metamodel.SemanticRoles), "the constraint lists %d roles and metamodel.SemanticRoles carries %d: %v "+
+			"against %v", len(inDatabase), len(metamodel.SemanticRoles), inDatabase,
+			metamodel.SemanticRoles)
 	})
 }
 
@@ -165,9 +150,7 @@ func fieldTypeConstantsInSource(t *testing.T) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "schema.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parsing schema.go: %v", err)
-	}
+	assert.Must(t, err == nil, "parsing schema.go: %v", err)
 	var out []string
 	for _, decl := range file.Decls {
 		general, ok := decl.(*ast.GenDecl)
@@ -189,9 +172,7 @@ func fieldTypeConstantsInSource(t *testing.T) []string {
 					continue
 				}
 				unquoted, err := strconv.Unquote(literal.Value)
-				if err != nil {
-					t.Fatalf("unquoting %s: %v", literal.Value, err)
-				}
+				assert.Must(t, err == nil, "unquoting %s: %v", literal.Value, err)
 				out = append(out, unquoted)
 			}
 		}

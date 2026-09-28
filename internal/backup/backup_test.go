@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The backup loop's own checks.
@@ -47,17 +49,11 @@ func TestParseClock(t *testing.T) {
 		t.Run(tc.in, func(t *testing.T) {
 			h, m, err := parseClock(tc.in)
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q (%s), got h=%d m=%d", tc.in, tc.errLabel, h, m)
-				}
+				assert.Must(t, err != nil, "expected error for %q (%s), got h=%d m=%d", tc.in, tc.errLabel, h, m)
 				return
 			}
-			if err != nil {
-				t.Fatalf("parseClock(%q): %v", tc.in, err)
-			}
-			if h != tc.wantH || m != tc.wantM {
-				t.Errorf("parseClock(%q) = (%d,%d), want (%d,%d)", tc.in, h, m, tc.wantH, tc.wantM)
-			}
+			assert.Must(t, err == nil, "parseClock(%q): %v", tc.in, err)
+			assert.Should(t, h == tc.wantH && m == tc.wantM, "parseClock(%q) = (%d,%d), want (%d,%d)", tc.in, h, m, tc.wantH, tc.wantM)
 		})
 	}
 }
@@ -66,27 +62,21 @@ func TestNextFire_LaterToday(t *testing.T) {
 	now := time.Date(2026, 6, 7, 1, 30, 0, 0, time.Local)
 	got := nextFire(now, 3, 0)
 	want := time.Date(2026, 6, 7, 3, 0, 0, 0, time.Local)
-	if !got.Equal(want) {
-		t.Errorf("nextFire(01:30, 03:00) = %v, want %v", got, want)
-	}
+	assert.Should(t, got.Equal(want), "nextFire(01:30, 03:00) = %v, want %v", got, want)
 }
 
 func TestNextFire_EarlierToday_RollsToTomorrow(t *testing.T) {
 	now := time.Date(2026, 6, 7, 4, 30, 0, 0, time.Local)
 	got := nextFire(now, 3, 0)
 	want := time.Date(2026, 6, 8, 3, 0, 0, 0, time.Local)
-	if !got.Equal(want) {
-		t.Errorf("nextFire(04:30, 03:00) = %v, want %v", got, want)
-	}
+	assert.Should(t, got.Equal(want), "nextFire(04:30, 03:00) = %v, want %v", got, want)
 }
 
 func TestNextFire_ExactlyNow_RollsToTomorrow(t *testing.T) {
 	now := time.Date(2026, 6, 7, 3, 0, 0, 0, time.Local)
 	got := nextFire(now, 3, 0)
 	want := time.Date(2026, 6, 8, 3, 0, 0, 0, time.Local)
-	if !got.Equal(want) {
-		t.Errorf("nextFire(equal-now) = %v, want %v", got, want)
-	}
+	assert.Should(t, got.Equal(want), "nextFire(equal-now) = %v, want %v", got, want)
 }
 
 func TestPruneOldDumps_DeletesOldKeepsNew(t *testing.T) {
@@ -152,9 +142,7 @@ func TestSplitPassword(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dsn, pass := splitPassword(tc.in)
-			if dsn != tc.wantDSN || pass != tc.wantPass {
-				t.Errorf("splitPassword(%q) = (%q, %q), want (%q, %q)", tc.in, dsn, pass, tc.wantDSN, tc.wantPass)
-			}
+			assert.Should(t, dsn == tc.wantDSN && pass == tc.wantPass, "splitPassword(%q) = (%q, %q), want (%q, %q)", tc.in, dsn, pass, tc.wantDSN, tc.wantPass)
 		})
 	}
 }
@@ -191,15 +179,11 @@ func TestDumpOnce_WritesPrivateFileAndHidesPassword(t *testing.T) {
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Now:         func() time.Time { return now },
 	})
-	if err != nil {
-		t.Fatalf("dumpOnce: %v", err)
-	}
+	assert.Must(t, err == nil, "dumpOnce: %v", err)
 
 	final := filepath.Join(dir, FilePrefix+"2026-09-20-0300"+FileSuffix)
 	info, err := os.Stat(final)
-	if err != nil {
-		t.Fatalf("dump not written: %v", err)
-	}
+	assert.Must(t, err == nil, "dump not written: %v", err)
 	if got := info.Mode().Perm(); got != filePerm {
 		t.Errorf("dump mode = %#o, want %#o", got, filePerm)
 	}
@@ -208,16 +192,10 @@ func TestDumpOnce_WritesPrivateFileAndHidesPassword(t *testing.T) {
 	}
 
 	invocation, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatalf("no invocation recorded: %v", err)
-	}
+	assert.Must(t, err == nil, "no invocation recorded: %v", err)
 	args, _, _ := strings.Cut(string(invocation), "\n")
-	if strings.Contains(args, "s3cr3t") {
-		t.Errorf("password passed on the command line: %s", args)
-	}
-	if !strings.Contains(string(invocation), "pgpassword: s3cr3t") {
-		t.Errorf("password not passed through the environment: %s", invocation)
-	}
+	assert.Should(t, !strings.Contains(args, "s3cr3t"), "password passed on the command line: %s", args)
+	assert.Should(t, strings.Contains(string(invocation), "pgpassword: s3cr3t"), "password not passed through the environment: %s", invocation)
 }
 
 // Run tightens a directory an earlier version left at 0755.

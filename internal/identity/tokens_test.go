@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -32,26 +33,14 @@ func TestAPITokenResolvesToItsProject(t *testing.T) {
 		UserID:    user.ID,
 		Label:     "seed agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
-	if !strings.HasPrefix(token, identity.TokenPrefix) {
-		t.Fatalf("token = %q, want the %s prefix", token, identity.TokenPrefix)
-	}
-	if tok.Label != "seed agent" {
-		t.Fatalf("label = %q", tok.Label)
-	}
-	if tok.ProjectID != project.ID || tok.UserID != user.ID {
-		t.Fatal("the returned token is bound to the wrong project or user")
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
+	assert.Must(t, strings.HasPrefix(token, identity.TokenPrefix), "token = %q, want the %s prefix", token, identity.TokenPrefix)
+	assert.Must(t, tok.Label == "seed agent", "label = %q", tok.Label)
+	assert.Must(t, tok.ProjectID == project.ID && tok.UserID == user.ID, "the returned token is bound to the wrong project or user")
 
 	resolved, err := ids.ResolveAPIToken(ctx, token)
-	if err != nil {
-		t.Fatalf("ResolveAPIToken: %v", err)
-	}
-	if resolved.ProjectID != project.ID || resolved.UserID != user.ID {
-		t.Fatal("the token resolved to the wrong project or user")
-	}
+	assert.Must(t, err == nil, "ResolveAPIToken: %v", err)
+	assert.Must(t, resolved.ProjectID == project.ID && resolved.UserID == user.ID, "the token resolved to the wrong project or user")
 
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: tok.ID}); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
@@ -81,16 +70,10 @@ func TestCreateAPITokenGeneratesUniqueTokens(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 
 	first, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "one"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	second, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "two"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
-	if first == second {
-		t.Fatal("two tokens minted the same value")
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
+	assert.Must(t, first != second, "two tokens minted the same value")
 }
 
 func TestCreateAPITokenRejectsInvalidLabel(t *testing.T) {
@@ -125,9 +108,7 @@ func TestRevokeAPITokenIsScopedToItsOwnProject(t *testing.T) {
 	theirs, _ := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
 
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	// Revoking the token through the wrong project must not touch it.
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: theirs.ID, TokenID: tok.ID}); err != nil {
@@ -157,20 +138,14 @@ func TestListAPITokensIsScopedToOneProjectAndOmitsTheHash(t *testing.T) {
 	theirs, _ := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
 
 	_, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "seed agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: theirs.ID, UserID: user.ID, Label: "other project's agent"}); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
 	list, err := ids.ListAPITokens(ctx, mine.ID)
-	if err != nil {
-		t.Fatalf("ListAPITokens: %v", err)
-	}
-	if len(list) != 1 {
-		t.Fatalf("len(list) = %d, want 1", len(list))
-	}
+	assert.Must(t, err == nil, "ListAPITokens: %v", err)
+	assert.Must(t, len(list) == 1, "len(list) = %d, want 1", len(list))
 	if list[0].ID != tok.ID || list[0].Label != "seed agent" {
 		t.Fatalf("list[0] = %+v, want the seed agent token", list[0])
 	}
@@ -201,9 +176,7 @@ func TestResolveAPITokenThrottlesLastUsedAtWrites(t *testing.T) {
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	lastUsedAt := func() time.Time {
 		t.Helper()
@@ -218,9 +191,7 @@ func TestResolveAPITokenThrottlesLastUsedAtWrites(t *testing.T) {
 		t.Fatalf("ResolveAPIToken: %v", err)
 	}
 	first := lastUsedAt()
-	if first.IsZero() {
-		t.Fatal("last_used_at was not set on the first resolve")
-	}
+	assert.Must(t, !first.IsZero(), "last_used_at was not set on the first resolve")
 
 	if _, err := ids.ResolveAPIToken(ctx, token); err != nil {
 		t.Fatalf("ResolveAPIToken: %v", err)
@@ -296,9 +267,7 @@ func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	// A freshly minted token has no last_used_at at all (NULL), so its very
 	// first resolve always touches regardless of the Go-side pre-check —
@@ -315,9 +284,7 @@ func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt
 	tracedCfg := pool.Config()
 	tracedCfg.ConnConfig.Tracer = tracer
 	tracedPool, err := pgxpool.NewWithConfig(ctx, tracedCfg)
-	if err != nil {
-		t.Fatalf("open traced pool: %v", err)
-	}
+	assert.Must(t, err == nil, "open traced pool: %v", err)
 	t.Cleanup(tracedPool.Close)
 	tracedIDs := identity.New(tracedPool, testConfig())
 
@@ -354,18 +321,14 @@ func TestRevokedTokenIsIndistinguishableFromUnknown(t *testing.T) {
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: tok.ID}); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
 	}
 
 	_, revokedErr := ids.ResolveAPIToken(ctx, token)
 	_, unknownErr := ids.ResolveAPIToken(ctx, "mst_totallyunknown")
-	if !errors.Is(revokedErr, identity.ErrTokenInvalid) || !errors.Is(unknownErr, identity.ErrTokenInvalid) {
-		t.Fatalf("revokedErr = %v, unknownErr = %v, want both ErrTokenInvalid", revokedErr, unknownErr)
-	}
+	assert.Must(t, errors.Is(revokedErr, identity.ErrTokenInvalid) && errors.Is(unknownErr, identity.ErrTokenInvalid), "revokedErr = %v, unknownErr = %v, want both ErrTokenInvalid", revokedErr, unknownErr)
 }
 
 // TestResolveAPITokenReturnsTheCorrectProjectAmongMany guards against a
@@ -387,29 +350,17 @@ func TestResolveAPITokenReturnsTheCorrectProjectAmongMany(t *testing.T) {
 	leMans, _ := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
 
 	azerothToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: azeroth.ID, UserID: user.ID, Label: "azeroth agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken (azeroth): %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken (azeroth): %v", err)
 	leMansToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: leMans.ID, UserID: user.ID, Label: "le mans agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken (le mans): %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken (le mans): %v", err)
 
 	resolvedAzeroth, err := ids.ResolveAPIToken(ctx, azerothToken)
-	if err != nil {
-		t.Fatalf("ResolveAPIToken (azeroth): %v", err)
-	}
-	if resolvedAzeroth.ProjectID != azeroth.ID {
-		t.Fatalf("azeroth token resolved to project %v, want %v", resolvedAzeroth.ProjectID, azeroth.ID)
-	}
+	assert.Must(t, err == nil, "ResolveAPIToken (azeroth): %v", err)
+	assert.Must(t, resolvedAzeroth.ProjectID == azeroth.ID, "azeroth token resolved to project %v, want %v", resolvedAzeroth.ProjectID, azeroth.ID)
 
 	resolvedLeMans, err := ids.ResolveAPIToken(ctx, leMansToken)
-	if err != nil {
-		t.Fatalf("ResolveAPIToken (le mans): %v", err)
-	}
-	if resolvedLeMans.ProjectID != leMans.ID {
-		t.Fatalf("le mans token resolved to project %v, want %v", resolvedLeMans.ProjectID, leMans.ID)
-	}
+	assert.Must(t, err == nil, "ResolveAPIToken (le mans): %v", err)
+	assert.Must(t, resolvedLeMans.ProjectID == leMans.ID, "le mans token resolved to project %v, want %v", resolvedLeMans.ProjectID, leMans.ID)
 }
 
 func TestRevokeUnknownAPITokenIsANoOp(t *testing.T) {
@@ -437,9 +388,7 @@ func TestRevokeAlreadyRevokedAPITokenIsANoOp(t *testing.T) {
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	_, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	req := identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: tok.ID}
 	if err := ids.RevokeAPIToken(ctx, req); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
@@ -468,9 +417,7 @@ func TestResolveAPITokenRejectsTamperedTokenWithoutTouchingTheDatabase(t *testin
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	// Flip the last character of the token, inside its checksum suffix.
 	tampered := token[:len(token)-1]
@@ -501,9 +448,7 @@ func TestCheckAPITokenNeverTouchesLastUsedAt(t *testing.T) {
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	lastUsedAt := func() (time.Time, bool) {
 		t.Helper()
@@ -563,9 +508,7 @@ func TestCountAPITokensForProjectIncludesRevoked(t *testing.T) {
 		t.Fatalf("CreateAPIToken (live): %v", err)
 	}
 	_, revoked, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "to be revoked"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken (to revoke): %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken (to revoke): %v", err)
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: revoked.ID}); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
 	}
@@ -574,10 +517,6 @@ func TestCountAPITokensForProjectIncludesRevoked(t *testing.T) {
 	}
 
 	n, err := ids.CountAPITokensForProject(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("CountAPITokensForProject: %v", err)
-	}
-	if n != 2 {
-		t.Fatalf("CountAPITokensForProject = %d, want 2 (live + revoked, not the other project's)", n)
-	}
+	assert.Must(t, err == nil, "CountAPITokensForProject: %v", err)
+	assert.Must(t, n == 2, "CountAPITokensForProject = %d, want 2 (live + revoked, not the other project's)", n)
 }

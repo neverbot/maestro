@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The provenance, payload and resolution guards for the vendored half of
@@ -113,9 +115,7 @@ type vendorManifest struct {
 func readVendorManifest(t *testing.T) vendorManifest {
 	t.Helper()
 	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", manifestPath, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", manifestPath, err)
 	// The manifest carries prose fields this struct does not model, so
 	// unknown fields are tolerated; what is not tolerated is malformed
 	// JSON, which would otherwise leave every test below reading an
@@ -124,9 +124,7 @@ func readVendorManifest(t *testing.T) vendorManifest {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatalf("parse %s: %v", manifestPath, err)
 	}
-	if len(manifest.Files) == 0 {
-		t.Fatalf("%s lists no files: every test in this file would pass vacuously", manifestPath)
-	}
+	assert.Must(t, len(manifest.Files) != 0, "%s lists no files: every test in this file would pass vacuously", manifestPath)
 	return manifest
 }
 
@@ -158,10 +156,8 @@ func TestVendoredFilesMatchTheirManifest(t *testing.T) {
 		if got := int64(len(raw)); got != entry.Bytes {
 			t.Errorf("%s: %d bytes on disk, manifest says %d", entry.Path, got, entry.Bytes)
 		}
-		if !strings.HasPrefix(entry.URL, "https://") {
-			t.Errorf("%s: url %q is not an https URL; provenance that cannot be refetched is not provenance",
-				entry.Path, entry.URL)
-		}
+		assert.Should(t, strings.HasPrefix(entry.URL, "https://"), "%s: url %q is not an https URL; provenance that cannot be refetched is not provenance",
+			entry.Path, entry.URL)
 	}
 }
 
@@ -184,9 +180,7 @@ func vendoredTreeFiles(t *testing.T) []string {
 		out = append(out, filepath.ToSlash(rel))
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", vendorRoot, err)
-	}
+	assert.Must(t, err == nil, "walk %s: %v", vendorRoot, err)
 	sort.Strings(out)
 	return out
 }
@@ -209,21 +203,17 @@ func TestNoVendoredFileIsUnlisted(t *testing.T) {
 	}
 
 	files := vendoredTreeFiles(t)
-	if len(files) == 0 {
-		t.Fatalf("%s holds no files: this walk would pass whatever the manifest said", vendorRoot)
-	}
+	assert.Must(t, len(files) != 0, "%s holds no files: this walk would pass whatever the manifest said", vendorRoot)
 	var unlisted []string
 	for _, rel := range files {
 		if !listed[rel] {
 			unlisted = append(unlisted, rel)
 		}
 	}
-	if len(unlisted) > 0 {
-		t.Fatalf("%d file(s) under %s that %s does not list:\n%s\n"+
-			"a vendored file with no provenance is a file this repository cannot answer for; "+
-			"add it to the manifest with its package, version, upstream URL, sha256, size and licence",
-			len(unlisted), vendorRoot, manifestPath, strings.Join(unlisted, "\n"))
-	}
+	assert.Must(t, len(unlisted) <= 0, "%d file(s) under %s that %s does not list:\n%s\n"+
+		"a vendored file with no provenance is a file this repository cannot answer for; "+
+		"add it to the manifest with its package, version, upstream URL, sha256, size and licence",
+		len(unlisted), vendorRoot, manifestPath, strings.Join(unlisted, "\n"))
 	t.Logf("%s holds %d file(s), all listed", vendorRoot, len(files))
 }
 
@@ -245,9 +235,7 @@ func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
 	lines := make([]string, 0, len(manifest.Files))
 	for _, entry := range manifest.Files {
 		info, err := os.Stat(filepath.Join(vendorRoot, filepath.FromSlash(entry.Path)))
-		if err != nil {
-			t.Fatalf("stat %s: %v", entry.Path, err)
-		}
+		assert.Must(t, err == nil, "stat %s: %v", entry.Path, err)
 		kind := "render"
 		if strings.HasPrefix(entry.Path, fontsPrefix) {
 			kind = "fonts"
@@ -297,9 +285,7 @@ func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
 func TestEveryVendoredFontIsSwapped(t *testing.T) {
 	t.Parallel()
 	sheet, err := os.ReadFile(filepath.Join("static", "styles.css"))
-	if err != nil {
-		t.Fatalf("read styles.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read styles.css: %v", err)
 
 	faces := regexp.MustCompile(`(?s)@font-face\s*\{(.*?)\}`).FindAllStringSubmatch(string(sheet), -1)
 	declared := map[string]bool{}
@@ -324,20 +310,14 @@ func TestEveryVendoredFontIsSwapped(t *testing.T) {
 			continue
 		}
 		vendored[entry.Path] = true
-		if !declared[entry.Path] {
-			t.Errorf("%s is vendored and no @font-face in styles.css declares it: a font nothing "+
-				"points at is bytes in a public repository for nobody", entry.Path)
-		}
+		assert.Should(t, declared[entry.Path], "%s is vendored and no @font-face in styles.css declares it: a font nothing "+
+			"points at is bytes in a public repository for nobody", entry.Path)
 	}
 	for path := range declared {
-		if !vendored[path] {
-			t.Errorf("styles.css declares a face at %s, which the manifest does not vendor: a "+
-				"@font-face this repository does not ship is a 404 or a third-party origin", path)
-		}
+		assert.Should(t, vendored[path], "styles.css declares a face at %s, which the manifest does not vendor: a "+
+			"@font-face this repository does not ship is a 404 or a third-party origin", path)
 	}
-	if len(vendored) == 0 {
-		t.Fatal("no vendored font at all, so this guard holds nothing")
-	}
+	assert.Must(t, len(vendored) != 0, "no vendored font at all, so this guard holds nothing")
 }
 
 // TestEveryVendoredPackageHasItsLicence holds the redistribution half.
@@ -377,23 +357,17 @@ func TestEveryVendoredPackageHasItsLicence(t *testing.T) {
 		// this test. Every permissive licence text says who holds the
 		// copyright and grants a permission; both being present is a
 		// cheap floor no stub clears by accident.
-		if !strings.Contains(text, "Copyright") {
-			t.Errorf("%s: licence file %q carries no copyright line", entry.Path, entry.LicensePath)
-		}
-		if !strings.Contains(text, "permitted") && !strings.Contains(text, "Permission") {
-			t.Errorf("%s: licence file %q grants no permission; it does not read like a licence",
-				entry.Path, entry.LicensePath)
-		}
+		assert.Should(t, strings.Contains(text, "Copyright"), "%s: licence file %q carries no copyright line", entry.Path, entry.LicensePath)
+		assert.Should(t, strings.Contains(text, "permitted") || strings.Contains(text, "Permission"), "%s: licence file %q grants no permission; it does not read like a licence",
+			entry.Path, entry.LicensePath)
 	}
 
 	for _, rel := range vendoredTreeFiles(t) {
 		if !strings.HasPrefix(rel, licensesDir+"/") {
 			continue
 		}
-		if !referenced[rel] {
-			t.Errorf("%s is a licence no manifest entry points at: either the package it covers "+
-				"is no longer vendored, or an entry lost its licence_path", rel)
-		}
+		assert.Should(t, referenced[rel], "%s is a licence no manifest entry points at: either the package it covers "+
+			"is no longer vendored, or an entry lost its licence_path", rel)
 	}
 }
 
@@ -495,9 +469,7 @@ func scanForNetworkReach(t *testing.T) (read []string, reaches []networkReach) {
 		reaches = append(reaches, networkReachesIn(slashed, string(raw))...)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
 	sort.Strings(read)
 	return read, reaches
 }
@@ -532,9 +504,7 @@ func networkReachesIn(file, src string) []networkReach {
 func TestNoModuleFetchesFromTheNetwork(t *testing.T) {
 	t.Parallel()
 	read, reaches := scanForNetworkReach(t)
-	if len(read) == 0 {
-		t.Fatal("scanned no modules under internal/web/static: this test would pass on an empty tree")
-	}
+	assert.Must(t, len(read) != 0, "scanned no modules under internal/web/static: this test would pass on an empty tree")
 	if len(reaches) > 0 {
 		lines := make([]string, 0, len(reaches))
 		for _, r := range reaches {
@@ -583,13 +553,9 @@ func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
 		}
 		vendoredModules++
 		want := vendorRoot + "/" + entry.Path
-		if !seen[want] {
-			t.Errorf("the network scan never read %s; it is a module this instance ships", want)
-		}
+		assert.Should(t, seen[want], "the network scan never read %s; it is a module this instance ships", want)
 	}
-	if vendoredModules == 0 {
-		t.Error("the manifest lists no module at all, so the loop above asserted nothing")
-	}
+	assert.Should(t, vendoredModules != 0, "the manifest lists no module at all, so the loop above asserted nothing")
 
 	// And the same for our own modules, by an independent walk.
 	own := 0
@@ -602,17 +568,11 @@ func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
 			return nil
 		}
 		own++
-		if !seen[slashed] {
-			t.Errorf("the network scan never read %s", slashed)
-		}
+		assert.Should(t, seen[slashed], "the network scan never read %s", slashed)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if own == 0 {
-		t.Error("the walk found no module under static: this test would pass on an empty tree")
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Should(t, own != 0, "the walk found no module under static: this test would pass on an empty tree")
 	t.Logf("network scan read %d module(s) of %d found by an independent walk: %s",
 		len(read), own, strings.Join(read, ", "))
 }
@@ -673,39 +633,27 @@ type shellMap struct {
 func shellImportMaps(t *testing.T) []shellMap {
 	t.Helper()
 	shells, err := filepath.Glob(filepath.Join("static", "*.html"))
-	if err != nil {
-		t.Fatalf("glob shells: %v", err)
-	}
-	if len(shells) == 0 {
-		t.Fatal("found no HTML shell under internal/web/static")
-	}
+	assert.Must(t, err == nil, "glob shells: %v", err)
+	assert.Must(t, len(shells) != 0, "found no HTML shell under internal/web/static")
 	sort.Strings(shells)
 
 	out := make([]shellMap, 0, len(shells))
 	for _, shell := range shells {
 		raw, err := os.ReadFile(shell)
-		if err != nil {
-			t.Fatalf("read %s: %v", shell, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", shell, err)
 		src := string(raw)
 		found := importMapRE.FindAllStringSubmatchIndex(src, -1)
-		if len(found) == 0 {
-			t.Fatalf("%s carries no import map: every shell needs one, or the first bare "+
-				"specifier that page imports fails to resolve", shell)
-		}
-		if len(found) > 1 {
-			t.Fatalf("%s carries %d import maps: a browser honours the first and errors on the rest",
-				shell, len(found))
-		}
+		assert.Must(t, len(found) != 0, "%s carries no import map: every shell needs one, or the first bare "+
+			"specifier that page imports fails to resolve", shell)
+		assert.Must(t, len(found) <= 1, "%s carries %d import maps: a browser honours the first and errors on the rest",
+			shell, len(found))
 		var parsed struct {
 			Imports map[string]string `json:"imports"`
 		}
 		if err := json.Unmarshal([]byte(src[found[0][2]:found[0][3]]), &parsed); err != nil {
 			t.Fatalf("%s: the import map is not valid JSON, so a browser ignores it entirely: %v", shell, err)
 		}
-		if len(parsed.Imports) == 0 {
-			t.Fatalf("%s: the import map declares no imports", shell)
-		}
+		assert.Must(t, len(parsed.Imports) != 0, "%s: the import map declares no imports", shell)
 		out = append(out, shellMap{shell: filepath.ToSlash(shell), imports: parsed.Imports, at: found[0][0]})
 	}
 	return out
@@ -719,16 +667,12 @@ func shellImportMaps(t *testing.T) []shellMap {
 func TestTheImportMapIsIdenticalInEveryShell(t *testing.T) {
 	t.Parallel()
 	maps := shellImportMaps(t)
-	if len(maps) < 2 {
-		t.Fatalf("found %d shell(s): this comparison needs at least two to mean anything", len(maps))
-	}
+	assert.Must(t, len(maps) >= 2, "found %d shell(s): this comparison needs at least two to mean anything", len(maps))
 
 	reference := maps[0]
 	for _, m := range maps[1:] {
-		if len(m.imports) != len(reference.imports) {
-			t.Errorf("%s maps %d specifier(s), %s maps %d",
-				m.shell, len(m.imports), reference.shell, len(reference.imports))
-		}
+		assert.Should(t, len(m.imports) == len(reference.imports), "%s maps %d specifier(s), %s maps %d",
+			m.shell, len(m.imports), reference.shell, len(reference.imports))
 		for specifier, target := range reference.imports {
 			got, ok := m.imports[specifier]
 			switch {
@@ -759,9 +703,7 @@ func TestTheImportMapPrecedesEveryModuleScript(t *testing.T) {
 	t.Parallel()
 	for _, m := range shellImportMaps(t) {
 		raw, err := os.ReadFile(m.shell)
-		if err != nil {
-			t.Fatalf("read %s: %v", m.shell, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", m.shell, err)
 		for _, loc := range moduleScriptRE.FindAllStringIndex(string(raw), -1) {
 			if loc[0] < m.at {
 				t.Errorf("%s: a module script at byte %d precedes the import map at byte %d; "+
@@ -795,10 +737,8 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 	for _, m := range shellImportMaps(t) {
 		for specifier, target := range m.imports {
 			mapped[target] = true
-			if !vendored[target] {
-				t.Errorf("%s sends %q to %q, which %s does not list",
-					m.shell, specifier, target, manifestPath)
-			}
+			assert.Should(t, vendored[target], "%s sends %q to %q, which %s does not list",
+				m.shell, specifier, target, manifestPath)
 			if _, err := os.Stat(filepath.Join("static", strings.TrimPrefix(target, "/static/"))); err != nil {
 				t.Errorf("%s sends %q to %q, which is not in the tree: %v", m.shell, specifier, target, err)
 			}
@@ -816,9 +756,7 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 		if !strings.HasSuffix(entry.Path, ".js") && !strings.HasSuffix(entry.Path, ".mjs") {
 			continue
 		}
-		if !mapped["/static/vendor/"+entry.Path] {
-			t.Errorf("%s is vendored and costs its bytes, but no import map specifier reaches it", entry.Path)
-		}
+		assert.Should(t, mapped["/static/vendor/"+entry.Path], "%s is vendored and costs its bytes, but no import map specifier reaches it", entry.Path)
 	}
 }
 
@@ -856,9 +794,7 @@ func TestEveryImportMapTargetIsServedAsJavaScript(t *testing.T) {
 			t.Errorf("GET %s served as %q; a browser refuses a module that is not a JavaScript MIME type",
 				target, ct)
 		}
-		if rec.Body.Len() == 0 {
-			t.Errorf("GET %s served an empty body", target)
-		}
+		assert.Should(t, rec.Body.Len() != 0, "GET %s served an empty body", target)
 	}
 }
 
@@ -869,9 +805,7 @@ func TestEveryImportMapTargetIsServedAsJavaScript(t *testing.T) {
 func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
 	t.Parallel()
 	admitted := `export const SVG_NS = "http://www.w3.org/2000/svg";`
-	if !namespaceDeclaration.MatchString(admitted) {
-		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
-	}
+	assert.Should(t, namespaceDeclaration.MatchString(admitted), "the exemption does not admit the declaration it exists for: %q", admitted)
 	for name, refused := range map[string]string{
 		"a fetch of the same string": `const r = await fetch("http://www.w3.org/2000/svg");`,
 		"an https spelling":          `export const SVG_NS = "https://www.w3.org/2000/svg";`,
@@ -879,29 +813,21 @@ func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
 		"a declaration with a tail":  `export const SVG_NS = "http://www.w3.org/2000/svg"; fetch(SVG_NS);`,
 		"any other host":             `export const CDN_NS = "http://cdn.example.com/2000/svg";`,
 	} {
-		if namespaceDeclaration.MatchString(refused) {
-			t.Errorf("the exemption admits %s: %q", name, refused)
-		}
-		if len(networkReachesIn("static/x.js", refused+"\n")) == 0 {
-			t.Errorf("the scan does not report %s: %q", name, refused)
-		}
+		assert.Should(t, !namespaceDeclaration.MatchString(refused), "the exemption admits %s: %q", name, refused)
+		assert.Should(t, len(networkReachesIn("static/x.js", refused+"\n")) != 0, "the scan does not report %s: %q", name, refused)
 	}
 
 	// And the real module really is the one line that uses it, so this
 	// exemption cannot quietly acquire a second beneficiary.
 	raw, err := os.ReadFile(filepath.Join("static", "render", "scene.js"))
-	if err != nil {
-		t.Fatalf("read scene.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read scene.js: %v", err)
 	found := 0
 	for _, line := range codeLines(string(raw)) {
 		if namespaceDeclaration.MatchString(line.code) {
 			found++
 		}
 	}
-	if found != 1 {
-		t.Errorf("the namespace declaration appears %d time(s) in render/scene.js, want exactly 1", found)
-	}
+	assert.Should(t, found == 1, "the namespace declaration appears %d time(s) in render/scene.js, want exactly 1", found)
 }
 
 // TestTheDocumentationExemptionIsExactlyOneDeclaration is the guard on
@@ -911,9 +837,7 @@ func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
 func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
 	t.Parallel()
 	admitted := `export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";`
-	if !documentationLink.MatchString(admitted) {
-		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
-	}
+	assert.Should(t, documentationLink.MatchString(admitted), "the exemption does not admit the declaration it exists for: %q", admitted)
 	for name, refused := range map[string]string{
 		"a fetch of the same URL":   `const r = await fetch("https://github.com/neverbot/maestro#the-skill-bundle");`,
 		"an http spelling":          `export const SKILL_BUNDLE_HREF = "http://github.com/neverbot/maestro#the-skill-bundle";`,
@@ -921,12 +845,8 @@ func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
 		"another constant":          `export const ANALYTICS_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";`,
 		"a declaration with a tail": `export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro"; fetch(SKILL_BUNDLE_HREF);`,
 	} {
-		if documentationLink.MatchString(refused) {
-			t.Errorf("the exemption admits %s: %q", name, refused)
-		}
-		if len(networkReachesIn("static/x.js", refused+"\n")) == 0 {
-			t.Errorf("the scan does not report %s: %q", name, refused)
-		}
+		assert.Should(t, !documentationLink.MatchString(refused), "the exemption admits %s: %q", name, refused)
+		assert.Should(t, len(networkReachesIn("static/x.js", refused+"\n")) != 0, "the scan does not report %s: %q", name, refused)
 	}
 
 	// And exactly one line in the whole front end benefits from it, so a
@@ -951,12 +871,8 @@ func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if found != 1 {
-		t.Errorf("the documentation link appears %d time(s) under internal/web/static, want exactly 1", found)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Should(t, found == 1, "the documentation link appears %d time(s) under internal/web/static, want exactly 1", found)
 }
 
 // TestThePublishedSiteExemptionIsExactlyOneDeclaration is the guard on
@@ -971,9 +887,7 @@ func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
 func TestThePublishedSiteExemptionIsExactlyOneDeclaration(t *testing.T) {
 	t.Parallel()
 	admitted := `export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/";`
-	if !publishedSite.MatchString(admitted) {
-		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
-	}
+	assert.Should(t, publishedSite.MatchString(admitted), "the exemption does not admit the declaration it exists for: %q", admitted)
 	for name, refused := range map[string]string{
 		"a fetch of the same URL":   `const r = await fetch("https://neverbot.github.io/maestro/");`,
 		"an http spelling":          `export const DOCUMENTATION_HREF = "http://neverbot.github.io/maestro/";`,
@@ -981,12 +895,8 @@ func TestThePublishedSiteExemptionIsExactlyOneDeclaration(t *testing.T) {
 		"another constant":          `export const ANALYTICS_HREF = "https://neverbot.github.io/maestro/";`,
 		"a declaration with a tail": `export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/"; fetch(DOCUMENTATION_HREF);`,
 	} {
-		if publishedSite.MatchString(refused) {
-			t.Errorf("the exemption admits %s: %q", name, refused)
-		}
-		if len(networkReachesIn("static/x.js", refused+"\n")) == 0 {
-			t.Errorf("the scan does not report %s: %q", name, refused)
-		}
+		assert.Should(t, !publishedSite.MatchString(refused), "the exemption admits %s: %q", name, refused)
+		assert.Should(t, len(networkReachesIn("static/x.js", refused+"\n")) != 0, "the scan does not report %s: %q", name, refused)
 	}
 
 	found := 0
@@ -1008,10 +918,6 @@ func TestThePublishedSiteExemptionIsExactlyOneDeclaration(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if found != 1 {
-		t.Errorf("the published site's address appears %d time(s) under internal/web/static, want exactly 1", found)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Should(t, found == 1, "the published site's address appears %d time(s) under internal/web/static, want exactly 1", found)
 }

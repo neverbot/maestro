@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/views"
 )
 
@@ -41,9 +42,7 @@ func TestComposingAQuery(t *testing.T) {
 func TestEveryDocumentTheBuilderEmitsParses(t *testing.T) {
 	t.Parallel()
 	out, err := exec.Command("node", "jstest/compose_test.mjs", "--emit").Output()
-	if err != nil {
-		t.Fatalf("running the emitter harness: %v", err)
-	}
+	assert.Must(t, err == nil, "running the emitter harness: %v", err)
 
 	documents := 0
 	scan := bufio.NewScanner(bytes.NewReader(out))
@@ -63,7 +62,5 @@ func TestEveryDocumentTheBuilderEmitsParses(t *testing.T) {
 	}
 	// A harness that emitted nothing would pass this test in silence,
 	// which is the same failure as having no test at all.
-	if documents < 5 {
-		t.Fatalf("the harness emitted %d documents; it composes more than that", documents)
-	}
+	assert.Must(t, documents >= 5, "the harness emitted %d documents; it composes more than that", documents)
 }

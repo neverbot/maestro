@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 )
 
@@ -30,20 +31,14 @@ func TestKindsArea(t *testing.T) {
 		seedKinded(t, svc, game, "notes/a", "")
 
 		catalogue, err := svc.Kinds(ctx, game)
-		if err != nil {
-			t.Fatalf("Kinds: %v", err)
-		}
+		assert.Must(t, err == nil, "Kinds: %v", err)
 		want := []markdown.KindCount{
 			{Kind: "lore", DocumentCount: 2},
 			{Kind: "script", DocumentCount: 1},
 		}
-		if fmt.Sprint(catalogue.Kinds) != fmt.Sprint(want) {
-			t.Fatalf("Kinds = %v, want %v (sorted, and the kind-less document is not a kind)",
-				catalogue.Kinds, want)
-		}
-		if catalogue.Totals.Documents != 4 || catalogue.Totals.Unkinded != 1 {
-			t.Fatalf("Totals = %+v, want 4 documents of which 1 unkinded", catalogue.Totals)
-		}
+		assert.Must(t, fmt.Sprint(catalogue.Kinds) == fmt.Sprint(want), "Kinds = %v, want %v (sorted, and the kind-less document is not a kind)",
+			catalogue.Kinds, want)
+		assert.Must(t, catalogue.Totals.Documents == 4 && catalogue.Totals.Unkinded == 1, "Totals = %+v, want 4 documents of which 1 unkinded", catalogue.Totals)
 
 		// Every kind the catalogue names must select exactly the documents
 		// it counted, through the filter it exists to feed. A catalogue that
@@ -51,13 +46,9 @@ func TestKindsArea(t *testing.T) {
 		// no catalogue.
 		for _, k := range catalogue.Kinds {
 			page, err := svc.List(ctx, game, markdown.ListFilter{Kind: k.Kind})
-			if err != nil {
-				t.Fatalf("List by kind %q: %v", k.Kind, err)
-			}
-			if int64(len(page.Documents)) != k.DocumentCount {
-				t.Fatalf("kind %q counts %d documents and lists %d",
-					k.Kind, k.DocumentCount, len(page.Documents))
-			}
+			assert.Must(t, err == nil, "List by kind %q: %v", k.Kind, err)
+			assert.Must(t, int64(len(page.Documents)) == k.DocumentCount, "kind %q counts %d documents and lists %d",
+				k.Kind, k.DocumentCount, len(page.Documents))
 		}
 	})
 
@@ -71,22 +62,12 @@ func TestKindsArea(t *testing.T) {
 		game := newGame(t, pool, "azeroth")
 
 		catalogue, err := svc.Kinds(context.Background(), game)
-		if err != nil {
-			t.Fatalf("Kinds: %v", err)
-		}
-		if catalogue.Kinds == nil {
-			t.Fatal("Kinds is nil, want an empty slice")
-		}
+		assert.Must(t, err == nil, "Kinds: %v", err)
+		assert.Must(t, catalogue.Kinds != nil, "Kinds is nil, want an empty slice")
 		encoded, err := json.Marshal(catalogue.Kinds)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		if string(encoded) != "[]" {
-			t.Fatalf("an empty catalogue marshals as %s, want []", encoded)
-		}
-		if catalogue.Totals.Documents != 0 || catalogue.Totals.Unkinded != 0 {
-			t.Fatalf("Totals = %+v, want zeroes", catalogue.Totals)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
+		assert.Must(t, string(encoded) == "[]", "an empty catalogue marshals as %s, want []", encoded)
+		assert.Must(t, catalogue.Totals.Documents == 0 && catalogue.Totals.Unkinded == 0, "Totals = %+v, want zeroes", catalogue.Totals)
 	})
 
 	// TestKindsArea's "two spellings of one kind are one catalogue row" case
@@ -104,13 +85,9 @@ func TestKindsArea(t *testing.T) {
 		seedKinded(t, svc, game, "c", "LORE")
 
 		catalogue, err := svc.Kinds(ctx, game)
-		if err != nil {
-			t.Fatalf("Kinds: %v", err)
-		}
-		if len(catalogue.Kinds) != 1 {
-			t.Fatalf("Kinds = %v, want one row: three spellings of a kind are one kind",
-				catalogue.Kinds)
-		}
+		assert.Must(t, err == nil, "Kinds: %v", err)
+		assert.Must(t, len(catalogue.Kinds) == 1, "Kinds = %v, want one row: three spellings of a kind are one kind",
+			catalogue.Kinds)
 		if catalogue.Kinds[0].Kind != "lore" {
 			t.Fatalf("Kind = %q, want the folded spelling, which is what the filter matches on",
 				catalogue.Kinds[0].Kind)
@@ -121,13 +98,9 @@ func TestKindsArea(t *testing.T) {
 		// And the spelling it reports selects all three, which is the whole
 		// contract of a catalogue value.
 		page, err := svc.List(ctx, game, markdown.ListFilter{Kind: catalogue.Kinds[0].Kind})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 3 {
-			t.Fatalf("filtering by the catalogue's own spelling found %d documents, want 3",
-				len(page.Documents))
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 3, "filtering by the catalogue's own spelling found %d documents, want 3",
+			len(page.Documents))
 	})
 
 	// TestKindsArea's "a deleted documents kind leaves the catalogue" case. A
@@ -148,12 +121,8 @@ func TestKindsArea(t *testing.T) {
 		}
 
 		catalogue, err := svc.Kinds(ctx, game)
-		if err != nil {
-			t.Fatalf("Kinds: %v", err)
-		}
-		if len(catalogue.Kinds) != 0 || catalogue.Totals.Documents != 0 {
-			t.Fatalf("catalogue = %+v, want nothing: its only document is deleted", catalogue)
-		}
+		assert.Must(t, err == nil, "Kinds: %v", err)
+		assert.Must(t, len(catalogue.Kinds) == 0 && catalogue.Totals.Documents == 0, "catalogue = %+v, want nothing: its only document is deleted", catalogue)
 
 		if _, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "notes/only", Content: "back\n", ExpectedVersion: ptrInt32(2),
@@ -161,12 +130,8 @@ func TestKindsArea(t *testing.T) {
 			t.Fatalf("resurrect: %v", err)
 		}
 		catalogue, err = svc.Kinds(ctx, game)
-		if err != nil {
-			t.Fatalf("Kinds after resurrection: %v", err)
-		}
-		if len(catalogue.Kinds) != 1 || catalogue.Kinds[0].Kind != "pitch" {
-			t.Fatalf("catalogue = %+v, want the kind back with the document", catalogue)
-		}
+		assert.Must(t, err == nil, "Kinds after resurrection: %v", err)
+		assert.Must(t, len(catalogue.Kinds) == 1 && catalogue.Kinds[0].Kind == "pitch", "catalogue = %+v, want the kind back with the document", catalogue)
 	})
 
 	// TestKindsArea's "a kind catalogue is per game" case. The counting query
@@ -182,13 +147,8 @@ func TestKindsArea(t *testing.T) {
 		seedKinded(t, svc, outland, "a", "script")
 
 		catalogue, err := svc.Kinds(ctx, azeroth)
-		if err != nil {
-			t.Fatalf("Kinds: %v", err)
-		}
-		if len(catalogue.Kinds) != 1 || catalogue.Kinds[0].Kind != "lore" ||
-			catalogue.Totals.Documents != 1 {
-			t.Fatalf("catalogue = %+v, want only this game's own prose", catalogue)
-		}
+		assert.Must(t, err == nil, "Kinds: %v", err)
+		assert.Must(t, len(catalogue.Kinds) == 1 && catalogue.Kinds[0].Kind == "lore" && catalogue.Totals.Documents == 1, "catalogue = %+v, want only this game's own prose", catalogue)
 	})
 
 	// TestKindsArea's "the kind catalogue does not grow with the documents it
@@ -206,21 +166,13 @@ func TestKindsArea(t *testing.T) {
 		}
 
 		catalogue, err := svc.Kinds(ctx, game)
-		if err != nil {
-			t.Fatalf("Kinds: %v", err)
-		}
-		if len(catalogue.Kinds) != 1 || catalogue.Kinds[0].DocumentCount != 60 {
-			t.Fatalf("catalogue = %+v, want one kind counting 60", catalogue)
-		}
+		assert.Must(t, err == nil, "Kinds: %v", err)
+		assert.Must(t, len(catalogue.Kinds) == 1 && catalogue.Kinds[0].DocumentCount == 60, "catalogue = %+v, want one kind counting 60", catalogue)
 		encoded, err := json.Marshal(catalogue)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
 		for _, path := range []string{"lore/entry-42", "entry-0"} {
-			if strings.Contains(string(encoded), path) {
-				t.Fatalf("the catalogue names %q: it counts documents and must not list them:\n%s",
-					path, encoded)
-			}
+			assert.Must(t, !strings.Contains(string(encoded), path), "the catalogue names %q: it counts documents and must not list them:\n%s",
+				path, encoded)
 		}
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/skill"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -115,10 +116,8 @@ var restatementFixtures = []struct {
 func TestTheBundleRestatesNoToolDescription(t *testing.T) {
 	t.Parallel()
 	registered := web.NewToolReferenceServer().ToolDescriptionsForTest()
-	if len(registered) < 40 {
-		t.Fatalf("this server registered %d tools; the scan below would be against a table "+
-			"too small to be the real surface", len(registered))
-	}
+	assert.Must(t, len(registered) >= 40, "this server registered %d tools; the scan below would be against a table "+
+		"too small to be the real surface", len(registered))
 
 	// The fixtures first. If these do not behave, nothing the real bundle
 	// says below is evidence of anything.
@@ -126,10 +125,8 @@ func TestTheBundleRestatesNoToolDescription(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			found := web.AuditRestatementForTest(
 				web.ScanMarkdownForTest("fixture.md", fixture.page), registered)
-			if len(found) != fixture.want {
-				t.Fatalf("the guard reported %d violations, want %d, for:\n%s\n\n%s",
-					len(found), fixture.want, fixture.page, strings.Join(found, "\n"))
-			}
+			assert.Must(t, len(found) == fixture.want, "the guard reported %d violations, want %d, for:\n%s\n\n%s",
+				len(found), fixture.want, fixture.page, strings.Join(found, "\n"))
 			if fixture.contains != "" && !strings.Contains(found[0], fixture.contains) {
 				t.Fatalf("the violation does not explain itself with %q:\n%s",
 					fixture.contains, found[0])
@@ -138,16 +135,12 @@ func TestTheBundleRestatesNoToolDescription(t *testing.T) {
 	}
 
 	sentences, err := web.ScanBundleForTest(skill.Files())
-	if err != nil {
-		t.Fatalf("scanning the bundle: %v", err)
-	}
+	assert.Must(t, err == nil, "scanning the bundle: %v", err)
 	// The scan is asserted to have seen the bundle before its silence is
 	// read as good news: some sentences at all, and some of them naming a
 	// registered tool.
-	if len(sentences) < 20 {
-		t.Fatalf("the scan produced %d sentences over the whole bundle: it is not reading "+
-			"the tree, and its silence below would mean nothing", len(sentences))
-	}
+	assert.Must(t, len(sentences) >= 20, "the scan produced %d sentences over the whole bundle: it is not reading "+
+		"the tree, and its silence below would mean nothing", len(sentences))
 	// Two independent ways a scanned sentence can be *about* a tool, both
 	// asserted, because each is the whole input of one half of the guard:
 	// the sentence names a tool in its own text (the unquoted half), and
@@ -162,16 +155,12 @@ func TestTheBundleRestatesNoToolDescription(t *testing.T) {
 			attributed++
 		}
 	}
-	if naming < 5 {
-		t.Fatalf("only %d scanned sentences name a registered tool: the matcher is not "+
-			"matching, so nothing below can be caught", naming)
-	}
-	if attributed < len(registered) {
-		t.Fatalf("only %d scanned sentences are inside an attribution and the server "+
-			"registers %d tools: the generated index's bullets are not being read as the "+
-			"attributed quotes they are, so no reword of a description would be caught here",
-			attributed, len(registered))
-	}
+	assert.Must(t, naming >= 5, "only %d scanned sentences name a registered tool: the matcher is not "+
+		"matching, so nothing below can be caught", naming)
+	assert.Must(t, attributed >= len(registered), "only %d scanned sentences are inside an attribution and the server "+
+		"registers %d tools: the generated index's bullets are not being read as the "+
+		"attributed quotes they are, so no reword of a description would be caught here",
+		attributed, len(registered))
 
 	for _, violation := range web.AuditRestatementForTest(sentences, registered) {
 		t.Error(violation)
@@ -198,9 +187,7 @@ func TestEveryClaimMarkerIsLiveAndBounded(t *testing.T) {
 		t.Run(marker, func(t *testing.T) {
 			page := fmt.Sprintf("entities.upsert %s something.", marker)
 			found := web.AuditRestatementForTest(web.ScanMarkdownForTest("fixture.md", page), registered)
-			if len(found) != 1 {
-				t.Fatalf("%q reported %d violations for %q, want 1", marker, len(found), page)
-			}
+			assert.Must(t, len(found) == 1, "%q reported %d violations for %q, want 1", marker, len(found), page)
 		})
 	}
 	for _, page := range []string{
@@ -208,10 +195,8 @@ func TestEveryClaimMarkerIsLiveAndBounded(t *testing.T) {
 		"entities.upsert and mustard have nothing in common.",
 	} {
 		found := web.AuditRestatementForTest(web.ScanMarkdownForTest("fixture.md", page), registered)
-		if len(found) != 0 {
-			t.Errorf("a word containing a marker was read as a marker in %q:\n%s",
-				page, strings.Join(found, "\n"))
-		}
+		assert.Should(t, len(found) == 0, "a word containing a marker was read as a marker in %q:\n%s",
+			page, strings.Join(found, "\n"))
 	}
 }
 
@@ -286,9 +271,7 @@ func TestTheToolMatcherReadsWholeTokens(t *testing.T) {
 		{"`entities.get`'s own description", []string{"entities.get"}},
 	} {
 		got := web.ToolsNamedInForTest(tc.text, registered)
-		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-			t.Errorf("toolsNamedIn(%q) = %v, want %v", tc.text, got, tc.want)
-		}
+		assert.Should(t, strings.Join(got, ",") == strings.Join(tc.want, ","), "toolsNamedIn(%q) = %v, want %v", tc.text, got, tc.want)
 	}
 }
 
@@ -313,9 +296,7 @@ func TestTheSentenceSplitterIsPrecise(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := web.SplitSentencesForTest(tc.in)
-			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
-				t.Fatalf("split(%q) = %q, want %q", tc.in, got, tc.want)
-			}
+			assert.Must(t, strings.Join(got, "|") == strings.Join(tc.want, "|"), "split(%q) = %q, want %q", tc.in, got, tc.want)
 		})
 	}
 
@@ -323,9 +304,7 @@ func TestTheSentenceSplitterIsPrecise(t *testing.T) {
 	// the splitter, because it is the join that does the work.
 	scanned := web.ScanMarkdownForTest("fixture.md",
 		"A batch is a batch: entities.upsert accepts at\nmost 500 items.")
-	if len(scanned) != 1 {
-		t.Fatalf("a wrapped sentence produced %d sentences: %+v", len(scanned), scanned)
-	}
+	assert.Must(t, len(scanned) == 1, "a wrapped sentence produced %d sentences: %+v", len(scanned), scanned)
 	if !strings.Contains(scanned[0].Text, "accepts at most 500") {
 		t.Fatalf("the wrap was not joined: %q", scanned[0].Text)
 	}
@@ -339,9 +318,7 @@ func TestTheScannerReadsTranscriptStrings(t *testing.T) {
 	registered := map[string]string{"entities.upsert": "Write entities in bulk."}
 	body := []byte(`{"_comment": "entities.upsert accepts at most 500 items.", "steps": []}`)
 	sentences, err := web.ScanJSONForTest("genres/fixture.json", body)
-	if err != nil {
-		t.Fatalf("scanning the fixture transcript: %v", err)
-	}
+	assert.Must(t, err == nil, "scanning the fixture transcript: %v", err)
 	if found := web.AuditRestatementForTest(sentences, registered); len(found) != 1 {
 		t.Fatalf("a restatement inside a transcript string reported %d violations, want 1: %v",
 			len(found), found)
@@ -355,9 +332,7 @@ func TestTheScannerReadsTranscriptStrings(t *testing.T) {
 		"genres/fixture.json": &fstest.MapFile{Data: body},
 	}
 	all, err := web.ScanBundleForTest(tree)
-	if err != nil {
-		t.Fatalf("scanning the fixture tree: %v", err)
-	}
+	assert.Must(t, err == nil, "scanning the fixture tree: %v", err)
 	if found := web.AuditRestatementForTest(all, registered); len(found) != 1 {
 		t.Fatalf("scanBundle reported %d violations over a tree whose transcript restates "+
 			"a bound, want 1: %v", len(found), found)
@@ -372,13 +347,9 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 	registered := web.NewToolReferenceServer().ToolDescriptionsForTest()
 
 	tokens, err := web.BundleToolTokensForTest(skill.Files())
-	if err != nil {
-		t.Fatalf("reading the bundle's tool tokens: %v", err)
-	}
-	if len(tokens) < 40 {
-		t.Fatalf("only %d backticked tool tokens were found in the whole bundle: the scan "+
-			"is not reading it, and its silence would mean nothing", len(tokens))
-	}
+	assert.Must(t, err == nil, "reading the bundle's tool tokens: %v", err)
+	assert.Must(t, len(tokens) >= 40, "only %d backticked tool tokens were found in the whole bundle: the scan "+
+		"is not reading it, and its silence would mean nothing", len(tokens))
 	for _, token := range tokens {
 		if _, ok := registered[token.Name]; !ok {
 			t.Errorf("%s:%d names `%s`, which this server does not register: a page that "+
@@ -393,12 +364,8 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 		"skill.md": &fstest.MapFile{Data: []byte("Run `analysis.orphans` after seeding.\n")},
 	}
 	scratch, err := web.BundleToolTokensForTest(tree)
-	if err != nil {
-		t.Fatalf("reading the scratch tree: %v", err)
-	}
-	if len(scratch) != 1 || scratch[0].Name != "analysis.orphans" || scratch[0].Line != 1 {
-		t.Fatalf("the scan did not report `analysis.orphans` at skill.md:1, got %+v", scratch)
-	}
+	assert.Must(t, err == nil, "reading the scratch tree: %v", err)
+	assert.Must(t, len(scratch) == 1 && scratch[0].Name == "analysis.orphans" && scratch[0].Line == 1, "the scan did not report `analysis.orphans` at skill.md:1, got %+v", scratch)
 
 	// And the false positive that would get this scanner deleted: the
 	// bundle names its own pages constantly, and `skill.md` is not a tool.
@@ -406,12 +373,8 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 		"skill.md": &fstest.MapFile{Data: []byte("See `reference/tools.md` and `skill.md`.\n")},
 	}
 	filenames, err := web.BundleToolTokensForTest(names)
-	if err != nil {
-		t.Fatalf("reading the filename tree: %v", err)
-	}
-	if len(filenames) != 0 {
-		t.Errorf("a filename was read as a tool name: %+v", filenames)
-	}
+	assert.Must(t, err == nil, "reading the filename tree: %v", err)
+	assert.Should(t, len(filenames) == 0, "a filename was read as a tool name: %+v", filenames)
 }
 
 // notYetTaughtOutsideTheIndex is the ratchet Task 3 left behind, and it
@@ -450,13 +413,9 @@ func TestEveryRegisteredToolIsRoutedFromTheBundle(t *testing.T) {
 	// failing for a reason that has nothing to do with the bundle is a
 	// guard somebody switches off.
 	tokens, err := web.BundleToolMentionsForTest(skill.Files(), registered)
-	if err != nil {
-		t.Fatalf("reading the bundle's tool mentions: %v", err)
-	}
-	if len(tokens) < len(registered) {
-		t.Fatalf("only %d tool mentions were found across the whole bundle and %d tools are "+
-			"registered: the scan is not reading the tree", len(tokens), len(registered))
-	}
+	assert.Must(t, err == nil, "reading the bundle's tool mentions: %v", err)
+	assert.Must(t, len(tokens) >= len(registered), "only %d tool mentions were found across the whole bundle and %d tools are "+
+		"registered: the scan is not reading the tree", len(tokens), len(registered))
 
 	inIndex := map[string]bool{}
 	elsewhere := map[string]bool{}
@@ -474,9 +433,7 @@ func TestEveryRegisteredToolIsRoutedFromTheBundle(t *testing.T) {
 
 	var onlyInIndex []string
 	for name := range registered {
-		if !inIndex[name] {
-			t.Errorf("%s is registered and is not routed from %s", name, web.ToolReferencePath)
-		}
+		assert.Should(t, inIndex[name], "%s is registered and is not routed from %s", name, web.ToolReferencePath)
 		if !elsewhere[name] {
 			onlyInIndex = append(onlyInIndex, name)
 		}
@@ -485,10 +442,8 @@ func TestEveryRegisteredToolIsRoutedFromTheBundle(t *testing.T) {
 
 	want := append([]string(nil), notYetTaughtOutsideTheIndex...)
 	sort.Strings(want)
-	if strings.Join(onlyInIndex, "\n") != strings.Join(want, "\n") {
-		t.Errorf("the tools reachable only from the index have moved.\n\nfound:\n%s\n\nrecorded "+
-			"in notYetTaughtOutsideTheIndex:\n%s\n\nA page that teaches a tool shortens that "+
-			"list in the same commit; a tool that stops being taught lengthens it.",
-			strings.Join(onlyInIndex, "\n"), strings.Join(want, "\n"))
-	}
+	assert.Should(t, strings.Join(onlyInIndex, "\n") == strings.Join(want, "\n"), "the tools reachable only from the index have moved.\n\nfound:\n%s\n\nrecorded "+
+		"in notYetTaughtOutsideTheIndex:\n%s\n\nA page that teaches a tool shortens that "+
+		"list in the same commit; a tool that stops being taught lengthens it.",
+		strings.Join(onlyInIndex, "\n"), strings.Join(want, "\n"))
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -62,13 +63,9 @@ func TestEveryStringInAQueryIsBounded(t *testing.T) {
 	             "fields":["` + badChar + `"]}}`
 
 	_, err := ParseQuery([]byte(doc))
-	if err == nil {
-		t.Fatal("a document whose every string holds a control character must be refused")
-	}
+	assert.Must(t, err != nil, "a document whose every string holds a control character must be refused")
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
 	// Collect the pointers that reported a text problem. Other problems
 	// (an unusable set name, an unknown direction) are expected in the
 	// same pass and are not counted here.
@@ -92,15 +89,11 @@ func TestEveryStringInAQueryIsBounded(t *testing.T) {
 		"/project/label", "/project/color_by", "/project/fields/0",
 	}
 	for _, ptr := range want {
-		if !got[ptr] {
-			t.Errorf("the string at %s was not bounded: a control character reached the "+
-				"rest of the engine from there", ptr)
-		}
+		assert.Should(t, got[ptr], "the string at %s was not bounded: a control character reached the "+
+			"rest of the engine from there", ptr)
 	}
-	if len(got) != len(want) {
-		t.Errorf("bounded %d string positions, expected %d; the difference is either a "+
-			"position this test forgot or one the walk reaches twice: got %v", len(got), len(want), got)
-	}
+	assert.Should(t, len(got) == len(want), "bounded %d string positions, expected %d; the difference is either a "+
+		"position this test forgot or one the walk reaches twice: got %v", len(got), len(want), got)
 }
 
 // TestAStringFieldAddedLaterIsBoundedWithoutTouchingTheWalk is the proof
@@ -151,13 +144,9 @@ func TestAStringFieldAddedLaterIsBoundedWithoutTouchingTheWalk(t *testing.T) {
 		"/child/added_map/k",
 	}
 	for _, ptr := range want {
-		if !got[ptr] {
-			t.Errorf("a string added at %s escaped the bound; got %v", ptr, got)
-		}
+		assert.Should(t, got[ptr], "a string added at %s escaped the bound; got %v", ptr, got)
 	}
-	if len(got) != len(want) {
-		t.Errorf("bounded %d positions, expected %d: got %v", len(got), len(want), got)
-	}
+	assert.Should(t, len(got) == len(want), "bounded %d positions, expected %d: got %v", len(got), len(want), got)
 }
 
 // TestAControlCharacterIsRefusedAnywhereInAQuery is the rule stated over
@@ -172,28 +161,18 @@ func TestAControlCharacterIsRefusedAnywhereInAQuery(t *testing.T) {
 		t.Fatalf("the same document without the newline must parse: %v", err)
 	}
 	_, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","as":"a\nb"}]}`))
-	if err == nil {
-		t.Fatal("a set name holding a newline must be refused")
-	}
-	if !errors.Is(err, ErrQueryInvalid) {
-		t.Fatalf("must be query_invalid, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "holds a control character") {
-		t.Fatalf("must name the control character, got %v", err)
-	}
+	assert.Must(t, err != nil, "a set name holding a newline must be refused")
+	assert.Must(t, errors.Is(err, ErrQueryInvalid), "must be query_invalid, got %v", err)
+	assert.Must(t, strings.Contains(err.Error(), "holds a control character"), "must name the control character, got %v", err)
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
 	var at string
 	for _, f := range qe.Fields {
 		if strings.Contains(f.Message, "holds a control character") {
 			at = f.Path
 		}
 	}
-	if at != "/from/0/as" {
-		t.Fatalf("the control character must be reported at /from/0/as, got %q", at)
-	}
+	assert.Must(t, at == "/from/0/as", "the control character must be reported at /from/0/as, got %q", at)
 }
 
 // TestAnInvalidUTF8ByteIsRefusedBeforeItBecomesAReplacementCharacter is
@@ -207,15 +186,9 @@ func TestAnInvalidUTF8ByteIsRefusedBeforeItBecomesAReplacementCharacter(t *testi
 		t.Fatalf("the same document with valid bytes must parse: %v", err)
 	}
 	_, err := ParseQuery([]byte("{\"v\":1,\"from\":[{\"type\":\"quest\",\"as\":\"a\xffb\"}]}"))
-	if err == nil {
-		t.Fatal("a document holding a byte that is not valid UTF-8 must be refused")
-	}
-	if !errors.Is(err, ErrQueryInvalid) {
-		t.Fatalf("must be query_invalid, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "is not valid UTF-8") {
-		t.Fatalf("must say the document is not valid UTF-8, got %v", err)
-	}
+	assert.Must(t, err != nil, "a document holding a byte that is not valid UTF-8 must be refused")
+	assert.Must(t, errors.Is(err, ErrQueryInvalid), "must be query_invalid, got %v", err)
+	assert.Must(t, strings.Contains(err.Error(), "is not valid UTF-8"), "must say the document is not valid UTF-8, got %v", err)
 
 	// The reason the check cannot be per-string: the decoder replaces the
 	// byte, so metamodel.CheckText — the shared judgement — sees nothing
@@ -230,9 +203,7 @@ func TestAnInvalidUTF8ByteIsRefusedBeforeItBecomesAReplacementCharacter(t *testi
 	if _, bad := metamodel.CheckText(probe.A, ""); bad {
 		t.Fatalf("the decoded string is expected to be valid UTF-8 after substitution, got %q", probe.A)
 	}
-	if !strings.ContainsRune(probe.A, '�') {
-		t.Fatalf("the decoder is expected to substitute U+FFFD, got %q", probe.A)
-	}
+	assert.Must(t, strings.ContainsRune(probe.A, '�'), "the decoder is expected to substitute U+FFFD, got %q", probe.A)
 }
 
 // TestAnOverlongStringIsRefusedWhereverItSits pins the length cap on a
@@ -243,19 +214,11 @@ func TestAnOverlongStringIsRefusedWhereverItSits(t *testing.T) {
 	long := strings.Repeat("a", MaxStringLen+1)
 	doc := `{"v":1,"from":[{"type":"quest","where":{"field":"rank","op":"eq","value":"` + long + `"}}]}`
 	_, err := ParseQuery([]byte(doc))
-	if err == nil {
-		t.Fatal("an overlong value must be refused")
-	}
-	if !strings.Contains(err.Error(), "must be at most 4096 bytes") {
-		t.Fatalf("must name the cap, got %v", err)
-	}
+	assert.Must(t, err != nil, "an overlong value must be refused")
+	assert.Must(t, strings.Contains(err.Error(), "must be at most 4096 bytes"), "must name the cap, got %v", err)
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
-	if len(qe.Fields) != 1 || qe.Fields[0].Path != "/from/0/where/value" {
-		t.Fatalf("the cap must be reported at /from/0/where/value, got %v", qe.Fields)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
+	assert.Must(t, len(qe.Fields) == 1 && qe.Fields[0].Path == "/from/0/where/value", "the cap must be reported at /from/0/where/value, got %v", qe.Fields)
 	// One byte shorter is accepted, so the cap is the cap and not an
 	// accident of the document being long at all.
 	ok := `{"v":1,"from":[{"type":"quest","where":{"field":"rank","op":"eq","value":"` +
@@ -330,9 +293,7 @@ func TestAnEmbeddedTypesPromotedFieldIsBounded(t *testing.T) {
 		t.Fatal("encoding/json is expected to promote an unexported type's exported field: " +
 			"if it no longer does, the walk's embedded arm is pinning something unreachable")
 	}
-	if host.PromotedVisible == "" {
-		t.Fatal("an exported embedded type's field must be populated by the decode")
-	}
+	assert.Must(t, host.PromotedVisible != "", "an exported embedded type's field must be populated by the decode")
 	host.notAMember = "d" + controlChar
 
 	got := map[string]bool{}
@@ -341,15 +302,11 @@ func TestAnEmbeddedTypesPromotedFieldIsBounded(t *testing.T) {
 	}
 	want := []string{"/promoted_hidden", "/promoted_visible", "/named"}
 	for _, ptr := range want {
-		if !got[ptr] {
-			t.Errorf("the string at %s was not bounded at the pointer the caller wrote it at; "+
-				"got %v", ptr, got)
-		}
+		assert.Should(t, got[ptr], "the string at %s was not bounded at the pointer the caller wrote it at; "+
+			"got %v", ptr, got)
 	}
-	if len(got) != len(want) {
-		t.Errorf("bounded %d positions, expected %d: a field the document does not have is "+
-			"being walked, or one it does have is not; got %v", len(got), len(want), got)
-	}
+	assert.Should(t, len(got) == len(want), "bounded %d positions, expected %d: a field the document does not have is "+
+		"being walked, or one it does have is not; got %v", len(got), len(want), got)
 }
 
 // TestADeferredRawMessageIsBounded pins the one byte slice whose contents
@@ -375,22 +332,16 @@ func TestADeferredRawMessageIsBounded(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatalf("the document must decode: %v", err)
 	}
-	if doc.Bytes[1] != 0x01 {
-		t.Fatalf("the []byte member is expected to decode from base64, got %v", doc.Bytes)
-	}
+	assert.Must(t, doc.Bytes[1] == 0x01, "the []byte member is expected to decode from base64, got %v", doc.Bytes)
 	got := map[string]bool{}
 	for _, f := range checkAllText(&doc) {
 		got[f.Path] = true
 	}
 	want := []string{"/raw/deep/0", "/named"}
 	for _, ptr := range want {
-		if !got[ptr] {
-			t.Errorf("the string at %s escaped the bound; got %v", ptr, got)
-		}
+		assert.Should(t, got[ptr], "the string at %s escaped the bound; got %v", ptr, got)
 	}
-	if len(got) != len(want) {
-		t.Errorf("bounded %d positions, expected %d: got %v", len(got), len(want), got)
-	}
+	assert.Should(t, len(got) == len(want), "bounded %d positions, expected %d: got %v", len(got), len(want), got)
 }
 
 // TestTheWalkReachesAnArrayAndAMapKey pins three arms of the walk that
@@ -414,11 +365,7 @@ func TestTheWalkReachesAnArrayAndAMapKey(t *testing.T) {
 	}
 	want := []string{"/fixed/0", "/fixed/1", "/table/key" + controlChar}
 	for _, ptr := range want {
-		if !got[ptr] {
-			t.Errorf("the string at %q escaped the bound; got %v", ptr, got)
-		}
+		assert.Should(t, got[ptr], "the string at %q escaped the bound; got %v", ptr, got)
 	}
-	if len(got) != len(want) {
-		t.Errorf("bounded %d positions, expected %d: got %v", len(got), len(want), got)
-	}
+	assert.Should(t, len(got) == len(want), "bounded %d positions, expected %d: got %v", len(got), len(want), got)
 }

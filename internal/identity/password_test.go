@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 )
 
@@ -13,43 +14,25 @@ var testParams = config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyL
 func TestHashAndVerify(t *testing.T) {
 	t.Parallel()
 	hash, err := HashPassword("correct horse battery staple", testParams)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	if !strings.HasPrefix(hash, "$argon2id$") {
-		t.Fatalf("hash = %q, want an argon2id encoded string", hash)
-	}
+	assert.Must(t, err == nil, "HashPassword: %v", err)
+	assert.Must(t, strings.HasPrefix(hash, "$argon2id$"), "hash = %q, want an argon2id encoded string", hash)
 
 	ok, err := VerifyPassword("correct horse battery staple", hash)
-	if err != nil {
-		t.Fatalf("VerifyPassword: %v", err)
-	}
-	if !ok {
-		t.Fatal("the correct password did not verify")
-	}
+	assert.Must(t, err == nil, "VerifyPassword: %v", err)
+	assert.Must(t, ok, "the correct password did not verify")
 
 	ok, err = VerifyPassword("wrong password", hash)
-	if err != nil {
-		t.Fatalf("VerifyPassword: %v", err)
-	}
-	if ok {
-		t.Fatal("a wrong password verified")
-	}
+	assert.Must(t, err == nil, "VerifyPassword: %v", err)
+	assert.Must(t, !ok, "a wrong password verified")
 }
 
 func TestHashIsSalted(t *testing.T) {
 	t.Parallel()
 	a, err := HashPassword("same", testParams)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
+	assert.Must(t, err == nil, "HashPassword: %v", err)
 	b, err := HashPassword("same", testParams)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	if a == b {
-		t.Fatal("two hashes of the same password are identical; the salt is not random")
-	}
+	assert.Must(t, err == nil, "HashPassword: %v", err)
+	assert.Must(t, a != b, "two hashes of the same password are identical; the salt is not random")
 }
 
 func TestVerifyRejectsMalformedHash(t *testing.T) {
@@ -107,12 +90,8 @@ func TestVerifyRejectsEmptyKey(t *testing.T) {
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$"
 
 	ok, err := VerifyPassword("literally anything", encoded)
-	if err == nil {
-		t.Fatal("expected an error for an empty key")
-	}
-	if ok {
-		t.Fatal("a password verified against a hash with an empty key")
-	}
+	assert.Must(t, err != nil, "expected an error for an empty key")
+	assert.Must(t, !ok, "a password verified against a hash with an empty key")
 }
 
 // TestVerifyRejectsEmptySalt guards against the same class of malformed
@@ -179,12 +158,8 @@ func TestVerifyRejectsUndersizedKey(t *testing.T) {
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
 
 	ok, err := VerifyPassword("x", encoded)
-	if err == nil {
-		t.Fatal("expected an error for an undersized key")
-	}
-	if ok {
-		t.Fatal("a password verified against a hash with an undersized key")
-	}
+	assert.Must(t, err != nil, "expected an error for an undersized key")
+	assert.Must(t, !ok, "a password verified against a hash with an undersized key")
 }
 
 // TestVerifyRejectsMalformedParameterField guards the parser's totality:
@@ -212,26 +187,18 @@ func TestVerifyRejectsMalformedParameterField(t *testing.T) {
 func TestVerifyRejectsFlippedSaltByte(t *testing.T) {
 	t.Parallel()
 	hash, err := HashPassword("flip me", testParams)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
+	assert.Must(t, err == nil, "HashPassword: %v", err)
 
 	parts := strings.Split(hash, "$")
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		t.Fatalf("decode salt: %v", err)
-	}
+	assert.Must(t, err == nil, "decode salt: %v", err)
 	salt[0] ^= 0xFF
 	parts[4] = base64.RawStdEncoding.EncodeToString(salt)
 	tampered := strings.Join(parts, "$")
 
 	ok, err := VerifyPassword("flip me", tampered)
-	if err != nil {
-		t.Fatalf("VerifyPassword: %v", err)
-	}
-	if ok {
-		t.Fatal("a password verified against a hash with a flipped salt byte")
-	}
+	assert.Must(t, err == nil, "VerifyPassword: %v", err)
+	assert.Must(t, !ok, "a password verified against a hash with a flipped salt byte")
 }
 
 // TestHashAndVerifyAtProductionParameters exercises what the product
@@ -243,25 +210,15 @@ func TestHashAndVerifyAtProductionParameters(t *testing.T) {
 	prod := config.Argon2Params{Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32, SaltLen: 16}
 
 	hash, err := HashPassword("correct horse battery staple", prod)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
+	assert.Must(t, err == nil, "HashPassword: %v", err)
 
 	ok, err := VerifyPassword("correct horse battery staple", hash)
-	if err != nil {
-		t.Fatalf("VerifyPassword: %v", err)
-	}
-	if !ok {
-		t.Fatal("the correct password did not verify at production cost parameters")
-	}
+	assert.Must(t, err == nil, "VerifyPassword: %v", err)
+	assert.Must(t, ok, "the correct password did not verify at production cost parameters")
 
 	ok, err = VerifyPassword("wrong password", hash)
-	if err != nil {
-		t.Fatalf("VerifyPassword: %v", err)
-	}
-	if ok {
-		t.Fatal("a wrong password verified at production cost parameters")
-	}
+	assert.Must(t, err == nil, "VerifyPassword: %v", err)
+	assert.Must(t, !ok, "a wrong password verified at production cost parameters")
 }
 
 func TestHashPasswordRejectsZeroCostParameters(t *testing.T) {
@@ -283,26 +240,16 @@ func TestHashPasswordRejectsZeroCostParameters(t *testing.T) {
 func TestNeedsRehash(t *testing.T) {
 	t.Parallel()
 	hash, err := HashPassword("x", testParams)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
+	assert.Must(t, err == nil, "HashPassword: %v", err)
 
 	stale, err := NeedsRehash(hash, testParams)
-	if err != nil {
-		t.Fatalf("NeedsRehash: %v", err)
-	}
-	if stale {
-		t.Fatal("a hash produced with the current parameters reports needing a rehash")
-	}
+	assert.Must(t, err == nil, "NeedsRehash: %v", err)
+	assert.Must(t, !stale, "a hash produced with the current parameters reports needing a rehash")
 
 	stronger := config.Argon2Params{Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32, SaltLen: 16}
 	stale, err = NeedsRehash(hash, stronger)
-	if err != nil {
-		t.Fatalf("NeedsRehash: %v", err)
-	}
-	if !stale {
-		t.Fatal("a hash produced with weaker parameters does not report needing a rehash")
-	}
+	assert.Must(t, err == nil, "NeedsRehash: %v", err)
+	assert.Must(t, stale, "a hash produced with weaker parameters does not report needing a rehash")
 
 	if _, err := NeedsRehash("not-a-hash", testParams); err == nil {
 		t.Fatal("expected an error for a malformed hash")
@@ -338,14 +285,10 @@ func FuzzVerifyPassword(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, encoded, password string) {
 		ok, err := VerifyPassword(password, encoded)
-		if err != nil && ok {
-			t.Fatalf("VerifyPassword(%q, %q) returned ok=true alongside a non-nil error", password, encoded)
-		}
+		assert.Must(t, err == nil || !ok, "VerifyPassword(%q, %q) returned ok=true alongside a non-nil error", password, encoded)
 		if encoded == hash {
 			want := password == correctPassword
-			if ok != want {
-				t.Fatalf("VerifyPassword(%q, hash-of-%q) = %v, want %v", password, correctPassword, ok, want)
-			}
+			assert.Must(t, ok == want, "VerifyPassword(%q, hash-of-%q) = %v, want %v", password, correctPassword, ok, want)
 		}
 	})
 }

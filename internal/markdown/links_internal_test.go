@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/paging"
 )
 
@@ -34,16 +35,12 @@ func TestTheTwoSidesOfTheJoinDoNotShareAFingerprint(t *testing.T) {
 		t.Fatal("the two sides of the join share one fingerprint, so a cursor issued " +
 			"for one would be accepted by the other")
 	}
-	if byDocument != paging.Fingerprint(project.String(),
-		"document_links_by_document", row.String()) {
-		t.Fatalf("fingerprint = %q, want the project id first, then the side, then the row",
-			byDocument)
-	}
-	if byEntity != paging.Fingerprint(project.String(),
-		"document_links_by_entity", row.String()) {
-		t.Fatalf("fingerprint = %q, want the project id first, then the side, then the row",
-			byEntity)
-	}
+	assert.Must(t, byDocument == paging.Fingerprint(project.String(),
+		"document_links_by_document", row.String()), "fingerprint = %q, want the project id first, then the side, then the row",
+		byDocument)
+	assert.Must(t, byEntity == paging.Fingerprint(project.String(),
+		"document_links_by_entity", row.String()), "fingerprint = %q, want the project id first, then the side, then the row",
+		byEntity)
 	for _, part := range []struct {
 		name  string
 		other string
@@ -51,11 +48,7 @@ func TestTheTwoSidesOfTheJoinDoNotShareAFingerprint(t *testing.T) {
 		{"the game", documentLinksFingerprint(other, row)},
 		{"the document", documentLinksFingerprint(project, other)},
 	} {
-		if byDocument == part.other {
-			t.Fatalf("two attachment listings differing in %s share one fingerprint", part.name)
-		}
+		assert.Must(t, byDocument != part.other, "two attachment listings differing in %s share one fingerprint", part.name)
 	}
-	if byEntity == entityLinksFingerprint(project, other) {
-		t.Fatal("two entities' document listings share one fingerprint")
-	}
+	assert.Must(t, byEntity != entityLinksFingerprint(project, other), "two entities' document listings share one fingerprint")
 }

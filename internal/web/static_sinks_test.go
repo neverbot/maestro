@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // This file widens the HTML-sink perimeter that
@@ -109,9 +111,7 @@ func scanForHTMLSinks(t *testing.T) (scanned []string, offences []string) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
 	return scanned, offences
 }
 
@@ -125,9 +125,7 @@ func TestNoStaticAssetWritesRawHTMLOutsideTheOneAllowedSink(t *testing.T) {
 	// A guard that silently scanned nothing would pass forever. Four
 	// shells, three scripts today; the assertion is only that the walk
 	// found files at all, so adding one does not fail this line.
-	if len(scanned) == 0 {
-		t.Fatal("scanned no assets under internal/web/static: the walk found nothing to guard")
-	}
+	assert.Must(t, len(scanned) != 0, "scanned no assets under internal/web/static: the walk found nothing to guard")
 	if len(offences) > 0 {
 		sort.Strings(offences)
 		t.Fatalf("%d unlisted HTML sink(s) under internal/web/static:\n%s\n"+
@@ -181,9 +179,7 @@ func TestTheSinkPerimeterCoversEveryOwnModule(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
 
 	if len(missing) > 0 {
 		sort.Strings(missing)
@@ -196,10 +192,8 @@ func TestTheSinkPerimeterCoversEveryOwnModule(t *testing.T) {
 		t.Errorf("the perimeter read %d vendored file(s) it is documented to skip:\n%s",
 			len(vendored), strings.Join(vendored, "\n"))
 	}
-	if vendorFiles == 0 {
-		t.Errorf("%s holds no files: the vendor skip above is excluding nothing, so this test's "+
-			"second assertion would pass whatever the skip did", vendorDir)
-	}
+	assert.Should(t, vendorFiles != 0, "%s holds no files: the vendor skip above is excluding nothing, so this test's "+
+		"second assertion would pass whatever the skip did", vendorDir)
 	t.Logf("HTML-sink perimeter read %d own asset(s); %s holds %d file(s), none of them read",
 		len(scanned), vendorDir, vendorFiles)
 }

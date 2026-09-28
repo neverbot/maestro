@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -70,13 +71,9 @@ func TestABatchIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 	// the point: the batch got past the argument check and was run.
 	at := entities[:metamodel.MaxBulkItems]
 	out, err := svc.UpsertEntities(ctx, project, at, metamodel.BulkPartial)
-	if err != nil {
-		t.Fatalf("a batch of exactly %d items was refused: %v", metamodel.MaxBulkItems, err)
-	}
-	if len(out.Written) != metamodel.MaxBulkItems {
-		t.Fatalf("a batch of exactly %d items wrote %d rows: %+v",
-			metamodel.MaxBulkItems, len(out.Written), out.Failed)
-	}
+	assert.Must(t, err == nil, "a batch of exactly %d items was refused: %v", metamodel.MaxBulkItems, err)
+	assert.Must(t, len(out.Written) == metamodel.MaxBulkItems, "a batch of exactly %d items wrote %d rows: %+v",
+		metamodel.MaxBulkItems, len(out.Written), out.Failed)
 
 	// And nothing an over-large batch named exists. The refusal happens
 	// before any transaction opens, so partial mode cannot have landed a
@@ -90,9 +87,7 @@ func TestABatchIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 	total := 0
 	for {
 		page, err := svc.ListEntities(ctx, project, filter)
-		if err != nil {
-			t.Fatalf("ListEntities: %v", err)
-		}
+		assert.Must(t, err == nil, "ListEntities: %v", err)
 		total += len(page.Entities)
 		if page.NextCursor == "" {
 			break
@@ -100,8 +95,6 @@ func TestABatchIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 		filter.Cursor = page.NextCursor
 	}
 	// The two seeded quests plus the batch that was allowed through.
-	if total != metamodel.MaxBulkItems+2 {
-		t.Fatalf("the game holds %d quests, want %d — an over-large batch wrote rows",
-			total, metamodel.MaxBulkItems+2)
-	}
+	assert.Must(t, total == metamodel.MaxBulkItems+2, "the game holds %d quests, want %d — an over-large batch wrote rows",
+		total, metamodel.MaxBulkItems+2)
 }

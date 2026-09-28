@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The guard for the defect the 2026-09-09 interface audit measured: the
@@ -39,23 +41,17 @@ const sharedControlSheet = "control-styles.js"
 func componentSources(t *testing.T) map[string]string {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(".", componentDir))
-	if err != nil {
-		t.Fatalf("read %s: %v", componentDir, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", componentDir, err)
 	out := map[string]string{}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".js") {
 			continue
 		}
 		body, err := os.ReadFile(filepath.Join(".", componentDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", entry.Name(), err)
 		out[entry.Name()] = string(body)
 	}
-	if len(out) == 0 {
-		t.Fatalf("no component sources found under %s", componentDir)
-	}
+	assert.Must(t, len(out) != 0, "no component sources found under %s", componentDir)
 	return out
 }
 
@@ -134,9 +130,7 @@ func TestNoComponentRestatesTheControlVocabulary(t *testing.T) {
 func TestTheSharedControlSheetSpellsNoColour(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile(filepath.Join(".", componentDir, sharedControlSheet))
-	if err != nil {
-		t.Fatalf("read %s: %v", sharedControlSheet, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", sharedControlSheet, err)
 	literal := regexp.MustCompile(`(?m)^[^*/\n]*:[^;\n]*#[0-9a-fA-F]{3,8}`)
 	if loc := literal.FindStringIndex(string(body)); loc != nil {
 		line := 1 + strings.Count(string(body)[:loc[0]], "\n")
@@ -158,9 +152,7 @@ func TestTheSharedControlSheetSpellsNoColour(t *testing.T) {
 func TestTheProseRoleIsSetAtTheSizeTheSystemStates(t *testing.T) {
 	t.Parallel()
 	system, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))
-	if err != nil {
-		t.Fatalf("read docs/design.md: %v", err)
-	}
+	assert.Must(t, err == nil, "read docs/design.md: %v", err)
 	stated := regexp.MustCompile(`\*\*Prose\*\* \(serif \d+, ([0-9.]+rem)`).FindStringSubmatch(string(system))
 	if stated == nil {
 		t.Fatal("docs/design.md no longer states the Prose role's size in the shape this guard reads; " +
@@ -168,13 +160,9 @@ func TestTheProseRoleIsSetAtTheSizeTheSystemStates(t *testing.T) {
 	}
 
 	styles, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatalf("read styles.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read styles.css: %v", err)
 	rule := regexp.MustCompile(`\n\.prose \{[^}]*\}`).FindString(string(styles))
-	if rule == "" {
-		t.Fatal("no `.prose` rule at all: the game's own writing has no role")
-	}
+	assert.Must(t, rule != "", "no `.prose` rule at all: the game's own writing has no role")
 	if !strings.Contains(rule, "font-size: "+stated[1]) {
 		t.Errorf("the Prose role is stated as %s in docs/design.md and the stylesheet sets:\n%s", stated[1], rule)
 	}

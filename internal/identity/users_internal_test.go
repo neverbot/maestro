@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -63,17 +64,13 @@ func TestBootstrapFirstAdminConcurrentBootIsSafe(t *testing.T) {
 		}
 	}
 
-	if atomic.LoadInt32(&raceHits) == 0 {
-		t.Fatal("no goroutine observed ErrEmailTaken; the start gate did not force a genuine race, so this test proved nothing about concurrency safety")
-	}
+	assert.Must(t, atomic.LoadInt32(&raceHits) != 0, "no goroutine observed ErrEmailTaken; the start gate did not force a genuine race, so this test proved nothing about concurrency safety")
 
 	var count int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM users WHERE lower(email) = lower($1)", "race@example.test").Scan(&count); err != nil {
 		t.Fatalf("count users: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("got %d admin rows, want exactly 1", count)
-	}
+	assert.Must(t, count == 1, "got %d admin rows, want exactly 1", count)
 }
 
 func TestWithTxCommitsOnSuccess(t *testing.T) {
@@ -91,17 +88,11 @@ func TestWithTxCommitsOnSuccess(t *testing.T) {
 		})
 		return err
 	})
-	if err != nil {
-		t.Fatalf("withTx: %v", err)
-	}
+	assert.Must(t, err == nil, "withTx: %v", err)
 
 	count, err := svc.q.CountUsers(ctx)
-	if err != nil {
-		t.Fatalf("CountUsers: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("count = %d, want 1 after a committed transaction", count)
-	}
+	assert.Must(t, err == nil, "CountUsers: %v", err)
+	assert.Must(t, count == 1, "count = %d, want 1 after a committed transaction", count)
 }
 
 func TestWithTxRollsBackOnError(t *testing.T) {
@@ -125,15 +116,9 @@ func TestWithTxRollsBackOnError(t *testing.T) {
 		// non-nil return from fn, not just on a failing statement.
 		return sentinel
 	})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("err = %v, want the sentinel error", err)
-	}
+	assert.Must(t, errors.Is(err, sentinel), "err = %v, want the sentinel error", err)
 
 	count, err := svc.q.CountUsers(ctx)
-	if err != nil {
-		t.Fatalf("CountUsers: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("count = %d, want 0 after a rolled-back transaction", count)
-	}
+	assert.Must(t, err == nil, "CountUsers: %v", err)
+	assert.Must(t, count == 0, "count = %d, want 0 after a rolled-back transaction", count)
 }

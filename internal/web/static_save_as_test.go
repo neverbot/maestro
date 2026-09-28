@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/views"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -36,12 +37,8 @@ const saveAsModule = "static/components/mst-save-as.js"
 func readModule(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	if len(raw) < 500 {
-		t.Fatalf("%s is %d bytes: this test would pass on an empty file", path, len(raw))
-	}
+	assert.Must(t, err == nil, "read %s: %v", path, err)
+	assert.Must(t, len(raw) >= 500, "%s is %d bytes: this test would pass on an empty file", path, len(raw))
 	return string(raw)
 }
 
@@ -70,13 +67,9 @@ func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
 
 	// The pattern, character for character.
 	goPattern := regexp.MustCompile("rowKeyPattern = regexp.MustCompile\\(`([^`]+)`\\)").FindStringSubmatch(keys)
-	if goPattern == nil {
-		t.Fatal("read no rowKeyPattern out of internal/metamodel/keys.go; the rule moved and this guard did not")
-	}
+	assert.Must(t, goPattern != nil, "read no rowKeyPattern out of internal/metamodel/keys.go; the rule moved and this guard did not")
 	jsPattern := regexp.MustCompile(`export const KEY_PATTERN = /(.+)/;`).FindStringSubmatch(module)
-	if jsPattern == nil {
-		t.Fatalf("read no KEY_PATTERN out of %s", saveAsModule)
-	}
+	assert.Must(t, jsPattern != nil, "read no KEY_PATTERN out of %s", saveAsModule)
 	if jsPattern[1] != goPattern[1] {
 		t.Errorf("the dialog refuses keys by %s and internal/metamodel admits %s: a designer obeying the "+
 			"dialog would still be refused, or would be told a legal key is illegal", jsPattern[1], goPattern[1])
@@ -85,13 +78,9 @@ func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
 	// The length cap, as a number and not as a digit that happens to
 	// appear in the file.
 	goMax := regexp.MustCompile(`maxRowKeyLen = (\d+)`).FindStringSubmatch(keys)
-	if goMax == nil {
-		t.Fatal("read no maxRowKeyLen out of internal/metamodel/keys.go")
-	}
+	assert.Must(t, goMax != nil, "read no maxRowKeyLen out of internal/metamodel/keys.go")
 	jsMax := regexp.MustCompile(`export const KEY_MAX = (\d+);`).FindStringSubmatch(module)
-	if jsMax == nil {
-		t.Fatalf("read no KEY_MAX out of %s", saveAsModule)
-	}
+	assert.Must(t, jsMax != nil, "read no KEY_MAX out of %s", saveAsModule)
 	if jsMax[1] != goMax[1] {
 		t.Errorf("the dialog caps a key at %s characters and internal/metamodel caps it at %s", jsMax[1], goMax[1])
 	}
@@ -106,15 +95,11 @@ func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
 		"must be at most ",
 		"must be letters, digits, underscores or hyphens, starting with a letter or a digit",
 	} {
-		if !strings.Contains(keys, sentence) {
-			t.Errorf("internal/metamodel/keys.go no longer says %q; the dialog is repeating a sentence "+
-				"the server has stopped using", sentence)
-		}
-		if !strings.Contains(module, sentence) {
-			t.Errorf("%s never says %q, which is what rowKeyProblems answers: a refusal a designer reads "+
-				"here and a refusal they read from the server must be the same refusal",
-				saveAsModule, sentence)
-		}
+		assert.Should(t, strings.Contains(keys, sentence), "internal/metamodel/keys.go no longer says %q; the dialog is repeating a sentence "+
+			"the server has stopped using", sentence)
+		assert.Should(t, strings.Contains(module, sentence), "%s never says %q, which is what rowKeyProblems answers: a refusal a designer reads "+
+			"here and a refusal they read from the server must be the same refusal",
+			saveAsModule, sentence)
 	}
 }
 
@@ -135,13 +120,9 @@ func TestTheSaveAsDialogClaimsTheKeyIsFree(t *testing.T) {
 	viewsSource := readModule(t, "../views/views.go")
 
 	goCreate := regexp.MustCompile(`createExpectedVersion int32 = (\d+)`).FindStringSubmatch(viewsSource)
-	if goCreate == nil {
-		t.Fatal("read no createExpectedVersion out of internal/views/views.go")
-	}
+	assert.Must(t, goCreate != nil, "read no createExpectedVersion out of internal/views/views.go")
 	jsCreate := regexp.MustCompile(`export const CREATE_EXPECTED_VERSION = (\d+);`).FindStringSubmatch(client)
-	if jsCreate == nil {
-		t.Fatal("read no CREATE_EXPECTED_VERSION out of internal/web/static/client.js")
-	}
+	assert.Must(t, jsCreate != nil, "read no CREATE_EXPECTED_VERSION out of internal/web/static/client.js")
 	if jsCreate[1] != goCreate[1] {
 		t.Errorf("the browser spells \"this view must not exist yet\" as %s and internal/views spells it "+
 			"as %s: a copy would overwrite a view nobody asked it to touch", jsCreate[1], goCreate[1])
@@ -149,12 +130,8 @@ func TestTheSaveAsDialogClaimsTheKeyIsFree(t *testing.T) {
 	// And the constant is what saveViewAs actually sends, rather than a
 	// constant beside a literal.
 	body := regexp.MustCompile(`(?s)async function saveViewAs\(.*?\n  \}`).FindString(client)
-	if body == "" {
-		t.Fatal("read no saveViewAs out of internal/web/static/client.js")
-	}
-	if !strings.Contains(body, "expected_version: CREATE_EXPECTED_VERSION") {
-		t.Error("saveViewAs does not send CREATE_EXPECTED_VERSION: the constant above is then a value nothing reads")
-	}
+	assert.Must(t, body != "", "read no saveViewAs out of internal/web/static/client.js")
+	assert.Should(t, strings.Contains(body, "expected_version: CREATE_EXPECTED_VERSION"), "saveViewAs does not send CREATE_EXPECTED_VERSION: the constant above is then a value nothing reads")
 	if !strings.Contains(body, "query: from.query") {
 		t.Error("saveViewAs no longer hands the source's own query object to the encoder. That is the whole " +
 			"of \"the copy is the source's query\": a document rebuilt on the way out is a query builder, " +
@@ -181,24 +158,14 @@ func TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper(t *testing.T) {
 	shell := readModule(t, "static/view.html")
 	page := readModule(t, "static/pages/view.js")
 
-	if !strings.Contains(shell, `id="save-as-root"`) {
-		t.Error("static/view.html declares no save-as-root hole: the dialog would have nowhere to go but the frame")
-	}
-	if !strings.Contains(page, `doc.getElementById("save-as-root")`) {
-		t.Error("pages/view.js never looks the save-as-root hole up")
-	}
-	if !strings.Contains(page, "mountSaveAs(doc, saveAs)") {
-		t.Error("pages/view.js never mounts the dialog: a dialog nobody mounted is a mechanism nothing reads")
-	}
-	if !strings.Contains(page, "wireSaveAs(state.saveAs)") {
-		t.Error("pages/view.js never wires the dialog: a controller no gesture reaches is a controller nobody has")
-	}
+	assert.Should(t, strings.Contains(shell, `id="save-as-root"`), "static/view.html declares no save-as-root hole: the dialog would have nowhere to go but the frame")
+	assert.Should(t, strings.Contains(page, `doc.getElementById("save-as-root")`), "pages/view.js never looks the save-as-root hole up")
+	assert.Should(t, strings.Contains(page, "mountSaveAs(doc, saveAs)"), "pages/view.js never mounts the dialog: a dialog nobody mounted is a mechanism nothing reads")
+	assert.Should(t, strings.Contains(page, "wireSaveAs(state.saveAs)"), "pages/view.js never wires the dialog: a controller no gesture reaches is a controller nobody has")
 	for _, forbidden := range []string{"frame.append(saveAs", "frame.appendChild(saveAs"} {
-		if strings.Contains(page, forbidden) {
-			t.Errorf("pages/view.js appends the dialog to the frame (%q), which slots it into the "+
-				"aria-hidden drawing wrapper: every button in it becomes reachable by keyboard and "+
-				"invisible to a screen reader", forbidden)
-		}
+		assert.Should(t, !strings.Contains(page, forbidden), "pages/view.js appends the dialog to the frame (%q), which slots it into the "+
+			"aria-hidden drawing wrapper: every button in it becomes reachable by keyboard and "+
+			"invisible to a screen reader", forbidden)
 	}
 }
 
@@ -215,18 +182,14 @@ func TestTheRendererCatalogueRouteServesTheWholeTable(t *testing.T) {
 	t.Parallel()
 	f := newViewsRESTFixture(t)
 	rec := f.call(t, f.cookie, http.MethodGet, f.path("/views/renderers"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /views/renderers = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET /views/renderers = %d: %s", rec.Code, rec.Body.String())
 	var out web.RenderersOutput
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
 	}
 
 	catalogue := views.RendererCatalogue()
-	if len(out.Renderers) != len(catalogue) {
-		t.Fatalf("the route served %d renderers and the catalogue holds %d", len(out.Renderers), len(catalogue))
-	}
+	assert.Must(t, len(out.Renderers) == len(catalogue), "the route served %d renderers and the catalogue holds %d", len(out.Renderers), len(catalogue))
 	for i, want := range catalogue {
 		got := out.Renderers[i]
 		if got.Name != want.Name {
@@ -234,13 +197,9 @@ func TestTheRendererCatalogueRouteServesTheWholeTable(t *testing.T) {
 				i, got.Name, want.Name)
 			continue
 		}
-		if got.Consumes != want.Consumes || got.Doc != want.Doc || got.Requires != want.RequiresDoc {
-			t.Errorf("%s's prose does not survive the route", want.Name)
-		}
-		if got.ReadsBackground != want.ReadsBackground {
-			t.Errorf("%s reads a background: %v on the wire, %v in the catalogue",
-				want.Name, got.ReadsBackground, want.ReadsBackground)
-		}
+		assert.Should(t, got.Consumes == want.Consumes && got.Doc == want.Doc && got.Requires == want.RequiresDoc, "%s's prose does not survive the route", want.Name)
+		assert.Should(t, got.ReadsBackground == want.ReadsBackground, "%s reads a background: %v on the wire, %v in the catalogue",
+			want.Name, got.ReadsBackground, want.ReadsBackground)
 		if len(got.Params) != len(want.Params) {
 			t.Errorf("%s has %d knobs on the wire and %d in the catalogue: a knob that does not "+
 				"arrive is one no designer can reach and an agent can",
@@ -249,15 +208,10 @@ func TestTheRendererCatalogueRouteServesTheWholeTable(t *testing.T) {
 		}
 		for j, wantParam := range want.Params {
 			gotParam := got.Params[j]
-			if gotParam.Name != wantParam.Name || gotParam.Kind != string(wantParam.Kind) ||
-				gotParam.Required != wantParam.Required || gotParam.Doc != wantParam.Doc {
-				t.Errorf("%s's %q does not survive the route: got %+v", want.Name, wantParam.Name, gotParam)
-			}
-			if strings.Join(gotParam.Values, ",") != strings.Join(wantParam.Values, ",") {
-				t.Errorf("%s's %q admits %v on the wire and %v in the catalogue: a chooser offering a "+
-					"spelling the server refuses composes a document views.upsert will not take",
-					want.Name, wantParam.Name, gotParam.Values, wantParam.Values)
-			}
+			assert.Should(t, gotParam.Name == wantParam.Name && gotParam.Kind == string(wantParam.Kind) && gotParam.Required == wantParam.Required && gotParam.Doc == wantParam.Doc, "%s's %q does not survive the route: got %+v", want.Name, wantParam.Name, gotParam)
+			assert.Should(t, strings.Join(gotParam.Values, ",") == strings.Join(wantParam.Values, ","), "%s's %q admits %v on the wire and %v in the catalogue: a chooser offering a "+
+				"spelling the server refuses composes a document views.upsert will not take",
+				want.Name, wantParam.Name, gotParam.Values, wantParam.Values)
 		}
 	}
 

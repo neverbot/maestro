@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // forwardReferencedTestNames names tests a comment in this package cites
@@ -117,9 +119,7 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 		filepath.Join(root, "internal", "web", "static"),
 	} {
 		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Fatalf("read %s: %v", dir, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", dir, err)
 		for _, e := range entries {
 			if e.IsDir() {
 				continue
@@ -140,9 +140,7 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 			}
 			path := filepath.Join(dir, name)
 			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
+			assert.Must(t, err == nil, "read %s: %v", path, err)
 			for _, d := range citedTestNames(string(raw), prefix) {
 				if defined[d.name] || forwardReferencedTestNames[d.name] != "" ||
 					renamedAwayTestNames[d.name] != "" {
@@ -282,9 +280,7 @@ func definedTestNames(t *testing.T, root string) map[string]bool {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
+	assert.Must(t, err == nil, "walk %s: %v", root, err)
 	return defined
 }
 
@@ -294,9 +290,7 @@ func definedTestNames(t *testing.T, root string) map[string]bool {
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
+	assert.Must(t, ok, "runtime.Caller failed")
 	dir := filepath.Dir(file)
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {

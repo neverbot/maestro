@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestAValueTooLargeToIndexIsCallerFixable pins the backstop behind
@@ -28,15 +30,11 @@ func TestAValueTooLargeToIndexIsCallerFixable(t *testing.T) {
 		Message: "string is too long for tsvector (2197988 bytes, max 1048575 bytes)",
 	}
 	mapped := searchLimitExceeded(fmt.Errorf("upsert entity: %w", raised))
-	if !errors.Is(mapped, ErrInvalidInput) {
-		t.Fatalf("mapped = %v, want it to match ErrInvalidInput", mapped)
-	}
+	assert.Must(t, errors.Is(mapped, ErrInvalidInput), "mapped = %v, want it to match ErrInvalidInput", mapped)
 	if code := failureFor(context.Background(), 0, "lore", mapped).Code; code != codeInvalidInput {
 		t.Fatalf("bulk code = %q, want %q", code, codeInvalidInput)
 	}
-	if !errors.Is(mapped, raised) {
-		t.Fatalf("mapped = %v, want the database's own error still reachable", mapped)
-	}
+	assert.Must(t, errors.Is(mapped, raised), "mapped = %v, want the database's own error still reachable", mapped)
 
 	unrelated := error(&pgconn.PgError{Code: "23503", Message: "violates foreign key constraint"})
 	if got := searchLimitExceeded(unrelated); got != unrelated {

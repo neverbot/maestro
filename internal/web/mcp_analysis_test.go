@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -71,23 +72,15 @@ func newAnalysisWorld(t *testing.T) *analysisWorld {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create the second game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create the second game: %v", err)
 	viewer, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser viewer: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser viewer: %v", err)
 	if _, err := projSvc.SetRole(ctx, viewer.ID, game.ID, "viewer"); err != nil {
 		t.Fatalf("add the viewer to the game: %v", err)
 	}
@@ -97,13 +90,9 @@ func newAnalysisWorld(t *testing.T) *analysisWorld {
 		secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 			ProjectID: project, UserID: user, Label: label,
 		})
-		if err != nil {
-			t.Fatalf("CreateAPIToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CreateAPIToken %s: %v", label, err)
 		caller, err := web.CallerForToken(ctx, ids, secret)
-		if err != nil {
-			t.Fatalf("CallerForToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CallerForToken %s: %v", label, err)
 		return caller, secret
 	}
 	agent, agentSecret := mint(game.ID, owner.ID, "content agent")
@@ -251,9 +240,7 @@ func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 		"routes.upsert", "routes.list", "routes.get", "routes.check",
 		"analysis.cycles", "analysis.unreachable", "analysis.orphans", "routes.remove",
 	}
-	if len(order) != len(calls) {
-		t.Fatalf("the ordering names %d tools and the table has %d", len(order), len(calls))
-	}
+	assert.Must(t, len(order) == len(calls), "the ordering names %d tools and the table has %d", len(order), len(calls))
 	registered := 0
 	for _, name := range w.srv.ScopedToolNamesForTest() {
 		if !strings.HasPrefix(name, "analysis.") && !strings.HasPrefix(name, "routes.") {
@@ -265,12 +252,8 @@ func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 				"input and output schemas are asserted by nothing at all", name)
 		}
 	}
-	if registered != len(calls) {
-		t.Fatalf("%d analysis tools are registered and the table has %d", registered, len(calls))
-	}
-	if registered == 0 {
-		t.Fatal("no analysis tool is registered; this test would pass vacuously")
-	}
+	assert.Must(t, registered == len(calls), "%d analysis tools are registered and the table has %d", registered, len(calls))
+	assert.Must(t, registered != 0, "no analysis tool is registered; this test would pass vacuously")
 
 	// What each call must have actually found, so a schema that validated
 	// an empty answer cannot pass. Each entry reads one member of the
@@ -300,10 +283,8 @@ func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 			// one that carries `must_precede` and one that carries
 			// neither.
 			for _, want := range []string{"ok", "unmet_prerequisite", "out_of_order"} {
-				if !verdicts[want] {
-					t.Errorf("no step came back %q, so the schema was never judged "+
-						"against one: got %v", want, verdicts)
-				}
+				assert.Should(t, verdicts[want], "no step came back %q, so the schema was never judged "+
+					"against one: got %v", want, verdicts)
 			}
 		},
 		"analysis.cycles": func(t *testing.T, out map[string]any) {
@@ -327,9 +308,7 @@ func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 			result, err := session.CallTool(ctx, &mcp.CallToolParams{
 				Name: name, Arguments: calls[name],
 			})
-			if err != nil {
-				t.Fatalf("CallTool(%s): %v", name, err)
-			}
+			assert.Must(t, err == nil, "CallTool(%s): %v", name, err)
 			if result.IsError {
 				var msg any
 				decodeToolText(t, result, &msg)
@@ -338,9 +317,7 @@ func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 			// Every one of these tools declares an output schema, so a
 			// successful call must carry structured content: an answer
 			// that arrived only as prose is one no client can read.
-			if result.StructuredContent == nil {
-				t.Fatalf("%s answered with no structured content", name)
-			}
+			assert.Must(t, result.StructuredContent != nil, "%s answered with no structured content", name)
 			if check, ok := nonEmpty[name]; ok {
 				var out map[string]any
 				decodeStructured(t, result, &out)
@@ -356,17 +333,11 @@ func TestEveryAnalysisToolIsCallableOverTheRealTransport(t *testing.T) {
 func requireNonEmptyList(t *testing.T, out map[string]any, key string) {
 	t.Helper()
 	raw, ok := out[key]
-	if !ok {
-		t.Fatalf("the answer carries no %q member: %v", key, analysisKeysOf(out))
-	}
+	assert.Must(t, ok, "the answer carries no %q member: %v", key, analysisKeysOf(out))
 	list, ok := raw.([]any)
-	if !ok {
-		t.Fatalf("%q is %T and not a list", key, raw)
-	}
-	if len(list) == 0 {
-		t.Fatalf("%q came back empty, so the item schema below it was judged against "+
-			"nothing at all", key)
-	}
+	assert.Must(t, ok, "%q is %T and not a list", key, raw)
+	assert.Must(t, len(list) != 0, "%q came back empty, so the item schema below it was judged against "+
+		"nothing at all", key)
 }
 
 func analysisKeysOf(out map[string]any) []string {
@@ -388,9 +359,7 @@ func analysisKeysOf(out map[string]any) []string {
 func TestEveryAnalysisSentinelHasAWireCode(t *testing.T) {
 	t.Parallel()
 	sentinels := analysis.Sentinels()
-	if len(sentinels) == 0 {
-		t.Fatal("analysis.Sentinels() is empty, so this guard checks nothing")
-	}
+	assert.Must(t, len(sentinels) != 0, "analysis.Sentinels() is empty, so this guard checks nothing")
 	for _, sentinel := range sentinels {
 		t.Run(sentinel.Error(), func(t *testing.T) {
 			// The sentinel itself, not a typed error built around it:
@@ -399,11 +368,9 @@ func TestEveryAnalysisSentinelHasAWireCode(t *testing.T) {
 			result := web.MCPErrorForTest(sentinel)
 			var body map[string]any
 			decodeToolText(t, result, &body)
-			if body["error"] == "internal_error" {
-				t.Fatalf("%v reaches an agent as internal_error: it matches no arm of "+
-					"mcpErrorFor, so an agent is told to give up on a refusal it could "+
-					"act on", sentinel)
-			}
+			assert.Must(t, body["error"] != "internal_error", "%v reaches an agent as internal_error: it matches no arm of "+
+				"mcpErrorFor, so an agent is told to give up on a refusal it could "+
+				"act on", sentinel)
 			rec := httptest.NewRecorder()
 			web.WriteDomainErrorForTest(rec, httptest.NewRequest(http.MethodPost, "/x", nil),
 				sentinel)
@@ -416,9 +383,7 @@ func TestEveryAnalysisSentinelHasAWireCode(t *testing.T) {
 					"claims to be arm for arm with mcpErrorFor", sentinel,
 					body["error"], rest["error"])
 			}
-			if rec.Code == http.StatusInternalServerError {
-				t.Errorf("%v is a 500 over REST", sentinel)
-			}
+			assert.Should(t, rec.Code != http.StatusInternalServerError, "%v is a 500 over REST", sentinel)
 		})
 	}
 }
@@ -439,9 +404,7 @@ func TestSemanticsUndeclaredIs422OnRESTAndCarriesTheCatalogue(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	web.WriteDomainErrorForTest(rec, httptest.NewRequest(http.MethodPost, "/x", nil), err)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422", rec.Code)
 	var body map[string]any
 	if e := json.Unmarshal(rec.Body.Bytes(), &body); e != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), e)
@@ -450,17 +413,13 @@ func TestSemanticsUndeclaredIs422OnRESTAndCarriesTheCatalogue(t *testing.T) {
 		t.Fatalf("code = %v, want semantics_undeclared", body["error"])
 	}
 	details, ok := body["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("the refusal carries no details: %v", body)
-	}
+	assert.Must(t, ok, "the refusal carries no details: %v", body)
 	types, ok := details["relation_types"].([]any)
 	if !ok || len(types) != 1 {
 		t.Fatalf("details.relation_types = %v, want the game's one relation type",
 			details["relation_types"])
 	}
-	if details["advice"] == nil {
-		t.Error("the refusal carries no advice, so it names the problem and not the recovery")
-	}
+	assert.Should(t, details["advice"] != nil, "the refusal carries no advice, so it names the problem and not the recovery")
 }
 
 // TestEveryAnalysisToolDescriptionCarriesTheGeneratedTraitTable.
@@ -480,23 +439,17 @@ func TestSemanticsUndeclaredIs422OnRESTAndCarriesTheCatalogue(t *testing.T) {
 func TestEveryAnalysisToolDescriptionCarriesTheGeneratedTraitTable(t *testing.T) {
 	t.Parallel()
 	table := analysis.TraitDescription()
-	if len(table) < 200 {
-		t.Fatalf("the generated trait table is %d characters: too short to be the real "+
-			"one, so the assertions below would be vacuous", len(table))
-	}
+	assert.Must(t, len(table) >= 200, "the generated trait table is %d characters: too short to be the real "+
+		"one, so the assertions below would be vacuous", len(table))
 	descriptions := web.NewToolReferenceServer().ToolDescriptionsForTest()
 	want := []string{"analysis.cycles", "analysis.unreachable", "analysis.orphans",
 		"routes.check"}
 	for _, name := range want {
 		description, ok := descriptions[name]
-		if !ok {
-			t.Fatalf("%s is not registered", name)
-		}
-		if !strings.Contains(description, table) {
-			t.Errorf("%s's description does not carry analysis.TraitDescription(): a "+
-				"trait added to the vocabulary would never reach an agent through it",
-				name)
-		}
+		assert.Must(t, ok, "%s is not registered", name)
+		assert.Should(t, strings.Contains(description, table), "%s's description does not carry analysis.TraitDescription(): a "+
+			"trait added to the vocabulary would never reach an agent through it",
+			name)
 	}
 }
 
@@ -603,9 +556,7 @@ func TestNoAnalysisToolDescriptionNamesATraitOutsideTheTable(t *testing.T) {
 			}
 		}
 	}
-	if checked == 0 {
-		t.Fatal("no analysis tool description was scanned; this guard read nothing")
-	}
+	assert.Must(t, checked != 0, "no analysis tool description was scanned; this guard read nothing")
 }
 
 // jsonFieldNames is every wire name a struct's exported fields carry,
@@ -664,15 +615,11 @@ func TestTheAnalysisToolsAreAbsentWithoutAnAnalysisService(t *testing.T) {
 		Projects: projects.New(nil),
 	})
 	for _, name := range srv.ScopedToolNamesForTest() {
-		if strings.HasPrefix(name, "analysis.") || strings.HasPrefix(name, "routes.") {
-			t.Errorf("%s is registered on a server built with no analysis service", name)
-		}
+		assert.Should(t, !strings.HasPrefix(name, "analysis.") && !strings.HasPrefix(name, "routes."), "%s is registered on a server built with no analysis service", name)
 	}
 	// The control: the server did register something, so this test
 	// cannot pass over a server with no tools at all.
-	if len(srv.ScopedToolNamesForTest()) == 0 {
-		t.Fatal("the server registered no tools, so the loop above asserted nothing")
-	}
+	assert.Must(t, len(srv.ScopedToolNamesForTest()) != 0, "the server registered no tools, so the loop above asserted nothing")
 }
 
 // TestAViewerCanRunAnAnalysisAndCannotUpsertARoute pins what actually
@@ -709,9 +656,7 @@ func TestAViewerCanRunAnAnalysisAndCannotUpsertARoute(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, w.viewerSecret)
 	for _, name := range []string{"analysis.cycles", "analysis.orphans"} {
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name})
-		if err != nil {
-			t.Fatalf("CallTool(%s) as a viewer: %v", name, err)
-		}
+		assert.Must(t, err == nil, "CallTool(%s) as a viewer: %v", name, err)
 		if result.IsError {
 			var msg any
 			decodeToolText(t, result, &msg)
@@ -733,14 +678,10 @@ func TestAViewerCanRunAnAnalysisAndCannotUpsertARoute(t *testing.T) {
 	}
 	code, body := w.callAs(t, cookie, http.MethodPost,
 		"/api/games/azeroth/analysis/cycles", `{}`)
-	if code != http.StatusForbidden {
-		t.Fatalf("a viewer POSTing a read-only analysis got %d, want 403: this is the "+
-			"finding api_analysis.go records. If it has been fixed, fix `views.run` in "+
-			"the same change and rewrite this test", code)
-	}
-	if !strings.Contains(body, "viewer") {
-		t.Errorf("the refusal does not name the role that cannot write: %s", body)
-	}
+	assert.Must(t, code == http.StatusForbidden, "a viewer POSTing a read-only analysis got %d, want 403: this is the "+
+		"finding api_analysis.go records. If it has been fixed, fix `views.run` in "+
+		"the same change and rewrite this test", code)
+	assert.Should(t, strings.Contains(body, "viewer"), "the refusal does not name the role that cannot write: %s", body)
 }
 
 // callAs drives one REST request with a session cookie and hands back
@@ -823,30 +764,20 @@ func TestStalenessIsReadFromTheRouteAndNotFromAnEvent(t *testing.T) {
 	}
 	// The control: freshly checked, the listing says so.
 	page, err := web.MCPRoutesList(ctx, w.deps, w.agent, w.game, web.RoutesListInput{})
-	if err != nil {
-		t.Fatalf("routes.list: %v", err)
-	}
-	if len(page.Routes) != 1 || page.Routes[0].Status != analysis.RouteChecked {
-		t.Fatalf("the listing reports %+v immediately after a check, want %q",
-			page.Routes, analysis.RouteChecked)
-	}
+	assert.Must(t, err == nil, "routes.list: %v", err)
+	assert.Must(t, len(page.Routes) == 1 && page.Routes[0].Status == analysis.RouteChecked, "the listing reports %+v immediately after a check, want %q",
+		page.Routes, analysis.RouteChecked)
 
 	out, err := web.MCPEntitiesUpsert(ctx, w.deps, w.agent, w.game, web.EntitiesUpsertInput{
 		Items: []web.EntityItemInput{{TypeKey: "quest", Key: "epilogue-notes", Name: "Notes"}},
 	})
-	if err != nil {
-		t.Fatalf("entities.upsert: %v", err)
-	}
+	assert.Must(t, err == nil, "entities.upsert: %v", err)
 	t.Logf("bulk result: %+v", out)
 	page, err = web.MCPRoutesList(ctx, w.deps, w.agent, w.game, web.RoutesListInput{})
-	if err != nil {
-		t.Fatalf("routes.list: %v", err)
-	}
-	if len(page.Routes) != 1 || page.Routes[0].Status != analysis.RouteStale {
-		t.Fatalf("after one entity write the listing reports %+v, want %q: a client "+
-			"learns staleness by re-reading, which is the only mechanism this design "+
-			"actually has", page.Routes, analysis.RouteStale)
-	}
+	assert.Must(t, err == nil, "routes.list: %v", err)
+	assert.Must(t, len(page.Routes) == 1 && page.Routes[0].Status == analysis.RouteStale, "after one entity write the listing reports %+v, want %q: a client "+
+		"learns staleness by re-reading, which is the only mechanism this design "+
+		"actually has", page.Routes, analysis.RouteStale)
 }
 
 func requireWorldEvent(t *testing.T, sub *realtime.Subscription) realtime.Event {

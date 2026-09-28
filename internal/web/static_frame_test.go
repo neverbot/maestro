@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // Every component's one property with no runtime signature: **a
@@ -105,15 +107,11 @@ var definesAComponent = regexp.MustCompile(`customElements\.define\(|extends Lit
 func componentFiles(t *testing.T) []string {
 	t.Helper()
 	all, err := filepath.Glob(filepath.Join("static", "components", "*.js"))
-	if err != nil {
-		t.Fatalf("glob components: %v", err)
-	}
+	assert.Must(t, err == nil, "glob components: %v", err)
 	var found []string
 	for _, path := range all {
 		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		if definesAComponent.Match(raw) {
 			found = append(found, path)
 		}
@@ -126,9 +124,7 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 	t.Parallel()
 	for _, path := range componentFiles(t) {
 		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		if offences := scanTemplateText(string(raw)); len(offences) > 0 {
 			t.Errorf("%s writes its own words into %d text node(s): %q\n"+
 				"every sentence a designer reads belongs to a model under static/render/, which is where the "+
@@ -253,10 +249,8 @@ func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 		filepath.Join("static", "components", "mst-twin.js"),
 		filepath.Join("static", "components", "mst-view-frame.js"),
 	}
-	if len(found) != len(want) {
-		t.Fatalf("the component scan read %v, want %v: a component this list does not name is a component "+
-			"whose silence nobody has argued for", found, want)
-	}
+	assert.Must(t, len(found) == len(want), "the component scan read %v, want %v: a component this list does not name is a component "+
+		"whose silence nobody has argued for", found, want)
 	for i, path := range want {
 		if found[i] != path {
 			t.Errorf("the component scan read %q where %q was expected", found[i], path)
@@ -337,9 +331,7 @@ func TestNoComponentHidesASlotFromAssistiveTechnology(t *testing.T) {
 	scanned := 0
 	for _, path := range componentFiles(t) {
 		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		scanned++
 		if hit := hidesASlot.FindString(string(raw)); hit != "" {
 			t.Errorf("%s hides a slot from assistive technology:\n\t%q\n"+
@@ -350,9 +342,7 @@ func TestNoComponentHidesASlotFromAssistiveTechnology(t *testing.T) {
 				path, hit)
 		}
 	}
-	if scanned == 0 {
-		t.Fatal("scanned no component: a walk that reads nothing guards nothing")
-	}
+	assert.Must(t, scanned != 0, "scanned no component: a walk that reads nothing guards nothing")
 	t.Logf("the slot-hiding scan read %d component(s)", scanned)
 }
 
@@ -366,16 +356,12 @@ func TestTheSlotHidingScanReadsWhatItClaimsTo(t *testing.T) {
 		"the attribute last":     "html`<div><span aria-hidden=\"true\"></span><slot></slot></div>`",
 		"across a line":          "html`<div aria-hidden=\"true\">\n  <slot></slot>\n</div>`",
 	} {
-		if !hidesASlot.MatchString(planted) {
-			t.Errorf("the scan missed %s: %q", name, planted)
-		}
+		assert.Should(t, hidesASlot.MatchString(planted), "the scan missed %s: %q", name, planted)
 	}
 	for name, allowed := range map[string]string{
 		"a slot with nothing hidden":         "html`<div class=\"canvas\"><slot></slot></div>`",
 		"a hidden thing in another template": "html`<span aria-hidden=\"true\">x</span>`;\nhtml`<slot></slot>`",
 	} {
-		if hidesASlot.MatchString(allowed) {
-			t.Errorf("the scan objects to %s, which is fine: %q", name, allowed)
-		}
+		assert.Should(t, !hidesASlot.MatchString(allowed), "the scan objects to %s, which is fine: %q", name, allowed)
 	}
 }

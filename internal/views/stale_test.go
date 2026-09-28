@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -39,9 +40,7 @@ func (g *game) renameEntityType(t *testing.T, from, to string) {
 	t.Helper()
 	ctx := context.Background()
 	row, err := g.meta.EntityTypeByKey(ctx, g.projectID, from)
-	if err != nil {
-		t.Fatalf("read entity type %s before renaming it: %v", from, err)
-	}
+	assert.Must(t, err == nil, "read entity type %s before renaming it: %v", from, err)
 	if _, err := g.meta.RenameEntityType(ctx, g.projectID, metamodel.RenameInput{
 		From: from, To: to, ExpectedVersion: &row.Version,
 	}); err != nil {
@@ -53,9 +52,7 @@ func (g *game) renameRelationType(t *testing.T, from, to string) {
 	t.Helper()
 	ctx := context.Background()
 	row, err := g.meta.RelationTypeByKey(ctx, g.projectID, from)
-	if err != nil {
-		t.Fatalf("read relation type %s before renaming it: %v", from, err)
-	}
+	assert.Must(t, err == nil, "read relation type %s before renaming it: %v", from, err)
 	if _, err := g.meta.RenameRelationType(ctx, g.projectID, metamodel.RenameInput{
 		From: from, To: to, ExpectedVersion: &row.Version,
 	}); err != nil {
@@ -70,18 +67,14 @@ func (g *game) renameRelationType(t *testing.T, from, to string) {
 func (g *game) entityTypeVersion(t *testing.T, key string) int32 {
 	t.Helper()
 	row, err := g.meta.EntityTypeByKey(context.Background(), g.projectID, key)
-	if err != nil {
-		t.Fatalf("read entity type %s: %v", key, err)
-	}
+	assert.Must(t, err == nil, "read entity type %s: %v", key, err)
 	return row.Version
 }
 
 func (g *game) relationTypeVersion(t *testing.T, key string) int32 {
 	t.Helper()
 	row, err := g.meta.RelationTypeByKey(context.Background(), g.projectID, key)
-	if err != nil {
-		t.Fatalf("read relation type %s: %v", key, err)
-	}
+	assert.Must(t, err == nil, "read relation type %s: %v", key, err)
 	return row.Version
 }
 
@@ -92,15 +85,11 @@ func (g *game) typeIDOf(t *testing.T, kind, key string) uuid.UUID {
 	ctx := context.Background()
 	if kind == KindEntityType {
 		row, err := g.meta.EntityTypeByKey(ctx, g.projectID, key)
-		if err != nil {
-			t.Fatalf("read entity type %s: %v", key, err)
-		}
+		assert.Must(t, err == nil, "read entity type %s: %v", key, err)
 		return row.ID
 	}
 	row, err := g.meta.RelationTypeByKey(ctx, g.projectID, key)
-	if err != nil {
-		t.Fatalf("read relation type %s: %v", key, err)
-	}
+	assert.Must(t, err == nil, "read relation type %s: %v", key, err)
 	return row.ID
 }
 
@@ -115,16 +104,10 @@ func (g *game) save(t *testing.T, key, doc string) {
 // diagnosticsOf reads the staleness report off a refusal.
 func diagnosticsOf(t *testing.T, err error) []Diagnostic {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("expected a refusal carrying a staleness report")
-	}
-	if !errors.Is(err, ErrQueryStale) {
-		t.Fatalf("expected query_stale, got %v", err)
-	}
+	assert.Must(t, err != nil, "expected a refusal carrying a staleness report")
+	assert.Must(t, errors.Is(err, ErrQueryStale), "expected query_stale, got %v", err)
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("expected a *QueryError, got %T", err)
-	}
+	assert.Must(t, errors.As(err, &qe), "expected a *QueryError, got %T", err)
 	return qe.Stale
 }
 
@@ -178,20 +161,14 @@ func TestStaleArea(t *testing.T) {
 		g.renameRelationType(t, "requires", "depends_on")
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
-		if err != nil {
-			t.Fatalf("a renamed relation type must still resolve by id: %v", err)
-		}
-		if len(res.Nodes) != 2 || len(res.Edges) != 1 {
-			t.Fatalf("the picture must be the one the rename did not change: %d nodes, %d edges",
-				len(res.Nodes), len(res.Edges))
-		}
+		assert.Must(t, err == nil, "a renamed relation type must still resolve by id: %v", err)
+		assert.Must(t, len(res.Nodes) == 2 && len(res.Edges) == 1, "the picture must be the one the rename did not change: %d nodes, %d edges",
+			len(res.Nodes), len(res.Edges))
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagRelationTypeRenamed, Pointer: "/traverse/0/via/0",
 			Was: "requires", Now: "depends_on",
 		})
-		if len(res.Stale) != 1 {
-			t.Fatalf("one rename is one diagnostic, got %+v", res.Stale)
-		}
+		assert.Must(t, len(res.Stale) == 1, "one rename is one diagnostic, got %+v", res.Stale)
 	})
 
 	// TestStaleArea's "a rename does not rewrite the stored query" case is the
@@ -207,12 +184,8 @@ func TestStaleArea(t *testing.T) {
 		}
 
 		got, err := g.views.ViewByKey(t.Context(), g.projectID, "chain")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Version != 1 {
-			t.Fatalf("Version = %d: a run must not move a view's version", got.Version)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Version == 1, "Version = %d: a run must not move a view's version", got.Version)
 		var stored map[string]any
 		if err := json.Unmarshal(got.Query, &stored); err != nil {
 			t.Fatalf("decode the stored query: %v", err)
@@ -221,9 +194,7 @@ func TestStaleArea(t *testing.T) {
 		// so the assertion is on the decoded value at the position that was
 		// renamed, not on the bytes.
 		traverse, _ := stored["traverse"].([]any)
-		if len(traverse) != 1 {
-			t.Fatalf("the stored document must still hold its one step: %v", stored)
-		}
+		assert.Must(t, len(traverse) == 1, "the stored document must still hold its one step: %v", stored)
 		step, _ := traverse[0].(map[string]any)
 		if step["via"] != "requires" {
 			t.Fatalf("via = %v, want the spelling the author wrote", step["via"])
@@ -262,47 +233,31 @@ func TestStaleArea(t *testing.T) {
 		typeID := g.typeIDOf(t, KindEntityType, "quest")
 
 		before := g.refRow(t, "levels", "/from/0/type")
-		if before.key != "quest" || before.entityTypeID == nil || *before.entityTypeID != typeID {
-			t.Fatalf("before the rename the ref is %+v, want quest and the type's own id", before)
-		}
+		assert.Must(t, before.key == "quest" && before.entityTypeID != nil && *before.entityTypeID == typeID, "before the rename the ref is %+v, want quest and the type's own id", before)
 
 		g.renameEntityType(t, "quest", "mission")
 
 		after := g.refRow(t, "levels", "/from/0/type")
-		if after.key != "quest" {
-			t.Fatalf("the rename rewrote the reference index to %q: the index and the stored "+
-				"document must go on agreeing on the old spelling, or storedID reads their "+
-				"disagreement as a torn index and every view that names this type reports it "+
-				"missing", after.key)
-		}
-		if after.entityTypeID == nil || *after.entityTypeID != typeID {
-			t.Fatalf("the ref points at %v, want the type's unchanged id (%s): resolution by "+
-				"id is the whole reason a rename is survivable", after.entityTypeID, typeID)
-		}
+		assert.Must(t, after.key == "quest", "the rename rewrote the reference index to %q: the index and the stored "+
+			"document must go on agreeing on the old spelling, or storedID reads their "+
+			"disagreement as a torn index and every view that names this type reports it "+
+			"missing", after.key)
+		assert.Must(t, after.entityTypeID != nil && *after.entityTypeID == typeID, "the ref points at %v, want the type's unchanged id (%s): resolution by "+
+			"id is the whole reason a rename is survivable", after.entityTypeID, typeID)
 
 		// The stored document is untouched and the view did not move: a
 		// rename that repaired the query would make the next
 		// expected_version check pass against a document nobody wrote.
 		stored, err := g.views.ViewByKey(ctx, g.projectID, "levels")
-		if err != nil {
-			t.Fatalf("read the view back: %v", err)
-		}
-		if stored.Version != 1 {
-			t.Fatalf("the view is at version %d, want 1: a rename writes no view", stored.Version)
-		}
-		if !strings.Contains(string(stored.Query), `"quest"`) {
-			t.Fatalf("the stored query is %s, want the spelling its author wrote", stored.Query)
-		}
+		assert.Must(t, err == nil, "read the view back: %v", err)
+		assert.Must(t, stored.Version == 1, "the view is at version %d, want 1: a rename writes no view", stored.Version)
+		assert.Must(t, strings.Contains(string(stored.Query), `"quest"`), "the stored query is %s, want the spelling its author wrote", stored.Query)
 
 		// And the consequence the hands-off buys, which is what a caller
 		// actually sees: the view runs, whole, and says what moved.
 		res, err := g.views.RunView(ctx, g.projectID, "levels", RunRequest{})
-		if err != nil {
-			t.Fatalf("the renamed type must still resolve by id: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("the view drew %d nodes, want the 3 it drew before the rename", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "the renamed type must still resolve by id: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "the view drew %d nodes, want the 3 it drew before the rename", len(res.Nodes))
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagEntityTypeRenamed, Pointer: "/from/0/type", Was: "quest", Now: "mission",
 		})
@@ -320,18 +275,12 @@ func TestStaleArea(t *testing.T) {
 		g.renameRelationType(t, "requires", "depends_on")
 
 		after := g.refRow(t, "chain", "/traverse/0/via/0")
-		if after.key != "requires" {
-			t.Fatalf("the rename rewrote the reference index to %q; see "+
-				"TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey", after.key)
-		}
-		if after.relationTypeID == nil || *after.relationTypeID != typeID {
-			t.Fatalf("the ref points at %v, want the relation type's unchanged id (%s)",
-				after.relationTypeID, typeID)
-		}
+		assert.Must(t, after.key == "requires", "the rename rewrote the reference index to %q; see "+
+			"TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey", after.key)
+		assert.Must(t, after.relationTypeID != nil && *after.relationTypeID == typeID, "the ref points at %v, want the relation type's unchanged id (%s)",
+			after.relationTypeID, typeID)
 		res, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
-		if err != nil {
-			t.Fatalf("the renamed relation type must still resolve by id: %v", err)
-		}
+		assert.Must(t, err == nil, "the renamed relation type must still resolve by id: %v", err)
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagRelationTypeRenamed, Pointer: "/traverse/0/via/0",
 			Was: "requires", Now: "depends_on",
@@ -352,21 +301,15 @@ func TestStaleArea(t *testing.T) {
 		g.renameEntityType(t, "quest", "mission")
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "levels", RunRequest{})
-		if err != nil {
-			t.Fatalf("a renamed entity type must still resolve by id: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("every quest must still be drawn, got %d", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "a renamed entity type must still resolve by id: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "every quest must still be drawn, got %d", len(res.Nodes))
 		if res.Nodes[0].Attrs["color_by"] == nil {
 			t.Fatalf("the projection must still find its field: %+v", res.Nodes[0].Attrs)
 		}
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagEntityTypeRenamed, Pointer: "/from/0/type", Was: "quest", Now: "mission",
 		})
-		if len(res.Stale) != 1 {
-			t.Fatalf("the rename is the only thing that moved, got %+v", res.Stale)
-		}
+		assert.Must(t, len(res.Stale) == 1, "the rename is the only thing that moved, got %+v", res.Stale)
 	})
 
 	// TestStaleArea's "a rename is reported once and not once per position
@@ -382,12 +325,8 @@ func TestStaleArea(t *testing.T) {
 		g.renameEntityType(t, "quest", "mission")
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "levels", RunRequest{})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Stale) != 1 {
-			t.Fatalf("one renamed type is one diagnostic, got %+v", res.Stale)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Stale) == 1, "one renamed type is one diagnostic, got %+v", res.Stale)
 	})
 
 	// TestStaleArea's "a deleted type fails the run by default" case is the
@@ -418,12 +357,8 @@ func TestStaleArea(t *testing.T) {
 		// The view is still readable, and still says what it always said:
 		// refusing to run is not refusing to exist.
 		got, err := g.views.ViewByKey(t.Context(), g.projectID, "chain")
-		if err != nil {
-			t.Fatalf("a stale view must still be readable: %v", err)
-		}
-		if !strings.Contains(string(got.Query), "requires") {
-			t.Fatalf("the stored query must be untouched: %s", got.Query)
-		}
+		assert.Must(t, err == nil, "a stale view must still be readable: %v", err)
+		assert.Must(t, strings.Contains(string(got.Query), "requires"), "the stored query must be untouched: %s", got.Query)
 	})
 
 	// TestStaleArea's "best effort drops the stale part and says what it
@@ -443,15 +378,9 @@ func TestStaleArea(t *testing.T) {
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "chain",
 			RunRequest{OnStale: OnStaleBestEffort})
-		if err != nil {
-			t.Fatalf("best effort must draw what is left: %v", err)
-		}
-		if len(res.Nodes) != 1 || res.Nodes[0].Key != "defias" {
-			t.Fatalf("the un-stale part is the seed selector: %+v", res.Nodes)
-		}
-		if len(res.Edges) != 0 {
-			t.Fatalf("the edges entry drew the dropped step and must go with it: %+v", res.Edges)
-		}
+		assert.Must(t, err == nil, "best effort must draw what is left: %v", err)
+		assert.Must(t, len(res.Nodes) == 1 && res.Nodes[0].Key == "defias", "the un-stale part is the seed selector: %+v", res.Nodes)
+		assert.Must(t, len(res.Edges) == 0, "the edges entry drew the dropped step and must go with it: %+v", res.Edges)
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagRelationTypeMissing, Pointer: "/traverse/0/via/0", Was: "requires",
 		})
@@ -496,18 +425,12 @@ func TestStaleArea(t *testing.T) {
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "two",
 			RunRequest{OnStale: OnStaleBestEffort})
-		if err != nil {
-			t.Fatalf("best effort: %v", err)
-		}
+		assert.Must(t, err == nil, "best effort: %v", err)
 		for _, node := range res.Nodes {
-			if node.Type != "zone" {
-				t.Fatalf("the filtered set must be dropped whole, not run without its filter: %+v",
-					res.Nodes)
-			}
+			assert.Must(t, node.Type == "zone", "the filtered set must be dropped whole, not run without its filter: %+v",
+				res.Nodes)
 		}
-		if len(res.Nodes) != 2 {
-			t.Fatalf("the unfiltered set must survive: %+v", res.Nodes)
-		}
+		assert.Must(t, len(res.Nodes) == 2, "the unfiltered set must survive: %+v", res.Nodes)
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagEnumOptionMissing, Pointer: "/from/0/where/value", Was: "epic",
 		})
@@ -520,10 +443,8 @@ func TestStaleArea(t *testing.T) {
 			  {"type":"zone","as":"z"}],
 			"nodes":[{"set":"epics"},{"set":"z"}]}`)
 		control, err := g2.views.RunView(t.Context(), g2.projectID, "two", RunRequest{})
-		if err != nil || len(control.Nodes) != 3 {
-			t.Fatalf("the control must draw the epic quest and both zones: %v, %+v",
-				err, control.Nodes)
-		}
+		assert.Must(t, err == nil && len(control.Nodes) == 3, "the control must draw the epic quest and both zones: %v, %+v",
+			err, control.Nodes)
 	})
 
 	// TestStaleArea's "best effort with nothing left to draw refuses rather
@@ -564,31 +485,19 @@ func TestStaleArea(t *testing.T) {
 		g.relate(t, "requires", "quest", "defias", "quest", "hogger")
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
-		if err != nil {
-			t.Fatalf("a re-created type must resolve by key: %v", err)
-		}
-		if len(res.Nodes) != 2 || len(res.Edges) != 1 {
-			t.Fatalf("the picture must be whole again: %d nodes, %d edges",
-				len(res.Nodes), len(res.Edges))
-		}
-		if len(res.Stale) != 0 {
-			t.Fatalf("a view that runs correctly is not stale: %+v", res.Stale)
-		}
+		assert.Must(t, err == nil, "a re-created type must resolve by key: %v", err)
+		assert.Must(t, len(res.Nodes) == 2 && len(res.Edges) == 1, "the picture must be whole again: %d nodes, %d edges",
+			len(res.Nodes), len(res.Edges))
+		assert.Must(t, len(res.Stale) == 0, "a view that runs correctly is not stale: %+v", res.Stale)
 		// The control that the id really was null: the stored ref still
 		// carries the key and no id, so this resolved by the second step and
 		// not by the first.
 		view, err := g.views.ViewByKey(t.Context(), g.projectID, "chain")
-		if err != nil {
-			t.Fatalf("read the view: %v", err)
-		}
+		assert.Must(t, err == nil, "read the view: %v", err)
 		refs, err := g.views.ViewRefs(t.Context(), g.projectID, view.ID)
-		if err != nil {
-			t.Fatalf("read the refs: %v", err)
-		}
+		assert.Must(t, err == nil, "read the refs: %v", err)
 		for _, ref := range refs {
-			if ref.Pointer == "/traverse/0/via/0" && ref.RelationTypeID != nil {
-				t.Fatalf("the deletion must have emptied the id this test resolves without")
-			}
+			assert.Must(t, ref.Pointer != "/traverse/0/via/0" || ref.RelationTypeID == nil, "the deletion must have emptied the id this test resolves without")
 		}
 	})
 
@@ -608,27 +517,16 @@ func TestStaleArea(t *testing.T) {
 
 		broke, err := g.views.RemoveTypeReportingViews(t.Context(), g.projectID,
 			KindEntityType, id, true)
-		if err != nil {
-			t.Fatalf("a type views depend on is deletable: %v", err)
-		}
-		if len(broke) != 1 {
-			t.Fatalf("one view names this type in this game, got %+v", broke)
-		}
+		assert.Must(t, err == nil, "a type views depend on is deletable: %v", err)
+		assert.Must(t, len(broke) == 1, "one view names this type in this game, got %+v", broke)
 		got := broke[0]
-		if got.ViewKey != "factions" || got.Kind != KindEntityType || got.RefKey != "faction" ||
-			got.Pointer != "/from/0/type" {
-			t.Fatalf("the report must say which view and where: %+v", got)
-		}
+		assert.Must(t, got.ViewKey == "factions" && got.Kind == KindEntityType && got.RefKey == "faction" && got.Pointer == "/from/0/type", "the report must say which view and where: %+v", got)
 
 		// The ordering rule, asserted rather than trusted: asked after the
 		// deletion the same question answers nothing.
 		after, err := g.views.ViewsDependingOn(t.Context(), g.projectID, KindEntityType, id)
-		if err != nil {
-			t.Fatalf("list after: %v", err)
-		}
-		if len(after) != 0 {
-			t.Fatalf("the SET NULL empties the column this matches on: %+v", after)
-		}
+		assert.Must(t, err == nil, "list after: %v", err)
+		assert.Must(t, len(after) == 0, "the SET NULL empties the column this matches on: %+v", after)
 
 		// And the view is still there, still saying what it said. A deletion
 		// breaks a view; it does not remove one.
@@ -714,9 +612,7 @@ func TestStaleArea(t *testing.T) {
 		g2.save(t, "hard", `{"v":1,"from":[{"type":"quest","as":"q",
 			"where":{"field":"min_level","op":"gte","value":20}}]}`)
 		res, err := g2.views.RunView(t.Context(), g2.projectID, "hard", RunRequest{})
-		if err != nil || len(res.Nodes) != 2 || len(res.Stale) != 0 {
-			t.Fatalf("the control must draw the two quests over level 20: %v, %+v", err, res.Nodes)
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 2 && len(res.Stale) == 0, "the control must draw the two quests over level 20: %v, %+v", err, res.Nodes)
 	})
 
 	// TestStaleArea's "on stale is refused on an ad hoc run rather than
@@ -731,12 +627,8 @@ func TestStaleArea(t *testing.T) {
 
 		// The control: without the switch the same query runs.
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, questsOnly)})
-		if err != nil || len(res.Nodes) != 3 {
-			t.Fatalf("the control must run: %v, %d nodes", err, len(res.Nodes))
-		}
-		if res.Stale != nil {
-			t.Fatalf("an ad-hoc run has no staleness report: %+v", res.Stale)
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 3, "the control must run: %v, %d nodes", err, len(res.Nodes))
+		assert.Must(t, res.Stale == nil, "an ad-hoc run has no staleness report: %+v", res.Stale)
 	})
 
 	// TestStaleArea's "an at type operand is a dependency like every other
@@ -753,47 +645,31 @@ func TestStaleArea(t *testing.T) {
 		g.save(t, "classes", doc)
 
 		view, err := g.views.ViewByKey(t.Context(), g.projectID, "classes")
-		if err != nil {
-			t.Fatalf("read the view: %v", err)
-		}
+		assert.Must(t, err == nil, "read the view: %v", err)
 		refs, err := g.views.ViewRefs(t.Context(), g.projectID, view.ID)
-		if err != nil {
-			t.Fatalf("read the refs: %v", err)
-		}
+		assert.Must(t, err == nil, "read the refs: %v", err)
 		var found bool
 		for _, ref := range refs {
 			if ref.Pointer == "/traverse/0/where/value" {
 				found = true
-				if ref.Kind != KindEntityType || ref.RefKey != "class" || ref.EntityTypeID == nil {
-					t.Fatalf("the operand's reference must be a resolved entity type: %+v", ref)
-				}
+				assert.Must(t, ref.Kind == KindEntityType && ref.RefKey == "class" && ref.EntityTypeID != nil, "the operand's reference must be a resolved entity type: %+v", ref)
 			}
 		}
-		if !found {
-			t.Fatalf("an @type operand must be indexed like any other reference: %+v", refs)
-		}
+		assert.Must(t, found, "an @type operand must be indexed like any other reference: %+v", refs)
 
 		// The deletion of that type now reports this view, which is what the
 		// index is for.
 		id := g.typeIDOf(t, KindEntityType, "class")
 		broke, err := g.views.ViewsDependingOn(t.Context(), g.projectID, KindEntityType, id)
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
-		if len(broke) != 1 || broke[0].Pointer != "/traverse/0/where/value" {
-			t.Fatalf("deleting the type must name this position: %+v", broke)
-		}
+		assert.Must(t, err == nil, "list: %v", err)
+		assert.Must(t, len(broke) == 1 && broke[0].Pointer == "/traverse/0/where/value", "deleting the type must name this position: %+v", broke)
 
 		// And renaming it carries the view through, which by-key resolution
 		// of the operand could not do.
 		g.renameEntityType(t, "class", "profession")
 		res, err := g.views.RunView(t.Context(), g.projectID, "classes", RunRequest{})
-		if err != nil {
-			t.Fatalf("a renamed @type operand must still resolve by id: %v", err)
-		}
-		if len(res.Nodes) != 4 {
-			t.Fatalf("three quests and the class they reach: %+v", res.Nodes)
-		}
+		assert.Must(t, err == nil, "a renamed @type operand must still resolve by id: %v", err)
+		assert.Must(t, len(res.Nodes) == 4, "three quests and the class they reach: %+v", res.Nodes)
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagEntityTypeRenamed, Pointer: "/traverse/0/where/value",
 			Was: "class", Now: "profession",
@@ -923,25 +799,17 @@ func TestStaleArea(t *testing.T) {
 					wants(t, diagnosticsOf(t, err), tc.want)
 					return
 				}
-				if err != nil {
-					t.Fatalf("this view still runs: %v", err)
-				}
-				if len(res.Nodes) != tc.nodes {
-					t.Fatalf("nodes = %d, want %d: %+v", len(res.Nodes), tc.nodes, res.Nodes)
-				}
+				assert.Must(t, err == nil, "this view still runs: %v", err)
+				assert.Must(t, len(res.Nodes) == tc.nodes, "nodes = %d, want %d: %+v", len(res.Nodes), tc.nodes, res.Nodes)
 				wants(t, res.Stale, tc.want)
 			})
 		}
 		for _, code := range diagnosticCodes() {
-			if !covered[code] {
-				t.Errorf("the code %q is declared and no case here produces it: a code nothing "+
-					"can reach is a documented mechanism that does not exist", code)
-			}
+			assert.Should(t, covered[code], "the code %q is declared and no case here produces it: a code nothing "+
+				"can reach is a documented mechanism that does not exist", code)
 		}
-		if len(covered) != len(diagnosticCodes()) {
-			t.Fatalf("this test covers %d codes and the vocabulary has %d",
-				len(covered), len(diagnosticCodes()))
-		}
+		assert.Must(t, len(covered) == len(diagnosticCodes()), "this test covers %d codes and the vocabulary has %d",
+			len(covered), len(diagnosticCodes()))
 	})
 
 	// TestStaleArea's "every diagnostic code has a sentence of its own" case:
@@ -950,18 +818,12 @@ func TestStaleArea(t *testing.T) {
 	// agent as its own identifier, which says nothing about what to do.
 	t.Run("every diagnostic code has a sentence of its own", func(t *testing.T) {
 		codes := diagnosticCodes()
-		if len(codes) == 0 {
-			t.Fatalf("the vocabulary is empty: this guard would pass over nothing")
-		}
+		assert.Must(t, len(codes) != 0, "the vocabulary is empty: this guard would pass over nothing")
 		seen := map[string]string{}
 		for _, code := range codes {
 			message := Diagnostic{Code: code, Was: "a_key", Now: "another_key"}.message()
-			if message == code {
-				t.Errorf("the code %q has no sentence: message() fell through to the code", code)
-			}
-			if !strings.Contains(message, "a_key") {
-				t.Errorf("the sentence for %q does not name what the document says: %q", code, message)
-			}
+			assert.Should(t, message != code, "the code %q has no sentence: message() fell through to the code", code)
+			assert.Should(t, strings.Contains(message, "a_key"), "the sentence for %q does not name what the document says: %q", code, message)
 			if other, clash := seen[message]; clash {
 				t.Errorf("%q and %q answer with the same sentence: %q", code, other, message)
 			}
@@ -982,9 +844,7 @@ func TestStaleArea(t *testing.T) {
 		}
 		g.save(t, "chain", chainView)
 		res, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
-		if err != nil || len(res.Nodes) != 2 {
-			t.Fatalf("the control must run in the game that owns it: %v, %+v", err, res.Nodes)
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 2, "the control must run in the game that owns it: %v, %+v", err, res.Nodes)
 	})
 
 	// TestStaleArea's "a stale view is refused before it reaches the database"
@@ -1000,9 +860,7 @@ func TestStaleArea(t *testing.T) {
 			t.Fatalf("remove: %v", err)
 		}
 		_, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
-		if !errors.Is(err, ErrQueryStale) || errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("a stale view answers query_stale and nothing else: %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryStale) && !errors.Is(err, ErrQueryInvalid), "a stale view answers query_stale and nothing else: %v", err)
 		if got := codesOf(diagnosticsOf(t, err)); len(got) != 1 ||
 			got[0] != DiagRelationTypeMissing {
 			t.Fatalf("codes = %v", got)
@@ -1073,9 +931,7 @@ func TestStaleArea(t *testing.T) {
 			"edges":[{"from_step":"pre","label_from":"note"}]}`)
 		g2.renameRelationType(t, "requires", "depends_on")
 		res, err := g2.views.RunView(t.Context(), g2.projectID, "chain", RunRequest{})
-		if err != nil {
-			t.Fatalf("the control must run: %v", err)
-		}
+		assert.Must(t, err == nil, "the control must run: %v", err)
 		if got := codesOf(res.Stale); len(got) != 1 || got[0] != DiagRelationTypeRenamed {
 			t.Fatalf("codes = %v, want the rename alone", got)
 		}
@@ -1122,9 +978,7 @@ func TestStaleArea(t *testing.T) {
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "cards",
 			RunRequest{OnStale: OnStaleBestEffort})
-		if err != nil {
-			t.Fatalf("best effort: %v", err)
-		}
+		assert.Must(t, err == nil, "best effort: %v", err)
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagFieldMissing, Pointer: "/project/fields/0", Was: "min_level",
 		})
@@ -1134,18 +988,12 @@ func TestStaleArea(t *testing.T) {
 				hogger = &res.Nodes[i]
 			}
 		}
-		if hogger == nil {
-			t.Fatalf("the nodes are not stale and must all be drawn: %+v", res.Nodes)
-		}
-		if hogger.Fields["rank"] != "rare" || hogger.Fields["difficulty"] != float64(4) {
-			t.Fatalf("the two keys that survive must still be carried: %+v", hogger.Fields)
-		}
+		assert.Must(t, hogger != nil, "the nodes are not stale and must all be drawn: %+v", res.Nodes)
+		assert.Must(t, hogger.Fields["rank"] == "rare" && hogger.Fields["difficulty"] == float64(4), "the two keys that survive must still be carried: %+v", hogger.Fields)
 		if _, gone := hogger.Fields["min_level"]; gone {
 			t.Fatalf("the dropped key must not come back: %+v", hogger.Fields)
 		}
-		if len(hogger.Fields) != 2 {
-			t.Fatalf("exactly the two keys that resolved: %+v", hogger.Fields)
-		}
+		assert.Must(t, len(hogger.Fields) == 2, "exactly the two keys that resolved: %+v", hogger.Fields)
 	})
 
 	// TestStaleArea's "a renamed type does not switch off the projections typo
@@ -1197,9 +1045,7 @@ func TestStaleArea(t *testing.T) {
 			"project":{"color_by":"difficulty"}}`)
 		g2.renameEntityType(t, "quest", "mission")
 		res, err := g2.views.RunView(t.Context(), g2.projectID, "hard", RunRequest{})
-		if err != nil {
-			t.Fatalf("the control must run: %v", err)
-		}
+		assert.Must(t, err == nil, "the control must run: %v", err)
 		if got := codesOf(res.Stale); len(got) != 1 || got[0] != DiagEntityTypeRenamed {
 			t.Fatalf("codes = %v, want the rename alone", got)
 		}
@@ -1235,20 +1081,12 @@ func TestStaleArea(t *testing.T) {
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "web",
 			RunRequest{OnStale: OnStaleBestEffort})
-		if err != nil {
-			t.Fatalf("best effort must draw the set that still resolves: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("the quests are what is left: %+v", res.Nodes)
-		}
+		assert.Must(t, err == nil, "best effort must draw the set that still resolves: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "the quests are what is left: %+v", res.Nodes)
 		for _, node := range res.Nodes {
-			if node.Set != "q" {
-				t.Fatalf("only the surviving set may draw: %+v", res.Nodes)
-			}
+			assert.Must(t, node.Set == "q", "only the surviving set may draw: %+v", res.Nodes)
 		}
-		if len(res.Edges) != 0 {
-			t.Fatalf("the entry drew between a set that is gone: %+v", res.Edges)
-		}
+		assert.Must(t, len(res.Edges) == 0, "the entry drew between a set that is gone: %+v", res.Edges)
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagEntityTypeMissing, Pointer: "/from/0/type", Was: "faction",
 		})
@@ -1269,17 +1107,13 @@ func TestStaleArea(t *testing.T) {
 		_, err := g.views.RunView(t.Context(), g.projectID, "levelled",
 			RunRequest{Params: map[string]any{"flor": 5}})
 		oneProblem(t, err, "/params", `no parameter named "flor"`)
-		if errors.Is(err, ErrQueryStale) {
-			t.Fatalf("a run's own argument is not a stale view: %v", err)
-		}
+		assert.Must(t, !errors.Is(err, ErrQueryStale), "a run's own argument is not a stale view: %v", err)
 
 		// The control: the parameter spelled right runs, and the default it
 		// overrides shows the value really was read.
 		res, err := g.views.RunView(t.Context(), g.projectID, "levelled",
 			RunRequest{Params: map[string]any{"floor": 5}})
-		if err != nil || len(res.Nodes) != 3 {
-			t.Fatalf("the control must run every quest over level 5: %v, %+v", err, res.Nodes)
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 3, "the control must run every quest over level 5: %v, %+v", err, res.Nodes)
 	})
 
 	// TestStaleArea's "a type that is gone is reported once and not again by
@@ -1307,9 +1141,7 @@ func TestStaleArea(t *testing.T) {
 		wants(t, diags, Diagnostic{
 			Code: DiagEntityTypeMissing, Pointer: "/traverse/0/to_type/0", Was: "faction",
 		})
-		if len(diags) != 1 {
-			t.Fatalf("one thing moved and it is reported once: %+v", diags)
-		}
+		assert.Must(t, len(diags) == 1, "one thing moved and it is reported once: %+v", diags)
 		// The predicate's own refusal is still carried, because it is still
 		// true and an agent reading the addressed sentences should see every
 		// position that has to change. What it is not is a second thing to
@@ -1352,33 +1184,21 @@ func TestStaleArea(t *testing.T) {
 		tag, err := g.pool.Exec(t.Context(),
 			`UPDATE view_refs SET ref_key = 'zone', entity_type_id = $2
 			 WHERE project_id = $1 AND pointer = '/from/0/type'`, g.projectID, zone)
-		if err != nil {
-			t.Fatalf("repoint the ref row: %v", err)
-		}
-		if tag.RowsAffected() != 1 {
-			t.Fatalf("repointing changed %d rows", tag.RowsAffected())
-		}
+		assert.Must(t, err == nil, "repoint the ref row: %v", err)
+		assert.Must(t, tag.RowsAffected() == 1, "repointing changed %d rows", tag.RowsAffected())
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "quests", RunRequest{})
-		if err != nil {
-			t.Fatalf("the document names a live type and must run: %v", err)
-		}
+		assert.Must(t, err == nil, "the document names a live type and must run: %v", err)
 		drawn := make([]string, 0, len(res.Nodes))
 		for _, n := range res.Nodes {
 			drawn = append(drawn, n.Type+"/"+n.Key)
 		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("the document says quest and the picture must be the quests, drew %v", drawn)
-		}
+		assert.Must(t, len(res.Nodes) == 3, "the document says quest and the picture must be the quests, drew %v", drawn)
 		for _, n := range res.Nodes {
-			if n.Type != "quest" {
-				t.Fatalf("drew a %s: the index does not describe this document, so its id "+
-					"must not be trusted, %v", n.Type, drawn)
-			}
+			assert.Must(t, n.Type == "quest", "drew a %s: the index does not describe this document, so its id "+
+				"must not be trusted, %v", n.Type, drawn)
 		}
-		if len(res.Stale) != 0 {
-			t.Fatalf("nothing in this game moved under this view, got %+v", res.Stale)
-		}
+		assert.Must(t, len(res.Stale) == 0, "nothing in this game moved under this view, got %+v", res.Stale)
 	})
 
 	// TestStaleArea's "a renamed relation type is reported at the renderer
@@ -1406,12 +1226,8 @@ func TestStaleArea(t *testing.T) {
 		g.renameRelationType(t, "requires", "depends_on")
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "nest", RunRequest{})
-		if err != nil {
-			t.Fatalf("a rename does not change this picture and must not refuse it: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("the picture the rename did not change, got %d nodes", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "a rename does not change this picture and must not refuse it: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "the picture the rename did not change, got %d nodes", len(res.Nodes))
 		wants(t, res.Stale, Diagnostic{
 			Code: DiagRelationTypeRenamed, Pointer: "/traverse/0/via/0",
 			Was: "requires", Now: "depends_on",
@@ -1429,12 +1245,8 @@ func TestStaleArea(t *testing.T) {
 		g.saveNested(t, "nest", repaired, "depends_on", &one)
 
 		res, err = g.views.RunView(t.Context(), g.projectID, "nest", RunRequest{})
-		if err != nil {
-			t.Fatalf("the repaired view must run: %v", err)
-		}
-		if len(res.Stale) != 0 {
-			t.Fatalf("a repaired view reports nothing, got %+v", res.Stale)
-		}
+		assert.Must(t, err == nil, "the repaired view must run: %v", err)
+		assert.Must(t, len(res.Stale) == 0, "a repaired view reports nothing, got %+v", res.Stale)
 	})
 
 	// TestStaleArea's "a renderer parameter naming a deleted relation type is
@@ -1480,22 +1292,15 @@ func TestStaleArea(t *testing.T) {
 		g.saveNested(t, "nest", nestedView, "requires", nil)
 
 		view, err := g.views.ViewByKey(t.Context(), g.projectID, "nest")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
 		refs, err := g.views.ViewRefs(t.Context(), g.projectID, view.ID)
-		if err != nil {
-			t.Fatalf("read refs: %v", err)
-		}
+		assert.Must(t, err == nil, "read refs: %v", err)
 		for _, ref := range refs {
 			if ref.Pointer != "/renderer_params/contain_via" {
 				continue
 			}
-			if ref.Kind != KindRelationType || ref.RefKey != "requires" ||
-				ref.RelationTypeID == nil {
-				t.Fatalf("the parameter's reference must carry its kind, its key and its "+
-					"id: %+v", ref)
-			}
+			assert.Must(t, ref.Kind == KindRelationType && ref.RefKey == "requires" && ref.RelationTypeID != nil, "the parameter's reference must carry its kind, its key and its "+
+				"id: %+v", ref)
 			return
 		}
 		t.Fatalf("no reference recorded at the renderer parameter, got %+v", refs)
@@ -1551,20 +1356,14 @@ func TestStaleArea(t *testing.T) {
 			"traverse":[{"from":"q","via":["available_to","takes_place_in"],"as":"t",
 			  "where":{"field":"@type","op":"neq","value":"class"}}]}`)
 		res, err := g.views.RunView(t.Context(), g.projectID, "notclasses", RunRequest{})
-		if err != nil || len(res.Nodes) != 5 {
-			t.Fatalf("the control: three quests and the two zones, got %d nodes, %v",
-				len(res.Nodes), err)
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 5, "the control: three quests and the two zones, got %d nodes, %v",
+			len(res.Nodes), err)
 
 		id := g.typeIDOf(t, KindEntityType, "class")
 		broke, err := g.views.RemoveTypeReportingViews(t.Context(), g.projectID,
 			KindEntityType, id, true)
-		if err != nil {
-			t.Fatalf("remove: %v", err)
-		}
-		if len(broke) != 1 || broke[0].ViewKey != "notclasses" {
-			t.Fatalf("a view naming the type in a negation names it, got %+v", broke)
-		}
+		assert.Must(t, err == nil, "remove: %v", err)
+		assert.Must(t, len(broke) == 1 && broke[0].ViewKey == "notclasses", "a view naming the type in a negation names it, got %+v", broke)
 
 		_, err = g.views.RunView(t.Context(), g.projectID, "notclasses", RunRequest{})
 		wants(t, diagnosticsOf(t, err), Diagnostic{
@@ -1582,12 +1381,8 @@ func TestStaleArea(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, questsOnly), OnStale: OnStaleFail})
-		if err != nil || len(res.Nodes) != 3 {
-			t.Fatalf("fail is what this run already does: %v, %d nodes", err, len(res.Nodes))
-		}
-		if res.Stale != nil {
-			t.Fatalf("an ad-hoc run still has no staleness report: %+v", res.Stale)
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 3, "fail is what this run already does: %v, %d nodes", err, len(res.Nodes))
+		assert.Must(t, res.Stale == nil, "an ad-hoc run still has no staleness report: %+v", res.Stale)
 
 		// And a value that is neither is still refused, rather than read as
 		// one of the two.
@@ -1661,15 +1456,9 @@ func TestStaleArea(t *testing.T) {
 
 		res, err := g.views.RunView(t.Context(), g.projectID, "epics",
 			RunRequest{OnStale: OnStaleBestEffort})
-		if err != nil {
-			t.Fatalf("best effort has a seed set to draw and must not refuse: %v", err)
-		}
-		if len(res.Nodes) != 0 {
-			t.Fatalf("the rows the narrowing invalidated are gone, got %d nodes", len(res.Nodes))
-		}
-		if len(res.Stale) == 0 {
-			t.Fatalf("the empty picture must at least arrive with its warning")
-		}
+		assert.Must(t, err == nil, "best effort has a seed set to draw and must not refuse: %v", err)
+		assert.Must(t, len(res.Nodes) == 0, "the rows the narrowing invalidated are gone, got %d nodes", len(res.Nodes))
+		assert.Must(t, len(res.Stale) != 0, "the empty picture must at least arrive with its warning")
 	})
 
 	// TestStaleArea's "the dependency list is one row per reference and not
@@ -1690,25 +1479,17 @@ func TestStaleArea(t *testing.T) {
 
 		id := g.typeIDOf(t, KindEntityType, "quest")
 		deps, err := g.views.ViewsDependingOn(t.Context(), g.projectID, KindEntityType, id)
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
+		assert.Must(t, err == nil, "list: %v", err)
 		at := map[string]bool{}
 		for _, dep := range deps {
-			if dep.ViewKey != "thrice" {
-				t.Fatalf("another view came back: %+v", deps)
-			}
+			assert.Must(t, dep.ViewKey == "thrice", "another view came back: %+v", deps)
 			at[dep.Pointer] = true
 		}
 		for _, want := range []string{"/from/0/type", "/from/0/where/value",
 			"/traverse/0/to_type/0"} {
-			if !at[want] {
-				t.Fatalf("no row at %s: %+v", want, deps)
-			}
+			assert.Must(t, at[want], "no row at %s: %+v", want, deps)
 		}
-		if len(deps) != 3 {
-			t.Fatalf("one row per reference, and this view holds three: %+v", deps)
-		}
+		assert.Must(t, len(deps) == 3, "one row per reference, and this view holds three: %+v", deps)
 	})
 }
 
@@ -1730,9 +1511,7 @@ func (g *game) refRow(t *testing.T, viewKey, pointer string) storedRef {
 		FROM view_refs r JOIN views v ON v.id = r.view_id
 		WHERE v.project_id = $1 AND lower(v.key) = lower($2) AND r.pointer = $3`,
 		g.projectID, viewKey, pointer).Scan(&got.key, &got.entityTypeID, &got.relationTypeID)
-	if err != nil {
-		t.Fatalf("read the view ref at %s: %v", pointer, err)
-	}
+	assert.Must(t, err == nil, "read the view ref at %s: %v", pointer, err)
 	return got
 }
 

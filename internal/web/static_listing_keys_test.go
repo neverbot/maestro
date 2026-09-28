@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The guard for the defect that killed the Images destination: **the page
@@ -52,13 +54,9 @@ func TestListingKeysPagesReadAreKeysHandlersWrite(t *testing.T) {
 
 	for _, listing := range listings {
 		pageSrc, err := os.ReadFile(filepath.FromSlash(listing.page))
-		if err != nil {
-			t.Fatalf("reading %s: %v", listing.page, err)
-		}
+		assert.Must(t, err == nil, "reading %s: %v", listing.page, err)
 		handlerSrc, err := os.ReadFile(filepath.FromSlash(listing.handler))
-		if err != nil {
-			t.Fatalf("reading %s: %v", listing.handler, err)
-		}
+		assert.Must(t, err == nil, "reading %s: %v", listing.handler, err)
 
 		written := map[string]bool{}
 		for _, m := range writtenKey.FindAllStringSubmatch(string(handlerSrc), -1) {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -33,12 +34,8 @@ import (
 func pageModules(t *testing.T) []string {
 	t.Helper()
 	found, err := filepath.Glob(filepath.Join("static", "pages", "*.js"))
-	if err != nil {
-		t.Fatalf("glob page modules: %v", err)
-	}
-	if len(found) == 0 {
-		t.Fatal("found no module under internal/web/static/pages: this test would pass on an empty tree")
-	}
+	assert.Must(t, err == nil, "glob page modules: %v", err)
+	assert.Must(t, len(found) != 0, "found no module under internal/web/static/pages: this test would pass on an empty tree")
 	sort.Strings(found)
 	return found
 }
@@ -47,12 +44,8 @@ func pageModules(t *testing.T) []string {
 func shellFiles(t *testing.T) []string {
 	t.Helper()
 	found, err := filepath.Glob(filepath.Join("static", "*.html"))
-	if err != nil {
-		t.Fatalf("glob shells: %v", err)
-	}
-	if len(found) == 0 {
-		t.Fatal("found no HTML shell under internal/web/static")
-	}
+	assert.Must(t, err == nil, "glob shells: %v", err)
+	assert.Must(t, len(found) != 0, "found no HTML shell under internal/web/static")
 	sort.Strings(found)
 	return found
 }
@@ -95,10 +88,8 @@ func TestEveryShellIsReachableByItsRoute(t *testing.T) {
 	// definition is not reached at the pattern it is registered under.
 	// TestAnUnknownAddressIsStillThisProduct drives the second one for
 	// real.
-	if len(dispatching) != 2 {
-		t.Fatalf("%d shell route(s) are exempt from the byte comparison below, want exactly 2: "+
-			"an exemption nobody bounds is where the next unserved shell hides", len(dispatching))
-	}
+	assert.Must(t, len(dispatching) == 2, "%d shell route(s) are exempt from the byte comparison below, want exactly 2: "+
+		"an exemption nobody bounds is where the next unserved shell hides", len(dispatching))
 
 	// The table is keyed by pattern, because a shell may be served at
 	// more than one address — index.html is the picker at "/" and at
@@ -117,9 +108,7 @@ func TestEveryShellIsReachableByItsRoute(t *testing.T) {
 			continue
 		}
 		want, err := os.ReadFile(shell)
-		if err != nil {
-			t.Fatalf("read %s: %v", shell, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", shell, err)
 		for _, pattern := range served {
 			if dispatching[pattern] {
 				// handleRoot decides between the picker, a single game
@@ -137,9 +126,7 @@ func TestEveryShellIsReachableByItsRoute(t *testing.T) {
 				t.Errorf("GET %s (for %s) answered %d, want 200", url, name, rec.Code)
 				continue
 			}
-			if rec.Body.String() != string(want) {
-				t.Errorf("GET %s served %d bytes, which are not %s's %d", url, rec.Body.Len(), name, len(want))
-			}
+			assert.Should(t, rec.Body.String() == string(want), "GET %s served %d bytes, which are not %s's %d", url, rec.Body.Len(), name, len(want))
 			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 				t.Errorf("GET %s served as %q, want text/html", url, ct)
 			}
@@ -177,13 +164,9 @@ var gamesPathRegexp = regexp.MustCompile(`export const GAMES_PATH = "([^"]+)";`)
 func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile(filepath.Join("static", "app.js"))
-	if err != nil {
-		t.Fatalf("read static/app.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/app.js: %v", err)
 	match := gamesPathRegexp.FindSubmatch(source)
-	if match == nil {
-		t.Fatal("static/app.js declares no GAMES_PATH: the header's switcher has nowhere to point")
-	}
+	assert.Must(t, match != nil, "static/app.js declares no GAMES_PATH: the header's switcher has nowhere to point")
 	gamesPath := string(match[1])
 
 	srv, ids, projSvc := newTestServer(t)
@@ -203,26 +186,18 @@ func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
 	rootReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	rootReq.AddCookie(cookie)
 	srv.ServeHTTP(root, rootReq)
-	if root.Code != http.StatusFound || root.Header().Get("Location") != "/g/azeroth" {
-		t.Fatalf("GET / answered %d to /g/azeroth=%q, want a 302 into the one game: the single-game "+
-			"shortcut this fix had to keep is gone", root.Code, root.Header().Get("Location"))
-	}
+	assert.Must(t, root.Code == http.StatusFound && root.Header().Get("Location") == "/g/azeroth", "GET / answered %d to /g/azeroth=%q, want a 302 into the one game: the single-game "+
+		"shortcut this fix had to keep is gone", root.Code, root.Header().Get("Location"))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, gamesPath, nil)
 	req.AddCookie(cookie)
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET %s answered %d, want 200: the game switcher links here from inside every game",
-			gamesPath, rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET %s answered %d, want 200: the game switcher links here from inside every game",
+		gamesPath, rec.Code)
 	want, err := os.ReadFile(filepath.Join("static", "index.html"))
-	if err != nil {
-		t.Fatalf("read static/index.html: %v", err)
-	}
-	if rec.Body.String() != string(want) {
-		t.Errorf("GET %s served %d bytes, which are not the picker's %d", gamesPath, rec.Body.Len(), len(want))
-	}
+	assert.Must(t, err == nil, "read static/index.html: %v", err)
+	assert.Should(t, rec.Body.String() == string(want), "GET %s served %d bytes, which are not the picker's %d", gamesPath, rec.Body.Len(), len(want))
 }
 
 // TestNoShellIsServedTwice keeps the new shells inside the /static/ file
@@ -245,10 +220,8 @@ func TestNoShellIsServedTwice(t *testing.T) {
 		url := "/static/" + filepath.Base(shell)
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s answered %d, want 404: a shell reachable under /static/ is a shell reachable "+
-				"without the dispatch its own route performs", url, rec.Code)
-		}
+		assert.Should(t, rec.Code == http.StatusNotFound, "GET %s answered %d, want 404: a shell reachable under /static/ is a shell reachable "+
+			"without the dispatch its own route performs", url, rec.Code)
 	}
 }
 
@@ -285,9 +258,7 @@ func TestNoPageURLContainsAUUID(t *testing.T) {
 	scanned := 0
 	for _, module := range pageModules(t) {
 		raw, err := os.ReadFile(module)
-		if err != nil {
-			t.Fatalf("read %s: %v", module, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", module, err)
 		scanned++
 		for _, line := range codeLines(string(raw)) {
 			if uuidLiteral.MatchString(line.code) {
@@ -306,9 +277,7 @@ func TestNoPageURLContainsAUUID(t *testing.T) {
 			}
 		}
 	}
-	if scanned == 0 {
-		t.Fatal("scanned no page module: this test would pass on an empty tree")
-	}
+	assert.Must(t, scanned != 0, "scanned no page module: this test would pass on an empty tree")
 	if len(offences) > 0 {
 		sort.Strings(offences)
 		t.Fatalf("%d line(s) in the page modules put an id in an address:\n%s\n"+
@@ -330,9 +299,7 @@ func TestTheUUIDScanReadsWhatItClaimsTo(t *testing.T) {
 		"an id concatenated":       `const href = "/g/" + game.id;`,
 		"an encoded id in a path":  "const href = `/g/${encodeURIComponent(game.id)}`;",
 	} {
-		if !uuidLiteral.MatchString(caught) && !idInPath.MatchString(caught) {
-			t.Errorf("the scan misses %s: %q", name, caught)
-		}
+		assert.Should(t, uuidLiteral.MatchString(caught) || idInPath.MatchString(caught), "the scan misses %s: %q", name, caught)
 	}
 	for name, allowed := range map[string]string{
 		"an id used as an index key": "if (typeof node.id !== \"string\") continue;",
@@ -340,9 +307,7 @@ func TestTheUUIDScanReadsWhatItClaimsTo(t *testing.T) {
 		"a slug in a path":           "const href = `/g/${slug}/v/${key}`;",
 		"an id compared":             "if (edge.source === node.id) continue;",
 	} {
-		if uuidLiteral.MatchString(allowed) || idInPath.MatchString(allowed) {
-			t.Errorf("the scan reports %s, which is not an address: %q", name, allowed)
-		}
+		assert.Should(t, !uuidLiteral.MatchString(allowed) && !idInPath.MatchString(allowed), "the scan reports %s, which is not an address: %q", name, allowed)
 	}
 }
 
@@ -359,26 +324,14 @@ func TestEveryShellCarriesTheImportMapAndTheStylesheet(t *testing.T) {
 	t.Parallel()
 	for _, shell := range shellFiles(t) {
 		raw, err := os.ReadFile(shell)
-		if err != nil {
-			t.Fatalf("read %s: %v", shell, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", shell, err)
 		src := string(raw)
 		name := filepath.Base(shell)
-		if !strings.Contains(src, `<script type="importmap">`) {
-			t.Errorf("%s declares no import map: every bare specifier on it fails to resolve", name)
-		}
-		if !strings.Contains(src, `<link rel="stylesheet" href="/static/styles.css">`) {
-			t.Errorf("%s does not link the stylesheet", name)
-		}
-		if !strings.Contains(src, `<meta charset="utf-8">`) {
-			t.Errorf("%s declares no charset: a game's own words are UTF-8 and a sniffed encoding mangles them", name)
-		}
-		if !strings.Contains(src, "<noscript>") {
-			t.Errorf("%s has no noscript notice: with scripting off it renders as a blank page that says nothing", name)
-		}
-		if !strings.Contains(src, `<script type="module" src="/static/`) {
-			t.Errorf("%s loads no module: a shell with no script is a page that never fills in", name)
-		}
+		assert.Should(t, strings.Contains(src, `<script type="importmap">`), "%s declares no import map: every bare specifier on it fails to resolve", name)
+		assert.Should(t, strings.Contains(src, `<link rel="stylesheet" href="/static/styles.css">`), "%s does not link the stylesheet", name)
+		assert.Should(t, strings.Contains(src, `<meta charset="utf-8">`), "%s declares no charset: a game's own words are UTF-8 and a sniffed encoding mangles them", name)
+		assert.Should(t, strings.Contains(src, "<noscript>"), "%s has no noscript notice: with scripting off it renders as a blank page that says nothing", name)
+		assert.Should(t, strings.Contains(src, `<script type="module" src="/static/`), "%s loads no module: a shell with no script is a page that never fills in", name)
 	}
 }
 
@@ -394,9 +347,7 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 	loaded := map[string]bool{}
 	for _, shell := range shellFiles(t) {
 		raw, err := os.ReadFile(shell)
-		if err != nil {
-			t.Fatalf("read %s: %v", shell, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", shell, err)
 		for _, hit := range // A hyphen is part of a module name: `not-found.js` was invisible
 		// to this scan while being loaded by the shell it belongs to, which
 		// is the shape of hole this test exists to close.
@@ -404,9 +355,7 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 			loaded[hit[1]] = true
 		}
 	}
-	if len(loaded) == 0 {
-		t.Fatal("no shell loads a page module: this test would pass on an empty tree")
-	}
+	assert.Must(t, len(loaded) != 0, "no shell loads a page module: this test would pass on an empty tree")
 	// page.js is imported by the seven and loaded by none, and that is
 	// the whole of the exception.
 	const shared = "page.js"
@@ -417,9 +366,7 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 		}
 		t.Errorf("static/pages/%s is loaded by no shell: a module nobody reaches is code no test can see", name)
 	}
-	if loaded[shared] {
-		t.Errorf("a shell loads %s directly; it is the plumbing the seven page modules import, not a page", shared)
-	}
+	assert.Should(t, !(loaded[shared]), "a shell loads %s directly; it is the plumbing the seven page modules import, not a page", shared)
 }
 
 // TestTheNarrowFallbackIsWiredAtBothCallSites is a source-shape guard,
@@ -444,14 +391,10 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
-	if err != nil {
-		t.Fatalf("read static/pages/view.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/pages/view.js: %v", err)
 	src := string(raw)
 
-	if !strings.Contains(src, "watchWidth(surface, options);") {
-		t.Error("viewPage no longer installs the width watch: a narrow window would draw a picture with every write armed")
-	}
+	assert.Should(t, strings.Contains(src, "watchWidth(surface, options);"), "viewPage no longer installs the width watch: a narrow window would draw a picture with every write armed")
 	// The `finally` is the point and not the call: a redraw that threw
 	// must still leave the fallback applied, and a call placed after the
 	// three returns of drawPicture would miss two of them.
@@ -463,12 +406,8 @@ func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 	// screen (static_view_fit_test.go holds that ordering). What matters
 	// here is that the width is applied on every exit, including a throw,
 	// and that nothing runs before it.
-	if !regexp.MustCompile(`(?s)finally\s*\{\s*applyWidth\(state, state\.narrow === true\);`).MatchString(src) {
-		t.Error("draw no longer re-applies the fallback in a finally: a redraw would put the drawing back and re-arm the writes")
-	}
-	if !strings.Contains(src, "state.arrangement.setDrawn(!fell);") {
-		t.Error("applyWidth no longer disarms the arrangement: hiding the canvas in CSS alone leaves a keyboard nudging a drawing nobody can see")
-	}
+	assert.Should(t, regexp.MustCompile(`(?s)finally\s*\{\s*applyWidth\(state, state\.narrow === true\);`).MatchString(src), "draw no longer re-applies the fallback in a finally: a redraw would put the drawing back and re-arm the writes")
+	assert.Should(t, strings.Contains(src, "state.arrangement.setDrawn(!fell);"), "applyWidth no longer disarms the arrangement: hiding the canvas in CSS alone leaves a keyboard nudging a drawing nobody can see")
 }
 
 // TestAnUnknownAddressIsStillThisProduct drives the catch-all for real,
@@ -490,17 +429,13 @@ func TestAnUnknownAddressIsStillThisProduct(t *testing.T) {
 	t.Parallel()
 	server, _, _ := newTestServer(t)
 	shell, err := os.ReadFile(filepath.Join("static", "not-found.html"))
-	if err != nil {
-		t.Fatalf("read the shell: %v", err)
-	}
+	assert.Must(t, err == nil, "read the shell: %v", err)
 
 	t.Run("a person gets the page", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/g/azeroth/images", nil))
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404: a missing page that answers 200 is a missing page "+
-				"no crawler, link checker or `curl -f` can see", rec.Code)
-		}
+		assert.Should(t, rec.Code == http.StatusNotFound, "status = %d, want 404: a missing page that answers 200 is a missing page "+
+			"no crawler, link checker or `curl -f` can see", rec.Code)
 		if got := rec.Body.String(); got != string(shell) {
 			t.Errorf("an unknown address did not serve not-found.html: it answered %q", got[:min(len(got), 60)])
 		}
@@ -512,9 +447,7 @@ func TestAnUnknownAddressIsStillThisProduct(t *testing.T) {
 	t.Run("a client gets JSON", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/nothing-here", nil))
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
+		assert.Should(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
 		var body struct {
 			Error   string `json:"error"`
 			Message string `json:"message"`
@@ -522,25 +455,19 @@ func TestAnUnknownAddressIsStillThisProduct(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("an API caller was handed something that is not JSON: %v", err)
 		}
-		if body.Error != "not_found" || body.Message == "" {
-			t.Errorf("body = %+v, want the coded envelope every other refusal uses", body)
-		}
+		assert.Should(t, body.Error == "not_found" && body.Message != "", "body = %+v, want the coded envelope every other refusal uses", body)
 	})
 
 	t.Run("a known address under the wrong method is still 405", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/healthz", nil))
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("status = %d, want 405: the catch-all swallowed the distinction between "+
-				"\"no such address\" and \"not that way\"", rec.Code)
-		}
+		assert.Should(t, rec.Code == http.StatusMethodNotAllowed, "status = %d, want 405: the catch-all swallowed the distinction between "+
+			"\"no such address\" and \"not that way\"", rec.Code)
 	})
 
 	t.Run("a known address is untouched", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200: the catch-all is shadowing a real route", rec.Code)
-		}
+		assert.Should(t, rec.Code == http.StatusOK, "status = %d, want 200: the catch-all is shadowing a real route", rec.Code)
 	})
 }

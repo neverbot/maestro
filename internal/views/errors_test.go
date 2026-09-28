@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -22,20 +23,14 @@ func TestEachSentinelMatchesOnlyItsOwnCode(t *testing.T) {
 	}
 	for code, own := range cases {
 		err := &QueryError{Code: code}
-		if !errors.Is(err, own) {
-			t.Fatalf("a QueryError with code %q must match its own sentinel", code)
-		}
+		assert.Must(t, errors.Is(err, own), "a QueryError with code %q must match its own sentinel", code)
 		for otherCode, other := range cases {
 			if otherCode == code {
 				continue
 			}
-			if errors.Is(err, other) {
-				t.Fatalf("a QueryError with code %q must not match %q's sentinel", code, otherCode)
-			}
+			assert.Must(t, !errors.Is(err, other), "a QueryError with code %q must not match %q's sentinel", code, otherCode)
 		}
-		if errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("a QueryError with code %q must not match invalid_input", code)
-		}
+		assert.Must(t, !errors.Is(err, metamodel.ErrInvalidInput), "a QueryError with code %q must not match invalid_input", code)
 	}
 }
 
@@ -46,9 +41,7 @@ func TestAnUnknownCodeMatchesNothingRatherThanDefaulting(t *testing.T) {
 	err := &QueryError{Code: "query_slightly_off"}
 	for _, sentinel := range []error{ErrQueryInvalid, ErrRendererRequirements,
 		ErrLimitExceeded, ErrQueryStale, metamodel.ErrInvalidInput, metamodel.ErrNotFound} {
-		if errors.Is(err, sentinel) {
-			t.Fatalf("an unrecognised code must match no sentinel, matched %v", sentinel)
-		}
+		assert.Must(t, !errors.Is(err, sentinel), "an unrecognised code must match no sentinel, matched %v", sentinel)
 	}
 }
 
@@ -72,12 +65,8 @@ func TestAQueryErrorNamesItsPointerAndItsProblem(t *testing.T) {
 func TestSentinelsListsEveryCodeThisPackageAnswersWith(t *testing.T) {
 	want := []string{CodeQueryInvalid, CodeRendererRequirements, CodeLimitExceeded, CodeQueryStale}
 	got := Sentinels()
-	if len(got) != len(want) {
-		t.Fatalf("Sentinels() has %d entries, want %d: %v", len(got), len(want), got)
-	}
+	assert.Must(t, len(got) == len(want), "Sentinels() has %d entries, want %d: %v", len(got), len(want), got)
 	for i, code := range want {
-		if !errors.Is(&QueryError{Code: code}, got[i]) {
-			t.Fatalf("Sentinels()[%d] does not match code %q", i, code)
-		}
+		assert.Must(t, errors.Is(&QueryError{Code: code}, got[i]), "Sentinels()[%d] does not match code %q", i, code)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestTheCreateGameDisclosureIsWhatEachScreenNeeds is a source guard over
@@ -31,9 +33,7 @@ import (
 func TestTheCreateGameDisclosureIsWhatEachScreenNeeds(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatalf("read styles.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read styles.css: %v", err)
 	styles := string(raw)
 
 	only := regexp.MustCompile(`#new-game\[data-only-action\]\s*>\s*summary\s*\{[^}]*\}`).FindString(styles)
@@ -42,9 +42,7 @@ func TestTheCreateGameDisclosureIsWhatEachScreenNeeds(t *testing.T) {
 			"screen where the form is the only action, and nothing reads the mark, so the control " +
 			"that only hides the form is still on the page")
 	}
-	if !strings.Contains(only, "display: none") {
-		t.Errorf("the disclosure is not removed on that screen, only restyled:\n%s", only)
-	}
+	assert.Should(t, strings.Contains(only, "display: none"), "the disclosure is not removed on that screen, only restyled:\n%s", only)
 
 	open := regexp.MustCompile(`#new-game\[open\]\s*>\s*summary::before\s*\{[^}]*\}`).FindString(styles)
 	if open == "" {
@@ -53,15 +51,9 @@ func TestTheCreateGameDisclosureIsWhatEachScreenNeeds(t *testing.T) {
 	}
 	// \2212 is MINUS SIGN. A hyphen would sit at a different height and
 	// a different width from the plus it replaces.
-	if !strings.Contains(open, `\2212`) {
-		t.Errorf("the open state does not swap the plus for a minus sign:\n%s", open)
-	}
+	assert.Should(t, strings.Contains(open, `\2212`), "the open state does not swap the plus for a minus sign:\n%s", open)
 
 	app, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatalf("read app.js: %v", err)
-	}
-	if !strings.Contains(string(app), `"data-only-action"`) {
-		t.Fatal("app.js no longer sets data-only-action, so the rule above is a selector nothing matches")
-	}
+	assert.Must(t, err == nil, "read app.js: %v", err)
+	assert.Must(t, strings.Contains(string(app), `"data-only-action"`), "app.js no longer sets data-only-action, so the rule above is a selector nothing matches")
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -30,9 +31,7 @@ func TestMetamodelTablesExist(t *testing.T) {
 			table).Scan(&exists); err != nil {
 			t.Fatalf("query %s: %v", table, err)
 		}
-		if !exists {
-			t.Fatalf("table %s was not created", table)
-		}
+		assert.Must(t, exists, "table %s was not created", table)
 	}
 }
 
@@ -143,16 +142,10 @@ func seedTwoProjects(t *testing.T, ctx context.Context, pool *pgxpool.Pool) cros
 // proving anything.
 func assertForeignKeyViolation(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("expected a foreign key violation, but the insert succeeded")
-	}
+	assert.Must(t, err != nil, "expected a foreign key violation, but the insert succeeded")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
-	}
-	if pgErr.Code != "23503" {
-		t.Fatalf("expected SQLSTATE 23503 (foreign_key_violation), got %s: %v", pgErr.Code, err)
-	}
+	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
+	assert.Must(t, pgErr.Code == "23503", "expected SQLSTATE 23503 (foreign_key_violation), got %s: %v", pgErr.Code, err)
 }
 
 // TestEntityCannotUseAnotherProjectsEntityType pins isolation in SQL, not
@@ -355,9 +348,7 @@ func TestUpdatedAtTriggerFires(t *testing.T) {
 			if err := pool.QueryRow(ctx, read, tc.id).Scan(&after); err != nil {
 				t.Fatalf("read updated_at after: %v", err)
 			}
-			if !after.After(before) {
-				t.Fatalf("updated_at did not move on %s: %s -> %s", tc.table, before, after)
-			}
+			assert.Must(t, after.After(before), "updated_at did not move on %s: %s -> %s", tc.table, before, after)
 		})
 	}
 }
@@ -378,16 +369,10 @@ func TestDuplicateRelationEdgeIsRejected(t *testing.T) {
 	}
 
 	_, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeA, f.entityA1, f.entityA2)
-	if err == nil {
-		t.Fatal("expected a unique violation on a duplicate edge, but the insert succeeded")
-	}
+	assert.Must(t, err != nil, "expected a unique violation on a duplicate edge, but the insert succeeded")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
-	}
-	if pgErr.Code != "23505" {
-		t.Fatalf("expected SQLSTATE 23505 (unique_violation), got %s: %v", pgErr.Code, err)
-	}
+	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
+	assert.Must(t, pgErr.Code == "23505", "expected SQLSTATE 23505 (unique_violation), got %s: %v", pgErr.Code, err)
 
 	// The reverse direction is a different edge and must be accepted.
 	if _, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeA, f.entityA2, f.entityA1); err != nil {
@@ -445,9 +430,7 @@ func TestDeletingATokenClearsOnlyTheTokenColumn(t *testing.T) {
 	if tokenID != nil {
 		t.Fatalf("updated_by_token_id = %q, want NULL after the token was deleted", *tokenID)
 	}
-	if projectID != f.projectA {
-		t.Fatalf("project_id = %q, want %q; the SET NULL must not touch it", projectID, f.projectA)
-	}
+	assert.Must(t, projectID == f.projectA, "project_id = %q, want %q; the SET NULL must not touch it", projectID, f.projectA)
 }
 
 // TestTheSearchBackfillIsExact pins the one claim
@@ -576,9 +559,7 @@ func TestTheSearchBackfillIsExact(t *testing.T) {
 			).Scan(&same, &migrated); err != nil {
 				t.Fatalf("compare: %v", err)
 			}
-			if !same {
-				t.Fatalf("the migrated row's vector differs from the re-seeded row's: %s", migrated)
-			}
+			assert.Must(t, same, "the migrated row's vector differs from the re-seeded row's: %s", migrated)
 		})
 	}
 
@@ -591,9 +572,7 @@ func TestTheSearchBackfillIsExact(t *testing.T) {
 			projectID).Scan(&got); err != nil {
 			t.Fatalf("read the backfilled vector: %v", err)
 		}
-		if !strings.Contains(got, "'no':1A") || !strings.Contains(got, "'vector':2A") {
-			t.Fatalf("vector = %s, want the name indexed under label A", got)
-		}
+		assert.Must(t, strings.Contains(got, "'no':1A") && strings.Contains(got, "'vector':2A"), "vector = %s, want the name indexed under label A", got)
 	})
 
 	// The Down arm is shipped too, and a downgrade must leave a working
@@ -608,9 +587,7 @@ func TestTheSearchBackfillIsExact(t *testing.T) {
 		projectID).Scan(&unweighted); err != nil {
 		t.Fatalf("count downgraded rows: %v", err)
 	}
-	if unweighted != 0 {
-		t.Fatalf("%d rows still carry a weight or a NULL vector after the Down arm", unweighted)
-	}
+	assert.Must(t, unweighted == 0, "%d rows still carry a weight or a NULL vector after the Down arm", unweighted)
 }
 
 // TestTheEntityKeyBackfillIsExact is TestTheSearchBackfillIsExact for
@@ -717,12 +694,8 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 			).Scan(&same, &migrated); err != nil {
 				t.Fatalf("compare: %v", err)
 			}
-			if !same {
-				t.Fatalf("the migrated row's vector differs from the re-seeded row's: %s", migrated)
-			}
-			if !strings.Contains(migrated, "C") {
-				t.Fatalf("the migrated vector carries no C-weighted lexeme: %s", migrated)
-			}
+			assert.Must(t, same, "the migrated row's vector differs from the re-seeded row's: %s", migrated)
+			assert.Must(t, strings.Contains(migrated, "C"), "the migrated vector carries no C-weighted lexeme: %s", migrated)
 		})
 	}
 
@@ -735,9 +708,7 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 			oldTypeID).Scan(&got); err != nil {
 			t.Fatalf("read the backfilled vector: %v", err)
 		}
-		if got != "'no':2C 'no-vector':1C 'vector':3C" {
-			t.Fatalf("vector = %s, want the key alone under label C", got)
-		}
+		assert.Must(t, got == "'no':2C 'no-vector':1C 'vector':3C", "vector = %s, want the key alone under label C", got)
 	})
 
 	// The Down arm removes the C positions and leaves the A and B halves
@@ -748,9 +719,7 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 	before := map[string]string{}
 	rows, err := pool.Query(ctx,
 		`SELECT key, search::text FROM entities WHERE entity_type_id = $1`, newTypeID)
-	if err != nil {
-		t.Fatalf("read the re-seeded vectors: %v", err)
-	}
+	assert.Must(t, err == nil, "read the re-seeded vectors: %v", err)
 	for rows.Next() {
 		var key, vec string
 		if err := rows.Scan(&key, &vec); err != nil {
@@ -769,9 +738,7 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 		projectID).Scan(&stillWeighted); err != nil {
 		t.Fatalf("count downgraded rows: %v", err)
 	}
-	if stillWeighted != 0 {
-		t.Fatalf("%d rows still carry a C-weighted lexeme after the Down arm", stillWeighted)
-	}
+	assert.Must(t, stillWeighted == 0, "%d rows still carry a C-weighted lexeme after the Down arm", stillWeighted)
 	// And a downgraded row still finds the words it found before 0010: a
 	// key-only handle is gone, a name is not.
 	for _, shape := range shapes {
@@ -782,9 +749,7 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 			newTypeID, shape.key, shape.key).Scan(&found); err != nil {
 			t.Fatalf("query the downgraded row %s: %v", shape.key, err)
 		}
-		if found && !strings.Contains(before[shape.key], "'"+shape.key+"'") {
-			t.Fatalf("row %s is still findable by its key after the Down arm", shape.key)
-		}
+		assert.Must(t, !found || strings.Contains(before[shape.key], "'"+shape.key+"'"), "row %s is still findable by its key after the Down arm", shape.key)
 	}
 }
 
@@ -800,25 +765,17 @@ func TestTheEntityKeyBackfillIsExact(t *testing.T) {
 func gooseArm(t *testing.T, file, arm string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("migrations", file))
-	if err != nil {
-		t.Fatalf("read %s: %v", file, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", file, err)
 	body := string(raw)
-	if strings.Contains(body, "+goose StatementBegin") {
-		t.Fatalf("%s uses a StatementBegin block, which this parser does not handle", file)
-	}
+	assert.Must(t, !strings.Contains(body, "+goose StatementBegin"), "%s uses a StatementBegin block, which this parser does not handle", file)
 	start := strings.Index(body, "-- +goose "+arm)
-	if start < 0 {
-		t.Fatalf("%s has no %s arm", file, arm)
-	}
+	assert.Must(t, start >= 0, "%s has no %s arm", file, arm)
 	rest := body[start+len("-- +goose "+arm):]
 	if end := strings.Index(rest, "-- +goose "); end >= 0 {
 		rest = rest[:end]
 	}
 	sql := strings.TrimSpace(rest)
-	if sql == "" {
-		t.Fatalf("%s's %s arm is empty", file, arm)
-	}
+	assert.Must(t, sql != "", "%s's %s arm is empty", file, arm)
 	return sql
 }
 
@@ -854,18 +811,12 @@ func TestRelationsCarryAnInvalidFlagAndAVersion(t *testing.T) {
 			want.column).Scan(&dataType, &nullable, &def); err != nil {
 			t.Fatalf("relations has no %s column: %v", want.column, err)
 		}
-		if dataType != want.dataType {
-			t.Fatalf("relations.%s is %s, want %s", want.column, dataType, want.dataType)
-		}
-		if nullable != "NO" {
-			t.Fatalf("relations.%s is nullable: an edge with no verdict and no revision "+
-				"is a row nothing can compare against", want.column)
-		}
-		if def == nil || *def != want.def {
-			t.Fatalf("relations.%s defaults to %v, want %s — 0009 back-fills nothing, so "+
-				"the default is what every existing edge reads back as",
-				want.column, def, want.def)
-		}
+		assert.Must(t, dataType == want.dataType, "relations.%s is %s, want %s", want.column, dataType, want.dataType)
+		assert.Must(t, nullable == "NO", "relations.%s is nullable: an edge with no verdict and no revision "+
+			"is a row nothing can compare against", want.column)
+		assert.Must(t, def != nil && *def == want.def, "relations.%s defaults to %v, want %s — 0009 back-fills nothing, so "+
+			"the default is what every existing edge reads back as",
+			want.column, def, want.def)
 	}
 
 	// An edge inserted with neither column named reads back under both
@@ -879,10 +830,8 @@ func TestRelationsCarryAnInvalidFlagAndAVersion(t *testing.T) {
 		projectID, relTypeID, sourceID, targetID).Scan(&invalid, &version); err != nil {
 		t.Fatalf("insert edge: %v", err)
 	}
-	if invalid || version != 1 {
-		t.Fatalf("a fresh edge reads back invalid=%v version=%d, want false and 1",
-			invalid, version)
-	}
+	assert.Must(t, !invalid && version == 1, "a fresh edge reads back invalid=%v version=%d, want false and 1",
+		invalid, version)
 }
 
 // TestTheEdgeSweepSeeksAnIndexRatherThanScanning is the measurement
@@ -943,9 +892,7 @@ func TestTheEdgeSweepSeeksAnIndexRatherThanScanning(t *testing.T) {
 		`EXPLAIN SELECT id, fields FROM relations
 		  WHERE project_id = $1 AND relation_type_id = $2 ORDER BY id`,
 		projectID, relTypeID)
-	if err != nil {
-		t.Fatalf("explain: %v", err)
-	}
+	assert.Must(t, err == nil, "explain: %v", err)
 	defer rows.Close()
 	var plan strings.Builder
 	for rows.Next() {
@@ -959,13 +906,9 @@ func TestTheEdgeSweepSeeksAnIndexRatherThanScanning(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read plan: %v", err)
 	}
-	if strings.Contains(plan.String(), "Seq Scan on relations") {
-		t.Fatalf("the sweep scans the whole table, so 0009's \"no new index\" claim is "+
-			"wrong and the sweep needs one of its own:\n%s", plan.String())
-	}
-	if !strings.Contains(plan.String(), "Index Scan") {
-		t.Fatalf("the sweep's plan reads no index at all:\n%s", plan.String())
-	}
+	assert.Must(t, !strings.Contains(plan.String(), "Seq Scan on relations"), "the sweep scans the whole table, so 0009's \"no new index\" claim is "+
+		"wrong and the sweep needs one of its own:\n%s", plan.String())
+	assert.Must(t, strings.Contains(plan.String(), "Index Scan"), "the sweep's plan reads no index at all:\n%s", plan.String())
 }
 
 // seedEdgeParents makes the three parents an edge needs plus two entities

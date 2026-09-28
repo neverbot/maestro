@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -53,13 +54,9 @@ func TestDeleteGameMapsProjectNotFoundTo404(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	// requireProject would have resolved exactly this scope, from a
 	// membership row that still existed at that instant.
@@ -75,9 +72,7 @@ func TestDeleteGameMapsProjectNotFoundTo404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.handleDeleteGame(rec, req, newSessionCaller(owner.ID, false), scope)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 for a game deleted between admission and this handler's own lookup; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404 for a game deleted between admission and this handler's own lookup; body = %s", rec.Code, rec.Body.String())
 	var payload map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode body: %v", err)

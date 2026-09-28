@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/graph"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -100,9 +101,7 @@ func TestAnalysisTablesExist(t *testing.T) {
 			table).Scan(&exists); err != nil {
 			t.Fatalf("query %s: %v", table, err)
 		}
-		if !exists {
-			t.Fatalf("table %s was not created", table)
-		}
+		assert.Must(t, exists, "table %s was not created", table)
 	}
 }
 
@@ -145,9 +144,7 @@ func TestTheTraitVocabularyConstraintRefusesAnUnknownTrait(t *testing.T) {
 		`SELECT analysis_traits FROM relation_types WHERE id = $1`, g.relationTypeID).Scan(&got); err != nil {
 		t.Fatalf("read traits back: %v", err)
 	}
-	if len(got) != 2 || got[0] != "prerequisite_of" || got[1] != "acyclic" {
-		t.Fatalf("read back %v, want [prerequisite_of acyclic]", got)
-	}
+	assert.Must(t, len(got) == 2 && got[0] == "prerequisite_of" && got[1] == "acyclic", "read back %v, want [prerequisite_of acyclic]", got)
 
 	// Every word of the vocabulary is accepted, so the constraint cannot
 	// pass by admitting only the two this test happened to pick.
@@ -190,9 +187,7 @@ func TestAnEmptyTraitArrayIsRefusedAndNullIsNot(t *testing.T) {
 		`SELECT analysis_traits IS NULL FROM relation_types WHERE id = $1`, g.relationTypeID).Scan(&isNull); err != nil {
 		t.Fatalf("read traits back: %v", err)
 	}
-	if !isNull {
-		t.Fatal("traits set to NULL did not read back as NULL")
-	}
+	assert.Must(t, isNull, "traits set to NULL did not read back as NULL")
 
 	// The inert spelling, which is what {} would otherwise be mistaken
 	// for.
@@ -218,9 +213,7 @@ func TestANewRelationTypeHasNoTraitsAndThatIsNotAnError(t *testing.T) {
 		`SELECT analysis_traits IS NULL FROM relation_types WHERE id = $1`, g.relationTypeID).Scan(&isNull); err != nil {
 		t.Fatalf("read traits: %v", err)
 	}
-	if !isNull {
-		t.Fatal("a freshly inserted relation type must read as undeclared (NULL), not as a declared empty set")
-	}
+	assert.Must(t, isNull, "a freshly inserted relation type must read as undeclared (NULL), not as a declared empty set")
 }
 
 // TestARouteStepCannotNameAnEntityFromAnotherGame is the isolation the
@@ -303,14 +296,10 @@ func TestDeletingAnEntityLeavesItsRouteStepWithATombstone(t *testing.T) {
 	if entityID != nil {
 		t.Fatalf("entity_id was not nulled, got %v", *entityID)
 	}
-	if entityTypeKey != "quest" || entityKey != "hogger" {
-		t.Fatalf("the tombstone pair was rewritten: got (%q, %q), want (quest, hogger)", entityTypeKey, entityKey)
-	}
+	assert.Must(t, entityTypeKey == "quest" && entityKey == "hogger", "the tombstone pair was rewritten: got (%q, %q), want (quest, hogger)", entityTypeKey, entityKey)
 	// project_id must survive untouched: a bare SET NULL on the
 	// composite key would have tried to null it too, and it is NOT NULL.
-	if projectID != g.projectID {
-		t.Fatalf("project_id changed on the step: got %v, want %v", projectID, g.projectID)
-	}
+	assert.Must(t, projectID == g.projectID, "project_id changed on the step: got %v, want %v", projectID, g.projectID)
 }
 
 // TestARouteCannotRecordAnotherGamesToken mirrors
@@ -366,9 +355,7 @@ func TestRevokingATokenNullsOnlyTheTokenColumnOfARoute(t *testing.T) {
 	if tokenID != nil {
 		t.Fatalf("updated_by_token_id was not nulled, got %v", *tokenID)
 	}
-	if projectID != g.projectID {
-		t.Fatalf("project_id was nulled or changed: got %v, want %v", projectID, g.projectID)
-	}
+	assert.Must(t, projectID == g.projectID, "project_id was nulled or changed: got %v, want %v", projectID, g.projectID)
 }
 
 // TestARouteKeyIsUniquePerGameWithoutRegardToCase pins routes_key_key:
@@ -466,9 +453,7 @@ func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
 		                      AND a.attnum > 0 AND NOT a.attisdropped
 		  WHERE c.relkind = 'r' AND n.nspname = 'public'
 		  ORDER BY c.relname`)
-	if err != nil {
-		t.Fatalf("list project-scoped tables: %v", err)
-	}
+	assert.Must(t, err == nil, "list project-scoped tables: %v", err)
 	var scoped []string
 	for rows.Next() {
 		var name string
@@ -481,9 +466,7 @@ func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("list project-scoped tables: %v", err)
 	}
-	if len(scoped) == 0 {
-		t.Fatal("no project-scoped tables found; this test would assert nothing")
-	}
+	assert.Must(t, len(scoped) != 0, "no project-scoped tables found; this test would assert nothing")
 
 	// Triggers, by table, from the catalogue -- matched on the function
 	// they call rather than on their names, so renaming one does not
@@ -502,9 +485,7 @@ func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
 		   JOIN pg_class c ON c.oid = t.tgrelid
 		   JOIN pg_proc  p ON p.oid = t.tgfoid
 		  WHERE NOT t.tgisinternal AND p.proname = 'bump_design_version'`)
-	if err != nil {
-		t.Fatalf("list design-version triggers: %v", err)
-	}
+	assert.Must(t, err == nil, "list design-version triggers: %v", err)
 	for trows.Next() {
 		var table string
 		var tr trig
@@ -543,19 +524,13 @@ func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
 		}
 		events := int16(0)
 		for _, tr := range got {
-			if tr.ttype&1 != 0 {
-				t.Fatalf("%s.%s is FOR EACH ROW; the counter is maintained per statement, "+
-					"which is what makes a thousand-row write cost one UPDATE", table, tr.name)
-			}
-			if tr.ttype&2 != 0 {
-				t.Fatalf("%s.%s is a BEFORE trigger; a transition table needs AFTER", table, tr.name)
-			}
+			assert.Must(t, tr.ttype&1 == 0, "%s.%s is FOR EACH ROW; the counter is maintained per statement, "+
+				"which is what makes a thousand-row write cost one UPDATE", table, tr.name)
+			assert.Must(t, tr.ttype&2 == 0, "%s.%s is a BEFORE trigger; a transition table needs AFTER", table, tr.name)
 			events |= tr.ttype & (4 | 8 | 16)
 		}
-		if events != 4|8|16 {
-			t.Fatalf("%s's design-version triggers cover events %d, want insert, update and delete (28)",
-				table, events)
-		}
+		assert.Must(t, events == 4|8|16, "%s's design-version triggers cover events %d, want insert, update and delete (28)",
+			table, events)
 	}
 }
 
@@ -671,20 +646,14 @@ func TestEveryMetamodelWriteBumpsTheDesignVersion(t *testing.T) {
 				before := designVersion(t, ctx, pool, g.projectID)
 				sql, args := arm.stmt(g)
 				tag, err := pool.Exec(ctx, sql, args...)
-				if err != nil {
-					t.Fatalf("%s on %s: %v", arm.name, tc.table, err)
-				}
+				assert.Must(t, err == nil, "%s on %s: %v", arm.name, tc.table, err)
 				// A statement that wrote nothing would leave the counter
 				// alone and be reported as a trigger failure, which is
 				// the wrong diagnosis; assert the write landed first.
-				if tag.RowsAffected() == 0 {
-					t.Fatalf("%s on %s affected no rows, so this case asserts nothing", arm.name, tc.table)
-				}
+				assert.Must(t, tag.RowsAffected() != 0, "%s on %s affected no rows, so this case asserts nothing", arm.name, tc.table)
 				after := designVersion(t, ctx, pool, g.projectID)
-				if after <= before {
-					t.Fatalf("%s on %s left design_version at %d (was %d); the counter did not move",
-						arm.name, tc.table, after, before)
-				}
+				assert.Must(t, after > before, "%s on %s left design_version at %d (was %d); the counter did not move",
+					arm.name, tc.table, after, before)
 			})
 		}
 	}
@@ -709,16 +678,10 @@ func TestTheDesignVersionIsMonotonicAndNotACountOfChanges(t *testing.T) {
 		`INSERT INTO entities (project_id, entity_type_id, key, name)
 		 SELECT $1, $2, 'bulk-' || i, 'Bulk' FROM generate_series(1, 3) AS i`,
 		g.projectID, g.entityTypeID)
-	if err != nil {
-		t.Fatalf("bulk insert: %v", err)
-	}
-	if tag.RowsAffected() != 3 {
-		t.Fatalf("the bulk insert wrote %d rows, want 3", tag.RowsAffected())
-	}
+	assert.Must(t, err == nil, "bulk insert: %v", err)
+	assert.Must(t, tag.RowsAffected() == 3, "the bulk insert wrote %d rows, want 3", tag.RowsAffected())
 	after := designVersion(t, ctx, pool, g.projectID)
-	if after <= before {
-		t.Fatalf("design_version did not move over a three-row statement: %d -> %d", before, after)
-	}
+	assert.Must(t, after > before, "design_version did not move over a three-row statement: %d -> %d", before, after)
 	if after-before != 1 {
 		// Not a failure of the schema, but of this test's own claim: if
 		// a statement ever moves the counter more than once, the
@@ -761,11 +724,9 @@ func TestDeletingAnEntityBumpsTheCounterThroughTheRelationsCascade(t *testing.T)
 	countRows(t, ctx, pool, `SELECT count(*) FROM relations WHERE project_id = $1`, []any{g.projectID}, 0)
 
 	after := designVersion(t, ctx, pool, g.projectID)
-	if after-before < 2 {
-		t.Fatalf("design_version moved by %d over an entity deletion that also removed an edge; "+
-			"the cascaded relations delete did not fire its own trigger, which is the case a "+
-			"Go-side bump would miss", after-before)
-	}
+	assert.Must(t, after-before >= 2, "design_version moved by %d over an entity deletion that also removed an edge; "+
+		"the cascaded relations delete did not fire its own trigger, which is the case a "+
+		"Go-side bump would miss", after-before)
 }
 
 // TestAWriteToAnotherGameDoesNotMoveThisGamesDesignVersion is the
@@ -823,9 +784,7 @@ func TestTwoConcurrentWritesToOneGameBothLandAndTheCounterMovesTwice(t *testing.
 	before := designVersion(t, ctx, pool, g.projectID)
 
 	tx1, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin tx1: %v", err)
-	}
+	assert.Must(t, err == nil, "begin tx1: %v", err)
 	if _, err := tx1.Exec(ctx,
 		`INSERT INTO entities (project_id, entity_type_id, key, name) VALUES ($1, $2, 'first', 'First')`,
 		g.projectID, g.entityTypeID); err != nil {
@@ -869,9 +828,7 @@ func TestTwoConcurrentWritesToOneGameBothLandAndTheCounterMovesTwice(t *testing.
 		t.Fatalf("tx1 commit: %v", err)
 	}
 	wg.Wait()
-	if tx2Err != nil {
-		t.Fatalf("tx2: %v", tx2Err)
-	}
+	assert.Must(t, tx2Err == nil, "tx2: %v", tx2Err)
 	_ = finished
 
 	// The serialisation is the point of the measurement: the second
@@ -888,9 +845,7 @@ func TestTwoConcurrentWritesToOneGameBothLandAndTheCounterMovesTwice(t *testing.
 		`SELECT count(*) FROM entities WHERE project_id = $1 AND key IN ('first', 'second')`,
 		[]any{g.projectID}, 2)
 	after := designVersion(t, ctx, pool, g.projectID)
-	if after-before != 2 {
-		t.Fatalf("design_version moved by %d over two concurrent single-row writes, want 2", after-before)
-	}
+	assert.Must(t, after-before == 2, "design_version moved by %d over two concurrent single-row writes, want 2", after-before)
 }
 
 // TestDeletingAGameDoesNotFailOnItsOwnDesignVersionTrigger walks the one
@@ -1002,9 +957,7 @@ func TestTheReachabilityWalkSeeksAnIndexRatherThanScanning(t *testing.T) {
 	stmt := "EXPLAIN WITH RECURSIVE " + body + "\nSELECT id, depth FROM " + graph.ReadFrom(w)
 
 	rows, err := pool.Query(ctx, stmt, args...)
-	if err != nil {
-		t.Fatalf("explain the reachability walk: %v\n%s", err, stmt)
-	}
+	assert.Must(t, err == nil, "explain the reachability walk: %v\n%s", err, stmt)
 	defer rows.Close()
 
 	var plan strings.Builder
@@ -1019,13 +972,9 @@ func TestTheReachabilityWalkSeeksAnIndexRatherThanScanning(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read plan: %v", err)
 	}
-	if plan.Len() == 0 {
-		t.Fatal("EXPLAIN returned no plan; this test would assert nothing")
-	}
-	if strings.Contains(plan.String(), "Seq Scan on relations") {
-		t.Fatalf("the reachability walk sequentially scans relations; "+
-			"0013_analysis.sql's decision not to add relations_project_type_idx rests on it not doing that:\n%s",
-			plan.String())
-	}
+	assert.Must(t, plan.Len() != 0, "EXPLAIN returned no plan; this test would assert nothing")
+	assert.Must(t, !strings.Contains(plan.String(), "Seq Scan on relations"), "the reachability walk sequentially scans relations; "+
+		"0013_analysis.sql's decision not to add relations_project_type_idx rests on it not doing that:\n%s",
+		plan.String())
 	t.Logf("reachability walk plan:\n%s", plan.String())
 }

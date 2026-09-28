@@ -3,6 +3,8 @@ package web
 import (
 	"testing"
 	"time"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestSSERecheckOutcome pins sseRecheckOutcome's retry policy directly,
@@ -82,9 +84,7 @@ func TestJitteredSSEMaxLifetime(t *testing.T) {
 	var sawBelow, sawAbove bool
 	for i := 0; i < 200; i++ {
 		got := jitteredSSEMaxLifetime(base)
-		if got < lo || got > hi {
-			t.Fatalf("jitteredSSEMaxLifetime(%v) = %v, want within [%v, %v]", base, got, lo, hi)
-		}
+		assert.Must(t, got >= lo && got <= hi, "jitteredSSEMaxLifetime(%v) = %v, want within [%v, %v]", base, got, lo, hi)
 		switch {
 		case got < base:
 			sawBelow = true
@@ -92,7 +92,5 @@ func TestJitteredSSEMaxLifetime(t *testing.T) {
 			sawAbove = true
 		}
 	}
-	if !sawBelow || !sawAbove {
-		t.Fatalf("200 samples never varied in both directions (below=%v, above=%v) — jitter looks one-sided or absent", sawBelow, sawAbove)
-	}
+	assert.Must(t, sawBelow && sawAbove, "200 samples never varied in both directions (below=%v, above=%v) — jitter looks one-sided or absent", sawBelow, sawAbove)
 }

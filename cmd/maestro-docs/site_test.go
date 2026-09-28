@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // buildSite builds the whole site into a temporary directory and returns
@@ -37,12 +39,8 @@ func buildSite(t *testing.T) map[string]string {
 		pages[filepath.ToSlash(rel)] = string(body)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk the built site: %v", err)
-	}
-	if len(pages) < 20 {
-		t.Fatalf("built %d page(s): the bundle alone is nineteen, so this guard is holding nothing", len(pages))
-	}
+	assert.Must(t, err == nil, "walk the built site: %v", err)
+	assert.Must(t, len(pages) >= 20, "built %d page(s): the bundle alone is nineteen, so this guard is holding nothing", len(pages))
 	return pages
 }
 
@@ -68,13 +66,9 @@ func TestEveryPageWearsTheSameFrame(t *testing.T) {
 			{"the rail", `<nav class="rail"`},
 			{"the site stylesheet", `style.css"`},
 		} {
-			if !strings.Contains(body, part.needle) {
-				t.Errorf("%s carries no %s (%q)", path, part.what, part.needle)
-			}
+			assert.Should(t, strings.Contains(body, part.needle), "%s carries no %s (%q)", path, part.what, part.needle)
 		}
-		if strings.Count(body, "<main") != 1 {
-			t.Errorf("%s has %d <main> elements: a page has exactly one", path, strings.Count(body, "<main"))
-		}
+		assert.Should(t, strings.Count(body, "<main") == 1, "%s has %d <main> elements: a page has exactly one", path, strings.Count(body, "<main"))
 	}
 }
 
@@ -90,9 +84,7 @@ func TestEveryPageWearsTheSameFrame(t *testing.T) {
 // publishes the document.
 func TestTheFrameIsTheOneDesignDotMdStates(t *testing.T) {
 	stated, err := os.ReadFile("../../docs/design.md")
-	if err != nil {
-		t.Fatalf("read docs/design.md: %v", err)
-	}
+	assert.Must(t, err == nil, "read docs/design.md: %v", err)
 	document := string(stated)
 	frame := map[string]string{
 		"--page":   "1440px",
@@ -101,13 +93,9 @@ func TestTheFrameIsTheOneDesignDotMdStates(t *testing.T) {
 		"--gutter": "24px",
 	}
 	for token, value := range frame {
-		if !strings.Contains(siteCSS, token+": "+value) {
-			t.Errorf("the site's stylesheet does not declare %s: %s", token, value)
-		}
-		if !strings.Contains(document, value) {
-			t.Errorf("docs/design.md no longer states %s anywhere, and the stylesheet still sets %s to it",
-				value, token)
-		}
+		assert.Should(t, strings.Contains(siteCSS, token+": "+value), "the site's stylesheet does not declare %s: %s", token, value)
+		assert.Should(t, strings.Contains(document, value), "docs/design.md no longer states %s anywhere, and the stylesheet still sets %s to it",
+			value, token)
 	}
 	if strings.Contains(siteCSS, "max-width: 46rem") {
 		t.Error("the page is set to a prose measure again: docs/design.md's frame caps the page at " +
@@ -126,32 +114,20 @@ func TestTheFrameIsTheOneDesignDotMdStates(t *testing.T) {
 func TestTheHeaderPromisesAPageAndNotAnAnchor(t *testing.T) {
 	pages := buildSite(t)
 	index, ok := pages[agentsIndexPath]
-	if !ok {
-		t.Fatalf("the site has no %s", agentsIndexPath)
-	}
+	assert.Must(t, ok, "the site has no %s", agentsIndexPath)
 	for path, body := range pages {
-		if strings.Contains(body, `href="index.html#for-agents">For agents`) {
-			t.Errorf("%s still sends For agents at an anchor into the readme", path)
-		}
-		if !strings.Contains(body, `For agents</a>`) {
-			t.Errorf("%s has no For agents link at all", path)
-		}
+		assert.Should(t, !strings.Contains(body, `href="index.html#for-agents">For agents`), "%s still sends For agents at an anchor into the readme", path)
+		assert.Should(t, strings.Contains(body, `For agents</a>`), "%s has no For agents link at all", path)
 	}
 	// Every bundle page is on it, under a group heading.
 	bundle, err := bundlePages()
-	if err != nil {
-		t.Fatalf("render the bundle: %v", err)
-	}
+	assert.Must(t, err == nil, "render the bundle: %v", err)
 	for _, p := range bundle {
 		href := strings.TrimPrefix(p.Path, "agents/")
-		if !strings.Contains(index, `href="`+href+`"`) {
-			t.Errorf("%s does not link %s", agentsIndexPath, href)
-		}
+		assert.Should(t, strings.Contains(index, `href="`+href+`"`), "%s does not link %s", agentsIndexPath, href)
 	}
 	for _, label := range groupLabels {
-		if !strings.Contains(index, ">"+label+"<") {
-			t.Errorf("%s does not group anything under %q", agentsIndexPath, label)
-		}
+		assert.Should(t, strings.Contains(index, ">"+label+"<"), "%s does not group anything under %q", agentsIndexPath, label)
 	}
 	// And the entry point is first, which is what the path order got
 	// wrong: `agents/genres/...` sorts before `agents/skill.md`.
@@ -176,9 +152,7 @@ func TestNoPageFetchesAnotherOrigin(t *testing.T) {
 		for _, attr := range []string{`<img`, `<script`} {
 			for _, fragment := range strings.Split(body, attr)[1:] {
 				tag, _, _ := strings.Cut(fragment, ">")
-				if strings.Contains(tag, `src="http`) {
-					t.Errorf("%s fetches %s from another origin: %s", path, attr, strings.TrimSpace(tag))
-				}
+				assert.Should(t, !strings.Contains(tag, `src="http`), "%s fetches %s from another origin: %s", path, attr, strings.TrimSpace(tag))
 			}
 		}
 	}
@@ -191,12 +165,8 @@ func TestNoPageFetchesAnotherOrigin(t *testing.T) {
 func TestTheSiteAnswersAMistypedAddress(t *testing.T) {
 	pages := buildSite(t)
 	body, ok := pages["404.html"]
-	if !ok {
-		t.Fatal("the site has no 404.html")
-	}
-	if !strings.Contains(body, `href="index.html"`) {
-		t.Error("the refusal page offers no way back")
-	}
+	assert.Must(t, ok, "the site has no 404.html")
+	assert.Should(t, strings.Contains(body, `href="index.html"`), "the refusal page offers no way back")
 }
 
 // TestEverySectionCanBeLinked: a page whose headings have no ids is a
@@ -204,18 +174,14 @@ func TestTheSiteAnswersAMistypedAddress(t *testing.T) {
 // sent to anybody.
 func TestEverySectionCanBeLinked(t *testing.T) {
 	for path, body := range buildSite(t) {
-		if strings.Contains(body, "<h2>") && !strings.Contains(body, `<nav class="rail"`) {
-			t.Errorf("%s has an h2 with no id", path)
-		}
+		assert.Should(t, !strings.Contains(body, "<h2>") || strings.Contains(body, `<nav class="rail"`), "%s has an h2 with no id", path)
 		// The rail's own headings are the exception: they are furniture,
 		// not sections of the page.
 		content := body
 		if from := strings.Index(body, `<nav class="rail"`); from >= 0 {
 			content = body[:from]
 		}
-		if strings.Contains(content, "<h2>") {
-			t.Errorf("%s carries an h2 with no id, so nothing can link to it", path)
-		}
+		assert.Should(t, !strings.Contains(content, "<h2>"), "%s carries an h2 with no id, so nothing can link to it", path)
 	}
 }
 
@@ -227,9 +193,7 @@ func TestEverySectionCanBeLinked(t *testing.T) {
 // here" — the licence and the 404 page, filed under where to begin.
 func TestTheRailsGroupsAreTheBundleAndNothingElse(t *testing.T) {
 	pages, err := collect("../..")
-	if err != nil {
-		t.Fatalf("collect the pages: %v", err)
-	}
+	assert.Must(t, err == nil, "collect the pages: %v", err)
 	for _, group := range grouped(pages) {
 		for _, p := range group {
 			if !strings.HasPrefix(p.Path, "agents/") {
@@ -250,23 +214,15 @@ func TestEveryPageSaysWhereItIs(t *testing.T) {
 		// printed "Maestro" above an h1 reading "Maestro" under a
 		// wordmark reading "Maestro".
 		if path == "index.html" {
-			if strings.Contains(body, `<nav class="crumbs"`) {
-				t.Error("the home page carries a breadcrumb of one crumb")
-			}
+			assert.Should(t, !strings.Contains(body, `<nav class="crumbs"`), "the home page carries a breadcrumb of one crumb")
 			continue
 		}
-		if !strings.Contains(body, `<nav class="crumbs"`) {
-			t.Errorf("%s has no breadcrumb", path)
-		}
-		if !strings.Contains(body, `<b aria-current="page">`) {
-			t.Errorf("%s has a breadcrumb that does not mark the page you are on", path)
-		}
+		assert.Should(t, strings.Contains(body, `<nav class="crumbs"`), "%s has no breadcrumb", path)
+		assert.Should(t, strings.Contains(body, `<b aria-current="page">`), "%s has a breadcrumb that does not mark the page you are on", path)
 	}
 	deep := pages["agents/reference/tools.html"]
 	for _, crumb := range []string{">Maestro<", ">For agents<", ">Reference<", ">The tool surface<"} {
-		if !strings.Contains(deep, crumb) {
-			t.Errorf("the tool surface's breadcrumb has no %s", crumb)
-		}
+		assert.Should(t, strings.Contains(deep, crumb), "the tool surface's breadcrumb has no %s", crumb)
 	}
 	// And the trail is climbable: every crumb above the last one is a
 	// link, and each one is relative to a page two directories deep.
@@ -275,9 +231,7 @@ func TestEveryPageSaysWhereItIs(t *testing.T) {
 		`href="../../agents/index.html">For agents<`,
 		`href="../../agents/index.html#reference">Reference<`,
 	} {
-		if !strings.Contains(deep, link) {
-			t.Errorf("the tool surface's breadcrumb does not climb: no %s", link)
-		}
+		assert.Should(t, strings.Contains(deep, link), "the tool surface's breadcrumb does not climb: no %s", link)
 	}
 }
 
@@ -287,16 +241,12 @@ func TestEveryPageSaysWhereItIs(t *testing.T) {
 func TestTheSiteCarriesItsOwnMap(t *testing.T) {
 	pages := buildSite(t)
 	body, ok := pages[mapPath]
-	if !ok {
-		t.Fatalf("the site has no %s", mapPath)
-	}
+	assert.Must(t, ok, "the site has no %s", mapPath)
 	for path := range pages {
 		if path == mapPath || path == "404.html" {
 			continue
 		}
-		if !strings.Contains(body, `"`+path) {
-			t.Errorf("%s is on the site and not on its map", path)
-		}
+		assert.Should(t, strings.Contains(body, `"`+path), "%s is on the site and not on its map", path)
 	}
 	// Every section of the longest page is on it, by anchor.
 	for _, want := range []string{
@@ -304,25 +254,17 @@ func TestTheSiteCarriesItsOwnMap(t *testing.T) {
 		"agents/reference/tools.html#relation_types",
 		"running.html#known-limitations",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the map does not carry %s", want)
-		}
+		assert.Should(t, strings.Contains(body, want), "the map does not carry %s", want)
 	}
 	// Every entry opens the page it names, and none of them does it in
 	// a second shape.
-	if strings.Contains(body, "Open the page") {
-		t.Error("the map still special-cases a page with no sections with its own link shape")
-	}
-	if !strings.Contains(body, `<summary><b><a href="index.html">Maestro</a></b>`) {
-		t.Error("a page's title on the map is not a link to it")
-	}
+	assert.Should(t, !strings.Contains(body, "Open the page"), "the map still special-cases a page with no sections with its own link shape")
+	assert.Should(t, strings.Contains(body, `<summary><b><a href="index.html">Maestro</a></b>`), "a page's title on the map is not a link to it")
 	// It discloses progressively and still answers a find: a folded page
 	// whose words the browser cannot see would defeat the one thing this
 	// page is for.
-	if strings.Count(body, "<details open>") < 20 {
-		t.Errorf("the map has %d open sections: they ship open so find-in-page reads them",
-			strings.Count(body, "<details open>"))
-	}
+	assert.Should(t, strings.Count(body, "<details open>") >= 20, "the map has %d open sections: they ship open so find-in-page reads them",
+		strings.Count(body, "<details open>"))
 }
 
 // TestAMachineNameKeepsItsOwnVoice holds the Copyable Is Mono Rule on
@@ -331,19 +273,13 @@ func TestAMachineNameKeepsItsOwnVoice(t *testing.T) {
 	pages := buildSite(t)
 	tools := pages["agents/reference/tools.html"]
 	for _, name := range []string{"analysis", "relation_types", "entities"} {
-		if !strings.Contains(tools, `id="`+name+`" class="ident"`) {
-			t.Errorf("the heading %q is not marked as a machine name", name)
-		}
+		assert.Should(t, strings.Contains(tools, `id="`+name+`" class="ident"`), "the heading %q is not marked as a machine name", name)
 	}
 	// And a sentence is not: the rule is a shape, so it has to refuse as
 	// well as admit.
 	home := pages["index.html"]
-	if strings.Contains(home, `id="known-limitations" class="ident"`) {
-		t.Error(`"Known limitations" is a sentence and is marked as a machine name`)
-	}
-	if !strings.Contains(siteCSS, ".ident { font-family: var(--mono)") {
-		t.Error("nothing sets the machine-name voice, so the class is a mechanism nothing reads")
-	}
+	assert.Should(t, !strings.Contains(home, `id="known-limitations" class="ident"`), `"Known limitations" is a sentence and is marked as a machine name`)
+	assert.Should(t, strings.Contains(siteCSS, ".ident { font-family: var(--mono)"), "nothing sets the machine-name voice, so the class is a mechanism nothing reads")
 }
 
 // TestNothingOnTheSiteScrollsSideways is the specificity bug that
@@ -380,9 +316,7 @@ func TestTheStylesheetHasNoDeadOrMissingTokens(t *testing.T) {
 				break
 			}
 		}
-		if !found {
-			t.Errorf("the stylesheet dresses <%s> and no page emits one", tag)
-		}
+		assert.Should(t, found, "the stylesheet dresses <%s> and no page emits one", tag)
 	}
 }
 
@@ -406,13 +340,9 @@ const (
 // image that is not there.
 func TestEveryImageIsInTheIndex(t *testing.T) {
 	entries, err := os.ReadDir(imageDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", imageDir, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", imageDir, err)
 	index, err := os.ReadFile(imageIndex)
-	if err != nil {
-		t.Fatalf("read %s: %v", imageIndex, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", imageIndex, err)
 	listed := string(index)
 
 	var files []string
@@ -421,14 +351,10 @@ func TestEveryImageIsInTheIndex(t *testing.T) {
 			continue
 		}
 		files = append(files, entry.Name())
-		if !strings.Contains(listed, "`"+entry.Name()+"`") {
-			t.Errorf("%s is published and has no row in docs/images/readme.md: nothing says what it "+
-				"shows, where it was taken or when it stopped being true", entry.Name())
-		}
+		assert.Should(t, strings.Contains(listed, "`"+entry.Name()+"`"), "%s is published and has no row in docs/images/readme.md: nothing says what it "+
+			"shows, where it was taken or when it stopped being true", entry.Name())
 	}
-	if len(files) == 0 {
-		t.Fatal("no image found under docs/images: this guard is holding nothing")
-	}
+	assert.Must(t, len(files) != 0, "no image found under docs/images: this guard is holding nothing")
 
 	// And the other direction: a row for an image somebody deleted.
 	for _, row := range regexp.MustCompile("`([\\w-]+\\.png)`").FindAllStringSubmatch(listed, -1) {
@@ -444,9 +370,7 @@ func TestEveryImageIsInTheIndex(t *testing.T) {
 func TestEveryPublishedImageIsCarriedAndUsed(t *testing.T) {
 	pages := buildSite(t)
 	entries, err := os.ReadDir(imageDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", imageDir, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", imageDir, err)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
 			continue
@@ -458,9 +382,7 @@ func TestEveryPublishedImageIsCarriedAndUsed(t *testing.T) {
 				break
 			}
 		}
-		if !shown {
-			t.Errorf("%s is committed and no page shows it", entry.Name())
-		}
+		assert.Should(t, shown, "%s is committed and no page shows it", entry.Name())
 	}
 }
 
@@ -473,21 +395,15 @@ func TestEveryPublishedImageIsCarriedAndUsed(t *testing.T) {
 func TestTheFrontPageIsNotTheReadme(t *testing.T) {
 	pages := buildSite(t)
 	front, ok := pages["index.html"]
-	if !ok {
-		t.Fatal("the site has no index.html")
-	}
+	assert.Must(t, ok, "the site has no index.html")
 	for _, operator := range []string{"docker compose", "FIRST_ADMIN_PASSWORD", "TEST_DATABASE_URL"} {
-		if strings.Contains(front, operator) {
-			t.Errorf("the front page carries %q: that belongs on running.html", operator)
-		}
+		assert.Should(t, !strings.Contains(front, operator), "the front page carries %q: that belongs on running.html", operator)
 	}
 	if _, ok := pages["running.html"]; !ok {
 		t.Error("the readme is not published anywhere: an operator still needs it")
 	}
 	// It shows the product rather than only describing it.
-	if !strings.Contains(front, "<figure>") {
-		t.Error("the front page shows no screenshot of the product it describes")
-	}
+	assert.Should(t, strings.Contains(front, "<figure>"), "the front page shows no screenshot of the product it describes")
 }
 
 // TestEveryWrittenPageIsAMarkdownFile is the guard on where this site's
@@ -501,19 +417,15 @@ func TestTheFrontPageIsNotTheReadme(t *testing.T) {
 // that nothing publishes.
 func TestEveryWrittenPageIsAMarkdownFile(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join("..", "..", siteDir))
-	if err != nil {
-		t.Fatalf("read %s: %v", siteDir, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", siteDir, err)
 	var names []string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
 			names = append(names, strings.TrimSuffix(entry.Name(), ".md"))
 		}
 	}
-	if len(names) < 4 {
-		t.Fatalf("%s holds %d page(s): the front page, the bundle's index, the map and the "+
-			"refusal page are all written here", siteDir, len(names))
-	}
+	assert.Must(t, len(names) >= 4, "%s holds %d page(s): the front page, the bundle's index, the map and the "+
+		"refusal page are all written here", siteDir, len(names))
 
 	// Every one of them renders, and none is left asking for a part this
 	// generator does not build.
@@ -525,16 +437,12 @@ func TestEveryWrittenPageIsAMarkdownFile(t *testing.T) {
 			t.Errorf("%s.md: %v", name, err)
 			continue
 		}
-		if strings.Contains(body, "{{") {
-			t.Errorf("%s.md leaves an unexpanded part in its output", name)
-		}
+		assert.Should(t, !strings.Contains(body, "{{"), "%s.md leaves an unexpanded part in its output", name)
 	}
 
 	// And nothing in the built site still carries a marker.
 	for path, body := range buildSite(t) {
-		if strings.Contains(body, "{{") {
-			t.Errorf("%s ships an unexpanded {{part}}", path)
-		}
+		assert.Should(t, !strings.Contains(body, "{{"), "%s ships an unexpanded {{part}}", path)
 	}
 }
 
@@ -543,18 +451,12 @@ func TestEveryWrittenPageIsAMarkdownFile(t *testing.T) {
 // off the file so the page does not jump while it loads.
 func TestAPictureOnItsOwnLineIsAFigure(t *testing.T) {
 	front := buildSite(t)["index.html"]
-	if strings.Contains(front, "<p><img") {
-		t.Error("an image is still a bare paragraph: the figure transform did not run")
-	}
+	assert.Should(t, !strings.Contains(front, "<p><img"), "an image is still a bare paragraph: the figure transform did not run")
 	for _, want := range []string{"<figure><img ", "<figcaption>", `width="1440" height="815"`} {
-		if !strings.Contains(front, want) {
-			t.Errorf("the front page's figures carry no %s", want)
-		}
+		assert.Should(t, strings.Contains(front, want), "the front page's figures carry no %s", want)
 	}
 	// The size is read and not written down: a picture of another size
 	// gets its own.
 	w, h, ok := pngSize(filepath.Join("..", "..", "docs", "images", "quest-chain.png"))
-	if !ok || w != 1440 || h != 815 {
-		t.Errorf("pngSize read %dx%d (ok=%v) from a 1440x815 screenshot", w, h, ok)
-	}
+	assert.Should(t, ok && w == 1440 && h == 815, "pngSize read %dx%d (ok=%v) from a 1440x815 screenshot", w, h, ok)
 }

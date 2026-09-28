@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/realtime"
 	"github.com/neverbot/maestro/internal/roles"
@@ -46,9 +47,7 @@ func TestService(t *testing.T) {
 			}
 			return sentinel
 		})
-		if !errors.Is(err, sentinel) {
-			t.Fatalf("err = %v, want fn's own error returned unwrapped enough to match", err)
-		}
+		assert.Must(t, errors.Is(err, sentinel), "err = %v, want fn's own error returned unwrapped enough to match", err)
 		if got := countRelationTypes(t, g, "rolled-back"); got != 0 {
 			t.Fatalf("%d rows survived a rolled-back unit of work", got)
 		}
@@ -61,9 +60,7 @@ func TestService(t *testing.T) {
 	// only a production wiring reaches.
 	t.Run("nothing is published without a hub", func(t *testing.T) {
 		g := a.game(t)
-		if g.analysis.hub != nil {
-			t.Fatal("this fixture is supposed to have no hub")
-		}
+		assert.Must(t, g.analysis.hub == nil, "this fixture is supposed to have no hub")
 		g.analysis.publish(g.projectID, "route.checked", roles.Viewer, false,
 			map[string]any{"key": "the-critical-path"})
 	})
@@ -97,15 +94,9 @@ func TestService(t *testing.T) {
 
 		select {
 		case event := <-sub.C:
-			if event.Kind != "route.checked" {
-				t.Fatalf("kind = %q", event.Kind)
-			}
-			if event.MinRole != string(roles.Editor) || !event.HumanOnly {
-				t.Fatalf("event = %+v, want the gating this call site chose", event)
-			}
-			if event.ProjectID != g.projectID {
-				t.Fatalf("project = %s, want %s", event.ProjectID, g.projectID)
-			}
+			assert.Must(t, event.Kind == "route.checked", "kind = %q", event.Kind)
+			assert.Must(t, event.MinRole == string(roles.Editor) && event.HumanOnly, "event = %+v, want the gating this call site chose", event)
+			assert.Must(t, event.ProjectID == g.projectID, "project = %s, want %s", event.ProjectID, g.projectID)
 		default:
 			t.Fatal("nothing was published to a subscriber of this game")
 		}

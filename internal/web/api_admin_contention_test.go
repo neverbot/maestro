@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -59,14 +60,10 @@ func TestAGameDeletionDeadlockedByAContentWriteIsRetryable(t *testing.T) {
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := mm.UpsertEntityType(ctx, project.ID, metamodel.EntityTypeInput{
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 	}); err != nil {
@@ -79,17 +76,13 @@ func TestAGameDeletionDeadlockedByAContentWriteIsRetryable(t *testing.T) {
 	}
 
 	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
+	assert.Must(t, err == nil, "Acquire: %v", err)
 	defer conn.Release()
 	if _, err := conn.Exec(ctx, "SET deadlock_timeout = '30s'"); err != nil {
 		t.Fatalf("SET deadlock_timeout: %v", err)
 	}
 	tx, err := conn.Begin(ctx)
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
+	assert.Must(t, err == nil, "Begin: %v", err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	var held int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM (SELECT id FROM entities WHERE project_id = $1 FOR UPDATE) locked", project.ID).Scan(&held); err != nil {
@@ -117,10 +110,8 @@ func TestAGameDeletionDeadlockedByAContentWriteIsRetryable(t *testing.T) {
 		Message string `json:"message"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if rec.Code != http.StatusServiceUnavailable || body.Error != "retryable" {
-		t.Fatalf("a deletion deadlocked by a concurrent content write answered %d %s (%s); "+
-			"want 503 retryable", rec.Code, body.Error, body.Message)
-	}
+	assert.Must(t, rec.Code == http.StatusServiceUnavailable && body.Error == "retryable", "a deletion deadlocked by a concurrent content write answered %d %s (%s); "+
+		"want 503 retryable", rec.Code, body.Error, body.Message)
 }
 
 // waitForBlockedDelete blocks until the deletion is actually waiting on a

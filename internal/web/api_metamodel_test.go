@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -45,23 +46,15 @@ func newRESTFixture(t *testing.T) restFixture {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: owner.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	agent, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	return restFixture{
 		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md,
 		game: game.ID, gameSlug: game.Slug, ownerID: owner.ID,
@@ -89,9 +82,7 @@ func (f restFixture) call(t *testing.T, cookie *http.Cookie, method, path string
 	var reader *bytes.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal body: %v", err)
 		reader = bytes.NewReader(raw)
 	} else {
 		reader = bytes.NewReader(nil)
@@ -158,17 +149,11 @@ type wireError struct {
 // mode this project has spent several tasks removing from its tests.
 func assertError(t *testing.T, rec *httptest.ResponseRecorder, status int, code, path string) wireError {
 	t.Helper()
-	if rec.Code != status {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, status, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == status, "status = %d, want %d: %s", rec.Code, status, rec.Body.String())
 	var body wireError
 	decodeBody(t, rec, &body)
-	if body.Error != code {
-		t.Fatalf("error = %q, want %q: %s", body.Error, code, rec.Body.String())
-	}
-	if body.Message == "" {
-		t.Fatalf("no message on %s", rec.Body.String())
-	}
+	assert.Must(t, body.Error == code, "error = %q, want %q: %s", body.Error, code, rec.Body.String())
+	assert.Must(t, body.Message != "", "no message on %s", rec.Body.String())
 	if path != "" {
 		found := false
 		for _, f := range body.Details.Fields {
@@ -176,9 +161,7 @@ func assertError(t *testing.T, rec *httptest.ResponseRecorder, status int, code,
 				found = true
 			}
 		}
-		if !found {
-			t.Fatalf("no field problem at path %q: %s", path, rec.Body.String())
-		}
+		assert.Must(t, found, "no field problem at path %q: %s", path, rec.Body.String())
 	}
 	return body
 }
@@ -189,9 +172,7 @@ func questType(t *testing.T, f restFixture) {
 		"key": "quest", "label": "Quest", "label_plural": "Quests",
 		"field_schema": []any{map[string]any{"key": "min_level", "type": "number"}},
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("declare quest type = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "declare quest type = %d: %s", rec.Code, rec.Body.String())
 }
 
 func TestRESTTypesRequireMembership(t *testing.T) {
@@ -218,9 +199,7 @@ func TestRESTCreateAndListTypes(t *testing.T) {
 	questType(t, f)
 
 	rec := f.as(t, http.MethodGet, "/types", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "list = %d: %s", rec.Code, rec.Body.String())
 	var payload struct {
 		Items []struct {
 			ID          string `json:"id"`
@@ -230,18 +209,14 @@ func TestRESTCreateAndListTypes(t *testing.T) {
 		} `json:"items"`
 	}
 	decodeBody(t, rec, &payload)
-	if len(payload.Items) != 1 || payload.Items[0].Key != "quest" {
-		t.Fatalf("items = %+v, want the one declared type", payload.Items)
-	}
+	assert.Must(t, len(payload.Items) == 1 && payload.Items[0].Key == "quest", "items = %+v, want the one declared type", payload.Items)
 	if payload.Items[0].Version != 1 || payload.Items[0].ID == "" {
 		t.Fatalf("item = %+v, want an id and version 1", payload.Items[0])
 	}
 
 	// One type in full, addressed by key.
 	one := f.as(t, http.MethodGet, "/types/by-key/quest", nil)
-	if one.Code != http.StatusOK {
-		t.Fatalf("get = %d: %s", one.Code, one.Body.String())
-	}
+	assert.Must(t, one.Code == http.StatusOK, "get = %d: %s", one.Code, one.Body.String())
 	var detail struct {
 		Key    string `json:"key"`
 		Schema []struct {
@@ -249,9 +224,7 @@ func TestRESTCreateAndListTypes(t *testing.T) {
 		} `json:"field_schema"`
 	}
 	decodeBody(t, one, &detail)
-	if detail.Key != "quest" || len(detail.Schema) != 1 || detail.Schema[0].Key != "min_level" {
-		t.Fatalf("detail = %+v, want the declared field schema back", detail)
-	}
+	assert.Must(t, detail.Key == "quest" && len(detail.Schema) == 1 && detail.Schema[0].Key == "min_level", "detail = %+v, want the declared field schema back", detail)
 }
 
 // TestRESTDeclaringABrokenSchemaIsInvalidSchema is where the plan's own
@@ -302,9 +275,7 @@ func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
 		"expected_version": 7,
 	})
 	body := assertError(t, rec, http.StatusConflict, "version_conflict", "")
-	if body.Details.CurrentVersion == nil || *body.Details.CurrentVersion != 1 {
-		t.Fatalf("details = %+v, want the current version 1: %s", body.Details, rec.Body.String())
-	}
+	assert.Must(t, body.Details.CurrentVersion != nil && *body.Details.CurrentVersion == 1, "details = %+v, want the current version 1: %s", body.Details, rec.Body.String())
 }
 
 // TestTheRenameRoutesMirrorTheirTools is what stops the REST rename from
@@ -324,9 +295,7 @@ func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
 		rec := f.as(t, http.MethodPost, "/types", map[string]any{
 			"key": key, "label": key, "label_plural": key + "s",
 		})
-		if rec.Code != http.StatusOK {
-			t.Fatalf("declare %q = %d: %s", key, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "declare %q = %d: %s", key, rec.Code, rec.Body.String())
 		var out struct {
 			ID string `json:"id"`
 		}
@@ -339,19 +308,15 @@ func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
 	rec := f.as(t, http.MethodPost, "/types/rename", map[string]any{
 		"from": "quest", "to": "mission", "expected_version": 1,
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rename = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "rename = %d: %s", rec.Code, rec.Body.String())
 	var renamed struct {
 		ID      string `json:"id"`
 		Key     string `json:"key"`
 		Version int32  `json:"version"`
 	}
 	decodeBody(t, rec, &renamed)
-	if renamed.ID != questID || renamed.Key != "mission" || renamed.Version != 2 {
-		t.Fatalf("the rename answered %+v, want the same id under the new key at version 2",
-			renamed)
-	}
+	assert.Must(t, renamed.ID == questID && renamed.Key == "mission" && renamed.Version == 2, "the rename answered %+v, want the same id under the new key at version 2",
+		renamed)
 	if got := f.as(t, http.MethodGet, "/types/by-key/quest", nil); got.Code != http.StatusNotFound {
 		t.Fatalf("the old key = %d, want 404: the type moved, it was not copied", got.Code)
 	}
@@ -361,27 +326,18 @@ func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
 	taken := f.as(t, http.MethodPost, "/types/rename", map[string]any{
 		"from": "mission", "to": "zone", "expected_version": 2,
 	})
-	if taken.Code != http.StatusBadRequest {
-		t.Fatalf("renaming onto a taken key = %d, want 400: %s", taken.Code, taken.Body.String())
-	}
+	assert.Must(t, taken.Code == http.StatusBadRequest, "renaming onto a taken key = %d, want 400: %s", taken.Code, taken.Body.String())
 	var problem wireError
 	decodeBody(t, taken, &problem)
-	if problem.Error != "invalid_input" || len(problem.Details.Fields) == 0 ||
-		problem.Details.Fields[0].Path != "to" {
-		t.Fatalf("the refusal is %+v, want invalid_input reported at `to`", problem)
-	}
+	assert.Must(t, problem.Error == "invalid_input" && len(problem.Details.Fields) != 0 && problem.Details.Fields[0].Path == "to", "the refusal is %+v, want invalid_input reported at `to`", problem)
 
 	stale := f.as(t, http.MethodPost, "/types/rename", map[string]any{
 		"from": "mission", "to": "quest", "expected_version": 1,
 	})
-	if stale.Code != http.StatusConflict {
-		t.Fatalf("a stale version = %d, want 409: %s", stale.Code, stale.Body.String())
-	}
+	assert.Must(t, stale.Code == http.StatusConflict, "a stale version = %d, want 409: %s", stale.Code, stale.Body.String())
 	var conflict wireError
 	decodeBody(t, stale, &conflict)
-	if conflict.Details.CurrentVersion == nil || *conflict.Details.CurrentVersion != 2 {
-		t.Fatalf("the conflict is %+v, want the version to merge onto", conflict)
-	}
+	assert.Must(t, conflict.Details.CurrentVersion != nil && *conflict.Details.CurrentVersion == 2, "the conflict is %+v, want the version to merge onto", conflict)
 
 	// The relation-type twin, over its own route.
 	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
@@ -392,17 +348,13 @@ func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
 	rec = f.as(t, http.MethodPost, "/relation-types/rename", map[string]any{
 		"from": "available_to", "to": "usable_by", "expected_version": 1,
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rename the relation type = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "rename the relation type = %d: %s", rec.Code, rec.Body.String())
 	var movedEdgeType struct {
 		Key     string `json:"key"`
 		Version int32  `json:"version"`
 	}
 	decodeBody(t, rec, &movedEdgeType)
-	if movedEdgeType.Key != "usable_by" || movedEdgeType.Version != 2 {
-		t.Fatalf("the relation type answered %+v, want usable_by at version 2", movedEdgeType)
-	}
+	assert.Must(t, movedEdgeType.Key == "usable_by" && movedEdgeType.Version == 2, "the relation type answered %+v, want usable_by at version 2", movedEdgeType)
 }
 
 // TestARouteShapedKeyIsStillAddressable is decision 1 of this task,
@@ -428,39 +380,29 @@ func TestARouteShapedKeyIsStillAddressable(t *testing.T) {
 		rec := f.as(t, http.MethodPost, "/types", map[string]any{
 			"key": key, "label": key, "label_plural": key + "s",
 		})
-		if rec.Code != http.StatusOK {
-			t.Fatalf("declare %q = %d: %s", key, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "declare %q = %d: %s", key, rec.Code, rec.Body.String())
 	}
 	for _, key := range keys {
 		rec := f.as(t, http.MethodGet, "/types/by-key/"+key, nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("get %q = %d: %s", key, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "get %q = %d: %s", key, rec.Code, rec.Body.String())
 		var detail struct {
 			ID  string `json:"id"`
 			Key string `json:"key"`
 		}
 		decodeBody(t, rec, &detail)
-		if detail.Key != key {
-			t.Fatalf("get %q answered with %q", key, detail.Key)
-		}
+		assert.Must(t, detail.Key == key, "get %q answered with %q", key, detail.Key)
 		// And the removal reaches the same row: since Metamodel 14 the
 		// removal is addressed by key too, so a key shaped like a route
 		// has to survive it as well as the read.
 		removed := f.as(t, http.MethodDelete, "/types/by-key/"+key, nil)
-		if removed.Code != http.StatusOK {
-			t.Fatalf("remove %q = %d: %s", key, removed.Code, removed.Body.String())
-		}
+		assert.Must(t, removed.Code == http.StatusOK, "remove %q = %d: %s", key, removed.Code, removed.Body.String())
 	}
 	rec := f.as(t, http.MethodGet, "/types", nil)
 	var payload struct {
 		Items []json.RawMessage `json:"items"`
 	}
 	decodeBody(t, rec, &payload)
-	if len(payload.Items) != 0 {
-		t.Fatalf("items = %d, want every route-shaped key removed by id", len(payload.Items))
-	}
+	assert.Must(t, len(payload.Items) == 0, "items = %d, want every route-shaped key removed by id", len(payload.Items))
 }
 
 // TestAGameFieldNamedLikeARowColumnNeverShadowsIt is decision 2, proved
@@ -484,9 +426,7 @@ func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
 			map[string]any{"key": "type_key", "type": "text"},
 		},
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("declare = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "declare = %d: %s", rec.Code, rec.Body.String())
 
 	shadow := map[string]any{
 		"id": "not-a-uuid", "key": "not-the-key", "name": "Not The Name",
@@ -497,14 +437,10 @@ func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
 			"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger", "fields": shadow,
 		}},
 	})
-	if written.Code != http.StatusOK {
-		t.Fatalf("write = %d: %s", written.Code, written.Body.String())
-	}
+	assert.Must(t, written.Code == http.StatusOK, "write = %d: %s", written.Code, written.Body.String())
 
 	got := f.as(t, http.MethodGet, "/entities/by-key/quest/hogger", nil)
-	if got.Code != http.StatusOK {
-		t.Fatalf("read = %d: %s", got.Code, got.Body.String())
-	}
+	assert.Must(t, got.Code == http.StatusOK, "read = %d: %s", got.Code, got.Body.String())
 	var entity struct {
 		ID      string         `json:"id"`
 		TypeKey string         `json:"type_key"`
@@ -518,12 +454,8 @@ func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
 	if _, err := uuid.Parse(entity.ID); err != nil {
 		t.Fatalf("id = %q, want the row's own uuid: %s", entity.ID, got.Body.String())
 	}
-	if entity.Key != "hogger" || entity.Name != "Wanted: Hogger" || entity.TypeKey != "quest" {
-		t.Fatalf("row = %+v, want the row's own identity, not the game's field values", entity)
-	}
-	if entity.Version != 1 || entity.Invalid {
-		t.Fatalf("row = %+v, want version 1 and invalid false", entity)
-	}
+	assert.Must(t, entity.Key == "hogger" && entity.Name == "Wanted: Hogger" && entity.TypeKey == "quest", "row = %+v, want the row's own identity, not the game's field values", entity)
+	assert.Must(t, entity.Version == 1 && !entity.Invalid, "row = %+v, want version 1 and invalid false", entity)
 	for key, want := range shadow {
 		if entity.Fields[key] != want {
 			t.Fatalf("fields[%q] = %v, want %v", key, entity.Fields[key], want)
@@ -550,9 +482,7 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -565,14 +495,10 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 	}
 
 	writes := f.srv.ContentWritePatternsForTest()
-	if len(writes) == 0 {
-		t.Fatal("the server registered no content write routes — this test would pass vacuously")
-	}
+	assert.Must(t, len(writes) != 0, "the server registered no content write routes — this test would pass vacuously")
 	for _, pattern := range writes {
 		method, path, ok := strings.Cut(pattern, " ")
-		if !ok {
-			t.Fatalf("pattern %q names no method", pattern)
-		}
+		assert.Must(t, ok, "pattern %q names no method", pattern)
 		// A body that would be perfectly acceptable from an editor, so
 		// the refusal cannot be blamed on the request itself. Every
 		// wildcard but {game} is filled with a value that resolves to
@@ -590,9 +516,7 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 		t.Run(pattern, func(t *testing.T) {
 			rec := f.call(t, cookie, method, path, body)
 			assertError(t, rec, http.StatusForbidden, "forbidden", "")
-			if !strings.Contains(rec.Body.String(), "viewer") {
-				t.Errorf("%s said %q, want it to name the role that cannot write", pattern, rec.Body.String())
-			}
+			assert.Should(t, strings.Contains(rec.Body.String(), "viewer"), "%s said %q, want it to name the role that cannot write", pattern, rec.Body.String())
 		})
 	}
 }
@@ -609,9 +533,7 @@ func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
 	other, err := f.proj.Create(context.Background(), "le-mans", "Le Mans", f.ownerID)
-	if err != nil {
-		t.Fatalf("Create other game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create other game: %v", err)
 
 	rec := f.as(t, http.MethodPost, "/types", map[string]any{
 		"game": other.Slug,
@@ -625,9 +547,7 @@ func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 		"game": f.gameSlug,
 		"key":  "quest", "label": "Quest", "label_plural": "Quests",
 	})
-	if ok.Code != http.StatusOK {
-		t.Fatalf("agreeing game = %d: %s", ok.Code, ok.Body.String())
-	}
+	assert.Must(t, ok.Code == http.StatusOK, "agreeing game = %d: %s", ok.Code, ok.Body.String())
 
 	// The confirmation folds case, like the address beside it: a caller
 	// that confirmed "Azeroth" while working in "azeroth" confirmed the
@@ -637,9 +557,7 @@ func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 		"game": strings.ToUpper(f.gameSlug),
 		"key":  "zone", "label": "Zone", "label_plural": "Zones",
 	})
-	if folded.Code != http.StatusOK {
-		t.Fatalf("a differently-cased game confirmation = %d: %s", folded.Code, folded.Body.String())
-	}
+	assert.Must(t, folded.Code == http.StatusOK, "a differently-cased game confirmation = %d: %s", folded.Code, folded.Body.String())
 }
 
 // The order the catalogue's column headers set, read off a URL.
@@ -662,18 +580,12 @@ func TestTheOrderReachesTheListingThroughTheURL(t *testing.T) {
 
 	ascending := entityKeys(t, f, "?type_key=quest&order=name")
 	descending := entityKeys(t, f, "?type_key=quest&order=-name")
-	if len(ascending) != 3 || ascending[0] != "alpha" {
-		t.Fatalf("order=name = %v", ascending)
-	}
-	if len(descending) != 3 || descending[0] != "charlie" {
-		t.Fatalf("order=-name = %v", descending)
-	}
+	assert.Must(t, len(ascending) == 3 && ascending[0] == "alpha", "order=name = %v", ascending)
+	assert.Must(t, len(descending) == 3 && descending[0] == "charlie", "order=-name = %v", descending)
 	// Not "the two are different": two wrong orders are different too.
 	// The reverse of one is the other, row for row.
 	for i, key := range ascending {
-		if descending[len(descending)-1-i] != key {
-			t.Fatalf("order=-name %v is not the reverse of order=name %v", descending, ascending)
-		}
+		assert.Must(t, descending[len(descending)-1-i] == key, "order=-name %v is not the reverse of order=name %v", descending, ascending)
 	}
 	if got := entityKeys(t, f, "?type_key=quest&order=-updated"); len(got) != 3 {
 		t.Fatalf("order=-updated = %v, want three rows", got)
@@ -746,9 +658,7 @@ func TestRESTRelationsListNamesItsEndpointsByRef(t *testing.T) {
 	}
 
 	rec := f.as(t, http.MethodGet, "/relations", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "list = %d: %s", rec.Code, rec.Body.String())
 	var page struct {
 		Items []struct {
 			SourceID string `json:"source_id"`
@@ -763,19 +673,11 @@ func TestRESTRelationsListNamesItsEndpointsByRef(t *testing.T) {
 		} `json:"items"`
 	}
 	decodeBody(t, rec, &page)
-	if len(page.Items) != 1 {
-		t.Fatalf("items = %+v, want the one edge", page.Items)
-	}
+	assert.Must(t, len(page.Items) == 1, "items = %+v, want the one edge", page.Items)
 	edge := page.Items[0]
-	if edge.Source == nil || edge.Target == nil {
-		t.Fatalf("edge = %+v, want both endpoints resolved", edge)
-	}
-	if edge.Source.Key != "hogger" || edge.Source.TypeKey != "quest" || edge.Source.Name != "Wanted: Hogger" {
-		t.Fatalf("source = %+v, want the quest the edge was written with", edge.Source)
-	}
-	if edge.Target.Key != "elwynn" {
-		t.Fatalf("target = %+v, want the zone", edge.Target)
-	}
+	assert.Must(t, edge.Source != nil && edge.Target != nil, "edge = %+v, want both endpoints resolved", edge)
+	assert.Must(t, edge.Source.Key == "hogger" && edge.Source.TypeKey == "quest" && edge.Source.Name == "Wanted: Hogger", "source = %+v, want the quest the edge was written with", edge.Source)
+	assert.Must(t, edge.Target.Key == "elwynn", "target = %+v, want the zone", edge.Target)
 	if _, err := uuid.Parse(edge.SourceID); err != nil {
 		t.Fatalf("source_id = %q, want the id a removal addresses", edge.SourceID)
 	}
@@ -794,27 +696,19 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 	outsider, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "outsider@example.test", DisplayName: "Outsider", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	theirs, err := f.proj.Create(ctx, "le-mans", "Le Mans", outsider.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, f.srv, "outsider@example.test")
 
 	// Their own game answers, and holds none of this game's types.
 	own := f.call(t, cookie, http.MethodGet, "/api/games/"+theirs.Slug+"/types", nil)
-	if own.Code != http.StatusOK {
-		t.Fatalf("own game = %d: %s", own.Code, own.Body.String())
-	}
+	assert.Must(t, own.Code == http.StatusOK, "own game = %d: %s", own.Code, own.Body.String())
 	var payload struct {
 		Items []json.RawMessage `json:"items"`
 	}
 	decodeBody(t, own, &payload)
-	if len(payload.Items) != 0 {
-		t.Fatalf("items = %d, want another game's types to be invisible", len(payload.Items))
-	}
+	assert.Must(t, len(payload.Items) == 0, "items = %d, want another game's types to be invisible", len(payload.Items))
 
 	// This game does not, and says so in the words a game that does not
 	// exist gets: a slug is guessable, so the two are one answer
@@ -852,9 +746,7 @@ func TestTheGameSummaryCountsContentWithoutListingIt(t *testing.T) {
 	}
 
 	rec := f.as(t, http.MethodGet, "/summary", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "summary = %d: %s", rec.Code, rec.Body.String())
 	var summary gameSummary
 	decodeBody(t, rec, &summary)
 
@@ -862,17 +754,11 @@ func TestTheGameSummaryCountsContentWithoutListingIt(t *testing.T) {
 	for _, typ := range summary.EntityTypes {
 		counts[typ.Key] = typ.EntityCount
 	}
-	if counts["quest"] != 100 || counts["zone"] != 20 {
-		t.Fatalf("counts = %+v, want 100 quests and 20 zones", counts)
-	}
-	if summary.Totals.Entities != 120 || summary.Totals.Relations != 0 || summary.Totals.Invalid != 0 {
-		t.Fatalf("totals = %+v, want 120 entities and nothing else", summary.Totals)
-	}
+	assert.Must(t, counts["quest"] == 100 && counts["zone"] == 20, "counts = %+v, want 100 quests and 20 zones", counts)
+	assert.Must(t, summary.Totals.Entities == 120 && summary.Totals.Relations == 0 && summary.Totals.Invalid == 0, "totals = %+v, want 120 entities and nothing else", summary.Totals)
 	// The payload is a catalogue, not a listing: no individual row of
 	// the hundred and twenty appears in it.
-	if strings.Contains(rec.Body.String(), "quest-42") {
-		t.Fatalf("the summary carries individual entities: %s", rec.Body.String())
-	}
+	assert.Must(t, !strings.Contains(rec.Body.String(), "quest-42"), "the summary carries individual entities: %s", rec.Body.String())
 }
 
 // TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue pins what the home
@@ -883,21 +769,13 @@ func TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
 	rec := f.as(t, http.MethodGet, "/summary", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "summary = %d: %s", rec.Code, rec.Body.String())
 	var summary gameSummary
 	decodeBody(t, rec, &summary)
-	if summary.EntityTypes == nil || summary.RelationTypes == nil {
-		t.Fatalf("summary = %+v, want empty arrays a page can iterate, not nulls: %s",
-			summary, rec.Body.String())
-	}
-	if len(summary.EntityTypes) != 0 || len(summary.RelationTypes) != 0 {
-		t.Fatalf("summary = %+v, want nothing declared yet", summary)
-	}
-	if summary.Totals.Entities != 0 || summary.Totals.Relations != 0 || summary.Totals.Invalid != 0 {
-		t.Fatalf("totals = %+v, want zeros", summary.Totals)
-	}
+	assert.Must(t, summary.EntityTypes != nil && summary.RelationTypes != nil, "summary = %+v, want empty arrays a page can iterate, not nulls: %s",
+		summary, rec.Body.String())
+	assert.Must(t, len(summary.EntityTypes) == 0 && len(summary.RelationTypes) == 0, "summary = %+v, want nothing declared yet", summary)
+	assert.Must(t, summary.Totals.Entities == 0 && summary.Totals.Relations == 0 && summary.Totals.Invalid == 0, "totals = %+v, want zeros", summary.Totals)
 }
 
 // TestTheGameSummaryCountsTheRowsASchemaEditInvalidated is the one number
@@ -928,16 +806,10 @@ func TestTheGameSummaryCountsTheRowsASchemaEditInvalidated(t *testing.T) {
 	rec := f.as(t, http.MethodGet, "/summary", nil)
 	var summary gameSummary
 	decodeBody(t, rec, &summary)
-	if len(summary.EntityTypes) != 1 {
-		t.Fatalf("entity_types = %+v, want the one type", summary.EntityTypes)
-	}
+	assert.Must(t, len(summary.EntityTypes) == 1, "entity_types = %+v, want the one type", summary.EntityTypes)
 	quest := summary.EntityTypes[0]
-	if quest.EntityCount != 2 || quest.InvalidCount != 1 {
-		t.Fatalf("quest = %+v, want 2 entities of which 1 invalid", quest)
-	}
-	if summary.Totals.Invalid != 1 {
-		t.Fatalf("totals = %+v, want one invalid row", summary.Totals)
-	}
+	assert.Must(t, quest.EntityCount == 2 && quest.InvalidCount == 1, "quest = %+v, want 2 entities of which 1 invalid", quest)
+	assert.Must(t, summary.Totals.Invalid == 1, "totals = %+v, want one invalid row", summary.Totals)
 }
 
 // gameSummary is GET /api/games/{game}/summary's answer, as a client
@@ -980,15 +852,11 @@ func TestATokenMayReadItsOwnGamesContentAndNoOthers(t *testing.T) {
 	questType(t, f)
 
 	other, err := f.proj.Create(ctx, "le-mans", "Le Mans", f.ownerID)
-	if err != nil {
-		t.Fatalf("Create other game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create other game: %v", err)
 	token, _, err := f.ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: f.game, UserID: f.ownerID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	send := func(path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -999,9 +867,7 @@ func TestATokenMayReadItsOwnGamesContentAndNoOthers(t *testing.T) {
 	}
 
 	own := send(f.path("/types"))
-	if own.Code != http.StatusOK {
-		t.Fatalf("own game = %d: %s", own.Code, own.Body.String())
-	}
+	assert.Must(t, own.Code == http.StatusOK, "own game = %d: %s", own.Code, own.Body.String())
 	assertError(t, send("/api/games/"+other.ID.String()+"/types"),
 		http.StatusForbidden, "scope_violation", "")
 }
@@ -1034,9 +900,7 @@ func invalidAndValidQuests(t *testing.T, f restFixture) (invalid, valid string) 
 func entityKeys(t *testing.T, f restFixture, query string) []string {
 	t.Helper()
 	rec := f.as(t, http.MethodGet, "/entities"+query, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list %q = %d: %s", query, rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "list %q = %d: %s", query, rec.Code, rec.Body.String())
 	var page struct {
 		Items []struct {
 			Key string `json:"key"`
@@ -1113,9 +977,7 @@ func TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
 	// Empty: present and naming nothing. The field is a confirmation,
 	// and an empty confirmation confirms nothing.
 	body := assertError(t, declare(""), http.StatusBadRequest, "bad_request", "")
-	if !strings.Contains(body.Message, "slug") {
-		t.Errorf("message = %q, want it to say what to pass", body.Message)
-	}
+	assert.Should(t, strings.Contains(body.Message, "slug"), "message = %q, want it to say what to pass", body.Message)
 
 	// A name that is not a game at all is a scope violation and not a
 	// bad_request: from this surface's point of view it is simply not
@@ -1125,9 +987,7 @@ func TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
 
 	// And the rule the field exists for still holds in both directions.
 	other, err := f.proj.Create(context.Background(), "monza", "Monza", f.ownerID)
-	if err != nil {
-		t.Fatalf("Create other game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create other game: %v", err)
 	assertError(t, declare(other.Slug), http.StatusForbidden, "scope_violation", "")
 	if rec := declare(f.gameSlug); rec.Code != http.StatusOK {
 		t.Fatalf("agreeing game = %d: %s", rec.Code, rec.Body.String())
@@ -1173,12 +1033,8 @@ func TestAWrongTypedFieldIsNamed(t *testing.T) {
 			f.srv.ServeHTTP(rec, req)
 
 			got := assertError(t, rec, http.StatusBadRequest, "bad_request", tc.path)
-			if strings.Contains(got.Message, "malformed") {
-				t.Errorf("message = %q, but this body is well-formed JSON", got.Message)
-			}
-			if strings.Contains(got.Message, "not number ") {
-				t.Errorf("message = %q leaks encoding/json's own wording and denies that a number is one", got.Message)
-			}
+			assert.Should(t, !strings.Contains(got.Message, "malformed"), "message = %q, but this body is well-formed JSON", got.Message)
+			assert.Should(t, !strings.Contains(got.Message, "not number "), "message = %q leaks encoding/json's own wording and denies that a number is one", got.Message)
 		})
 	}
 
@@ -1212,21 +1068,15 @@ func TestASeedSizedBatchIsAccepted(t *testing.T) {
 		})
 	}
 	body, err := json.Marshal(map[string]any{"items": items})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if len(body) <= 16*1024 {
-		t.Fatalf("the batch is %d bytes, too small to prove anything about a 16 KiB bound", len(body))
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, len(body) > 16*1024, "the batch is %d bytes, too small to prove anything about a 16 KiB bound", len(body))
 
 	req := httptest.NewRequest(http.MethodPost, f.path("/entities"), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(f.cookie)
 	rec := httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("seed of %d bytes = %d: %s", len(body), rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "seed of %d bytes = %d: %s", len(body), rec.Code, rec.Body.String())
 	// A batch answers 200 with a report even when rows failed, so the
 	// status alone would pass for a request that landed nothing.
 	var report struct {
@@ -1236,10 +1086,8 @@ func TestASeedSizedBatchIsAccepted(t *testing.T) {
 		Failed []any `json:"failed"`
 	}
 	decodeBody(t, rec, &report)
-	if len(report.Written) != len(items) || len(report.Failed) != 0 {
-		t.Fatalf("wrote %d of %d rows, %d failed: %s",
-			len(report.Written), len(items), len(report.Failed), rec.Body.String())
-	}
+	assert.Must(t, len(report.Written) == len(items) && len(report.Failed) == 0, "wrote %d of %d rows, %d failed: %s",
+		len(report.Written), len(items), len(report.Failed), rec.Body.String())
 }
 
 // TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame
@@ -1285,23 +1133,17 @@ func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testi
 		{"?" + dirKey + "=", []string{relKey, typeKey, entKey, dirKey}},
 	} {
 		rec := f.as(t, http.MethodGet, "/entities"+tc.query, nil)
-		if rec.Code == http.StatusOK {
-			t.Fatalf("%s = 200 with %s, want a refusal rather than the whole game",
-				tc.query, rec.Body.String())
-		}
+		assert.Must(t, rec.Code != http.StatusOK, "%s = 200 with %s, want a refusal rather than the whole game",
+			tc.query, rec.Body.String())
 		got := assertError(t, rec, http.StatusBadRequest, "invalid_input", "")
 		paths := map[string]bool{}
 		for _, field := range got.Details.Fields {
 			paths[field.Path] = true
 		}
-		if len(paths) != len(tc.missing) {
-			t.Errorf("%s named %d paths, want exactly the %d missing ones: %s",
-				tc.query, len(paths), len(tc.missing), rec.Body.String())
-		}
+		assert.Should(t, len(paths) == len(tc.missing), "%s named %d paths, want exactly the %d missing ones: %s",
+			tc.query, len(paths), len(tc.missing), rec.Body.String())
 		for _, want := range tc.missing {
-			if !paths[want] {
-				t.Errorf("%s did not name the missing %s: %s", tc.query, want, rec.Body.String())
-			}
+			assert.Should(t, paths[want], "%s did not name the missing %s: %s", tc.query, want, rec.Body.String())
 		}
 	}
 
@@ -1346,9 +1188,7 @@ func TestARepeatedOrEmptyQueryParameterIsRefused(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := f.as(t, http.MethodGet, "/entities"+tc.query, nil)
-			if rec.Code == http.StatusOK {
-				t.Fatalf("%s = 200: %s", tc.query, rec.Body.String())
-			}
+			assert.Must(t, rec.Code != http.StatusOK, "%s = 200: %s", tc.query, rec.Body.String())
 			assertError(t, rec, http.StatusBadRequest, "invalid_input", tc.path)
 		})
 	}
@@ -1366,18 +1206,12 @@ func TestALimitTooLargeForTheFieldSaysSo(t *testing.T) {
 
 	got := assertError(t, f.as(t, http.MethodGet, "/entities?limit=999999999999", nil),
 		http.StatusBadRequest, "invalid_input", "limit")
-	if strings.Contains(got.Message, "not a number") {
-		t.Errorf("message = %q, but 999999999999 is a number", got.Message)
-	}
-	if !strings.Contains(got.Message, "999999999999") {
-		t.Errorf("message = %q, want it to quote the value it refused", got.Message)
-	}
+	assert.Should(t, !strings.Contains(got.Message, "not a number"), "message = %q, but 999999999999 is a number", got.Message)
+	assert.Should(t, strings.Contains(got.Message, "999999999999"), "message = %q, want it to quote the value it refused", got.Message)
 	// A genuine non-number still says what it is.
 	got = assertError(t, f.as(t, http.MethodGet, "/entities?limit=lots", nil),
 		http.StatusBadRequest, "invalid_input", "limit")
-	if !strings.Contains(got.Message, "not a number") {
-		t.Errorf("message = %q, want it to say \"lots\" is not a number", got.Message)
-	}
+	assert.Should(t, strings.Contains(got.Message, "not a number"), "message = %q, want it to say \"lots\" is not a number", got.Message)
 }
 
 // TestABodyThatIsNotAnObjectSaysSo pins the other half of the wrong-type
@@ -1399,12 +1233,8 @@ func TestABodyThatIsNotAnObjectSaysSo(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			got := assertError(t, f.raw(t, http.MethodPost, "/types", body),
 				http.StatusBadRequest, "bad_request", "")
-			if strings.Contains(got.Message, "malformed") {
-				t.Errorf("message = %q, but %s is well-formed JSON", got.Message, body)
-			}
-			if !strings.Contains(got.Message, "JSON object") {
-				t.Errorf("message = %q, want it to say the body must be a JSON object", got.Message)
-			}
+			assert.Should(t, !strings.Contains(got.Message, "malformed"), "message = %q, but %s is well-formed JSON", got.Message, body)
+			assert.Should(t, strings.Contains(got.Message, "JSON object"), "message = %q, want it to say the body must be a JSON object", got.Message)
 		})
 	}
 }
@@ -1430,9 +1260,7 @@ func TestDataAfterTheJSONBodyIsRefused(t *testing.T) {
 		Types []any `json:"types"`
 	}
 	decodeBody(t, f.as(t, http.MethodGet, "/types", nil), &list)
-	if len(list.Types) != 0 {
-		t.Fatalf("a refused two-value body still wrote %d types", len(list.Types))
-	}
+	assert.Must(t, len(list.Types) == 0, "a refused two-value body still wrote %d types", len(list.Types))
 }
 
 // TestTheSummaryNamesTheCallersRole pins the one field the game home
@@ -1452,27 +1280,19 @@ func TestTheSummaryNamesTheCallersRole(t *testing.T) {
 		Role string `json:"role"`
 	}
 	decodeBody(t, f.as(t, http.MethodGet, "/summary", nil), &summary)
-	if summary.Role != "owner" {
-		t.Errorf("the owner's summary names role %q", summary.Role)
-	}
+	assert.Should(t, summary.Role == "owner", "the owner's summary names role %q", summary.Role)
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "onlooker@example.test", DisplayName: "Onlooker", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	rec := f.call(t, loginAs(t, f.srv, "onlooker@example.test"), http.MethodGet, f.path("/summary"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("viewer summary = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "viewer summary = %d: %s", rec.Code, rec.Body.String())
 	decodeBody(t, rec, &summary)
-	if summary.Role != "viewer" {
-		t.Errorf("the viewer's summary names role %q", summary.Role)
-	}
+	assert.Should(t, summary.Role == "viewer", "the viewer's summary names role %q", summary.Role)
 }
 
 // TestRemovingATypeStillInUseIsAConflict pins the status the domain's
@@ -1553,17 +1373,11 @@ func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
 	one := f.as(t, http.MethodGet,
 		"/relations/one?type_key=connects_to&source_type_key=zone&source_key=elwynn"+
 			"&target_type_key=zone&target_key=westfall", nil)
-	if one.Code != http.StatusOK {
-		t.Fatalf("read one edge = %d: %s", one.Code, one.Body.String())
-	}
+	assert.Must(t, one.Code == http.StatusOK, "read one edge = %d: %s", one.Code, one.Body.String())
 	var got edgeBody
 	decodeBody(t, one, &got)
-	if got.Fields["requires_ability"] != "mothwing_cloak" {
-		t.Fatalf("edge = %+v, want the ability it was written with", got)
-	}
-	if got.TypeKey != "connects_to" || got.Source == nil || got.Source.Key != "elwynn" {
-		t.Fatalf("edge = %+v, want the identity the listing gives too", got)
-	}
+	assert.Must(t, got.Fields["requires_ability"] == "mothwing_cloak", "edge = %+v, want the ability it was written with", got)
+	assert.Must(t, got.TypeKey == "connects_to" && got.Source != nil && got.Source.Key == "elwynn", "edge = %+v, want the identity the listing gives too", got)
 
 	// A fresh decode target per read: json.Unmarshal reuses the elements
 	// of a slice it is given, so one shared page struct would let the
@@ -1571,16 +1385,12 @@ func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
 	listing := func(path string) []edgeBody {
 		t.Helper()
 		rec := f.as(t, http.MethodGet, path, nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "GET %s = %d: %s", path, rec.Code, rec.Body.String())
 		var page struct {
 			Items []edgeBody `json:"items"`
 		}
 		decodeBody(t, rec, &page)
-		if len(page.Items) != 1 {
-			t.Fatalf("GET %s items = %+v, want the one edge", path, page.Items)
-		}
+		assert.Must(t, len(page.Items) == 1, "GET %s items = %+v, want the one edge", path, page.Items)
 		return page.Items
 	}
 	if fields := listing("/relations")[0].Fields; fields != nil {
@@ -1597,9 +1407,7 @@ func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
 		"/relations/one?type_key=connects_to&source_type_key=zone&source_key=westfall"+
 			"&target_type_key=zone&target_key=elwynn", nil),
 		http.StatusNotFound, "not_found", "")
-	if !strings.Contains(missing.Message, `no "connects_to" edge`) {
-		t.Fatalf("message = %q, want it to name the edge that is missing", missing.Message)
-	}
+	assert.Must(t, strings.Contains(missing.Message, `no "connects_to" edge`), "message = %q, want it to name the edge that is missing", missing.Message)
 	assertError(t, f.as(t, http.MethodGet,
 		"/relations/one?type_key=connects+to&source_type_key=zone&source_key=elwynn"+
 			"&target_type_key=zone&target_key=westfall", nil),
@@ -1679,9 +1487,7 @@ func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
 	rec := f.as(t, http.MethodGet, "/relations", nil)
 	var before relationsPage
 	decodeBody(t, rec, &before)
-	if len(before.Items) != 1 || before.Items[0].Invalid {
-		t.Fatalf("items = %+v, want one edge that still fits", before.Items)
-	}
+	assert.Must(t, len(before.Items) == 1 && !before.Items[0].Invalid, "items = %+v, want one edge that still fits", before.Items)
 	if before.Items[0].Version != 1 {
 		t.Fatalf("version = %d, want 1 — an agent cannot send an expected_version "+
 			"the listing never told it", before.Items[0].Version)
@@ -1699,18 +1505,12 @@ func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
 	} {
 		t.Run("relations"+tc.query, func(t *testing.T) {
 			rec := f.as(t, http.MethodGet, "/relations"+tc.query, nil)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
-			}
+			assert.Must(t, rec.Code == http.StatusOK, "list = %d: %s", rec.Code, rec.Body.String())
 			var page relationsPage
 			decodeBody(t, rec, &page)
-			if len(page.Items) != tc.want {
-				t.Fatalf("items = %d, want %d: %s", len(page.Items), tc.want, rec.Body.String())
-			}
+			assert.Must(t, len(page.Items) == tc.want, "items = %d, want %d: %s", len(page.Items), tc.want, rec.Body.String())
 			for _, item := range page.Items {
-				if tc.query == "?invalid=true" && !item.Invalid {
-					t.Fatalf("the invalid listing returned an edge with invalid=false: %+v", item)
-				}
+				assert.Must(t, tc.query != "?invalid=true" || item.Invalid, "the invalid listing returned an edge with invalid=false: %+v", item)
 			}
 		})
 	}
@@ -1736,15 +1536,11 @@ func TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated(t *testing.T) {
 	rec := f.as(t, http.MethodGet, "/summary", nil)
 	var before gameSummary
 	decodeBody(t, rec, &before)
-	if len(before.RelationTypes) != 1 {
-		t.Fatalf("relation_types = %+v, want the one type", before.RelationTypes)
-	}
+	assert.Must(t, len(before.RelationTypes) == 1, "relation_types = %+v, want the one type", before.RelationTypes)
 	if before.RelationTypes[0].RelationCount != 1 || before.RelationTypes[0].InvalidCount != 0 {
 		t.Fatalf("requires = %+v, want 1 edge of which 0 invalid", before.RelationTypes[0])
 	}
-	if before.Totals.Invalid != 0 {
-		t.Fatalf("totals = %+v, want nothing to fix yet", before.Totals)
-	}
+	assert.Must(t, before.Totals.Invalid == 0, "totals = %+v, want nothing to fix yet", before.Totals)
 
 	narrowRequiresOverREST(t, f)
 
@@ -1754,9 +1550,7 @@ func TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated(t *testing.T) {
 	if after.RelationTypes[0].RelationCount != 1 || after.RelationTypes[0].InvalidCount != 1 {
 		t.Fatalf("requires = %+v, want 1 edge of which 1 invalid", after.RelationTypes[0])
 	}
-	if after.Totals.Invalid != 1 {
-		t.Fatalf("totals = %+v, want the broken edge counted", after.Totals)
-	}
+	assert.Must(t, after.Totals.Invalid == 1, "totals = %+v, want the broken edge counted", after.Totals)
 	// The entity half is untouched: this game's two quests still fit.
 	if after.EntityTypes[0].InvalidCount != 0 {
 		t.Fatalf("quest = %+v, want no invalid entities — the two counts are being "+
@@ -1786,9 +1580,7 @@ func TestRESTRelationsUpsertTakesAnExpectedVersion(t *testing.T) {
 	// No expected_version: refused per item, and the batch reports it
 	// rather than overwriting.
 	rec := f.as(t, http.MethodPost, "/relations", map[string]any{"items": []any{item(nil)}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("blind rewrite = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "blind rewrite = %d: %s", rec.Code, rec.Body.String())
 	var report struct {
 		Count   int `json:"count"`
 		Written []struct {
@@ -1799,19 +1591,13 @@ func TestRESTRelationsUpsertTakesAnExpectedVersion(t *testing.T) {
 		} `json:"failed"`
 	}
 	decodeBody(t, rec, &report)
-	if report.Count != 0 || len(report.Failed) != 1 || report.Failed[0].Code != "version_conflict" {
-		t.Fatalf("report = %+v, want one version_conflict", report)
-	}
+	assert.Must(t, report.Count == 0 && len(report.Failed) == 1 && report.Failed[0].Code == "version_conflict", "report = %+v, want one version_conflict", report)
 
 	rec = f.as(t, http.MethodPost, "/relations",
 		map[string]any{"items": []any{item(map[string]any{"expected_version": 1})}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("versioned rewrite = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "versioned rewrite = %d: %s", rec.Code, rec.Body.String())
 	decodeBody(t, rec, &report)
-	if report.Count != 1 {
-		t.Fatalf("report = %+v, want the write to land", report)
-	}
+	assert.Must(t, report.Count == 1, "report = %+v, want the write to land", report)
 	if report.Written[0].Version != 2 {
 		t.Fatalf("written version = %d, want 2 — the number the next edit has to send",
 			report.Written[0].Version)

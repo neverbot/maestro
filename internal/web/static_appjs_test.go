@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // appScriptSource reads internal/web/static/app.js straight off disk
@@ -17,9 +19,7 @@ import (
 func appScriptSource(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatalf("read static/app.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/app.js: %v", err)
 	return string(body)
 }
 
@@ -63,9 +63,7 @@ func TestLastVisitedRedirectIsCorroboratedBeforeItFires(t *testing.T) {
 	guard := regexp.MustCompile(
 		`if \(remembered && games\.some\(\(game\) => game\.slug === remembered\)\) \{\s*\n\s*window\.location\.href = `,
 	)
-	if !guard.MatchString(source) {
-		t.Fatal("app.js no longer redirects to the remembered game from directly inside the games.some(...) corroboration check")
-	}
+	assert.Must(t, guard.MatchString(source), "app.js no longer redirects to the remembered game from directly inside the games.some(...) corroboration check")
 }
 
 // TestRememberGameIsOnlyCalledAfterCorroboration pins the companion fix:
@@ -95,19 +93,15 @@ func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
 	total := 0
 	for _, path := range ownModules(t) {
 		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		if n := strings.Count(string(raw), callSite); n > 0 {
 			calls[path] = n
 			total += n
 		}
 	}
-	if total != 1 {
-		t.Fatalf("found %d call site(s) for %q across the front end (%v); want exactly 1 — "+
-			"a second page remembering a slug is a second page that has to corroborate it first",
-			total, callSite, calls)
-	}
+	assert.Must(t, total == 1, "found %d call site(s) for %q across the front end (%v); want exactly 1 — "+
+		"a second page remembering a slug is a second page that has to corroborate it first",
+		total, callSite, calls)
 	if _, ok := calls[openGameModule]; !ok {
 		t.Fatalf("the one call site for %q is not in %s, which is where the slug is corroborated "+
 			"against the caller's own game list", callSite, openGameModule)
@@ -159,14 +153,10 @@ func TestEveryPageInsideAGameGivesItsHeaderTheGameList(t *testing.T) {
 	// the reading view is doc.js.
 	for _, module := range []string{openGameModule, "static/doc.js"} {
 		raw, err := os.ReadFile(module)
-		if err != nil {
-			t.Fatalf("read %s: %v", module, err)
-		}
-		if !handsOverTheGameList.Match(raw) {
-			t.Errorf("%s renders the shared header without handing it the caller's game list, so its "+
-				"switcher is not drawn: a page inside a game with no switcher is a page with no way to "+
-				"another game", module)
-		}
+		assert.Must(t, err == nil, "read %s: %v", module, err)
+		assert.Should(t, handsOverTheGameList.Match(raw), "%s renders the shared header without handing it the caller's game list, so its "+
+			"switcher is not drawn: a page inside a game with no switcher is a page with no way to "+
+			"another game", module)
 	}
 }
 
@@ -176,9 +166,7 @@ const openGameModule = "static/pages/page.js"
 func openGameSource(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile(openGameModule)
-	if err != nil {
-		t.Fatalf("read %s: %v", openGameModule, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", openGameModule, err)
 	return string(body)
 }
 
@@ -205,11 +193,7 @@ func ownModules(t *testing.T) []string {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if len(out) == 0 {
-		t.Fatal("found no own module under internal/web/static: this test would pass on an empty tree")
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Must(t, len(out) != 0, "found no own module under internal/web/static: this test would pass on an empty tree")
 	return out
 }

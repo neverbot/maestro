@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/views"
@@ -107,9 +108,7 @@ var domainPackages = map[string]bool{
 // reads.
 func TestEveryDomainTypeOnTheWireIsTagged(t *testing.T) {
 	t.Parallel()
-	if len(wireDomainRoots) == 0 {
-		t.Fatal("no roots: this guard swept nothing")
-	}
+	assert.Must(t, len(wireDomainRoots) != 0, "no roots: this guard swept nothing")
 	for name, root := range wireDomainRoots {
 		seen := map[reflect.Type]bool{}
 		walkWireType(t, name, root, seen)
@@ -187,9 +186,7 @@ func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
 	t.Parallel()
 	found := map[string]string{}
 	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the package directory: %v", err)
-	}
+	assert.Must(t, err == nil, "read the package directory: %v", err)
 	fset := token.NewFileSet()
 	scanned := 0
 	for _, entry := range entries {
@@ -198,9 +195,7 @@ func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
 			continue
 		}
 		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
+		assert.Must(t, err == nil, "parse %s: %v", name, err)
 		scanned++
 		ast.Inspect(file, func(node ast.Node) bool {
 			structType, ok := node.(*ast.StructType)
@@ -218,9 +213,7 @@ func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
 			return true
 		})
 	}
-	if scanned == 0 {
-		t.Fatal("scanned no source files: this guard read nothing")
-	}
+	assert.Must(t, scanned != 0, "scanned no source files: this guard read nothing")
 
 	missing := make([]string, 0)
 	for qualified, where := range found {
@@ -229,11 +222,9 @@ func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
 		}
 	}
 	sort.Strings(missing)
-	if len(missing) > 0 {
-		t.Errorf("these domain types are marshalled as themselves and wireDomainRoots does not "+
-			"name them, so nothing checks that their members are spelled the way an agent is "+
-			"told to read them: %s", strings.Join(missing, ", "))
-	}
+	assert.Should(t, len(missing) <= 0, "these domain types are marshalled as themselves and wireDomainRoots does not "+
+		"name them, so nothing checks that their members are spelled the way an agent is "+
+		"told to read them: %s", strings.Join(missing, ", "))
 }
 
 // embeddedStruct reports whether an anonymous field's type is one

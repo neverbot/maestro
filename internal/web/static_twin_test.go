@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The escaping perimeter for a templating library.
@@ -83,18 +85,14 @@ func scanForUnsafeDirectives(t *testing.T) (scanned []string, offences []string)
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
 	return scanned, offences
 }
 
 func TestNoOwnModuleReachesForARawHTMLDirective(t *testing.T) {
 	t.Parallel()
 	scanned, offences := scanForUnsafeDirectives(t)
-	if len(scanned) == 0 {
-		t.Fatal("scanned no module under internal/web/static: a walk that reads nothing guards nothing")
-	}
+	assert.Must(t, len(scanned) != 0, "scanned no module under internal/web/static: a walk that reads nothing guards nothing")
 	if len(offences) > 0 {
 		sort.Strings(offences)
 		t.Fatalf("%d raw-HTML directive(s) in this front end's own modules:\n%s\n"+
@@ -114,25 +112,19 @@ func TestNoOwnModuleReachesForARawHTMLDirective(t *testing.T) {
 func TestTheRawDirectiveScanReadsWhatItClaimsTo(t *testing.T) {
 	t.Parallel()
 	planted := `import { unsafeHTML } from "lit/directives/unsafe-html.js";`
-	if !unsafeDirectiveRE.MatchString(planted) {
-		t.Errorf("the scan missed a planted directive import: %q", planted)
-	}
+	assert.Should(t, unsafeDirectiveRE.MatchString(planted), "the scan missed a planted directive import: %q", planted)
 	for _, benign := range []string{
 		"return html`<td>${cell.text}</td>`;",
 		`import { LitElement, css, html, nothing } from "lit";`,
 	} {
-		if unsafeDirectiveRE.MatchString(benign) {
-			t.Errorf("the scan read ordinary Lit as a raw-HTML directive: %q", benign)
-		}
+		assert.Should(t, !unsafeDirectiveRE.MatchString(benign), "the scan read ordinary Lit as a raw-HTML directive: %q", benign)
 	}
 
 	// The comment strip is what keeps this file and mst-twin.js from
 	// failing on their own prose, and codeLines is where it happens.
 	commented := "// unsafeHTML is exactly what this component must never reach for\nconst a = 1;\n"
 	for _, line := range codeLines(commented) {
-		if unsafeDirectiveRE.MatchString(line.code) {
-			t.Errorf("the scan read a comment as a call: %q", line.text)
-		}
+		assert.Should(t, !unsafeDirectiveRE.MatchString(line.code), "the scan read a comment as a call: %q", line.text)
 	}
 
 	// And it really did open the twin, rather than passing because the
@@ -145,7 +137,5 @@ func TestTheRawDirectiveScanReadsWhatItClaimsTo(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Errorf("the raw-HTML directive scan never read %s; it read %v", want, scanned)
-	}
+	assert.Should(t, found, "the raw-HTML directive scan never read %s; it read %v", want, scanned)
 }

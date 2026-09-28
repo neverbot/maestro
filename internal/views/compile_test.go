@@ -12,18 +12,16 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 func compileOf(t *testing.T, g *game, doc string) (string, []any) {
 	t.Helper()
 	r, err := g.views.Resolve(t.Context(), g.projectID, mustParse(t, doc))
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	assert.Must(t, err == nil, "resolve: %v", err)
 	sql, args, err := Compile(r, g.projectID)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
+	assert.Must(t, err == nil, "compile: %v", err)
 	return sql, args
 }
 
@@ -52,13 +50,9 @@ func TestCompileArea(t *testing.T) {
 			             "depth":{"min":1,"max":3},"as":"chain",
 			             "edge_where":{"field":"@type","op":"eq","value":"requires"}}]}`)
 		for _, sentinel := range []string{"hogger", "rare", "quest", "min_level", "requires", "chain"} {
-			if strings.Contains(sql, sentinel) {
-				t.Errorf("the caller value %q reached the statement text:\n%s", sentinel, sql)
-			}
+			assert.Should(t, !strings.Contains(sql, sentinel), "the caller value %q reached the statement text:\n%s", sentinel, sql)
 		}
-		if len(args) < 3 {
-			t.Fatalf("the values must have gone somewhere: %d bind arguments", len(args))
-		}
+		assert.Must(t, len(args) >= 3, "the values must have gone somewhere: %d bind arguments", len(args))
 	})
 
 	// TestCompileArea's "the project filter guard sees the shapes it must see"
@@ -203,10 +197,8 @@ func TestCompileArea(t *testing.T) {
 			t.Error(problem)
 		}
 		for _, table := range projectScopedTables {
-			if seen[table] == 0 {
-				t.Errorf("the query above reads no %s, so nothing above asserted a filter on it; "+
-					"the assertion is vacuous for that table:\n%s", table, sql)
-			}
+			assert.Should(t, seen[table] != 0, "the query above reads no %s, so nothing above asserted a filter on it; "+
+				"the assertion is vacuous for that table:\n%s", table, sql)
 		}
 	})
 
@@ -214,24 +206,16 @@ func TestCompileArea(t *testing.T) {
 		g, _ := a.games(t)
 		sql, _ := compileOf(t, g,
 			`{"v":1,"from":[{"type":"quest","where":{"field":"min_level","op":"between","value":[20,30]}}]}`)
-		if !strings.Contains(sql, "jsonb_typeof") {
-			t.Fatalf("a number predicate must guard its cast with jsonb_typeof:\n%s", sql)
-		}
-		if !strings.Contains(sql, "::numeric") {
-			t.Fatalf("a number predicate must compare numerically:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "jsonb_typeof"), "a number predicate must guard its cast with jsonb_typeof:\n%s", sql)
+		assert.Must(t, strings.Contains(sql, "::numeric"), "a number predicate must compare numerically:\n%s", sql)
 	})
 
 	t.Run("invalid rows are excluded unless asked for", func(t *testing.T) {
 		g, _ := a.games(t)
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest"}]}`)
-		if !strings.Contains(sql, "invalid = false") {
-			t.Fatalf("invalid rows must be excluded by default:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "invalid = false"), "invalid rows must be excluded by default:\n%s", sql)
 		sql, _ = compileOf(t, g, `{"v":1,"from":[{"type":"quest"}],"include_invalid":true}`)
-		if strings.Contains(sql, "invalid = false") {
-			t.Fatalf("include_invalid must lift the filter:\n%s", sql)
-		}
+		assert.Must(t, !strings.Contains(sql, "invalid = false"), "include_invalid must lift the filter:\n%s", sql)
 	})
 
 	// TestCompileArea's "the worked examples compile to these statements" case
@@ -263,9 +247,7 @@ func TestCompileArea(t *testing.T) {
 					return
 				}
 				want, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatalf("read %s (run go test -run TestTheWorkedExamplesCompileToTheseStatements -update): %v", path, err)
-				}
+				assert.Must(t, err == nil, "read %s (run go test -run TestTheWorkedExamplesCompileToTheseStatements -update): %v", path, err)
 				if got := sql + "\n"; got != string(want) {
 					t.Errorf("the emitted statement changed. **Read this diff before you "+
 						"regenerate it.** -update makes any change to the emitter agree with "+
@@ -328,9 +310,7 @@ func TestCompileArea(t *testing.T) {
 		found := 0
 		for _, file := range packageFiles(t) {
 			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", file, err)
-			}
+			assert.Must(t, err == nil, "parse %s: %v", file, err)
 			// Route 4: an alias or a defined type over frag would give a
 			// second spelling of the conversion, which the walk below does
 			// not know to look for. There is no legitimate one.
@@ -357,11 +337,9 @@ func TestCompileArea(t *testing.T) {
 					if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "raw" {
 						// Route 2: writing to the statement's buffer directly
 						// needs no frag conversion at all.
-						if !bufferHolders[where] {
-							t.Errorf("%s reaches a statement's raw buffer; only %v may, and a "+
-								"strings.Builder takes a plain string", where,
-								sortedNames(bufferHolders))
-						}
+						assert.Should(t, bufferHolders[where], "%s reaches a statement's raw buffer; only %v may, and a "+
+							"strings.Builder takes a plain string", where,
+							sortedNames(bufferHolders))
 						return true
 					}
 					call, ok := n.(*ast.CallExpr)
@@ -375,20 +353,16 @@ func TestCompileArea(t *testing.T) {
 						return true
 					}
 					found++
-					if !allowed[where] {
-						t.Errorf("%s converts a string to statement text; only %v may, and a "+
-							"caller's value has no other route into the SQL", where,
-							sortedNames(allowed))
-					}
+					assert.Should(t, allowed[where], "%s converts a string to statement text; only %v may, and a "+
+						"caller's value has no other route into the SQL", where,
+						sortedNames(allowed))
 					return true
 				})
 			}
 		}
-		if found != len(allowed) {
-			t.Fatalf("expected one conversion in each of %v, found %d — if a helper stopped "+
-				"converting, this test is no longer watching what it names",
-				sortedNames(allowed), found)
-		}
+		assert.Must(t, found == len(allowed), "expected one conversion in each of %v, found %d — if a helper stopped "+
+			"converting, this test is no longer watching what it names",
+			sortedNames(allowed), found)
 	})
 }
 
@@ -672,9 +646,7 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden statements in 
 func packageFiles(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the package directory: %v", err)
-	}
+	assert.Must(t, err == nil, "read the package directory: %v", err)
 	var files []string
 	for _, entry := range entries {
 		name := entry.Name()
@@ -683,9 +655,7 @@ func packageFiles(t *testing.T) []string {
 		}
 		files = append(files, name)
 	}
-	if len(files) < 2 {
-		t.Fatalf("found %d source files; the walk below would be watching one file again", len(files))
-	}
+	assert.Must(t, len(files) >= 2, "found %d source files; the walk below would be watching one file again", len(files))
 	return files
 }
 

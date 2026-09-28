@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -20,9 +21,7 @@ func seedRenameableType(t *testing.T, svc *metamodel.Service, project uuid.UUID,
 	row, err := svc.UpsertEntityType(context.Background(), project, metamodel.EntityTypeInput{
 		Key: key, Label: "Quest", LabelPlural: "Quests",
 	})
-	if err != nil {
-		t.Fatalf("seed type %s: %v", key, err)
-	}
+	assert.Must(t, err == nil, "seed type %s: %v", key, err)
 	return row.ID
 }
 
@@ -32,9 +31,7 @@ func rename(t *testing.T, svc *metamodel.Service, project uuid.UUID, from, to st
 	t.Helper()
 	ctx := context.Background()
 	row, err := svc.EntityTypeByKey(ctx, project, from)
-	if err != nil {
-		t.Fatalf("read %s before renaming it: %v", from, err)
-	}
+	assert.Must(t, err == nil, "read %s before renaming it: %v", from, err)
 	_, err = svc.RenameEntityType(ctx, project, metamodel.RenameInput{
 		From: from, To: to, ExpectedVersion: &row.Version,
 	})
@@ -73,18 +70,12 @@ func TestRenameArea(t *testing.T) {
 		}
 
 		moved, err := svc.EntityTypeByKey(ctx, project, "mission")
-		if err != nil {
-			t.Fatalf("read the renamed type: %v", err)
-		}
-		if moved.ID != id {
-			t.Fatalf("the renamed type has id %s, want the id it already had (%s): a rename "+
-				"that produced a new row would take every reference to the old one with it",
-				moved.ID, id)
-		}
-		if moved.Version != 2 {
-			t.Fatalf("Version = %d, want 2: a rename is a write and advances the version like "+
-				"any other", moved.Version)
-		}
+		assert.Must(t, err == nil, "read the renamed type: %v", err)
+		assert.Must(t, moved.ID == id, "the renamed type has id %s, want the id it already had (%s): a rename "+
+			"that produced a new row would take every reference to the old one with it",
+			moved.ID, id)
+		assert.Must(t, moved.Version == 2, "Version = %d, want 2: a rename is a write and advances the version like "+
+			"any other", moved.Version)
 		// The old key is free, which is the other half of "one row moved"
 		// rather than "a second row appeared".
 		if _, err := svc.EntityTypeByKey(ctx, project, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
@@ -94,12 +85,8 @@ func TestRenameArea(t *testing.T) {
 		// The entity is still an entity of this type, addressed under the
 		// new type key. Nothing rewrote it: it points at the id.
 		got, err := svc.EntityByKey(ctx, project, "mission", "hogger")
-		if err != nil {
-			t.Fatalf("read the entity under the new type key: %v", err)
-		}
-		if got.EntityTypeID != id {
-			t.Fatalf("the entity names type %s, want %s", got.EntityTypeID, id)
-		}
+		assert.Must(t, err == nil, "read the entity under the new type key: %v", err)
+		assert.Must(t, got.EntityTypeID == id, "the entity names type %s, want %s", got.EntityTypeID, id)
 	})
 
 	// TestRenameArea's "a renamed type carries the spelling it was given" case
@@ -118,12 +105,8 @@ func TestRenameArea(t *testing.T) {
 			t.Fatalf("rename: %v", err)
 		}
 		row, err := svc.EntityTypeByKey(ctx, project, "main_mission")
-		if err != nil {
-			t.Fatalf("read the renamed type without regard to case: %v", err)
-		}
-		if row.Key != "Main_Mission" {
-			t.Fatalf("Key = %q, want the spelling the rename asked for", row.Key)
-		}
+		assert.Must(t, err == nil, "read the renamed type without regard to case: %v", err)
+		assert.Must(t, row.Key == "Main_Mission", "Key = %q, want the spelling the rename asked for", row.Key)
 	})
 
 	// TestRenameArea's "a rename addresses the old key without regard to case"
@@ -168,22 +151,14 @@ func TestRenameArea(t *testing.T) {
 		seedRenameableType(t, svc, project, "mission")
 
 		err := rename(t, svc, project, "quest", "mission")
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input at the destination", err)
-		}
-		if !strings.Contains(err.Error(), "to:") || !strings.Contains(err.Error(), "never merges") {
-			t.Fatalf("err = %v, want the refusal reported at `to` and saying a rename does "+
-				"not merge two types", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input at the destination", err)
+		assert.Must(t, strings.Contains(err.Error(), "to:") && strings.Contains(err.Error(), "never merges"), "err = %v, want the refusal reported at `to` and saying a rename does "+
+			"not merge two types", err)
 		// Both types are still there, untouched: the refusal rolled back.
 		for _, key := range []string{"quest", "mission"} {
 			row, err := svc.EntityTypeByKey(ctx, project, key)
-			if err != nil {
-				t.Fatalf("read %s after the refused rename: %v", key, err)
-			}
-			if row.Version != 1 {
-				t.Fatalf("%s is at version %d, want 1: the refused rename moved a row", key, row.Version)
-			}
+			assert.Must(t, err == nil, "read %s after the refused rename: %v", key, err)
+			assert.Must(t, row.Version == 1, "%s is at version %d, want 1: the refused rename moved a row", key, row.Version)
 		}
 	})
 
@@ -201,12 +176,8 @@ func TestRenameArea(t *testing.T) {
 		seedRenameableType(t, svc, project, "Mission")
 
 		err := rename(t, svc, project, "quest", "mission")
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input", err)
-		}
-		if !strings.Contains(err.Error(), `"Mission"`) {
-			t.Fatalf("err = %v, want the stored spelling named", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
+		assert.Must(t, strings.Contains(err.Error(), `"Mission"`), "err = %v, want the stored spelling named", err)
 	})
 
 	// TestRenameArea's "a case only rename is refused as one address" case
@@ -228,20 +199,12 @@ func TestRenameArea(t *testing.T) {
 		seedRenameableType(t, svc, project, "quest")
 
 		err := rename(t, svc, project, "quest", "Quest")
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input", err)
-		}
-		if !strings.Contains(err.Error(), "capitalisation") {
-			t.Fatalf("err = %v, want the refusal to say why the two spellings are one key", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
+		assert.Must(t, strings.Contains(err.Error(), "capitalisation"), "err = %v, want the refusal to say why the two spellings are one key", err)
 		row, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if row.Key != "quest" || row.Version != 1 {
-			t.Fatalf("the type is (%q, v%d), want the first spelling standing at version 1",
-				row.Key, row.Version)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, row.Key == "quest" && row.Version == 1, "the type is (%q, v%d), want the first spelling standing at version 1",
+			row.Key, row.Version)
 	})
 
 	// TestRenameArea's "renaming a type to the key it already has is refused"
@@ -255,15 +218,9 @@ func TestRenameArea(t *testing.T) {
 		seedRenameableType(t, svc, project, "quest")
 
 		err := rename(t, svc, project, "quest", "quest")
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input", err)
-		}
-		if strings.Contains(err.Error(), "capitalisation") {
-			t.Fatalf("err = %v, want the identical-key wording, not the case-only one", err)
-		}
-		if !strings.Contains(err.Error(), "changes nothing") {
-			t.Fatalf("err = %v, want it to say the rename changes nothing", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
+		assert.Must(t, !strings.Contains(err.Error(), "capitalisation"), "err = %v, want the identical-key wording, not the case-only one", err)
+		assert.Must(t, strings.Contains(err.Error(), "changes nothing"), "err = %v, want it to say the rename changes nothing", err)
 	})
 
 	// TestRenameArea's "renaming a type this game does not have is not found"
@@ -279,12 +236,8 @@ func TestRenameArea(t *testing.T) {
 		_, err := svc.RenameEntityType(ctx, project, metamodel.RenameInput{
 			From: "quest", To: "mission", ExpectedVersion: ptrInt32(1),
 		})
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want not_found", err)
-		}
-		if !strings.Contains(err.Error(), `"quest"`) {
-			t.Fatalf("err = %v, want the key the caller sent named back", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found", err)
+		assert.Must(t, strings.Contains(err.Error(), `"quest"`), "err = %v, want the key the caller sent named back", err)
 	})
 
 	// TestRenameArea's "a rename needs the version it read" case pins both
@@ -303,23 +256,15 @@ func TestRenameArea(t *testing.T) {
 		seedRenameableType(t, svc, project, "quest")
 
 		_, err := svc.RenameEntityType(ctx, project, metamodel.RenameInput{From: "quest", To: "mission"})
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input for the missing version", err)
-		}
-		if !strings.Contains(err.Error(), "expected_version") {
-			t.Fatalf("err = %v, want the problem reported at expected_version", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input for the missing version", err)
+		assert.Must(t, strings.Contains(err.Error(), "expected_version"), "err = %v, want the problem reported at expected_version", err)
 
 		_, err = svc.RenameEntityType(ctx, project, metamodel.RenameInput{
 			From: "quest", To: "mission", ExpectedVersion: ptrInt32(7),
 		})
 		var conflict *metamodel.VersionConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("err = %v, want a version conflict", err)
-		}
-		if conflict.Current != 1 {
-			t.Fatalf("Current = %d, want the version the write would have met", conflict.Current)
-		}
+		assert.Must(t, errors.As(err, &conflict), "err = %v, want a version conflict", err)
+		assert.Must(t, conflict.Current == 1, "Current = %d, want the version the write would have met", conflict.Current)
 		if _, err := svc.EntityTypeByKey(ctx, project, "quest"); err != nil {
 			t.Fatalf("the refused rename moved the row: %v", err)
 		}
@@ -339,16 +284,12 @@ func TestRenameArea(t *testing.T) {
 			From: "-bad", To: "also bad", ExpectedVersion: ptrInt32(1),
 		})
 		var problems *metamodel.ValidationError
-		if !errors.As(err, &problems) {
-			t.Fatalf("err = %v, want a ValidationError", err)
-		}
+		assert.Must(t, errors.As(err, &problems), "err = %v, want a ValidationError", err)
 		paths := map[string]bool{}
 		for _, f := range problems.Fields {
 			paths[f.Path] = true
 		}
-		if !paths["from"] || !paths["to"] {
-			t.Fatalf("problems = %v, want one at `from` and one at `to`", problems.Fields)
-		}
+		assert.Must(t, paths["from"] && paths["to"], "problems = %v, want one at `from` and one at `to`", problems.Fields)
 	})
 
 	// TestRenameArea's "the case only refusal is judged after the keys are
@@ -372,16 +313,10 @@ func TestRenameArea(t *testing.T) {
 			From: "not a key", To: "NOT A KEY", ExpectedVersion: ptrInt32(1),
 		})
 		var problems *metamodel.ValidationError
-		if !errors.As(err, &problems) {
-			t.Fatalf("err = %v, want a ValidationError", err)
-		}
-		if strings.Contains(err.Error(), "capitalisation") {
-			t.Fatalf("err = %v, want the two keys judged as keys before they are compared "+
-				"as addresses", err)
-		}
-		if len(problems.Fields) != 2 {
-			t.Fatalf("problems = %v, want both keys reported", problems.Fields)
-		}
+		assert.Must(t, errors.As(err, &problems), "err = %v, want a ValidationError", err)
+		assert.Must(t, !strings.Contains(err.Error(), "capitalisation"), "err = %v, want the two keys judged as keys before they are compared "+
+			"as addresses", err)
+		assert.Must(t, len(problems.Fields) == 2, "problems = %v, want both keys reported", problems.Fields)
 	})
 
 	// TestRenameArea's "a rename publishes both spellings" case pins the
@@ -405,9 +340,7 @@ func TestRenameArea(t *testing.T) {
 		defer hub.Unsubscribe(agent)
 
 		row, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
+		assert.Must(t, err == nil, "read: %v", err)
 		if _, err := svc.RenameEntityType(ctx, project, metamodel.RenameInput{
 			From: "quest", To: "mission", ExpectedVersion: &row.Version,
 		}); err != nil {
@@ -416,24 +349,18 @@ func TestRenameArea(t *testing.T) {
 
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "type.renamed" {
-				t.Fatalf("%s: Kind = %q, want type.renamed", name, got.Kind)
-			}
+			assert.Must(t, got.Kind == "type.renamed", "%s: Kind = %q, want type.renamed", name, got.Kind)
 			var payload struct {
 				ID   uuid.UUID `json:"id"`
 				From string    `json:"from"`
 				To   string    `json:"to"`
 			}
 			raw, err := json.Marshal(got.Payload)
-			if err != nil {
-				t.Fatalf("%s: re-encode the payload: %v", name, err)
-			}
+			assert.Must(t, err == nil, "%s: re-encode the payload: %v", name, err)
 			if err := json.Unmarshal(raw, &payload); err != nil {
 				t.Fatalf("%s: decode the payload: %v", name, err)
 			}
-			if payload.ID != id || payload.From != "quest" || payload.To != "mission" {
-				t.Fatalf("%s: payload = %+v, want the id and both spellings", name, payload)
-			}
+			assert.Must(t, payload.ID == id && payload.From == "quest" && payload.To == "mission", "%s: payload = %+v, want the id and both spellings", name, payload)
 		}
 	})
 
@@ -454,9 +381,7 @@ func TestRenameArea(t *testing.T) {
 		defer hub.Unsubscribe(sub)
 
 		row, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
+		assert.Must(t, err == nil, "read: %v", err)
 		if _, err := svc.RenameEntityType(ctx, project, metamodel.RenameInput{
 			From: "quest", To: "mission", ExpectedVersion: &row.Version,
 		}); err == nil {
@@ -506,15 +431,11 @@ func TestRenameArea(t *testing.T) {
 			}
 			wg.Wait()
 			for i, err := range errs {
-				if err == nil {
-					t.Fatalf("round %d, call %d: a rename onto a key the other end holds must "+
-						"be refused, not granted", round, i)
-				}
-				if strings.Contains(err.Error(), "40P01") || strings.Contains(err.Error(), "deadlock") {
-					t.Fatalf("round %d, call %d: %v — two opposite renames must not deadlock; "+
-						"judgeRename locks the two ends in folded-key order to prevent exactly this",
-						round, i, err)
-				}
+				assert.Must(t, err != nil, "round %d, call %d: a rename onto a key the other end holds must "+
+					"be refused, not granted", round, i)
+				assert.Must(t, !strings.Contains(err.Error(), "40P01") && !strings.Contains(err.Error(), "deadlock"), "round %d, call %d: %v — two opposite renames must not deadlock; "+
+					"judgeRename locks the two ends in folded-key order to prevent exactly this",
+					round, i, err)
 			}
 		}
 	})
@@ -536,25 +457,17 @@ func TestRenameArea(t *testing.T) {
 		before, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "available_to", Label: "Available to",
 		})
-		if err != nil {
-			t.Fatalf("seed relation type: %v", err)
-		}
+		assert.Must(t, err == nil, "seed relation type: %v", err)
 		sub := hub.Subscribe(project, "viewer", false)
 		defer hub.Unsubscribe(sub)
 
 		after, err := svc.RenameRelationType(ctx, project, metamodel.RenameInput{
 			From: "available_to", To: "usable_by", ExpectedVersion: &before.Version,
 		})
-		if err != nil {
-			t.Fatalf("rename: %v", err)
-		}
-		if after.ID != before.ID {
-			t.Fatalf("the renamed relation type has id %s, want %s", after.ID, before.ID)
-		}
-		if after.Key != "usable_by" || after.Version != 2 {
-			t.Fatalf("the renamed relation type is (%q, v%d), want (usable_by, v2)",
-				after.Key, after.Version)
-		}
+		assert.Must(t, err == nil, "rename: %v", err)
+		assert.Must(t, after.ID == before.ID, "the renamed relation type has id %s, want %s", after.ID, before.ID)
+		assert.Must(t, after.Key == "usable_by" && after.Version == 2, "the renamed relation type is (%q, v%d), want (usable_by, v2)",
+			after.Key, after.Version)
 		if _, err := svc.RelationTypeByKey(ctx, project, "available_to"); !errors.Is(err, metamodel.ErrNotFound) {
 			t.Fatalf("reading the old key = %v, want not_found", err)
 		}
@@ -630,11 +543,7 @@ func TestRenameArea(t *testing.T) {
 			t.Fatalf("rename: %v", err)
 		}
 		row, err := svc.EntityTypeByKey(ctx, theirs, "quest")
-		if err != nil {
-			t.Fatalf("the other game's type was renamed out from under it: %v", err)
-		}
-		if row.Version != 1 {
-			t.Fatalf("the other game's type is at version %d, want 1", row.Version)
-		}
+		assert.Must(t, err == nil, "the other game's type was renamed out from under it: %v", err)
+		assert.Must(t, row.Version == 1, "the other game's type is at version %d, want 1", row.Version)
 	})
 }

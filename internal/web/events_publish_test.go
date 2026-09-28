@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -21,18 +22,12 @@ import (
 func openStream(t *testing.T, ts *httptest.Server, gameSlug, cookie string) *bufio.Reader {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+gameSlug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(&http.Cookie{Name: "maestro_session", Value: cookie})
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 	reader := bufio.NewReader(resp.Body)
 	// Skip the initial ": connected\n\n" comment frame.
 	if _, err := reader.ReadString('\n'); err != nil {
@@ -53,18 +48,12 @@ func openStream(t *testing.T, ts *httptest.Server, gameSlug, cookie string) *buf
 func openTokenStream(t *testing.T, ts *httptest.Server, gameSlug, token string) *bufio.Reader {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+gameSlug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 	reader := bufio.NewReader(resp.Body)
 	if _, err := reader.ReadString('\n'); err != nil {
 		t.Fatalf("read connect frame: %v", err)
@@ -94,9 +83,7 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@example.test", DisplayName: "Member", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := projSvc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -111,27 +98,17 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.Slug+"/members/"+member.ID.String(),
 		strings.NewReader(`{"role":"editor"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	kind, _, data := readOneSSEFrame(t, viewerReader)
-	if kind != "member.updated" {
-		t.Fatalf("Kind = %q, want member.updated", kind)
-	}
-	if data != `{"user_id":"`+member.ID.String()+`"}` {
-		t.Fatalf("data = %q, want only user_id — no role field (an invalidation, not a patch)", data)
-	}
+	assert.Must(t, kind == "member.updated", "Kind = %q, want member.updated", kind)
+	assert.Must(t, data == `{"user_id":"`+member.ID.String()+`"}`, "data = %q, want only user_id — no role field (an invalidation, not a patch)", data)
 }
 
 // TestRemoveMemberPublishesMemberRemoved pins the same thing for DELETE
@@ -145,9 +122,7 @@ func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@example.test", DisplayName: "Member", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := projSvc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -161,26 +136,16 @@ func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
 	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
 	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"/members/"+member.ID.String(), nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(memberCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	kind, _, data := readOneSSEFrame(t, ownerReader)
-	if kind != "member.removed" {
-		t.Fatalf("Kind = %q, want member.removed", kind)
-	}
-	if !strings.Contains(data, member.ID.String()) {
-		t.Fatalf("data = %q, want it to name the removed member", data)
-	}
+	assert.Must(t, kind == "member.removed", "Kind = %q, want member.removed", kind)
+	assert.Must(t, strings.Contains(data, member.ID.String()), "data = %q, want it to name the removed member", data)
 }
 
 // TestDeleteGamePublishesGameDeleted pins that DELETE
@@ -195,9 +160,7 @@ func TestDeleteGamePublishesGameDeleted(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -206,23 +169,15 @@ func TestDeleteGamePublishesGameDeleted(t *testing.T) {
 	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
 	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"?confirm=azeroth", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusNoContent, "status = %d, want 204", resp.StatusCode)
 
 	kind, _, _ := readOneSSEFrame(t, ownerReader)
-	if kind != "game.deleted" {
-		t.Fatalf("Kind = %q, want game.deleted", kind)
-	}
+	assert.Must(t, kind == "game.deleted", "Kind = %q, want game.deleted", kind)
 }
 
 // TestCreateTokenPublishesTokenMintedAboveViewerOnly pins the deliberate
@@ -241,9 +196,7 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -258,24 +211,16 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 	viewerReader := openStream(t, ts, project.Slug, viewerCookie.Value)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"agent"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "status = %d, want 201", resp.StatusCode)
 
 	kind, _, _ := readOneSSEFrame(t, ownerReader)
-	if kind != "token.minted" {
-		t.Fatalf("owner Kind = %q, want token.minted", kind)
-	}
+	assert.Must(t, kind == "token.minted", "owner Kind = %q, want token.minted", kind)
 
 	// Publish an unrelated, ungated marker event directly on the hub —
 	// standing in for any other event this project might fire next — and
@@ -285,12 +230,8 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "marker"})
 
 	kind, _, _ = readOneSSEFrame(t, viewerReader)
-	if kind == "token.minted" {
-		t.Fatal("viewer received token.minted; it should have been filtered by MinRole")
-	}
-	if kind != "marker" {
-		t.Fatalf("viewer Kind = %q, want marker", kind)
-	}
+	assert.Must(t, kind != "token.minted", "viewer received token.minted; it should have been filtered by MinRole")
+	assert.Must(t, kind == "marker", "viewer Kind = %q, want marker", kind)
 }
 
 // TestRevokeTokenPublishesTokenRevokedAboveViewerOnly is
@@ -303,13 +244,9 @@ func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	_, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -318,26 +255,16 @@ func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
 	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
 	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"/tokens/"+tok.ID.String(), nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusNoContent, "status = %d, want 204", resp.StatusCode)
 
 	kind, _, data := readOneSSEFrame(t, ownerReader)
-	if kind != "token.revoked" {
-		t.Fatalf("Kind = %q, want token.revoked", kind)
-	}
-	if !strings.Contains(data, tok.ID.String()) {
-		t.Fatalf("data = %q, want it to name the revoked token", data)
-	}
+	assert.Must(t, kind == "token.revoked", "Kind = %q, want token.revoked", kind)
+	assert.Must(t, strings.Contains(data, tok.ID.String()), "data = %q, want it to name the revoked token", data)
 }
 
 // TestCreateProjectInvitePublishesInviteCreatedOwnerOnly pins
@@ -352,9 +279,7 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -370,27 +295,17 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
 		strings.NewReader(`{"email":"new@example.test","role":"viewer"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "status = %d, want 201", resp.StatusCode)
 
 	kind, _, data := readOneSSEFrame(t, ownerReader)
-	if kind != "invite.created" {
-		t.Fatalf("owner Kind = %q, want invite.created", kind)
-	}
-	if !strings.Contains(data, "new@example.test") {
-		t.Fatalf("data = %q, want it to name the invited email", data)
-	}
+	assert.Must(t, kind == "invite.created", "owner Kind = %q, want invite.created", kind)
+	assert.Must(t, strings.Contains(data, "new@example.test"), "data = %q, want it to name the invited email", data)
 
 	// Publish an unrelated, ungated marker event directly on the hub, and
 	// confirm it, not invite.created, is the first thing the editor's
@@ -399,12 +314,8 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "marker"})
 
 	kind, _, _ = readOneSSEFrame(t, editorReader)
-	if kind == "invite.created" {
-		t.Fatal("editor received invite.created; it should have been filtered by MinRole")
-	}
-	if kind != "marker" {
-		t.Fatalf("editor Kind = %q, want marker", kind)
-	}
+	assert.Must(t, kind != "invite.created", "editor received invite.created; it should have been filtered by MinRole")
+	assert.Must(t, kind == "marker", "editor Kind = %q, want marker", kind)
 }
 
 // TestTokenCallerStreamNeverReceivesHumanOnlyEvents is the regression
@@ -426,16 +337,12 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@example.test", DisplayName: "Other", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := projSvc.SetRole(ctx, other.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	agentToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -446,60 +353,38 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 	// Trigger a member.updated (HumanOnly) via a real PATCH request.
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.Slug+"/members/"+other.ID.String(),
 		strings.NewReader(`{"role":"editor"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PATCH members status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "PATCH members status = %d, want 200", resp.StatusCode)
 
 	// Trigger a token.minted (HumanOnly, and MinRole editor which the
 	// token subscriber's own Role would otherwise satisfy).
 	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"second agent"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST tokens status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "POST tokens status = %d, want 201", resp.StatusCode)
 
 	// Delete the game: eventGameDeleted is not HumanOnly, so this must
 	// be the first thing the token stream actually receives.
 	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"?confirm=azeroth", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(ownerCookie)
 	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("DELETE game status = %d, want 204", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusNoContent, "DELETE game status = %d, want 204", resp.StatusCode)
 
 	kind, _, _ := readOneSSEFrame(t, tokenReader)
-	if kind == "member.updated" || kind == "token.minted" {
-		t.Fatalf("token stream received %q; HumanOnly events must never reach a token subscriber", kind)
-	}
-	if kind != "game.deleted" {
-		t.Fatalf("token stream's first received event Kind = %q, want game.deleted", kind)
-	}
+	assert.Must(t, kind != "member.updated" && kind != "token.minted", "token stream received %q; HumanOnly events must never reach a token subscriber", kind)
+	assert.Must(t, kind == "game.deleted", "token stream's first received event Kind = %q, want game.deleted", kind)
 }
 
 // TestRevokeProjectInvitePublishesInviteRevoked is
@@ -513,9 +398,7 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -525,15 +408,11 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
 		strings.NewReader(`{"email":"third@example.test","role":"viewer"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	var created struct {
 		ID string `json:"id"`
 	}
@@ -541,35 +420,23 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 		t.Fatalf("decode create response: %v", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "status = %d, want 201", resp.StatusCode)
 	// Drain the invite.created frame this create just published.
 	if kind, _, _ := readOneSSEFrame(t, ownerReader); kind != "invite.created" {
 		t.Fatalf("Kind = %q, want invite.created", kind)
 	}
 
 	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"/invites/"+created.ID, nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(ownerCookie)
 	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusNoContent, "status = %d, want 204", resp.StatusCode)
 
 	kind, _, data := readOneSSEFrame(t, ownerReader)
-	if kind != "invite.revoked" {
-		t.Fatalf("Kind = %q, want invite.revoked", kind)
-	}
-	if !strings.Contains(data, created.ID) {
-		t.Fatalf("data = %q, want it to name the revoked invite", data)
-	}
+	assert.Must(t, kind == "invite.revoked", "Kind = %q, want invite.revoked", kind)
+	assert.Must(t, strings.Contains(data, created.ID), "data = %q, want it to name the revoked invite", data)
 }
 
 // TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed
@@ -590,9 +457,7 @@ func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testi
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -602,15 +467,11 @@ func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testi
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
 		strings.NewReader(`{"email":"","role":"viewer"}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(ownerCookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	var created struct {
 		ID    string `json:"id"`
 		Token string `json:"token"`
@@ -619,41 +480,25 @@ func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testi
 		t.Fatalf("decode create response: %v", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "status = %d, want 201", resp.StatusCode)
 	if kind, _, _ := readOneSSEFrame(t, ownerReader); kind != "invite.created" {
 		t.Fatalf("Kind = %q, want invite.created", kind)
 	}
 
 	registerBody := `{"email":"newbie@example.test","display_name":"Newbie","password":"password12345","invite_token":"` + created.Token + `"}`
 	regReq, err := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/register", strings.NewReader(registerBody))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	regReq.Header.Set("Content-Type", "application/json")
 	regResp, err := http.DefaultClient.Do(regReq)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = regResp.Body.Close() }()
-	if regResp.StatusCode != http.StatusCreated {
-		t.Fatalf("register status = %d, want 201", regResp.StatusCode)
-	}
+	assert.Must(t, regResp.StatusCode == http.StatusCreated, "register status = %d, want 201", regResp.StatusCode)
 
 	kind, _, data := readOneSSEFrame(t, ownerReader)
-	if kind != "member.updated" {
-		t.Fatalf("first post-redeem Kind = %q, want member.updated", kind)
-	}
-	if strings.Contains(data, "role") {
-		t.Fatalf("member.updated data = %q, must carry no role field", data)
-	}
+	assert.Must(t, kind == "member.updated", "first post-redeem Kind = %q, want member.updated", kind)
+	assert.Must(t, !strings.Contains(data, "role"), "member.updated data = %q, must carry no role field", data)
 
 	kind, _, data = readOneSSEFrame(t, ownerReader)
-	if kind != "invite.redeemed" {
-		t.Fatalf("second post-redeem Kind = %q, want invite.redeemed", kind)
-	}
-	if !strings.Contains(data, created.ID) {
-		t.Fatalf("invite.redeemed data = %q, want it to name the consumed invite", data)
-	}
+	assert.Must(t, kind == "invite.redeemed", "second post-redeem Kind = %q, want invite.redeemed", kind)
+	assert.Must(t, strings.Contains(data, created.ID), "invite.redeemed data = %q, want it to name the consumed invite", data)
 }

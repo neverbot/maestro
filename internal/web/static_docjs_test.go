@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // docScriptSource reads internal/web/static/doc.js straight off disk, the
@@ -16,18 +18,14 @@ import (
 func docScriptSource(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile("static/doc.js")
-	if err != nil {
-		t.Fatalf("read static/doc.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/doc.js: %v", err)
 	return string(body)
 }
 
 func documentPageSource(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile("static/document.html")
-	if err != nil {
-		t.Fatalf("read static/document.html: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/document.html: %v", err)
 	return string(body)
 }
 
@@ -58,18 +56,12 @@ func TestTheDocumentScriptHasExactlyOneHTMLSink(t *testing.T) {
 	t.Parallel()
 	source := docScriptSource(t)
 	found := htmlSinks.FindAllString(source, -1)
-	if len(found) != 1 {
-		t.Fatalf("doc.js has %d HTML sinks (%v); want exactly 1, inside setRenderedHTML", len(found), found)
-	}
+	assert.Must(t, len(found) == 1, "doc.js has %d HTML sinks (%v); want exactly 1, inside setRenderedHTML", len(found), found)
 	sink := strings.Index(source, found[0])
 	fn := strings.Index(source, "function setRenderedHTML(el, html) {")
-	if fn == -1 {
-		t.Fatal("doc.js no longer declares setRenderedHTML, which is where its one HTML sink must live")
-	}
+	assert.Must(t, fn != -1, "doc.js no longer declares setRenderedHTML, which is where its one HTML sink must live")
 	end := strings.Index(source[fn:], "\n}\n")
-	if end == -1 || sink < fn || sink > fn+end {
-		t.Fatalf("doc.js's HTML sink is outside setRenderedHTML: every markup write must go through that one function")
-	}
+	assert.Must(t, end != -1 && sink >= fn && sink <= fn+end, "doc.js's HTML sink is outside setRenderedHTML: every markup write must go through that one function")
 }
 
 // TestTheDocumentScriptsHTMLSinkIsOnlyFedByARenderedView pins the other
@@ -98,9 +90,7 @@ func TestTheDocumentScriptsHTMLSinkIsOnlyFedByARenderedView(t *testing.T) {
 	for _, call := range calls {
 		args := strings.TrimSpace(call[1])
 		seen = append(seen, args)
-		if !allowed[args] {
-			t.Errorf("setRenderedHTML(%s): the one HTML sink may only be fed a rendered view's own html field", args)
-		}
+		assert.Should(t, allowed[args], "setRenderedHTML(%s): the one HTML sink may only be fed a rendered view's own html field", args)
 	}
 	// The local the comparison arm feeds the sink from, spelled out, so
 	// "comparison.html" above cannot come to mean a string this page
@@ -127,9 +117,7 @@ func TestTheDocumentPageDeclaresEveryElementItsScriptLooksUp(t *testing.T) {
 	source := docScriptSource(t)
 	shell := documentPageSource(t)
 	ids := regexp.MustCompile(`getElementById\("([^"]+)"\)`).FindAllStringSubmatch(source, -1)
-	if len(ids) == 0 {
-		t.Fatal("doc.js looks up no elements by id; this test no longer pins anything")
-	}
+	assert.Must(t, len(ids) != 0, "doc.js looks up no elements by id; this test no longer pins anything")
 	for _, match := range ids {
 		if !strings.Contains(shell, `id="`+match[1]+`"`) {
 			t.Errorf("doc.js looks up #%s, which document.html does not declare", match[1])
@@ -146,18 +134,12 @@ func TestTheDocumentPageDeclaresEveryElementItsScriptLooksUp(t *testing.T) {
 func TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile("static/game.html")
-	if err != nil {
-		t.Fatalf("read static/game.html: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/game.html: %v", err)
 	shell := string(body)
 	source := homeScriptSource(t)
 	for _, id := range []string{"docs", "docs-empty", "docs-error", "docs-more"} {
-		if !strings.Contains(shell, `id="`+id+`"`) {
-			t.Errorf("game.html does not declare #%s", id)
-		}
-		if !strings.Contains(source, `getElementById("`+id+`")`) {
-			t.Errorf("static/pages/home.js no longer looks up #%s", id)
-		}
+		assert.Should(t, strings.Contains(shell, `id="`+id+`"`), "game.html does not declare #%s", id)
+		assert.Should(t, strings.Contains(source, `getElementById("`+id+`")`), "static/pages/home.js no longer looks up #%s", id)
 	}
 }
 
@@ -165,9 +147,7 @@ func TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp(t *testing.T) {
 func homeScriptSource(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile("static/pages/home.js")
-	if err != nil {
-		t.Fatalf("read static/pages/home.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/pages/home.js: %v", err)
 	return string(body)
 }
 
@@ -187,33 +167,19 @@ func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
 	// and vocabulary, because "who may do this" is one rule with two
 	// subjects rather than two functions that can come to disagree.
 	raw, err := os.ReadFile("static/pages/page.js")
-	if err != nil {
-		t.Fatalf("read static/pages/page.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/pages/page.js: %v", err)
 	source := string(raw)
 	fn := strings.Index(source, "export function whoWrites(role, what) {")
-	if fn == -1 {
-		t.Fatal("static/pages/page.js no longer decides an empty state's action from the caller's role")
-	}
+	assert.Must(t, fn != -1, "static/pages/page.js no longer decides an empty state's action from the caller's role")
 	end := strings.Index(source[fn:], "\n}\n")
-	if end == -1 {
-		t.Fatal("could not read whoWrites's body")
-	}
+	assert.Must(t, end != -1, "could not read whoWrites's body")
 	body := source[fn : fn+end]
-	if !strings.Contains(body, "role === ROLE_VIEWER") {
-		t.Error("whoWrites does not branch on the viewer role")
-	}
-	if !strings.Contains(body, "will refuse a write from you") {
-		t.Error("the viewer's sentence no longer says the instance will refuse the write")
-	}
+	assert.Should(t, strings.Contains(body, "role === ROLE_VIEWER"), "whoWrites does not branch on the viewer role")
+	assert.Should(t, strings.Contains(body, "will refuse a write from you"), "the viewer's sentence no longer says the instance will refuse the write")
 
 	docSource := docScriptSource(t)
-	if !strings.Contains(docSource, `role === "viewer"`) {
-		t.Error("doc.js no longer tells a viewer that a revert will be refused")
-	}
-	if !strings.Contains(docSource, "will refuse a revert from you") {
-		t.Error("doc.js's viewer note no longer says the instance will refuse the revert")
-	}
+	assert.Should(t, strings.Contains(docSource, `role === "viewer"`), "doc.js no longer tells a viewer that a revert will be refused")
+	assert.Should(t, strings.Contains(docSource, "will refuse a revert from you"), "doc.js's viewer note no longer says the instance will refuse the revert")
 }
 
 // TestTheDocumentPageShipsItsSectionsHidden pins the real shell's
@@ -240,8 +206,6 @@ func TestTheDocumentPageShipsItsSectionsHidden(t *testing.T) {
 			t.Errorf("document.html declares no element with id %q", id)
 			continue
 		}
-		if !strings.Contains(element, "hidden") {
-			t.Errorf("document.html ships #%s visible (%s); it is empty until a request answers", id, element)
-		}
+		assert.Should(t, strings.Contains(element, "hidden"), "document.html ships #%s visible (%s); it is empty until a request answers", id, element)
 	}
 }

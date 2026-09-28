@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -36,9 +37,7 @@ func TestTheToolDescriptionsAreReadableOverREST(t *testing.T) {
 	req.AddCookie(f.cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		Tools []struct {
@@ -49,27 +48,19 @@ func TestTheToolDescriptionsAreReadableOverREST(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decoding the tool reference: %v", err)
 	}
-	if len(body.Tools) == 0 {
-		t.Fatal("no tool was listed, so this guard holds nothing")
-	}
+	assert.Must(t, len(body.Tools) != 0, "no tool was listed, so this guard holds nothing")
 
 	descriptions := map[string]string{}
 	for _, tool := range body.Tools {
-		if tool.Description == "" {
-			t.Errorf("%s is listed with no description, which is the whole of what this route is for", tool.Name)
-		}
+		assert.Should(t, tool.Description != "", "%s is listed with no description, which is the whole of what this route is for", tool.Name)
 		descriptions[tool.Name] = tool.Description
 	}
 
 	upsert, ok := descriptions["relation_types.upsert"]
-	if !ok {
-		t.Fatal("relation_types.upsert is not listed, and it is the one that carries the trait vocabulary")
-	}
+	assert.Must(t, ok, "relation_types.upsert is not listed, and it is the one that carries the trait vocabulary")
 	for _, trait := range metamodel.AnalysisTraits {
-		if !strings.Contains(upsert, trait) {
-			t.Errorf("the trait %q is in metamodel.AnalysisTraits and not in the description an agent "+
-				"reads: a closed vocabulary nobody can read is a rule nobody can follow", trait)
-		}
+		assert.Should(t, strings.Contains(upsert, trait), "the trait %q is in metamodel.AnalysisTraits and not in the description an agent "+
+			"reads: a closed vocabulary nobody can read is a rule nobody can follow", trait)
 	}
 }
 
@@ -81,7 +72,5 @@ func TestTheToolReferenceNeedsACaller(t *testing.T) {
 	srv := newRESTFixture(t).srv
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/mcp/tools", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }

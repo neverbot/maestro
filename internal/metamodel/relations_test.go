@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -98,9 +99,7 @@ func TestRelationsArea(t *testing.T) {
 			Source:  metamodel.Ref{TypeKey: "class", Key: "mage"},
 			Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 		})
-		if !errors.Is(err, metamodel.ErrEndpointTypeMismatch) {
-			t.Fatalf("err = %v, want ErrEndpointTypeMismatch", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrEndpointTypeMismatch), "err = %v, want ErrEndpointTypeMismatch", err)
 		// The message names the endpoint that is wrong, the type that was
 		// offered and the relation type that refused it: without all three a
 		// seeding agent with two bad endpoints cannot tell which one to fix.
@@ -168,16 +167,12 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"requires_ability": "mothwing_cloak"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		var stored map[string]any
 		if err := json.Unmarshal(rel.Fields, &stored); err != nil {
 			t.Fatalf("decode stored fields %s: %v", rel.Fields, err)
 		}
-		if stored["requires_ability"] != "mothwing_cloak" {
-			t.Fatalf("stored fields = %v, want requires_ability mothwing_cloak", stored)
-		}
+		assert.Must(t, stored["requires_ability"] == "mothwing_cloak", "stored fields = %v, want requires_ability mothwing_cloak", stored)
 
 		_, err = svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "connects_to",
@@ -185,9 +180,7 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 			Fields:  map[string]any{"requires_ability": 42},
 		})
-		if !errors.Is(err, metamodel.ErrSchemaViolation) {
-			t.Fatalf("err = %v, want ErrSchemaViolation on a bad edge field", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrSchemaViolation), "err = %v, want ErrSchemaViolation on a bad edge field", err)
 		requireFieldError(t, err, "fields.requires_ability", "expected text, got int")
 	})
 
@@ -210,12 +203,8 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 		}
 		first, err := svc.UpsertRelation(ctx, project, in)
-		if err != nil {
-			t.Fatalf("first: %v", err)
-		}
-		if first.Version != 1 {
-			t.Fatalf("a created edge is version %d, want 1", first.Version)
-		}
+		assert.Must(t, err == nil, "first: %v", err)
+		assert.Must(t, first.Version == 1, "a created edge is version %d, want 1", first.Version)
 
 		// **Idempotent by address, guarded by version** — exactly as an entity
 		// is. A second write of the same triple updates the same row rather
@@ -227,33 +216,21 @@ func TestRelationsArea(t *testing.T) {
 			t.Fatalf("a re-seed with no expected version: err = %v, want ErrVersionConflict", err)
 		}
 		second, err := svc.UpsertRelation(ctx, project, withVersion(in, first.Version))
-		if err != nil {
-			t.Fatalf("second: %v", err)
-		}
-		if first.ID != second.ID {
-			t.Fatal("re-seeding an edge created a duplicate")
-		}
-		if second.Version != 2 {
-			t.Fatalf("a rewritten edge is version %d, want 2", second.Version)
-		}
+		assert.Must(t, err == nil, "second: %v", err)
+		assert.Must(t, first.ID == second.ID, "re-seeding an edge created a duplicate")
+		assert.Must(t, second.Version == 2, "a rewritten edge is version %d, want 2", second.Version)
 
 		third, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: in.TypeKey, Source: in.Source, Target: in.Target,
 			Fields: map[string]any{"note": "rewritten"}, ExpectedVersion: &second.Version,
 		})
-		if err != nil {
-			t.Fatalf("third: %v", err)
-		}
-		if third.ID != first.ID {
-			t.Fatal("rewriting an edge's fields created a duplicate")
-		}
+		assert.Must(t, err == nil, "third: %v", err)
+		assert.Must(t, third.ID == first.ID, "rewriting an edge's fields created a duplicate")
 		var stored map[string]any
 		if err := json.Unmarshal(third.Fields, &stored); err != nil {
 			t.Fatalf("decode stored fields: %v", err)
 		}
-		if stored["note"] != "rewritten" {
-			t.Fatalf("stored fields = %v, want the last writer's note", stored)
-		}
+		assert.Must(t, stored["note"] == "rewritten", "stored fields = %v, want the last writer's note", stored)
 	})
 
 	// TestRelationsArea's "an edge may join an entity to itself" case pins
@@ -277,12 +254,8 @@ func TestRelationsArea(t *testing.T) {
 		row, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "connects_to", Source: self, Target: self,
 		})
-		if err != nil {
-			t.Fatalf("a self-loop must be allowed: %v", err)
-		}
-		if row.SourceID != row.TargetID {
-			t.Fatalf("SourceID %v != TargetID %v on a self-loop", row.SourceID, row.TargetID)
-		}
+		assert.Must(t, err == nil, "a self-loop must be allowed: %v", err)
+		assert.Must(t, row.SourceID == row.TargetID, "SourceID %v != TargetID %v on a self-loop", row.SourceID, row.TargetID)
 	})
 
 	t.Run("prerequisite cycles are allowed", func(t *testing.T) {
@@ -371,12 +344,8 @@ func TestRelationsArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.UpsertRelation(ctx, project, tc.in)
-				if !errors.Is(err, metamodel.ErrNotFound) {
-					t.Fatalf("err = %v, want ErrNotFound", err)
-				}
-				if err.Error() != tc.want {
-					t.Fatalf("message = %q, want %q", err.Error(), tc.want)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want ErrNotFound", err)
+				assert.Must(t, err.Error() == tc.want, "message = %q, want %q", err.Error(), tc.want)
 			})
 		}
 	})
@@ -415,9 +384,7 @@ func TestRelationsArea(t *testing.T) {
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Target:  metamodel.Ref{TypeKey: "raid", Key: "molten-core"},
 		})
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want ErrNotFound", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want ErrNotFound", err)
 		if want := `not_found: target: no entity type "raid" in this game`; err.Error() != want {
 			t.Fatalf("message = %q, want %q", err.Error(), want)
 		}
@@ -440,17 +407,13 @@ func TestRelationsArea(t *testing.T) {
 		foreign, err := svc.UpsertEntityType(ctx, theirs, metamodel.EntityTypeInput{
 			Key: "raid", Label: "Raid", LabelPlural: "Raids",
 		})
-		if err != nil {
-			t.Fatalf("their type: %v", err)
-		}
+		assert.Must(t, err == nil, "their type: %v", err)
 		_, err = svc.UpsertRelationType(ctx, mine, metamodel.RelationTypeInput{
 			Key: "takes_place_in", Label: "takes place in",
 			SourceTypeKeys: []string{"quest"},
 			TargetTypeKeys: []string{foreign.Key},
 		})
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want ErrInvalidInput", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want ErrInvalidInput", err)
 		requireFieldError(t, err, "target_type_keys[0]",
 			"names no entity type of this game: "+foreign.Key)
 
@@ -484,9 +447,7 @@ func TestRelationsArea(t *testing.T) {
 		zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "zone", Label: "Zone", LabelPlural: "Zones",
 		})
-		if err != nil {
-			t.Fatalf("seed zone type: %v", err)
-		}
+		assert.Must(t, err == nil, "seed zone type: %v", err)
 
 		// A pool of the test's own, every connection given a short
 		// lock_timeout on the session Postgres itself starts it with — the
@@ -494,17 +455,13 @@ func TestRelationsArea(t *testing.T) {
 		// exact deployment shape finding 1 describes rather than a synthetic
 		// stand-in for it.
 		cfg, err := pgxpool.ParseConfig(pool.Config().ConnString())
-		if err != nil {
-			t.Fatalf("parse pool config: %v", err)
-		}
+		assert.Must(t, err == nil, "parse pool config: %v", err)
 		cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 			_, err := conn.Exec(ctx, "SET lock_timeout = '300ms'")
 			return err
 		}
 		timeoutPool, err := pgxpool.NewWithConfig(ctx, cfg)
-		if err != nil {
-			t.Fatalf("open lock_timeout pool: %v", err)
-		}
+		assert.Must(t, err == nil, "open lock_timeout pool: %v", err)
 		defer timeoutPool.Close()
 		timeoutSvc := metamodel.New(timeoutPool, nil)
 
@@ -512,9 +469,7 @@ func TestRelationsArea(t *testing.T) {
 		// connection outside every pool under test.
 		blocker := standaloneConn(t, pool)
 		tx, err := blocker.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin blocking transaction: %v", err)
-		}
+		assert.Must(t, err == nil, "begin blocking transaction: %v", err)
 		defer func() { _ = tx.Rollback(ctx) }()
 		if _, err := tx.Exec(ctx,
 			`SELECT id FROM entity_types WHERE id = $1 FOR UPDATE`, zone.ID); err != nil {
@@ -528,25 +483,17 @@ func TestRelationsArea(t *testing.T) {
 			Key: "takes_place_in", Label: "takes place in",
 			TargetTypeKeys: []string{"zone"},
 		})
-		if err == nil {
-			t.Fatal("UpsertRelationType succeeded; the endpoint lock did not block it")
-		}
+		assert.Must(t, err != nil, "UpsertRelationType succeeded; the endpoint lock did not block it")
 
 		var validation *metamodel.ValidationError
 		if errors.As(err, &validation) {
 			t.Fatalf("a lock timeout was reported as a ValidationError (code %q): %v", validation.Code, err)
 		}
-		if errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("a lock timeout was reported as ErrInvalidInput: %v", err)
-		}
+		assert.Must(t, !errors.Is(err, metamodel.ErrInvalidInput), "a lock timeout was reported as ErrInvalidInput: %v", err)
 
 		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) {
-			t.Fatalf("the SQLSTATE did not survive: got %v", err)
-		}
-		if pgErr.Code != "55P03" {
-			t.Fatalf("pgErr.Code = %q, want 55P03 (lock_timeout)", pgErr.Code)
-		}
+		assert.Must(t, errors.As(err, &pgErr), "the SQLSTATE did not survive: got %v", err)
+		assert.Must(t, pgErr.Code == "55P03", "pgErr.Code = %q, want 55P03 (lock_timeout)", pgErr.Code)
 
 		// Task 7's third decision, proved on a real lock timeout rather than
 		// on a hand-built PgError: contention is retryable, so the surface
@@ -555,9 +502,7 @@ func TestRelationsArea(t *testing.T) {
 		// TestIsRetryableNamesTheFourContentionStatesAndNothingElse covers
 		// the classification; this covers the wiring that carries the
 		// SQLSTATE out to it through UpsertRelationType's own wrapping.
-		if !metamodel.IsRetryable(err) {
-			t.Fatalf("a lock timeout must be retryable, got %v", err)
-		}
+		assert.Must(t, metamodel.IsRetryable(err), "a lock timeout must be retryable, got %v", err)
 
 		if err := tx.Rollback(ctx); err != nil {
 			t.Fatalf("release the held row: %v", err)
@@ -576,13 +521,9 @@ func TestRelationsArea(t *testing.T) {
 		project := newProject(t, pool)
 
 		_, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{Key: "takes place in"})
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want ErrInvalidInput", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want ErrInvalidInput", err)
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || len(invalid.Fields) != 2 {
-			t.Fatalf("want the key and the label reported together, got %v", err)
-		}
+		assert.Must(t, errors.As(err, &invalid) && len(invalid.Fields) == 2, "want the key and the label reported together, got %v", err)
 
 		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "Takes_Place_In", Label: "takes place in",
@@ -648,9 +589,7 @@ func TestRelationsArea(t *testing.T) {
 
 		// A rival holds the row's lock and has already advanced it to 2.
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		if _, err := rival.Exec(ctx,
 			`UPDATE relation_types SET version = version + 1 WHERE project_id = $1 AND key = 'requires'`,
 			project); err != nil {
@@ -680,13 +619,9 @@ func TestRelationsArea(t *testing.T) {
 		select {
 		case err := <-done:
 			var conflict *metamodel.VersionConflictError
-			if !errors.As(err, &conflict) {
-				t.Fatalf("err = %v, want a *metamodel.VersionConflictError", err)
-			}
-			if conflict.Current != 2 {
-				t.Fatalf("Current = %d, want 2: the caller must be told the version its own write "+
-					"would have met, not the one visible before the rival committed", conflict.Current)
-			}
+			assert.Must(t, errors.As(err, &conflict), "err = %v, want a *metamodel.VersionConflictError", err)
+			assert.Must(t, conflict.Current == 2, "Current = %d, want 2: the caller must be told the version its own write "+
+				"would have met, not the one visible before the rival committed", conflict.Current)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival committed")
 		}
@@ -715,12 +650,8 @@ func TestRelationsArea(t *testing.T) {
 		}
 
 		rels, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 100})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if len(rels.Relations) != 0 {
-			t.Fatalf("%d relations survived their entity", len(rels.Relations))
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, len(rels.Relations) == 0, "%d relations survived their entity", len(rels.Relations))
 	})
 
 	// TestRelationsArea's "remove relation type refuses while it has edges"
@@ -737,9 +668,7 @@ func TestRelationsArea(t *testing.T) {
 		typ, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires",
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelationType: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelationType: %v", err)
 		if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "requires",
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
@@ -759,12 +688,8 @@ func TestRelationsArea(t *testing.T) {
 			t.Fatalf("cascade: %v", err)
 		}
 		rels, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 100})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if len(rels.Relations) != 0 {
-			t.Fatalf("%d relations survived their cascaded type", len(rels.Relations))
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, len(rels.Relations) == 0, "%d relations survived their cascaded type", len(rels.Relations))
 	})
 
 	// TestRelationsArea's "relations are scoped to their project" case pins
@@ -791,12 +716,8 @@ func TestRelationsArea(t *testing.T) {
 		}
 
 		rels, err := svc.ListRelations(ctx, theirs, metamodel.RelationFilter{Limit: 100})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if len(rels.Relations) != 0 {
-			t.Fatalf("another game's listing returned %d edges", len(rels.Relations))
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, len(rels.Relations) == 0, "another game's listing returned %d edges", len(rels.Relations))
 		// Knowing the address is not enough: the removal filters on the
 		// project too, and the other game does not even hold the type.
 		kobold := metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"}
@@ -821,9 +742,7 @@ func TestRelationsArea(t *testing.T) {
 		typ, err := svc.UpsertRelationType(ctx, mine, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires",
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelationType: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelationType: %v", err)
 		if err := svc.RemoveRelationType(ctx, theirs, typ.ID, false); !errors.Is(err, metamodel.ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
@@ -831,12 +750,8 @@ func TestRelationsArea(t *testing.T) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
 		types, err := svc.ListRelationTypes(ctx, theirs)
-		if err != nil {
-			t.Fatalf("ListRelationTypes: %v", err)
-		}
-		if len(types) != 0 {
-			t.Fatalf("another game's listing returned %d relation types", len(types))
-		}
+		assert.Must(t, err == nil, "ListRelationTypes: %v", err)
+		assert.Must(t, len(types) == 0, "another game's listing returned %d relation types", len(types))
 
 		// Both games may use the key, and each sees only its own.
 		if _, err := svc.UpsertRelationType(ctx, theirs, metamodel.RelationTypeInput{
@@ -860,9 +775,7 @@ func TestRelationsArea(t *testing.T) {
 		_, err := svc.UpsertRelationType(ctx, mine, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires", Actor: metamodel.Actor{TokenID: &foreign},
 		})
-		if !errors.Is(err, metamodel.ErrActorNotInGame) {
-			t.Fatalf("relation type: err = %v, want ErrActorNotInGame", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrActorNotInGame), "relation type: err = %v, want ErrActorNotInGame", err)
 
 		if _, err := svc.UpsertRelationType(ctx, mine, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires",
@@ -875,16 +788,10 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Actor:   metamodel.Actor{TokenID: &foreign},
 		})
-		if !errors.Is(err, metamodel.ErrActorNotInGame) {
-			t.Fatalf("relation: err = %v, want ErrActorNotInGame", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrActorNotInGame), "relation: err = %v, want ErrActorNotInGame", err)
 		rels, err := svc.ListRelations(ctx, mine, metamodel.RelationFilter{Limit: 100})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if len(rels.Relations) != 0 {
-			t.Fatalf("the refused write stored %d edges", len(rels.Relations))
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, len(rels.Relations) == 0, "the refused write stored %d edges", len(rels.Relations))
 
 		// The same token against its own game is an ordinary write, so the
 		// mapping cannot be refusing token actors in general.
@@ -895,12 +802,8 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Actor:   metamodel.Actor{TokenID: &own},
 		})
-		if err != nil {
-			t.Fatalf("a token writing to its own game: %v", err)
-		}
-		if row.UpdatedByTokenID == nil || *row.UpdatedByTokenID != own {
-			t.Fatalf("UpdatedByTokenID = %v, want %v", row.UpdatedByTokenID, own)
-		}
+		assert.Must(t, err == nil, "a token writing to its own game: %v", err)
+		assert.Must(t, row.UpdatedByTokenID != nil && *row.UpdatedByTokenID == own, "UpdatedByTokenID = %v, want %v", row.UpdatedByTokenID, own)
 	})
 
 	// TestRelationsArea's "list relations filters by type and endpoint" case
@@ -922,13 +825,9 @@ func TestRelationsArea(t *testing.T) {
 			}
 		}
 		hogger, err := svc.EntityByKey(ctx, project, "quest", "hogger")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 		kobold, err := svc.EntityByKey(ctx, project, "quest", "kobold-camp")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 		for _, spec := range []struct {
 			typeKey      string
 			source, dest metamodel.Ref
@@ -970,12 +869,8 @@ func TestRelationsArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rows, err := svc.ListRelations(ctx, project, tc.filter)
-				if err != nil {
-					t.Fatalf("ListRelations: %v", err)
-				}
-				if len(rows.Relations) != tc.want {
-					t.Fatalf("got %d edges, want %d", len(rows.Relations), tc.want)
-				}
+				assert.Must(t, err == nil, "ListRelations: %v", err)
+				assert.Must(t, len(rows.Relations) == tc.want, "got %d edges, want %d", len(rows.Relations), tc.want)
 			})
 		}
 
@@ -986,9 +881,7 @@ func TestRelationsArea(t *testing.T) {
 		// test that only matches ErrNotFound stays green against exactly the
 		// bare "not_found" this refuses to return.
 		_, err = svc.ListRelations(ctx, project, metamodel.RelationFilter{TypeKey: "nosuch"})
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want ErrNotFound", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want ErrNotFound", err)
 		if got, want := err.Error(), `not_found: no relation type "nosuch" in this game`; got != want {
 			t.Fatalf("message = %q, want %q", got, want)
 		}
@@ -1046,16 +939,10 @@ func TestRelationsArea(t *testing.T) {
 		// unfiltered relation listing actually checks against. Limit: 1
 		// forces the one edge above to fill the page.
 		page, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if page.NextCursor == "" {
-			t.Fatal("a full page did not carry a cursor to forge from")
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, page.NextCursor != "", "a full page did not carry a cursor to forge from")
 		raw, err := base64.RawURLEncoding.DecodeString(page.NextCursor)
-		if err != nil {
-			t.Fatalf("decode cursor: %v", err)
-		}
+		assert.Must(t, err == nil, "decode cursor: %v", err)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			t.Fatalf("unmarshal cursor: %v", err)
@@ -1075,20 +962,14 @@ func TestRelationsArea(t *testing.T) {
 					"f": fields["f"],
 				}
 				forgedRaw, err := json.Marshal(forged)
-				if err != nil {
-					t.Fatalf("marshal forged cursor: %v", err)
-				}
+				assert.Must(t, err == nil, "marshal forged cursor: %v", err)
 				forgedCursor := base64.RawURLEncoding.EncodeToString(forgedRaw)
 
 				_, err = svc.ListRelations(ctx, project,
 					metamodel.RelationFilter{Limit: 1, Cursor: forgedCursor})
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
-					t.Fatalf("err = %v, want a ValidationError at path \"cursor\"", err)
-				}
+				assert.Must(t, errors.As(err, &ve) && len(ve.Fields) == 1 && ve.Fields[0].Path == "cursor", "err = %v, want a ValidationError at path \"cursor\"", err)
 				const want = "is malformed (it carries no creation time): page from the cursor " +
 					"a previous call returned, or omit it to start"
 				if ve.Fields[0].Message != want {
@@ -1129,15 +1010,9 @@ func TestRelationsArea(t *testing.T) {
 				Target: metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 				Fields: map[string]any{"note": 42}},
 		}, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("UpsertRelations: %v", err)
-		}
-		if len(result.Succeeded) != 1 {
-			t.Fatalf("%d edges landed, want 1", len(result.Succeeded))
-		}
-		if len(result.Failed) != 2 {
-			t.Fatalf("failures = %+v, want 2", result.Failed)
-		}
+		assert.Must(t, err == nil, "UpsertRelations: %v", err)
+		assert.Must(t, len(result.Succeeded) == 1, "%d edges landed, want 1", len(result.Succeeded))
+		assert.Must(t, len(result.Failed) == 2, "failures = %+v, want 2", result.Failed)
 		if result.Failed[0].Index != 1 || result.Failed[0].Code != "not_found" {
 			t.Fatalf("failure 0 = %+v, want index 1 not_found", result.Failed[0])
 		}
@@ -1148,9 +1023,7 @@ func TestRelationsArea(t *testing.T) {
 			t.Fatalf("failure 1 = %+v, want index 2 schema_violation", result.Failed[1])
 		}
 		for _, f := range result.Failed {
-			if strings.Contains(f.Message, "secret-first-note") {
-				t.Fatalf("a failure message carries another item's values: %q", f.Message)
-			}
+			assert.Must(t, !strings.Contains(f.Message, "secret-first-note"), "a failure message carries another item's values: %q", f.Message)
 		}
 	})
 
@@ -1189,19 +1062,11 @@ func TestRelationsArea(t *testing.T) {
 				Source: metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 				Target: metamodel.Ref{TypeKey: "zone", Key: "nosuch"}},
 		}, metamodel.BulkAtomic)
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want ErrNotFound", err)
-		}
-		if !strings.Contains(err.Error(), "item 1") {
-			t.Fatalf("err = %v, want the failing item named", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want ErrNotFound", err)
+		assert.Must(t, strings.Contains(err.Error(), "item 1"), "err = %v, want the failing item named", err)
 		rels, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 100})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if len(rels.Relations) != 0 {
-			t.Fatalf("%d edges survived a rolled-back atomic batch", len(rels.Relations))
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, len(rels.Relations) == 0, "%d edges survived a rolled-back atomic batch", len(rels.Relations))
 		requireNothing(t, sub, "a rolled-back batch wrote nothing")
 	})
 
@@ -1238,15 +1103,9 @@ func TestRelationsArea(t *testing.T) {
 		}
 
 		result, err := svc.UpsertRelations(ctx, project, items, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("UpsertRelations: %v", err)
-		}
-		if len(result.Succeeded) != 2 {
-			t.Fatalf("%d edges landed, want 2 — the repeat is the only refusal", len(result.Succeeded))
-		}
-		if len(result.Failed) != 1 || result.Failed[0].Index != 1 || result.Failed[0].Code != "invalid_input" {
-			t.Fatalf("failures = %+v, want one invalid_input at index 1", result.Failed)
-		}
+		assert.Must(t, err == nil, "UpsertRelations: %v", err)
+		assert.Must(t, len(result.Succeeded) == 2, "%d edges landed, want 2 — the repeat is the only refusal", len(result.Succeeded))
+		assert.Must(t, len(result.Failed) == 1 && result.Failed[0].Index == 1 && result.Failed[0].Code == "invalid_input", "failures = %+v, want one invalid_input at index 1", result.Failed)
 		if want := `items[1]: an edge of type "REQUIRES" from "QUEST"/"Kobold-Camp" to "quest"/"hogger" ` +
 			`is already addressed by item 0 of this batch, and keys are matched without regard to case: ` +
 			`an edge is identified by its type and its two endpoints, so the two items are one edge — ` +
@@ -1263,16 +1122,10 @@ func TestRelationsArea(t *testing.T) {
 			t.Fatalf("UpsertRelationType: %v", err)
 		}
 		_, err = svc.UpsertRelations(ctx, other, items, metamodel.BulkAtomic)
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want ErrInvalidInput", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want ErrInvalidInput", err)
 		rels, err := svc.ListRelations(ctx, other, metamodel.RelationFilter{Limit: 100})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if len(rels.Relations) != 0 {
-			t.Fatalf("%d edges landed from a batch refused whole", len(rels.Relations))
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, len(rels.Relations) == 0, "%d edges landed from a batch refused whole", len(rels.Relations))
 	})
 
 	// TestRelationsArea's "an atomic relation batch lands every edge of the
@@ -1309,12 +1162,8 @@ func TestRelationsArea(t *testing.T) {
 				Source: metamodel.Ref{TypeKey: "class", Key: "mage"},
 				Target: metamodel.Ref{TypeKey: "quest", Key: "hogger"}},
 		}, metamodel.BulkAtomic)
-		if err != nil {
-			t.Fatalf("UpsertRelations: %v", err)
-		}
-		if len(result.Succeeded) != 2 {
-			t.Fatalf("%d edges landed, want 2", len(result.Succeeded))
-		}
+		assert.Must(t, err == nil, "UpsertRelations: %v", err)
+		assert.Must(t, len(result.Succeeded) == 2, "%d edges landed, want 2", len(result.Succeeded))
 	})
 
 	// TestRelationsArea's "relation events reach every member of the game
@@ -1345,14 +1194,10 @@ func TestRelationsArea(t *testing.T) {
 		typ, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "Requires", Label: "requires",
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelationType: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelationType: %v", err)
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "relation_type.upserted" {
-				t.Fatalf("%s: Kind = %q, want relation_type.upserted", name, got.Kind)
-			}
+			assert.Must(t, got.Kind == "relation_type.upserted", "%s: Kind = %q, want relation_type.upserted", name, got.Kind)
 			assertIdentityPayload(t, name, got, typ.ID, "Requires")
 		}
 
@@ -1363,9 +1208,7 @@ func TestRelationsArea(t *testing.T) {
 		edge, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "requires", Source: kobold, Target: hogger,
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			assertRelationPayload(t, name, receive(t, sub), "relation.upserted", edge.ID, "Requires")
 		}
@@ -1380,12 +1223,8 @@ func TestRelationsArea(t *testing.T) {
 				item.ExpectedVersion = &back
 			}
 			result, err := svc.UpsertRelations(ctx, project, []metamodel.RelationInput{item}, mode)
-			if err != nil {
-				t.Fatalf("%s batch: %v", mode, err)
-			}
-			if len(result.Succeeded) != 1 {
-				t.Fatalf("%s batch landed %d edges, want 1", mode, len(result.Succeeded))
-			}
+			assert.Must(t, err == nil, "%s batch: %v", mode, err)
+			assert.Must(t, len(result.Succeeded) == 1, "%s batch landed %d edges, want 1", mode, len(result.Succeeded))
 			back = result.Succeeded[0].Version
 			for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 				assertRelationPayload(t, name+" "+string(mode), receive(t, sub),
@@ -1407,9 +1246,7 @@ func TestRelationsArea(t *testing.T) {
 		}
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "relation_type.removed" {
-				t.Fatalf("%s: Kind = %q, want relation_type.removed", name, got.Kind)
-			}
+			assert.Must(t, got.Kind == "relation_type.removed", "%s: Kind = %q, want relation_type.removed", name, got.Kind)
 			assertIdentityPayload(t, name, got, typ.ID, "Requires")
 		}
 	})
@@ -1463,9 +1300,7 @@ func TestRelationsArea(t *testing.T) {
 		project := newProject(t, pool)
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`INSERT INTO relation_types (project_id, key, label) VALUES ($1, 'requires', 'requires')`,
@@ -1493,20 +1328,14 @@ func TestRelationsArea(t *testing.T) {
 		var conflict *metamodel.VersionConflictError
 		select {
 		case err := <-result:
-			if !errors.As(err, &conflict) || conflict.Current != 1 {
-				t.Fatalf("err = %v, want a *VersionConflictError carrying version 1", err)
-			}
+			assert.Must(t, errors.As(err, &conflict) && conflict.Current == 1, "err = %v, want a *VersionConflictError carrying version 1", err)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival committed")
 		}
 
 		row, err := svc.RelationTypeByKey(ctx, project, "requires")
-		if err != nil {
-			t.Fatalf("RelationTypeByKey: %v", err)
-		}
-		if row.Label != "requires" || row.Version != 1 {
-			t.Fatalf("the losing writer overwrote the row: %+v", row)
-		}
+		assert.Must(t, err == nil, "RelationTypeByKey: %v", err)
+		assert.Must(t, row.Label == "requires" && row.Version == 1, "the losing writer overwrote the row: %+v", row)
 	})
 
 	// TestRelationsArea's "a relation type losing its key to another spelling
@@ -1524,9 +1353,7 @@ func TestRelationsArea(t *testing.T) {
 		project := newProject(t, pool)
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`INSERT INTO relation_types (project_id, key, label, version)
@@ -1582,9 +1409,7 @@ func TestRelationsArea(t *testing.T) {
 		project := newProject(t, pool)
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`INSERT INTO relation_types (project_id, key, label) VALUES ($1, 'Requires', 'theirs')`,
@@ -1631,12 +1456,8 @@ func TestRelationsArea(t *testing.T) {
 		}
 
 		row, err := svc.RelationTypeByKey(ctx, project, "requires")
-		if err != nil {
-			t.Fatalf("RelationTypeByKey: %v", err)
-		}
-		if row.Label != "theirs" || row.Version != 1 {
-			t.Fatalf("the refused write was not rolled back: %+v", row)
-		}
+		assert.Must(t, err == nil, "RelationTypeByKey: %v", err)
+		assert.Must(t, row.Label == "theirs" && row.Version == 1, "the refused write was not rolled back: %+v", row)
 	})
 
 	// TestRelationsArea's "the relation queries that address a row by ID are
@@ -1659,17 +1480,13 @@ func TestRelationsArea(t *testing.T) {
 		typ, err := svc.UpsertRelationType(ctx, mine, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires",
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelationType: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelationType: %v", err)
 		edge, err := svc.UpsertRelation(ctx, mine, metamodel.RelationInput{
 			TypeKey: "requires",
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		q := dbq.New(pool)
 
 		if _, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{
@@ -1748,13 +1565,9 @@ func TestRelationsArea(t *testing.T) {
 		seedWorld(t, svc, project)
 
 		quest, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("quest type: %v", err)
-		}
+		assert.Must(t, err == nil, "quest type: %v", err)
 		zone, err := svc.EntityTypeByKey(ctx, project, "zone")
-		if err != nil {
-			t.Fatalf("zone type: %v", err)
-		}
+		assert.Must(t, err == nil, "zone type: %v", err)
 		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "takes_place_in", Label: "takes place in",
 			SourceTypeKeys: []string{"quest"},
@@ -1770,19 +1583,13 @@ func TestRelationsArea(t *testing.T) {
 		}
 
 		stored, err := svc.RelationTypeByKey(ctx, project, "takes_place_in")
-		if err != nil {
-			t.Fatalf("RelationTypeByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationTypeByKey: %v", err)
 		for _, id := range stored.TargetTypeIds {
-			if id == zone.ID {
-				t.Fatal("the removed entity type is still declared as a target")
-			}
+			assert.Must(t, id != zone.ID, "the removed entity type is still declared as a target")
 		}
 		// The source list names a type that still exists and must be left
 		// exactly as it was: pruning is not a licence to empty the row.
-		if len(stored.SourceTypeIds) != 1 || stored.SourceTypeIds[0] != quest.ID {
-			t.Fatalf("source_type_ids = %v, want [%v]", stored.SourceTypeIds, quest.ID)
-		}
+		assert.Must(t, len(stored.SourceTypeIds) == 1 && stored.SourceTypeIds[0] == quest.ID, "source_type_ids = %v, want [%v]", stored.SourceTypeIds, quest.ID)
 
 		// The type is repairable through its own API. Re-declaring it with
 		// the list it currently holds must be accepted; while the dangling id
@@ -1802,12 +1609,8 @@ func TestRelationsArea(t *testing.T) {
 		newZone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "zone", Label: "Zone", LabelPlural: "Zones",
 		})
-		if err != nil {
-			t.Fatalf("re-create zone: %v", err)
-		}
-		if newZone.ID == zone.ID {
-			t.Fatal("the recreated type reused the removed type's id; this test proves nothing")
-		}
+		assert.Must(t, err == nil, "re-create zone: %v", err)
+		assert.Must(t, newZone.ID != zone.ID, "the recreated type reused the removed type's id; this test proves nothing")
 		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 			TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest",
 		}); err != nil {
@@ -1873,9 +1676,7 @@ func TestRelationsArea(t *testing.T) {
 
 		// The designer who wrote "door" first.
 		first, err := svc.UpsertRelation(ctx, project, edge("door"))
-		if err != nil {
-			t.Fatalf("first write: %v", err)
-		}
+		assert.Must(t, err == nil, "first write: %v", err)
 		if firstEvent := receive(t, sub); firstEvent.Kind != "relation.upserted" {
 			t.Fatalf("first event kind = %q, want relation.upserted", firstEvent.Kind)
 		}
@@ -1885,14 +1686,10 @@ func TestRelationsArea(t *testing.T) {
 		// and that is now a refusal rather than an overwrite.
 		_, err = svc.UpsertRelation(ctx, project, edge("vent"))
 		var conflict *metamodel.VersionConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("second write: err = %v, want a VersionConflictError — an unversioned "+
-				"rewrite of an edge is a lost update and must be refused", err)
-		}
-		if conflict.Current != first.Version {
-			t.Fatalf("conflict reports version %d, want %d: a caller told the wrong number "+
-				"retries into the same refusal", conflict.Current, first.Version)
-		}
+		assert.Must(t, errors.As(err, &conflict), "second write: err = %v, want a VersionConflictError — an unversioned "+
+			"rewrite of an edge is a lost update and must be refused", err)
+		assert.Must(t, conflict.Current == first.Version, "conflict reports version %d, want %d: a caller told the wrong number "+
+			"retries into the same refusal", conflict.Current, first.Version)
 
 		// **The refusal happened before the write.** A conflict raised after
 		// the row had already been overwritten would report the same error
@@ -1900,16 +1697,12 @@ func TestRelationsArea(t *testing.T) {
 		stored, err := svc.RelationByEdge(ctx, project, "connects_to",
 			metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 			metamodel.Ref{TypeKey: "quest", Key: "hogger"})
-		if err != nil {
-			t.Fatalf("RelationByEdge: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationByEdge: %v", err)
 		if got, want := string(stored.Fields), `{"passages": "door"}`; got != want {
 			t.Fatalf("fields = %s, want %s — the refused write took the row anyway", got, want)
 		}
-		if stored.Version != first.Version {
-			t.Fatalf("version = %d, want %d — a refused write moved the version",
-				stored.Version, first.Version)
-		}
+		assert.Must(t, stored.Version == first.Version, "version = %d, want %d — a refused write moved the version",
+			stored.Version, first.Version)
 
 		// And nothing was announced: an event for a write that did not happen
 		// would send every subscriber to re-read a row that did not change.
@@ -1921,17 +1714,11 @@ func TestRelationsArea(t *testing.T) {
 		// in this field and is now protected.
 		merged, err := svc.UpsertRelation(ctx, project,
 			withVersion(edge("door, vent"), conflict.Current))
-		if err != nil {
-			t.Fatalf("merged write: %v", err)
-		}
-		if merged.ID != first.ID {
-			t.Fatalf("two row ids (%s, %s): parallel edges are no longer refused, and the "+
-				"decision that pushes multiplicity into edge fields no longer holds",
-				first.ID, merged.ID)
-		}
-		if merged.Version != first.Version+1 {
-			t.Fatalf("version = %d, want %d", merged.Version, first.Version+1)
-		}
+		assert.Must(t, err == nil, "merged write: %v", err)
+		assert.Must(t, merged.ID == first.ID, "two row ids (%s, %s): parallel edges are no longer refused, and the "+
+			"decision that pushes multiplicity into edge fields no longer holds",
+			first.ID, merged.ID)
+		assert.Must(t, merged.Version == first.Version+1, "version = %d, want %d", merged.Version, first.Version+1)
 	})
 
 	// TestRelationsArea's "both bad ends of an edge are answered in one pass"
@@ -1975,14 +1762,10 @@ func TestRelationsArea(t *testing.T) {
 				Source:  metamodel.Ref{TypeKey: "class", Key: "mage"},
 				Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			})
-			if !errors.Is(err, metamodel.ErrEndpointTypeMismatch) {
-				t.Fatalf("err = %v, want ErrEndpointTypeMismatch", err)
-			}
+			assert.Must(t, errors.Is(err, metamodel.ErrEndpointTypeMismatch), "err = %v, want ErrEndpointTypeMismatch", err)
 			want := `endpoint_type_mismatch: source: entity type "class" cannot be the source of relation type "takes_place_in"; ` +
 				`target: entity type "quest" cannot be the target of relation type "takes_place_in"`
-			if err.Error() != want {
-				t.Fatalf("message = %q, want %q", err.Error(), want)
-			}
+			assert.Must(t, err.Error() == want, "message = %q, want %q", err.Error(), want)
 		})
 
 		t.Run("one missing end and one wrongly typed end", func(t *testing.T) {
@@ -1994,26 +1777,18 @@ func TestRelationsArea(t *testing.T) {
 			_, err := svc.UpsertRelation(ctx, project, in)
 			want := `not_found: source: no entity "nosuch" of type "quest" in this game; ` +
 				`endpoint_type_mismatch: target: entity type "quest" cannot be the target of relation type "takes_place_in"`
-			if err == nil || err.Error() != want {
-				t.Fatalf("message = %v, want %q", err, want)
-			}
+			assert.Must(t, err != nil && err.Error() == want, "message = %v, want %q", err, want)
 			// Both halves stay reachable, so a caller asking about either
 			// sentinel is answered truthfully.
-			if !errors.Is(err, metamodel.ErrNotFound) || !errors.Is(err, metamodel.ErrEndpointTypeMismatch) {
-				t.Fatalf("err = %v, want it to match both sentinels", err)
-			}
+			assert.Must(t, errors.Is(err, metamodel.ErrNotFound) && errors.Is(err, metamodel.ErrEndpointTypeMismatch), "err = %v, want it to match both sentinels", err)
 
 			// The wire code an agent branches on, through the only path that
 			// exposes it. not_found wins: the missing row is the one piece of
 			// work that has to happen first.
 			result, err := svc.UpsertRelations(ctx, project, []metamodel.RelationInput{in},
 				metamodel.BulkPartial)
-			if err != nil {
-				t.Fatalf("UpsertRelations: %v", err)
-			}
-			if len(result.Failed) != 1 {
-				t.Fatalf("Failed = %+v, want one failure", result.Failed)
-			}
+			assert.Must(t, err == nil, "UpsertRelations: %v", err)
+			assert.Must(t, len(result.Failed) == 1, "Failed = %+v, want one failure", result.Failed)
 			if result.Failed[0].Code != "not_found" {
 				t.Fatalf("Code = %q, want not_found", result.Failed[0].Code)
 			}
@@ -2054,25 +1829,15 @@ func TestRelationsArea(t *testing.T) {
 				Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 			},
 		}, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("UpsertRelations: %v", err)
-		}
-		if len(result.Written) != 1 {
-			t.Fatalf("written = %+v, want the one edge that landed", result.Written)
-		}
+		assert.Must(t, err == nil, "UpsertRelations: %v", err)
+		assert.Must(t, len(result.Written) == 1, "written = %+v, want the one edge that landed", result.Written)
 		w := result.Written[0]
-		if w.TypeKey != "takes_place_in" {
-			t.Fatalf("written.TypeKey = %q, want the stored relation type key", w.TypeKey)
-		}
+		assert.Must(t, w.TypeKey == "takes_place_in", "written.TypeKey = %q, want the stored relation type key", w.TypeKey)
 		row := result.Succeeded[0]
-		if w.ID != row.ID || w.SourceID != row.SourceID || w.TargetID != row.TargetID {
-			t.Fatalf("written = %+v, want the edge's own id and both endpoint ids", w)
-		}
+		assert.Must(t, w.ID == row.ID && w.SourceID == row.SourceID && w.TargetID == row.TargetID, "written = %+v, want the edge's own id and both endpoint ids", w)
 
 		raw, err := json.Marshal(result)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
 		var decoded struct {
 			Written []struct {
 				TypeKey  string `json:"type_key"`
@@ -2084,16 +1849,12 @@ func TestRelationsArea(t *testing.T) {
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			t.Fatalf("unmarshal %s: %v", raw, err)
 		}
-		if len(decoded.Written) != 1 || decoded.Written[0].ID != row.ID.String() {
-			t.Fatalf("marshalled result %s carries no record of the edge that landed", raw)
-		}
+		assert.Must(t, len(decoded.Written) == 1 && decoded.Written[0].ID == row.ID.String(), "marshalled result %s carries no record of the edge that landed", raw)
 		if decoded.Written[0].SourceID != row.SourceID.String() ||
 			decoded.Written[0].TargetID != row.TargetID.String() {
 			t.Fatalf("marshalled written = %+v, want both endpoint ids", decoded.Written[0])
 		}
-		if strings.Contains(string(raw), "updated_by") {
-			t.Fatalf("marshalled result %s carries database columns", raw)
-		}
+		assert.Must(t, !strings.Contains(string(raw), "updated_by"), "marshalled result %s carries database columns", raw)
 	})
 
 	// TestRelationsArea's "a relation type semantic role is checked here and
@@ -2115,9 +1876,7 @@ func TestRelationsArea(t *testing.T) {
 		_, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires", SemanticRole: "nonsense",
 		})
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want ErrInvalidInput", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want ErrInvalidInput", err)
 		requireFieldError(t, err, "semantic_role",
 			`must be one of "prerequisite", "unlock", "containment", "spatial", `+
 				`"availability", "reward", or omitted: a relation type need not classify itself`)
@@ -2197,52 +1956,34 @@ func TestRelationsArea(t *testing.T) {
 		} {
 			t.Run("removing "+tc.name+" that is not there names it", func(t *testing.T) {
 				err := tc.remove()
-				if !errors.Is(err, metamodel.ErrNotFound) {
-					t.Fatalf("err = %v, want ErrNotFound", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want ErrNotFound", err)
 				for _, want := range tc.want {
-					if !strings.Contains(err.Error(), want) {
-						t.Fatalf("message = %q, want it to name %q", err, want)
-					}
+					assert.Must(t, strings.Contains(err.Error(), want), "message = %q, want it to name %q", err, want)
 				}
-				if err.Error() == "not_found" {
-					t.Fatalf("message = %q, which is the code repeated as prose", err)
-				}
+				assert.Must(t, err.Error() != "not_found", "message = %q, which is the code repeated as prose", err)
 			})
 		}
 
 		// The in-use refusals say how many rows hold the type and that
 		// cascade is the way through, which is the whole recovery.
 		quest, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("quest type: %v", err)
-		}
+		assert.Must(t, err == nil, "quest type: %v", err)
 		// seedWorld left two quests behind, and both hold the type.
 		err = svc.RemoveEntityType(ctx, project, quest.ID, false)
-		if !errors.Is(err, metamodel.ErrInUse) {
-			t.Fatalf("err = %v, want ErrInUse", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInUse), "err = %v, want ErrInUse", err)
 		for _, want := range []string{"quest", "2 entit", "cascade"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("message = %q, want it to mention %q", err, want)
-			}
+			assert.Must(t, strings.Contains(err.Error(), want), "message = %q, want it to mention %q", err, want)
 		}
 
 		relate(t, svc, project, "takes_place_in",
 			metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
 		takesPlaceIn, err := svc.RelationTypeByKey(ctx, project, "takes_place_in")
-		if err != nil {
-			t.Fatalf("relation type: %v", err)
-		}
+		assert.Must(t, err == nil, "relation type: %v", err)
 		err = svc.RemoveRelationType(ctx, project, takesPlaceIn.ID, false)
-		if !errors.Is(err, metamodel.ErrInUse) {
-			t.Fatalf("err = %v, want ErrInUse", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInUse), "err = %v, want ErrInUse", err)
 		for _, want := range []string{"takes_place_in", "1 edge", "cascade"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("message = %q, want it to mention %q", err, want)
-			}
+			assert.Must(t, strings.Contains(err.Error(), want), "message = %q, want it to mention %q", err, want)
 		}
 	})
 
@@ -2276,26 +2017,18 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"requires_ability": "mothwing_cloak", "one_way": true},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 
 		row, err := svc.RelationByEdge(ctx, project, "connects_to",
 			metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 			metamodel.Ref{TypeKey: "quest", Key: "hogger"})
-		if err != nil {
-			t.Fatalf("RelationByEdge: %v", err)
-		}
-		if row.ID != written.ID {
-			t.Fatalf("read edge %s, want the one just written, %s", row.ID, written.ID)
-		}
+		assert.Must(t, err == nil, "RelationByEdge: %v", err)
+		assert.Must(t, row.ID == written.ID, "read edge %s, want the one just written, %s", row.ID, written.ID)
 		var stored map[string]any
 		if err := json.Unmarshal(row.Fields, &stored); err != nil {
 			t.Fatalf("decode stored fields %s: %v", row.Fields, err)
 		}
-		if stored["requires_ability"] != "mothwing_cloak" || stored["one_way"] != true {
-			t.Fatalf("read back %v, want requires_ability mothwing_cloak and one_way true", stored)
-		}
+		assert.Must(t, stored["requires_ability"] == "mothwing_cloak" && stored["one_way"] == true, "read back %v, want requires_ability mothwing_cloak and one_way true", stored)
 
 		// The direction is part of the address: the same pair the other way
 		// round is a different edge, and there is no such edge here.
@@ -2368,12 +2101,8 @@ func TestRelationsArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.RelationByEdge(ctx, project, tc.typeKey, tc.source, tc.target)
-				if !errors.Is(err, metamodel.ErrNotFound) {
-					t.Fatalf("err = %v, want ErrNotFound", err)
-				}
-				if !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("err = %q, want it to contain %q", err, tc.want)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want ErrNotFound", err)
+				assert.Must(t, strings.Contains(err.Error(), tc.want), "err = %q, want it to contain %q", err, tc.want)
 			})
 		}
 	})
@@ -2441,9 +2170,7 @@ func TestRelationsArea(t *testing.T) {
 				_, err := svc.RelationByEdge(ctx, mine, tc.typeKey,
 					metamodel.Ref{TypeKey: "quest", Key: tc.sourceKey},
 					metamodel.Ref{TypeKey: "quest", Key: "hogger"})
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want ErrInvalidInput", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want ErrInvalidInput", err)
 				requireFieldError(t, err, tc.path,
 					"must be letters, digits, underscores or hyphens, starting with a letter or a digit")
 			})
@@ -2491,14 +2218,10 @@ func TestRelationsArea(t *testing.T) {
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		q := dbq.New(pool)
 		stored, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: mine, ID: edge.ID})
-		if err != nil {
-			t.Fatalf("read the stored edge: %v", err)
-		}
+		assert.Must(t, err == nil, "read the stored edge: %v", err)
 
 		// The other game, holding this edge's three ids and its own project
 		// id, meets the guard: no row updated, and therefore no row returned.
@@ -2518,25 +2241,17 @@ func TestRelationsArea(t *testing.T) {
 			Fields:          []byte(`{"note":"theirs"}`),
 			ExpectedVersion: stored.Version,
 		})
-		if !errors.Is(err, pgx.ErrNoRows) {
-			t.Fatalf("UpsertRelation returned %+v (err = %v) for another game's edge, want no rows",
-				row, err)
-		}
+		assert.Must(t, errors.Is(err, pgx.ErrNoRows), "UpsertRelation returned %+v (err = %v) for another game's edge, want no rows",
+			row, err)
 
 		// The positive control, in both directions: the edge is untouched,
 		// and the owning game can still write it.
 		after, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: mine, ID: edge.ID})
-		if err != nil {
-			t.Fatalf("read the edge back: %v", err)
-		}
-		if string(after.Fields) != string(stored.Fields) {
-			t.Fatalf("the edge's fields are %s after another game's write, want %s",
-				after.Fields, stored.Fields)
-		}
-		if after.Version != stored.Version {
-			t.Fatalf("the edge is version %d after another game's write, want %d",
-				after.Version, stored.Version)
-		}
+		assert.Must(t, err == nil, "read the edge back: %v", err)
+		assert.Must(t, string(after.Fields) == string(stored.Fields), "the edge's fields are %s after another game's write, want %s",
+			after.Fields, stored.Fields)
+		assert.Must(t, after.Version == stored.Version, "the edge is version %d after another game's write, want %d",
+			after.Version, stored.Version)
 		mineRow, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
 			ProjectID:       mine,
 			RelationTypeID:  stored.RelationTypeID,
@@ -2545,13 +2260,9 @@ func TestRelationsArea(t *testing.T) {
 			Fields:          []byte(`{"note":"mine"}`),
 			ExpectedVersion: stored.Version,
 		})
-		if err != nil {
-			t.Fatalf("the owning game cannot write its own edge: %v", err)
-		}
-		if mineRow.Version != stored.Version+1 {
-			t.Fatalf("the owning game's write left version %d, want %d",
-				mineRow.Version, stored.Version+1)
-		}
+		assert.Must(t, err == nil, "the owning game cannot write its own edge: %v", err)
+		assert.Must(t, mineRow.Version == stored.Version+1, "the owning game's write left version %d, want %d",
+			mineRow.Version, stored.Version+1)
 	})
 
 	// TestRelationsArea's "an edge schema change flags the edges that stop
@@ -2583,18 +2294,14 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"note": "chain", "difficulty": 3},
 		})
-		if err != nil {
-			t.Fatalf("write the edge that will stop fitting: %v", err)
-		}
+		assert.Must(t, err == nil, "write the edge that will stop fitting: %v", err)
 		sparse, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "requires",
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 			Fields:  map[string]any{"note": "still fits"},
 		})
-		if err != nil {
-			t.Fatalf("write the edge that will keep fitting: %v", err)
-		}
+		assert.Must(t, err == nil, "write the edge that will keep fitting: %v", err)
 		_, sparseVersionBefore, sparseFieldsBefore, sparseUpdatedBefore := relationState(t, pool, sparse.ID)
 
 		// "difficulty" is dropped from the declaration, so the edge carrying
@@ -2604,32 +2311,18 @@ func TestRelationsArea(t *testing.T) {
 		}, 1)
 
 		invalid, version, fields, _ := relationState(t, pool, carrying.ID)
-		if !invalid {
-			t.Fatal("an edge carrying an undeclared field must be flagged invalid")
-		}
-		if version != carrying.Version {
-			t.Fatalf("the sweep moved the flagged edge's version: %d -> %d",
-				carrying.Version, version)
-		}
-		if !strings.Contains(fields, "difficulty") {
-			t.Fatalf("the sweep deleted the values it flagged: %s", fields)
-		}
+		assert.Must(t, invalid, "an edge carrying an undeclared field must be flagged invalid")
+		assert.Must(t, version == carrying.Version, "the sweep moved the flagged edge's version: %d -> %d",
+			carrying.Version, version)
+		assert.Must(t, strings.Contains(fields, "difficulty"), "the sweep deleted the values it flagged: %s", fields)
 
 		invalid, version, fieldsAfter, updatedAfter := relationState(t, pool, sparse.ID)
-		if invalid {
-			t.Fatal("an edge that still fits its schema must not be flagged")
-		}
-		if fieldsAfter != sparseFieldsBefore {
-			t.Fatalf("the sweep rewrote stored values: %s -> %s", sparseFieldsBefore, fieldsAfter)
-		}
-		if version != sparseVersionBefore {
-			t.Fatalf("the sweep moved a version: %d -> %d", sparseVersionBefore, version)
-		}
+		assert.Must(t, !invalid, "an edge that still fits its schema must not be flagged")
+		assert.Must(t, fieldsAfter == sparseFieldsBefore, "the sweep rewrote stored values: %s -> %s", sparseFieldsBefore, fieldsAfter)
+		assert.Must(t, version == sparseVersionBefore, "the sweep moved a version: %d -> %d", sparseVersionBefore, version)
 		// A row whose verdict has not changed must not be rewritten at all: a
 		// validation pass is not an edit, and a moved updated_at says it was.
-		if updatedAfter != sparseUpdatedBefore {
-			t.Fatalf("the sweep touched updated_at: %s -> %s", sparseUpdatedBefore, updatedAfter)
-		}
+		assert.Must(t, updatedAfter == sparseUpdatedBefore, "the sweep touched updated_at: %s -> %s", sparseUpdatedBefore, updatedAfter)
 	})
 
 	// TestRelationsArea's "an edge schema change does not back fill declared
@@ -2652,9 +2345,7 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"note": "chain"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 
 		narrowRequires(t, svc, project, metamodel.Schema{
 			{Key: "note", Type: metamodel.FieldText},
@@ -2662,12 +2353,8 @@ func TestRelationsArea(t *testing.T) {
 		}, 1)
 
 		invalid, _, fields, _ := relationState(t, pool, edge.ID)
-		if invalid {
-			t.Fatal("an edge missing a field that has a default still fits the schema")
-		}
-		if strings.Contains(fields, "hidden") {
-			t.Fatalf("the sweep back-filled the default: %s", fields)
-		}
+		assert.Must(t, !invalid, "an edge missing a field that has a default still fits the schema")
+		assert.Must(t, !strings.Contains(fields, "hidden"), "the sweep back-filled the default: %s", fields)
 	})
 
 	// TestRelationsArea's "an edge schema change clears the flag when the edge
@@ -2692,9 +2379,7 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"note": "chain"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 
 		narrowRequires(t, svc, project, nil, 1)
 		if invalid, _, _, _ := relationState(t, pool, edge.ID); !invalid {
@@ -2735,9 +2420,7 @@ func TestRelationsArea(t *testing.T) {
 			Fields:  map[string]any{"note": "chain", "difficulty": 3},
 		}
 		edge, err := svc.UpsertRelation(ctx, project, in)
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		narrowRequires(t, svc, project, metamodel.Schema{
 			{Key: "note", Type: metamodel.FieldText},
 		}, 1)
@@ -2748,12 +2431,8 @@ func TestRelationsArea(t *testing.T) {
 		fixed := withVersion(in, edge.Version)
 		fixed.Fields = map[string]any{"note": "chain"}
 		rewritten, err := svc.UpsertRelation(ctx, project, fixed)
-		if err != nil {
-			t.Fatalf("rewrite the flagged edge: %v", err)
-		}
-		if rewritten.Invalid {
-			t.Fatal("the returned row still carries the flag after a validated write")
-		}
+		assert.Must(t, err == nil, "rewrite the flagged edge: %v", err)
+		assert.Must(t, !rewritten.Invalid, "the returned row still carries the flag after a validated write")
 		if invalid, _, _, _ := relationState(t, pool, edge.ID); invalid {
 			t.Fatal("a rewritten edge that fits its schema must not stay flagged")
 		}
@@ -2784,18 +2463,14 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"note": "chain", "difficulty": 3},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		intact, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "requires",
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 			Fields:  map[string]any{"note": "fine"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 		narrowRequires(t, svc, project, metamodel.Schema{
 			{Key: "note", Type: metamodel.FieldText},
 		}, 1)
@@ -2812,20 +2487,14 @@ func TestRelationsArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				page, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Invalid: tc.filter})
-				if err != nil {
-					t.Fatalf("ListRelations: %v", err)
-				}
+				assert.Must(t, err == nil, "ListRelations: %v", err)
 				got := make(map[uuid.UUID]bool, len(page.Relations))
 				for _, row := range page.Relations {
 					got[row.ID] = true
 				}
-				if len(got) != len(tc.want) {
-					t.Fatalf("listed %d edges, want %d", len(got), len(tc.want))
-				}
+				assert.Must(t, len(got) == len(tc.want), "listed %d edges, want %d", len(got), len(tc.want))
 				for _, id := range tc.want {
-					if !got[id] {
-						t.Fatalf("edge %s is missing from the listing", id)
-					}
+					assert.Must(t, got[id], "edge %s is missing from the listing", id)
 				}
 			})
 		}
@@ -2862,19 +2531,13 @@ func TestRelationsArea(t *testing.T) {
 
 		yes := true
 		page, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1})
-		if err != nil {
-			t.Fatalf("ListRelations: %v", err)
-		}
-		if page.NextCursor == "" {
-			t.Fatal("the unfiltered listing issued no cursor, so there is nothing to carry")
-		}
+		assert.Must(t, err == nil, "ListRelations: %v", err)
+		assert.Must(t, page.NextCursor != "", "the unfiltered listing issued no cursor, so there is nothing to carry")
 		_, err = svc.ListRelations(ctx, project, metamodel.RelationFilter{
 			Invalid: &yes, Cursor: page.NextCursor, Limit: 1,
 		})
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input: a cursor from the unfiltered listing "+
-				"must not page the invalid one", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input: a cursor from the unfiltered listing "+
+			"must not page the invalid one", err)
 	})
 
 	// TestRelationsArea's "relation counts carry the invalid tally" case pins
@@ -2895,9 +2558,7 @@ func TestRelationsArea(t *testing.T) {
 		})
 
 		typ, err := svc.RelationTypeByKey(ctx, project, "requires")
-		if err != nil {
-			t.Fatalf("RelationTypeByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationTypeByKey: %v", err)
 		if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 			TypeKey: "requires",
 			Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
@@ -2916,9 +2577,7 @@ func TestRelationsArea(t *testing.T) {
 		}
 
 		counts, err := svc.RelationCountsByType(ctx, project)
-		if err != nil {
-			t.Fatalf("RelationCountsByType: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationCountsByType: %v", err)
 		if got := counts[typ.ID]; got.Total != 2 || got.Invalid != 0 {
 			t.Fatalf("before the schema edit: %+v, want {Total:2 Invalid:0}", got)
 		}
@@ -2928,9 +2587,7 @@ func TestRelationsArea(t *testing.T) {
 		}, 1)
 
 		counts, err = svc.RelationCountsByType(ctx, project)
-		if err != nil {
-			t.Fatalf("RelationCountsByType: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationCountsByType: %v", err)
 		if got := counts[typ.ID]; got.Total != 2 || got.Invalid != 1 {
 			t.Fatalf("after the schema edit: %+v, want {Total:2 Invalid:1}", got)
 		}
@@ -2964,9 +2621,7 @@ func TestRelationsArea(t *testing.T) {
 				Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 				Fields:  map[string]any{"note": "chain"},
 			})
-			if err != nil {
-				t.Fatalf("UpsertRelation: %v", err)
-			}
+			assert.Must(t, err == nil, "UpsertRelation: %v", err)
 			edges[project] = edge.ID
 		}
 
@@ -3007,9 +2662,7 @@ func TestRelationsArea(t *testing.T) {
 			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			Fields:  map[string]any{"note": "chain"},
 		})
-		if err != nil {
-			t.Fatalf("UpsertRelation: %v", err)
-		}
+		assert.Must(t, err == nil, "UpsertRelation: %v", err)
 
 		q := dbq.New(pool)
 		params := dbq.UpsertRelationParams{
@@ -3032,12 +2685,8 @@ func TestRelationsArea(t *testing.T) {
 		// land, so the refusal above is the guard and not some other clause.
 		params.ExpectedVersion = edge.Version
 		row, err := q.UpsertRelation(ctx, params)
-		if err != nil {
-			t.Fatalf("UpsertRelation with the true version: %v", err)
-		}
-		if row.Version != edge.Version+1 {
-			t.Fatalf("version = %d, want %d", row.Version, edge.Version+1)
-		}
+		assert.Must(t, err == nil, "UpsertRelation with the true version: %v", err)
+		assert.Must(t, row.Version == edge.Version+1, "version = %d, want %d", row.Version, edge.Version+1)
 	})
 }
 
@@ -3045,13 +2694,9 @@ func TestRelationsArea(t *testing.T) {
 // event: its id and the stored spelling of its type key.
 func assertRelationPayload(t *testing.T, who string, e realtime.Event, wantKind string, wantID uuid.UUID, wantTypeKey string) {
 	t.Helper()
-	if e.Kind != wantKind {
-		t.Fatalf("%s: Kind = %q, want %q", who, e.Kind, wantKind)
-	}
+	assert.Must(t, e.Kind == wantKind, "%s: Kind = %q, want %q", who, e.Kind, wantKind)
 	raw, err := json.Marshal(e.Payload)
-	if err != nil {
-		t.Fatalf("%s: marshal payload: %v", who, err)
-	}
+	assert.Must(t, err == nil, "%s: marshal payload: %v", who, err)
 	var got struct {
 		ID       uuid.UUID `json:"id"`
 		TypeKey  string    `json:"type_key"`
@@ -3061,15 +2706,9 @@ func assertRelationPayload(t *testing.T, who string, e realtime.Event, wantKind 
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("%s: decode payload %s: %v", who, raw, err)
 	}
-	if got.ID != wantID {
-		t.Fatalf("%s: payload id = %v, want %v", who, got.ID, wantID)
-	}
-	if got.TypeKey != wantTypeKey {
-		t.Fatalf("%s: payload type_key = %q, want %q", who, got.TypeKey, wantTypeKey)
-	}
-	if got.SourceID == uuid.Nil || got.TargetID == uuid.Nil {
-		t.Fatalf("%s: payload carries no endpoints: %s", who, raw)
-	}
+	assert.Must(t, got.ID == wantID, "%s: payload id = %v, want %v", who, got.ID, wantID)
+	assert.Must(t, got.TypeKey == wantTypeKey, "%s: payload type_key = %q, want %q", who, got.TypeKey, wantTypeKey)
+	assert.Must(t, got.SourceID != uuid.Nil && got.TargetID != uuid.Nil, "%s: payload carries no endpoints: %s", who, raw)
 }
 
 // relationState reads back the columns the re-validation sweep is
@@ -3083,9 +2722,7 @@ func relationState(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) (
 	err := pool.QueryRow(context.Background(),
 		`SELECT invalid, version, fields::text, updated_at::text FROM relations WHERE id = $1`, id).
 		Scan(&invalid, &version, &fields, &updatedAt)
-	if err != nil {
-		t.Fatalf("read relation: %v", err)
-	}
+	assert.Must(t, err == nil, "read relation: %v", err)
 	return invalid, version, fields, updatedAt
 }
 

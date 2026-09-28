@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -97,9 +98,7 @@ func transcriptPaths(t *testing.T) []string {
 		out = append(out, name)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walking the bundle for transcripts: %v", err)
-	}
+	assert.Must(t, err == nil, "walking the bundle for transcripts: %v", err)
 	sort.Strings(out)
 	if len(out) == 0 {
 		t.Fatal("the bundle ships no genre transcripts: every assertion below would run " +
@@ -111,25 +110,19 @@ func transcriptPaths(t *testing.T) []string {
 func readTranscript(t *testing.T, name string) transcript {
 	t.Helper()
 	body, err := fs.ReadFile(skill.Files(), name)
-	if err != nil {
-		t.Fatalf("reading %s: %v", name, err)
-	}
+	assert.Must(t, err == nil, "reading %s: %v", name, err)
 	var parsed transcript
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&parsed); err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}
-	if parsed.Genre == "" {
-		t.Fatalf("%s declares no genre", name)
-	}
+	assert.Must(t, parsed.Genre != "", "%s declares no genre", name)
 	if want := strings.TrimSuffix(path.Base(name), ".json"); parsed.Genre != want {
 		t.Fatalf("%s declares genre %q: the file name and the genre are one name written "+
 			"twice and they have drifted", name, parsed.Genre)
 	}
-	if len(parsed.Calls) == 0 {
-		t.Fatalf("%s carries no calls", name)
-	}
+	assert.Must(t, len(parsed.Calls) != 0, "%s carries no calls", name)
 	return parsed
 }
 
@@ -169,20 +162,14 @@ func newTranscriptFixture(t *testing.T, paths []string) transcriptFixture {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	newToken := func(slug, name string) string {
 		game, err := projSvc.Create(ctx, slug, name, owner.ID)
-		if err != nil {
-			t.Fatalf("Create game %s: %v", slug, err)
-		}
+		assert.Must(t, err == nil, "Create game %s: %v", slug, err)
 		secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 			ProjectID: game.ID, UserID: owner.ID, Label: "agent",
 		})
-		if err != nil {
-			t.Fatalf("CreateAPIToken for %s: %v", slug, err)
-		}
+		assert.Must(t, err == nil, "CreateAPIToken for %s: %v", slug, err)
 		return secret
 	}
 	f := transcriptFixture{srv: srv, tokens: map[string]string{}}
@@ -212,12 +199,8 @@ func applyTranscript(t *testing.T, f transcriptFixture, name string, script tran
 	validated, saved := 0, 0
 	for i, call := range script.Calls {
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: call.Tool, Arguments: call.Args})
-		if err != nil {
-			t.Fatalf("call %d of %s: %s: transport: %v", i, name, call.Tool, err)
-		}
-		if result.IsError {
-			t.Fatalf("call %d of %s: %s: %s", i, name, call.Tool, transcriptFailure(result))
-		}
+		assert.Must(t, err == nil, "call %d of %s: %s: transport: %v", i, name, call.Tool, err)
+		assert.Must(t, !result.IsError, "call %d of %s: %s: %s", i, name, call.Tool, transcriptFailure(result))
 		switch call.Tool {
 		case "views.validate":
 			validated++
@@ -229,10 +212,8 @@ func applyTranscript(t *testing.T, f transcriptFixture, name string, script tran
 				} `json:"errors"`
 			}
 			decodeStructured(t, result, &answer)
-			if !answer.Valid {
-				t.Fatalf("call %d of %s: views.validate refused the document it teaches: %+v",
-					i, name, answer.Errors)
-			}
+			assert.Must(t, answer.Valid, "call %d of %s: views.validate refused the document it teaches: %+v",
+				i, name, answer.Errors)
 		case "views.upsert":
 			saved++
 		}
@@ -241,11 +222,9 @@ func applyTranscript(t *testing.T, f transcriptFixture, name string, script tran
 	// surfaces and claims to cover five. The plan's shape for every
 	// genre is a validate and a save, and asserting the count here is
 	// what stops a transcript quietly dropping them.
-	if validated == 0 || saved == 0 {
-		t.Fatalf("%s ran %d views.validate and %d views.upsert calls: a transcript that "+
-			"never composes a view leaves the two view surfaces unexecuted while looking "+
-			"like a passing example", name, validated, saved)
-	}
+	assert.Must(t, validated != 0 && saved != 0, "%s ran %d views.validate and %d views.upsert calls: a transcript that "+
+		"never composes a view leaves the two view surfaces unexecuted while looking "+
+		"like a passing example", name, validated, saved)
 
 	var counts web.GameCountsOutput
 	decodeStructured(t, callOK(t, session, "games.counts", map[string]any{}), &counts)
@@ -318,10 +297,8 @@ func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 
 			declaredTypes := script.declaredTypeKeys()
 			declaredRelationTypes := script.declaredRelationTypeKeys()
-			if len(declaredTypes) == 0 || len(declaredRelationTypes) == 0 {
-				t.Fatalf("%s declares %d entity types and %d relation types: the comparisons "+
-					"below would run over an empty set", name, len(declaredTypes), len(declaredRelationTypes))
-			}
+			assert.Must(t, len(declaredTypes) != 0 && len(declaredRelationTypes) != 0, "%s declares %d entity types and %d relation types: the comparisons "+
+				"below would run over an empty set", name, len(declaredTypes), len(declaredRelationTypes))
 
 			entities := map[string]web.EntityTypeSummary{}
 			for _, row := range counts.EntityTypes {
@@ -335,11 +312,9 @@ func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 			// game does not report is a call that did nothing; a type the
 			// game reports and the transcript never declared is a game
 			// that was not built by this transcript alone.
-			if len(entities) != len(declaredTypes) || len(relations) != len(declaredRelationTypes) {
-				t.Errorf("%s declares %d entity and %d relation types; games.counts reports "+
-					"%d and %d", name, len(declaredTypes), len(declaredRelationTypes),
-					len(entities), len(relations))
-			}
+			assert.Should(t, len(entities) == len(declaredTypes) && len(relations) == len(declaredRelationTypes), "%s declares %d entity and %d relation types; games.counts reports "+
+				"%d and %d", name, len(declaredTypes), len(declaredRelationTypes),
+				len(entities), len(relations))
 			for _, key := range declaredTypes {
 				row, ok := entities[key]
 				if !ok {
@@ -347,14 +322,10 @@ func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 						name, key)
 					continue
 				}
-				if row.EntityCount == 0 {
-					t.Errorf("%s declares the entity type %q and seeds none of it: a worked "+
-						"example with a branch nothing instances", name, key)
-				}
-				if row.InvalidCount != 0 {
-					t.Errorf("%s leaves %d invalid rows of %q behind: the example teaches a "+
-						"game shape the product itself flags as broken", name, row.InvalidCount, key)
-				}
+				assert.Should(t, row.EntityCount != 0, "%s declares the entity type %q and seeds none of it: a worked "+
+					"example with a branch nothing instances", name, key)
+				assert.Should(t, row.InvalidCount == 0, "%s leaves %d invalid rows of %q behind: the example teaches a "+
+					"game shape the product itself flags as broken", name, row.InvalidCount, key)
 			}
 			for _, key := range declaredRelationTypes {
 				row, ok := relations[key]
@@ -363,21 +334,13 @@ func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 						name, key)
 					continue
 				}
-				if row.RelationCount == 0 {
-					t.Errorf("%s declares the relation type %q and writes no edge of it: the "+
-						"edge type is vocabulary the example never uses", name, key)
-				}
-				if row.InvalidCount != 0 {
-					t.Errorf("%s leaves %d invalid edges of %q behind", name, row.InvalidCount, key)
-				}
+				assert.Should(t, row.RelationCount != 0, "%s declares the relation type %q and writes no edge of it: the "+
+					"edge type is vocabulary the example never uses", name, key)
+				assert.Should(t, row.InvalidCount == 0, "%s leaves %d invalid edges of %q behind", name, row.InvalidCount, key)
 			}
-			if counts.Totals.Invalid != 0 {
-				t.Errorf("%s leaves %d invalid rows behind in total", name, counts.Totals.Invalid)
-			}
-			if counts.Totals.Entities == 0 || counts.Totals.Relations == 0 {
-				t.Errorf("%s produced %d entities and %d relations", name,
-					counts.Totals.Entities, counts.Totals.Relations)
-			}
+			assert.Should(t, counts.Totals.Invalid == 0, "%s leaves %d invalid rows behind in total", name, counts.Totals.Invalid)
+			assert.Should(t, counts.Totals.Entities != 0 && counts.Totals.Relations != 0, "%s produced %d entities and %d relations", name,
+				counts.Totals.Entities, counts.Totals.Relations)
 		})
 	}
 }
@@ -397,9 +360,7 @@ func TestATranscriptWritesOnlyToItsOwnGame(t *testing.T) {
 	witness := connectMCP(t, f.baseURL, f.witness)
 	var before web.GameCountsOutput
 	decodeStructured(t, callOK(t, witness, "games.counts", map[string]any{}), &before)
-	if len(before.EntityTypes) != 0 || len(before.RelationTypes) != 0 {
-		t.Fatalf("the witness game was not empty before anything ran: %+v", before)
-	}
+	assert.Must(t, len(before.EntityTypes) == 0 && len(before.RelationTypes) == 0, "the witness game was not empty before anything ran: %+v", before)
 
 	written := int64(0)
 	for _, name := range paths {
@@ -413,11 +374,8 @@ func TestATranscriptWritesOnlyToItsOwnGame(t *testing.T) {
 
 	var after web.GameCountsOutput
 	decodeStructured(t, callOK(t, witness, "games.counts", map[string]any{}), &after)
-	if len(after.EntityTypes) != 0 || len(after.RelationTypes) != 0 ||
-		after.Totals.Entities != 0 || after.Totals.Relations != 0 {
-		t.Fatalf("a game no transcript was pointed at holds content after %d rows were "+
-			"written elsewhere: %+v", written, after)
-	}
+	assert.Must(t, len(after.EntityTypes) == 0 && len(after.RelationTypes) == 0 && after.Totals.Entities == 0 && after.Totals.Relations == 0, "a game no transcript was pointed at holds content after %d rows were "+
+		"written elsewhere: %+v", written, after)
 }
 
 // TestTheTranscriptRunnerReportsAFailedCall is the precision fixture for
@@ -443,18 +401,14 @@ func TestTheTranscriptRunnerReportsAFailedCall(t *testing.T) {
 			"target_type_keys": []any{"another_one"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
+	assert.Must(t, err == nil, "CallTool: %v", err)
 	if !result.IsError {
 		t.Fatal("a relation type between two undeclared entity types was accepted, so the " +
 			"transcripts' own endpoint declarations are checked by nothing")
 	}
 	message := transcriptFailure(result)
-	if message == "" || strings.Contains(message, "refused with no content") {
-		t.Fatalf("the runner rendered a refusal as %q, which names neither the code nor the "+
-			"argument: a failure this test can print is the whole difference between a "+
-			"repairable transcript and a rerun", message)
-	}
+	assert.Must(t, message != "" && !strings.Contains(message, "refused with no content"), "the runner rendered a refusal as %q, which names neither the code nor the "+
+		"argument: a failure this test can print is the whole difference between a "+
+		"repairable transcript and a rerun", message)
 	t.Logf("a refused call renders as: %s", message)
 }

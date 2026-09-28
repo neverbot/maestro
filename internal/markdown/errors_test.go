@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -25,24 +26,14 @@ func TestAMissingErrorIsANotFoundThatNamesItsArgument(t *testing.T) {
 		Message: `this game has no entity with key "hogger"`,
 	})
 
-	if !errors.Is(err, markdown.ErrNotFound) {
-		t.Fatalf("a MissingError must match ErrNotFound, got %v", err)
-	}
-	if errors.Is(err, markdown.ErrInvalidInput) {
-		t.Fatal("a MissingError must not match ErrInvalidInput: the recoveries differ")
-	}
-	if !strings.HasPrefix(err.Error(), "not_found: ") {
-		t.Fatalf("Error() = %q, want it to lead with the wire code", err.Error())
-	}
+	assert.Must(t, errors.Is(err, markdown.ErrNotFound), "a MissingError must match ErrNotFound, got %v", err)
+	assert.Must(t, !errors.Is(err, markdown.ErrInvalidInput), "a MissingError must not match ErrInvalidInput: the recoveries differ")
+	assert.Must(t, strings.HasPrefix(err.Error(), "not_found: "), "Error() = %q, want it to lead with the wire code", err.Error())
 
 	var missing *markdown.MissingError
-	if !errors.As(err, &missing) {
-		t.Fatalf("errors.As did not recover the *MissingError from %v", err)
-	}
+	assert.Must(t, errors.As(err, &missing), "errors.As did not recover the *MissingError from %v", err)
 	fields := missing.Fields()
-	if len(fields) != 1 {
-		t.Fatalf("Fields() = %v, want exactly one", fields)
-	}
+	assert.Must(t, len(fields) == 1, "Fields() = %v, want exactly one", fields)
 	if fields[0].Path != "entity_key" {
 		t.Fatalf("Fields()[0].Path = %q, want %q", fields[0].Path, "entity_key")
 	}
@@ -61,12 +52,8 @@ func TestAConflictErrorCarriesTheCurrentDocument(t *testing.T) {
 		Frontmatter: json.RawMessage(`{"era":"third"}`),
 	}
 
-	if !errors.Is(error(conflict), markdown.ErrVersionConflict) {
-		t.Fatalf("a ConflictError must match ErrVersionConflict, got %v", conflict)
-	}
-	if !strings.Contains(conflict.Error(), "version 7") {
-		t.Fatalf("Error() = %q, want it to name the version to merge onto", conflict.Error())
-	}
+	assert.Must(t, errors.Is(error(conflict), markdown.ErrVersionConflict), "a ConflictError must match ErrVersionConflict, got %v", conflict)
+	assert.Must(t, strings.Contains(conflict.Error(), "version 7"), "Error() = %q, want it to name the version to merge onto", conflict.Error())
 
 	details := conflict.Details()
 	if details["current_version"] != int32(7) {
@@ -155,9 +142,7 @@ func TestAConflictErrorNamesNoAuthorItCannotResolve(t *testing.T) {
 	details = (&markdown.ConflictError{
 		Current: 1, Author: markdown.Author{Kind: "user", ID: &nameless},
 	}).Details()
-	if details["current_author_kind"] != "user" {
-		t.Fatal("a document that records somebody must say so even when the name is gone")
-	}
+	assert.Must(t, details["current_author_kind"] == "user", "a document that records somebody must say so even when the name is gone")
 	if _, ok := details["current_author_label"]; ok {
 		t.Fatal("an unresolvable author must carry no label rather than an empty one")
 	}
@@ -168,12 +153,8 @@ func TestAConflictErrorNamesNoAuthorItCannotResolve(t *testing.T) {
 // the sentinel internal/web already maps.
 func TestTheExportedWireCodesAreTheOnesValidationErrorMatchesOn(t *testing.T) {
 	invalid := &metamodel.ValidationError{Code: metamodel.CodeInvalidInput}
-	if !errors.Is(invalid, metamodel.ErrInvalidInput) {
-		t.Fatalf("CodeInvalidInput = %q does not match ErrInvalidInput", metamodel.CodeInvalidInput)
-	}
+	assert.Must(t, errors.Is(invalid, metamodel.ErrInvalidInput), "CodeInvalidInput = %q does not match ErrInvalidInput", metamodel.CodeInvalidInput)
 	violation := &metamodel.ValidationError{Code: metamodel.CodeSchemaViolation}
-	if !errors.Is(violation, metamodel.ErrSchemaViolation) {
-		t.Fatalf("CodeSchemaViolation = %q does not match ErrSchemaViolation",
-			metamodel.CodeSchemaViolation)
-	}
+	assert.Must(t, errors.Is(violation, metamodel.ErrSchemaViolation), "CodeSchemaViolation = %q does not match ErrSchemaViolation",
+		metamodel.CodeSchemaViolation)
 }

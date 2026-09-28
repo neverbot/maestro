@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -45,9 +46,7 @@ func newRepairFixture(t *testing.T, rows int) repairFixture {
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		Schema: metamodel.Schema{{Key: "summary", Type: metamodel.FieldText}},
 	})
-	if err != nil {
-		t.Fatalf("declare type: %v", err)
-	}
+	assert.Must(t, err == nil, "declare type: %v", err)
 	items := make([]metamodel.EntityInput, 0, rows)
 	for i := range rows {
 		items = append(items, metamodel.EntityInput{
@@ -57,12 +56,8 @@ func newRepairFixture(t *testing.T, rows int) repairFixture {
 		})
 	}
 	out, err := svc.UpsertEntities(ctx, project, items, metamodel.BulkAtomic)
-	if err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if len(out.Written) != rows {
-		t.Fatalf("seeded %d of %d rows", len(out.Written), rows)
-	}
+	assert.Must(t, err == nil, "seed: %v", err)
+	assert.Must(t, len(out.Written) == rows, "seeded %d of %d rows", len(out.Written), rows)
 	return repairFixture{svc: svc, project: project, typeVer: typ.Version}
 }
 
@@ -77,9 +72,7 @@ func (f *repairFixture) setSchema(t *testing.T, schema metamodel.Schema) {
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		Schema: schema, ExpectedVersion: &version,
 	})
-	if err != nil {
-		t.Fatalf("edit schema: %v", err)
-	}
+	assert.Must(t, err == nil, "edit schema: %v", err)
 	f.typeVer = typ.Version
 }
 
@@ -90,12 +83,8 @@ func (f repairFixture) flagged(t *testing.T) int {
 	page, err := f.svc.ListEntities(context.Background(), f.project, metamodel.EntityFilter{
 		TypeKey: "quest", Invalid: &yes, Limit: metamodel.MaxEntityPage,
 	})
-	if err != nil {
-		t.Fatalf("list flagged: %v", err)
-	}
-	if page.NextCursor != "" {
-		t.Fatalf("more flagged rows than one page; this fixture is too large")
-	}
+	assert.Must(t, err == nil, "list flagged: %v", err)
+	assert.Must(t, page.NextCursor == "", "more flagged rows than one page; this fixture is too large")
 	return len(page.Entities)
 }
 
@@ -135,13 +124,9 @@ func TestRepairArea(t *testing.T) {
 		out, err := f.svc.RepairEntities(ctx, f.project, metamodel.RepairInput{
 			TypeKey: "quest", Set: map[string]any{"laps": float64(10)},
 		})
-		if err != nil {
-			t.Fatalf("RepairEntities: %v", err)
-		}
-		if out.Scanned != 3 || len(out.Repaired) != 3 || len(out.Failed) != 0 {
-			t.Fatalf("repair scanned %d, repaired %d, failed %+v",
-				out.Scanned, len(out.Repaired), out.Failed)
-		}
+		assert.Must(t, err == nil, "RepairEntities: %v", err)
+		assert.Must(t, out.Scanned == 3 && len(out.Repaired) == 3 && len(out.Failed) == 0, "repair scanned %d, repaired %d, failed %+v",
+			out.Scanned, len(out.Repaired), out.Failed)
 		if got := f.flagged(t); got != 0 {
 			t.Fatalf("%d rows still flagged after the repair", got)
 		}
@@ -150,21 +135,13 @@ func TestRepairArea(t *testing.T) {
 		// are untouched. A repair that had rewritten the row wholesale would
 		// pass the flag check and be caught here.
 		row, err := f.svc.EntityByKey(ctx, f.project, "quest", "q0000")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
-		if row.Name != "Quest 0000" {
-			t.Fatalf("the repair changed a row's name to %q", row.Name)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
+		assert.Must(t, row.Name == "Quest 0000", "the repair changed a row's name to %q", row.Name)
 		fields := decodeStoredFields(t, row.Fields)
-		if fields["laps"] != float64(10) || fields["summary"] != "Defeat the gnoll chieftain." {
-			t.Fatalf("repaired fields = %v, want the set value beside the untouched one", fields)
-		}
+		assert.Must(t, fields["laps"] == float64(10) && fields["summary"] == "Defeat the gnoll chieftain.", "repaired fields = %v, want the set value beside the untouched one", fields)
 		// A repair is a write, so it advances the version like one: the row
 		// was created at 1 and repaired once.
-		if row.Version != 2 {
-			t.Fatalf("a repaired row is at version %d, want 2", row.Version)
-		}
+		assert.Must(t, row.Version == 2, "a repaired row is at version %d, want 2", row.Version)
 
 		// Step 3: take the field back out. Every row is flagged again,
 		// because the value it now carries is an unknown field — the second
@@ -179,27 +156,19 @@ func TestRepairArea(t *testing.T) {
 		out, err = f.svc.RepairEntities(ctx, f.project, metamodel.RepairInput{
 			TypeKey: "quest", DropUnknown: true,
 		})
-		if err != nil {
-			t.Fatalf("RepairEntities: %v", err)
-		}
-		if out.Scanned != 3 || len(out.Repaired) != 3 || len(out.Failed) != 0 {
-			t.Fatalf("the drop pass scanned %d, repaired %d, failed %+v",
-				out.Scanned, len(out.Repaired), out.Failed)
-		}
+		assert.Must(t, err == nil, "RepairEntities: %v", err)
+		assert.Must(t, out.Scanned == 3 && len(out.Repaired) == 3 && len(out.Failed) == 0, "the drop pass scanned %d, repaired %d, failed %+v",
+			out.Scanned, len(out.Repaired), out.Failed)
 		if got := f.flagged(t); got != 0 {
 			t.Fatalf("%d rows still flagged after dropping the unknown field", got)
 		}
 		row, err = f.svc.EntityByKey(ctx, f.project, "quest", "q0000")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 		fields = decodeStoredFields(t, row.Fields)
 		if _, present := fields["laps"]; present {
 			t.Fatalf("the dropped value is still stored: %v", fields)
 		}
-		if fields["summary"] != "Defeat the gnoll chieftain." {
-			t.Fatalf("dropping the unknown field took a declared one with it: %v", fields)
-		}
+		assert.Must(t, fields["summary"] == "Defeat the gnoll chieftain.", "dropping the unknown field took a declared one with it: %v", fields)
 	})
 
 	// TestRepairArea's "a schema edit repairs nothing by itself" case is the
@@ -233,19 +202,13 @@ func TestRepairArea(t *testing.T) {
 		}
 
 		row, err := f.svc.EntityByKey(ctx, f.project, "quest", "q0000")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
-		if row.Version != 1 {
-			t.Fatalf("a schema edit moved a row to version %d", row.Version)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
+		assert.Must(t, row.Version == 1, "a schema edit moved a row to version %d", row.Version)
 		fields := decodeStoredFields(t, row.Fields)
 		if _, present := fields["laps"]; present {
 			t.Fatalf("a schema edit back-filled a declared default: %v", fields)
 		}
-		if len(fields) != 1 {
-			t.Fatalf("a schema edit wrote to a row's values: %v", fields)
-		}
+		assert.Must(t, len(fields) == 1, "a schema edit wrote to a row's values: %v", fields)
 
 		// **Direction two: widening, which is the constructible back-fill.**
 		//
@@ -278,16 +241,10 @@ func TestRepairArea(t *testing.T) {
 			t.Fatalf("%d rows flagged after removing a field, want 3", got)
 		}
 		widened, err := f.svc.EntityByKey(ctx, f.project, "quest", "q0000")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
-		if !widened.Invalid {
-			t.Fatalf("a schema edit repaired the row it had just flagged")
-		}
-		if widened.Version != 2 {
-			t.Fatalf("a schema edit moved a row to version %d, want the 2 the hand fix left",
-				widened.Version)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
+		assert.Must(t, widened.Invalid, "a schema edit repaired the row it had just flagged")
+		assert.Must(t, widened.Version == 2, "a schema edit moved a row to version %d, want the 2 the hand fix left",
+			widened.Version)
 		if got := decodeStoredFields(t, widened.Fields)["laps"]; got != float64(3) {
 			t.Fatalf("a schema edit dropped the value it had just flagged: %v", got)
 		}
@@ -324,24 +281,14 @@ func TestRepairArea(t *testing.T) {
 		out, err := f.svc.RepairEntities(ctx, f.project, metamodel.RepairInput{
 			TypeKey: "quest", Set: map[string]any{"laps": float64(10)},
 		})
-		if err != nil {
-			t.Fatalf("RepairEntities: %v", err)
-		}
-		if out.Scanned != 2 || len(out.Repaired) != 2 {
-			t.Fatalf("the pass scanned %d and repaired %d, want 2 and 2", out.Scanned, len(out.Repaired))
-		}
+		assert.Must(t, err == nil, "RepairEntities: %v", err)
+		assert.Must(t, out.Scanned == 2 && len(out.Repaired) == 2, "the pass scanned %d and repaired %d, want 2 and 2", out.Scanned, len(out.Repaired))
 		for _, w := range out.Repaired {
-			if w.Key == "q0001" {
-				t.Fatalf("the pass rewrote a row that already fitted: %+v", w)
-			}
+			assert.Must(t, w.Key != "q0001", "the pass rewrote a row that already fitted: %+v", w)
 		}
 		row, err := f.svc.EntityByKey(ctx, f.project, "quest", "q0001")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
-		if row.Version != 2 {
-			t.Fatalf("the hand-fixed row moved to version %d; the pass wrote to it", row.Version)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
+		assert.Must(t, row.Version == 2, "the hand-fixed row moved to version %d; the pass wrote to it", row.Version)
 		if got := decodeStoredFields(t, row.Fields)["laps"]; got != float64(99) {
 			t.Fatalf("the pass overwrote a valid row's value with its own: %v", got)
 		}
@@ -367,20 +314,12 @@ func TestRepairArea(t *testing.T) {
 		out, err := f.svc.RepairEntities(ctx, f.project, metamodel.RepairInput{
 			TypeKey: "quest", Set: map[string]any{"rank": "bronze"},
 		})
-		if err != nil {
-			t.Fatalf("RepairEntities: %v", err)
-		}
-		if out.Scanned != 3 || len(out.Repaired) != 0 || len(out.Failed) != 3 {
-			t.Fatalf("the pass scanned %d, repaired %d, failed %d",
-				out.Scanned, len(out.Repaired), len(out.Failed))
-		}
+		assert.Must(t, err == nil, "RepairEntities: %v", err)
+		assert.Must(t, out.Scanned == 3 && len(out.Repaired) == 0 && len(out.Failed) == 3, "the pass scanned %d, repaired %d, failed %d",
+			out.Scanned, len(out.Repaired), len(out.Failed))
 		for _, fail := range out.Failed {
-			if fail.Code != "schema_violation" {
-				t.Fatalf("a row that could not be repaired was coded %q: %+v", fail.Code, fail)
-			}
-			if fail.Key == "" {
-				t.Fatalf("a repair failure names no row: %+v", fail)
-			}
+			assert.Must(t, fail.Code == "schema_violation", "a row that could not be repaired was coded %q: %+v", fail.Code, fail)
+			assert.Must(t, fail.Key != "", "a repair failure names no row: %+v", fail)
 		}
 		if got := f.flagged(t); got != 3 {
 			t.Fatalf("%d rows are flagged after a repair that fixed nothing, want 3", got)
@@ -412,24 +351,16 @@ func TestRepairArea(t *testing.T) {
 			out, err := f.svc.RepairEntities(ctx, f.project, metamodel.RepairInput{
 				TypeKey: "quest", Set: map[string]any{"laps": float64(10)}, Limit: 100,
 			})
-			if err != nil {
-				t.Fatalf("RepairEntities: %v", err)
-			}
+			assert.Must(t, err == nil, "RepairEntities: %v", err)
 			passes, repaired = passes+1, repaired+len(out.Repaired)
 			if len(out.Repaired) == 0 {
 				break
 			}
-			if out.Scanned > 100 {
-				t.Fatalf("a pass limited to 100 scanned %d rows", out.Scanned)
-			}
-			if passes > 10 {
-				t.Fatalf("the repair loop did not converge: %d passes, %d repaired", passes, repaired)
-			}
+			assert.Must(t, out.Scanned <= 100, "a pass limited to 100 scanned %d rows", out.Scanned)
+			assert.Must(t, passes <= 10, "the repair loop did not converge: %d passes, %d repaired", passes, repaired)
 		}
-		if repaired != rows || passes != 4 {
-			t.Fatalf("%d passes repaired %d rows, want 3 full passes plus one empty one over %d",
-				passes, repaired, rows)
-		}
+		assert.Must(t, repaired == rows && passes == 4, "%d passes repaired %d rows, want 3 full passes plus one empty one over %d",
+			passes, repaired, rows)
 		if got := f.flagged(t); got != 0 {
 			t.Fatalf("%d rows still flagged", got)
 		}
@@ -439,16 +370,10 @@ func TestRepairArea(t *testing.T) {
 		over, err := f.svc.RepairEntities(ctx, f.project, metamodel.RepairInput{
 			TypeKey: "quest", DropUnknown: true, Limit: metamodel.MaxRepairBatch + 1,
 		})
-		if err != nil {
-			t.Fatalf("RepairEntities: %v", err)
-		}
-		if over.Scanned != 0 {
-			t.Fatalf("a pass over a repaired type scanned %d rows", over.Scanned)
-		}
-		if metamodel.MaxRepairBatch != metamodel.MaxBulkItems {
-			t.Fatalf("a repair pass may write %d rows and a batch may carry %d; a pass is a batch",
-				metamodel.MaxRepairBatch, metamodel.MaxBulkItems)
-		}
+		assert.Must(t, err == nil, "RepairEntities: %v", err)
+		assert.Must(t, over.Scanned == 0, "a pass over a repaired type scanned %d rows", over.Scanned)
+		assert.Must(t, metamodel.MaxRepairBatch == metamodel.MaxBulkItems, "a repair pass may write %d rows and a batch may carry %d; a pass is a batch",
+			metamodel.MaxRepairBatch, metamodel.MaxBulkItems)
 	})
 
 	// TestRepairArea's "a repair that states no operation is refused" case
@@ -478,9 +403,7 @@ func TestRepairArea(t *testing.T) {
 		// Nothing was read and nothing was written: the refusal is before the
 		// selection, so the default is not in any row.
 		row, err := f.svc.EntityByKey(ctx, f.project, "quest", "q0000")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 		if _, present := decodeStoredFields(t, row.Fields)["laps"]; present {
 			t.Fatalf("a refused repair back-filled a default")
 		}
@@ -550,9 +473,7 @@ func TestRepairArea(t *testing.T) {
 		// The endpoint lists are entity type *ids*, which is what a caller of
 		// this domain has to resolve for itself today.
 		types, err := svc.ListEntityTypes(ctx, project)
-		if err != nil {
-			t.Fatalf("ListEntityTypes: %v", err)
-		}
+		assert.Must(t, err == nil, "ListEntityTypes: %v", err)
 		byKey := map[string]uuid.UUID{}
 		for _, row := range types {
 			byKey[row.Key] = row.ID
@@ -561,9 +482,7 @@ func TestRepairArea(t *testing.T) {
 			Key: "takes_place_in", Label: "takes place in",
 			SourceTypeKeys: []string{"quest"}, TargetTypeKeys: []string{"zone"},
 		})
-		if err != nil {
-			t.Fatalf("declare relation type: %v", err)
-		}
+		assert.Must(t, err == nil, "declare relation type: %v", err)
 		for _, quest := range []string{"hogger", "kobold-camp"} {
 			if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 				TypeKey: "takes_place_in",
@@ -589,33 +508,21 @@ func TestRepairArea(t *testing.T) {
 		flagged, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{
 			TypeKey: "takes_place_in", Invalid: &yes, Limit: metamodel.MaxRelationPage,
 		})
-		if err != nil {
-			t.Fatalf("list flagged edges: %v", err)
-		}
-		if len(flagged.Relations) != 2 {
-			t.Fatalf("%d edges flagged, want 2", len(flagged.Relations))
-		}
+		assert.Must(t, err == nil, "list flagged edges: %v", err)
+		assert.Must(t, len(flagged.Relations) == 2, "%d edges flagged, want 2", len(flagged.Relations))
 
 		out, err := svc.RepairRelations(ctx, project, metamodel.RepairInput{
 			TypeKey: "takes_place_in", Set: map[string]any{"act": float64(1)},
 		})
-		if err != nil {
-			t.Fatalf("RepairRelations: %v", err)
-		}
-		if out.Scanned != 2 || len(out.Repaired) != 2 || len(out.Failed) != 0 {
-			t.Fatalf("the edge pass scanned %d, repaired %d, failed %+v",
-				out.Scanned, len(out.Repaired), out.Failed)
-		}
+		assert.Must(t, err == nil, "RepairRelations: %v", err)
+		assert.Must(t, out.Scanned == 2 && len(out.Repaired) == 2 && len(out.Failed) == 0, "the edge pass scanned %d, repaired %d, failed %+v",
+			out.Scanned, len(out.Repaired), out.Failed)
 
 		still, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{
 			TypeKey: "takes_place_in", Invalid: &yes, Limit: metamodel.MaxRelationPage,
 		})
-		if err != nil {
-			t.Fatalf("list flagged edges: %v", err)
-		}
-		if len(still.Relations) != 0 {
-			t.Fatalf("%d edges still flagged after the repair", len(still.Relations))
-		}
+		assert.Must(t, err == nil, "list flagged edges: %v", err)
+		assert.Must(t, len(still.Relations) == 0, "%d edges still flagged after the repair", len(still.Relations))
 
 		// The endpoints survived the round trip. An edge is written by its
 		// address, and the repair rebuilds that address from the stored row;
@@ -624,25 +531,17 @@ func TestRepairArea(t *testing.T) {
 		edge, err := svc.RelationByEdge(ctx, project, "takes_place_in",
 			metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 			metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
-		if err != nil {
-			t.Fatalf("RelationByEdge: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationByEdge: %v", err)
 		if got := decodeStoredFields(t, edge.Fields)["act"]; got != float64(1) {
 			t.Fatalf("repaired edge fields = %v", got)
 		}
-		if edge.Version != 2 {
-			t.Fatalf("a repaired edge is at version %d, want 2", edge.Version)
-		}
+		assert.Must(t, edge.Version == 2, "a repaired edge is at version %d, want 2", edge.Version)
 		// And the game still holds two edges, not four: a repair writes the
 		// rows it read rather than creating new ones.
 		all, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{
 			TypeKey: "takes_place_in", Limit: metamodel.MaxRelationPage,
 		})
-		if err != nil {
-			t.Fatalf("list edges: %v", err)
-		}
-		if len(all.Relations) != 2 {
-			t.Fatalf("the game holds %d takes_place_in edges, want 2", len(all.Relations))
-		}
+		assert.Must(t, err == nil, "list edges: %v", err)
+		assert.Must(t, len(all.Relations) == 2, "the game holds %d takes_place_in edges, want 2", len(all.Relations))
 	})
 }

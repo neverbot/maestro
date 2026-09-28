@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -78,161 +79,82 @@ func TestEveryDocumentFieldSurvivesARoundTripThroughTheTools(t *testing.T) {
 			{EntityType: "quest", EntityKey: "wanted-hogger", Role: "script"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsWrite: %v", err)
-	}
+	assert.Must(t, err == nil, "MCPDocsWrite: %v", err)
 
 	// Every field of the write's own answer.
-	if written.Path != "lore/hogger.md" || written.Kind != "script" || written.Version != 1 {
-		t.Fatalf("written = %+v, want the path, the kind and version 1", written)
-	}
-	if written.Title != "The Fall of Hogger" || written.Summary != "How the gnoll met his end." {
-		t.Fatalf("title/summary = %q/%q, want the frontmatter's", written.Title, written.Summary)
-	}
+	assert.Must(t, written.Path == "lore/hogger.md" && written.Kind == "script" && written.Version == 1, "written = %+v, want the path, the kind and version 1", written)
+	assert.Must(t, written.Title == "The Fall of Hogger" && written.Summary == "How the gnoll met his end.", "title/summary = %q/%q, want the frontmatter's", written.Title, written.Summary)
 	wantBody := "# Act one\n\nHogger says: \"Rrrrr!\"\n"
-	if written.Body != wantBody {
-		t.Fatalf("body = %q, want the raw markdown %q", written.Body, wantBody)
-	}
-	if written.Truncated || written.BodyLength != len(wantBody) {
-		t.Fatalf("truncated/body_length = %v/%d, want false and %d",
-			written.Truncated, written.BodyLength, len(wantBody))
-	}
-	if written.Deleted {
-		t.Fatal("a document that was just written is not deleted")
-	}
+	assert.Must(t, written.Body == wantBody, "body = %q, want the raw markdown %q", written.Body, wantBody)
+	assert.Must(t, !written.Truncated && written.BodyLength == len(wantBody), "truncated/body_length = %v/%d, want false and %d",
+		written.Truncated, written.BodyLength, len(wantBody))
+	assert.Must(t, !written.Deleted, "a document that was just written is not deleted")
 	var frontmatter map[string]any
 	if err := json.Unmarshal(written.Frontmatter, &frontmatter); err != nil {
 		t.Fatalf("decode frontmatter %s: %v", written.Frontmatter, err)
 	}
-	if frontmatter["mood"] != "grim" {
-		t.Fatalf("frontmatter = %v, want the uninterpreted keys echoed back", frontmatter)
-	}
-	if len(written.Links) != 1 || written.Links[0].EntityKey != "wanted-hogger" ||
-		written.Links[0].Role != "script" || written.Links[0].Name != "Wanted: Hogger" ||
-		written.Links[0].EntityTypeKey != "quest" {
-		t.Fatalf("links = %+v, want the attachment with its role and label", written.Links)
-	}
+	assert.Must(t, frontmatter["mood"] == "grim", "frontmatter = %v, want the uninterpreted keys echoed back", frontmatter)
+	assert.Must(t, len(written.Links) == 1 && written.Links[0].EntityKey == "wanted-hogger" && written.Links[0].Role == "script" && written.Links[0].Name == "Wanted: Hogger" && written.Links[0].EntityTypeKey == "quest", "links = %+v, want the attachment with its role and label", written.Links)
 
 	// docs.read hands back exactly the same document.
 	read, err := web.MCPDocsRead(ctx, f.deps, f.caller, f.game, web.DocsReadInput{Path: "lore/hogger.md"})
-	if err != nil {
-		t.Fatalf("MCPDocsRead: %v", err)
-	}
-	if read.ID != written.ID {
-		t.Fatalf("read id %s, want the written %s", read.ID, written.ID)
-	}
-	if read.Body != wantBody || read.Kind != "script" || read.Title != written.Title ||
-		read.Summary != written.Summary || read.Version != 1 || len(read.Links) != 1 {
-		t.Fatalf("read = %+v, want the written document", read)
-	}
-	if string(read.Frontmatter) != string(written.Frontmatter) {
-		t.Fatalf("frontmatter %s, want %s", read.Frontmatter, written.Frontmatter)
-	}
+	assert.Must(t, err == nil, "MCPDocsRead: %v", err)
+	assert.Must(t, read.ID == written.ID, "read id %s, want the written %s", read.ID, written.ID)
+	assert.Must(t, read.Body == wantBody && read.Kind == "script" && read.Title == written.Title && read.Summary == written.Summary && read.Version == 1 && len(read.Links) == 1, "read = %+v, want the written document", read)
+	assert.Must(t, string(read.Frontmatter) == string(written.Frontmatter), "frontmatter %s, want %s", read.Frontmatter, written.Frontmatter)
 	// A path matches without regard to case, and the answer is the
 	// stored spelling and not the caller's.
 	upper, err := web.MCPDocsRead(ctx, f.deps, f.caller, f.game, web.DocsReadInput{Path: "LORE/HOGGER.MD"})
-	if err != nil {
-		t.Fatalf("MCPDocsRead in another case: %v", err)
-	}
-	if upper.Path != "lore/hogger.md" {
-		t.Fatalf("path = %q, want the stored spelling", upper.Path)
-	}
+	assert.Must(t, err == nil, "MCPDocsRead in another case: %v", err)
+	assert.Must(t, upper.Path == "lore/hogger.md", "path = %q, want the stored spelling", upper.Path)
 
 	// docs.list carries the summary fields and no body.
 	list, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{})
-	if err != nil {
-		t.Fatalf("MCPDocsList: %v", err)
-	}
-	if len(list.Items) != 1 {
-		t.Fatalf("list = %+v, want one row", list.Items)
-	}
+	assert.Must(t, err == nil, "MCPDocsList: %v", err)
+	assert.Must(t, len(list.Items) == 1, "list = %+v, want one row", list.Items)
 	row := list.Items[0]
-	if row.ID != written.ID || row.Path != written.Path || row.Kind != "script" ||
-		row.Title != written.Title || row.Summary != written.Summary ||
-		row.Version != 1 || row.Deleted {
-		t.Fatalf("listing row = %+v, want every summary field of the written document", row)
-	}
-	if list.Truncated || list.NextCursor != nil {
-		t.Fatalf("a one-row listing says truncated %v, cursor %v", list.Truncated, list.NextCursor)
-	}
+	assert.Must(t, row.ID == written.ID && row.Path == written.Path && row.Kind == "script" && row.Title == written.Title && row.Summary == written.Summary && row.Version == 1 && !row.Deleted, "listing row = %+v, want every summary field of the written document", row)
+	assert.Must(t, !list.Truncated && list.NextCursor == nil, "a one-row listing says truncated %v, cursor %v", list.Truncated, list.NextCursor)
 	// Filtering by the entity is the way to the script without knowing
 	// the path.
 	byEntity, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
 		EntityType: "quest", EntityKey: "wanted-hogger",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsList by entity: %v", err)
-	}
-	if len(byEntity.Items) != 1 || byEntity.Items[0].Path != "lore/hogger.md" {
-		t.Fatalf("listing by entity = %+v, want the attached document", byEntity.Items)
-	}
+	assert.Must(t, err == nil, "MCPDocsList by entity: %v", err)
+	assert.Must(t, len(byEntity.Items) == 1 && byEntity.Items[0].Path == "lore/hogger.md", "listing by entity = %+v, want the attached document", byEntity.Items)
 
 	// docs.history carries the message and the author.
 	history, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.game, web.DocsHistoryInput{
 		Path: "lore/hogger.md",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsHistory: %v", err)
-	}
-	if len(history.Items) != 1 {
-		t.Fatalf("history = %+v, want one version", history.Items)
-	}
+	assert.Must(t, err == nil, "MCPDocsHistory: %v", err)
+	assert.Must(t, len(history.Items) == 1, "history = %+v, want one version", history.Items)
 	version := history.Items[0]
-	if version.Version != 1 || version.Message != "the first draft" ||
-		version.Title != written.Title || version.Summary != written.Summary || version.Deleted {
-		t.Fatalf("version row = %+v, want the write's own metadata", version)
-	}
-	if version.AuthorKind != "token" || version.AuthorID == nil {
-		t.Fatalf("author = %q/%v, want the agent's own token", version.AuthorKind, version.AuthorID)
-	}
-	if version.CreatedAt.IsZero() {
-		t.Fatal("a version with no timestamp is a version nobody can order")
-	}
+	assert.Must(t, version.Version == 1 && version.Message == "the first draft" && version.Title == written.Title && version.Summary == written.Summary && !version.Deleted, "version row = %+v, want the write's own metadata", version)
+	assert.Must(t, version.AuthorKind == "token" && version.AuthorID != nil, "author = %q/%v, want the agent's own token", version.AuthorKind, version.AuthorID)
+	assert.Must(t, !version.CreatedAt.IsZero(), "a version with no timestamp is a version nobody can order")
 
 	// docs.read_version carries the body, byte for byte.
 	past, err := web.MCPDocsReadVersion(ctx, f.deps, f.caller, f.game, web.DocsReadVersionInput{
 		Path: "lore/hogger.md", Version: 1,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsReadVersion: %v", err)
-	}
-	if past.Body != wantBody || past.Title != written.Title || past.Message != "the first draft" ||
-		past.Version != 1 || past.Deleted || past.Path != "lore/hogger.md" {
-		t.Fatalf("version = %+v, want the stored snapshot", past)
-	}
-	if string(past.Frontmatter) != string(written.Frontmatter) {
-		t.Fatalf("version frontmatter %s, want %s", past.Frontmatter, written.Frontmatter)
-	}
+	assert.Must(t, err == nil, "MCPDocsReadVersion: %v", err)
+	assert.Must(t, past.Body == wantBody && past.Title == written.Title && past.Message == "the first draft" && past.Version == 1 && !past.Deleted && past.Path == "lore/hogger.md", "version = %+v, want the stored snapshot", past)
+	assert.Must(t, string(past.Frontmatter) == string(written.Frontmatter), "version frontmatter %s, want %s", past.Frontmatter, written.Frontmatter)
 
 	// docs.links.list answers from both sides.
 	fromDoc, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
 		Path: "lore/hogger.md",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsLinksList by path: %v", err)
-	}
-	if len(fromDoc.Entities) != 1 || fromDoc.Entities[0].EntityKey != "wanted-hogger" ||
-		fromDoc.Entities[0].Role != "script" {
-		t.Fatalf("entities = %+v, want the attachment", fromDoc.Entities)
-	}
-	if len(fromDoc.Documents) != 0 {
-		t.Fatalf("documents = %+v, want the other side empty", fromDoc.Documents)
-	}
+	assert.Must(t, err == nil, "MCPDocsLinksList by path: %v", err)
+	assert.Must(t, len(fromDoc.Entities) == 1 && fromDoc.Entities[0].EntityKey == "wanted-hogger" && fromDoc.Entities[0].Role == "script", "entities = %+v, want the attachment", fromDoc.Entities)
+	assert.Must(t, len(fromDoc.Documents) == 0, "documents = %+v, want the other side empty", fromDoc.Documents)
 	fromEntity, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
 		EntityType: "quest", EntityKey: "wanted-hogger",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsLinksList by entity: %v", err)
-	}
-	if len(fromEntity.Documents) != 1 || fromEntity.Documents[0].Path != "lore/hogger.md" ||
-		fromEntity.Documents[0].Role != "script" || fromEntity.Documents[0].Kind != "script" ||
-		fromEntity.Documents[0].Title != written.Title ||
-		fromEntity.Documents[0].ID != written.ID {
-		t.Fatalf("documents = %+v, want the attached document", fromEntity.Documents)
-	}
-	if len(fromEntity.Entities) != 0 {
-		t.Fatalf("entities = %+v, want the other side empty", fromEntity.Entities)
-	}
+	assert.Must(t, err == nil, "MCPDocsLinksList by entity: %v", err)
+	assert.Must(t, len(fromEntity.Documents) == 1 && fromEntity.Documents[0].Path == "lore/hogger.md" && fromEntity.Documents[0].Role == "script" && fromEntity.Documents[0].Kind == "script" && fromEntity.Documents[0].Title == written.Title && fromEntity.Documents[0].ID == written.ID, "documents = %+v, want the attached document", fromEntity.Documents)
+	assert.Must(t, len(fromEntity.Entities) == 0, "entities = %+v, want the other side empty", fromEntity.Entities)
 }
 
 // TestAnEditThatOmitsKindLeavesItAloneThroughTheTool is the wire half of
@@ -254,22 +176,14 @@ func TestAnEditThatOmitsKindLeavesItAloneThroughTheTool(t *testing.T) {
 	edited, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
 		Path: "lore/zone.md", Content: "second", ExpectedVersion: int32Ptr(1),
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsWrite editing: %v", err)
-	}
-	if edited.Kind != "lore" {
-		t.Fatalf("kind = %q after an edit that said nothing about it, want lore", edited.Kind)
-	}
+	assert.Must(t, err == nil, "MCPDocsWrite editing: %v", err)
+	assert.Must(t, edited.Kind == "lore", "kind = %q after an edit that said nothing about it, want lore", edited.Kind)
 	cleared, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
 		Path: "lore/zone.md", Content: "third", Kind: stringPtr(""),
 		ExpectedVersion: int32Ptr(2),
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsWrite clearing: %v", err)
-	}
-	if cleared.Kind != "" {
-		t.Fatalf("kind = %q after an explicit empty one, want it cleared", cleared.Kind)
-	}
+	assert.Must(t, err == nil, "MCPDocsWrite clearing: %v", err)
+	assert.Must(t, cleared.Kind == "", "kind = %q after an explicit empty one, want it cleared", cleared.Kind)
 }
 
 // TestALinksArrayReplacesTheSetAndOmittingItPreservesIt is the wire half
@@ -291,22 +205,14 @@ func TestALinksArrayReplacesTheSetAndOmittingItPreservesIt(t *testing.T) {
 	kept, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
 		Path: "lore/hogger.md", Content: "two", ExpectedVersion: int32Ptr(1),
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsWrite omitting links: %v", err)
-	}
-	if len(kept.Links) != 1 {
-		t.Fatalf("links = %+v after an edit that omitted them, want them preserved", kept.Links)
-	}
+	assert.Must(t, err == nil, "MCPDocsWrite omitting links: %v", err)
+	assert.Must(t, len(kept.Links) == 1, "links = %+v after an edit that omitted them, want them preserved", kept.Links)
 	detached, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
 		Path: "lore/hogger.md", Content: "three", ExpectedVersion: int32Ptr(2),
 		Links: &[]web.DocsLinkInput{},
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsWrite with an empty links array: %v", err)
-	}
-	if len(detached.Links) != 0 {
-		t.Fatalf("links = %+v after an empty array, want everything detached", detached.Links)
-	}
+	assert.Must(t, err == nil, "MCPDocsWrite with an empty links array: %v", err)
+	assert.Must(t, len(detached.Links) == 0, "links = %+v after an empty array, want everything detached", detached.Links)
 }
 
 // TestADocsWriteWithoutAnExpectedVersionIsInvalidInputAtItsOwnPath
@@ -349,18 +255,12 @@ func TestADocsWriteWithoutAnExpectedVersionIsInvalidInputAtItsOwnPath(t *testing
 // code and the same {"fields":[{"path","message"}]} details shape.
 func assertInvalidInputAt(t *testing.T, err error, path string) {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("no error at all, want invalid_input naming %q", path)
-	}
+	assert.Must(t, err != nil, "no error at all, want invalid_input naming %q", path)
 	var mcpErr *web.MCPError
 	if errors.As(err, &mcpErr) {
-		if mcpErr.Code != "invalid_input" {
-			t.Fatalf("code = %q, want invalid_input", mcpErr.Code)
-		}
+		assert.Must(t, mcpErr.Code == "invalid_input", "code = %q, want invalid_input", mcpErr.Code)
 		problems, ok := mcpErr.Details["fields"].([]map[string]string)
-		if !ok {
-			t.Fatalf("details = %v, carry no field problems", mcpErr.Details)
-		}
+		assert.Must(t, ok, "details = %v, carry no field problems", mcpErr.Details)
 		for _, problem := range problems {
 			if problem["path"] == path {
 				return
@@ -368,13 +268,9 @@ func assertInvalidInputAt(t *testing.T, err error, path string) {
 		}
 		t.Fatalf("fields = %v, want a problem at %q", problems, path)
 	}
-	if !errors.Is(err, metamodel.ErrInvalidInput) {
-		t.Fatalf("err = %v, want invalid_input", err)
-	}
+	assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 	var validation *metamodel.ValidationError
-	if !errors.As(err, &validation) {
-		t.Fatalf("err = %#v, carries no field problems at all", err)
-	}
+	assert.Must(t, errors.As(err, &validation), "err = %#v, carries no field problems at all", err)
 	for _, problem := range validation.Fields {
 		if problem.Path == path {
 			return
@@ -419,32 +315,19 @@ func TestTheLinkToolsReadTheirOwnResultBack(t *testing.T) {
 	added, err := web.MCPDocsLinkAdd(ctx, f.deps, f.caller, f.game, web.DocsLinkAddInput{
 		Path: "lore/hogger.md", EntityType: "quest", EntityKey: "wanted-hogger", Role: "script",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsLinkAdd: %v", err)
-	}
-	if len(added.Entities) != 1 || added.Entities[0].Role != "script" {
-		t.Fatalf("entities = %+v, want the attachment it just made", added.Entities)
-	}
+	assert.Must(t, err == nil, "MCPDocsLinkAdd: %v", err)
+	assert.Must(t, len(added.Entities) == 1 && added.Entities[0].Role == "script", "entities = %+v, want the attachment it just made", added.Entities)
 
 	removed, err := web.MCPDocsLinkRemove(ctx, f.deps, f.caller, f.game, web.DocsLinkRemoveInput{
 		Path: "lore/hogger.md", EntityType: "quest", EntityKey: "wanted-hogger",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsLinkRemove: %v", err)
-	}
-	if len(removed.Entities) != 0 {
-		t.Fatalf("entities = %+v, want the set empty after the detachment", removed.Entities)
-	}
+	assert.Must(t, err == nil, "MCPDocsLinkRemove: %v", err)
+	assert.Must(t, len(removed.Entities) == 0, "entities = %+v, want the set empty after the detachment", removed.Entities)
 	// Empty, never nil: an empty attachment set marshals as [] and not
 	// as null, on both sides.
 	raw, err := json.Marshal(removed)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(raw), `"entities":[]`) ||
-		!strings.Contains(string(raw), `"documents":[]`) {
-		t.Fatalf("marshalled %s, want both arrays as []", raw)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, strings.Contains(string(raw), `"entities":[]`) && strings.Contains(string(raw), `"documents":[]`), "marshalled %s, want both arrays as []", raw)
 }
 
 // TestIncludeCurrentDefaultsToTrueOnTheWireAndIsHonouredWhenFalse pins
@@ -468,9 +351,7 @@ func TestIncludeCurrentDefaultsToTrueOnTheWireAndIsHonouredWhenFalse(t *testing.
 		Path: "lore/hogger.md", Content: "mine", ExpectedVersion: int32Ptr(0),
 	})
 	details := conflictDetails(t, err)
-	if details["current_body"] != "the stored body\n" {
-		t.Fatalf("details = %v, want the body echoed by default", details)
-	}
+	assert.Must(t, details["current_body"] == "the stored body\n", "details = %v, want the body echoed by default", details)
 
 	_, err = web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
 		Path: "lore/hogger.md", Content: "mine", ExpectedVersion: int32Ptr(0),
@@ -480,9 +361,7 @@ func TestIncludeCurrentDefaultsToTrueOnTheWireAndIsHonouredWhenFalse(t *testing.
 	if _, present := quiet["current_body"]; present {
 		t.Fatalf("details = %v, want no body when the echo is turned off", quiet)
 	}
-	if quiet["current_version"] != int32(1) {
-		t.Fatalf("details = %v, want the current version even with the echo off", quiet)
-	}
+	assert.Must(t, quiet["current_version"] == int32(1), "details = %v, want the current version even with the echo off", quiet)
 }
 
 // conflictDetails pulls the structured payload off a version conflict,
@@ -490,9 +369,7 @@ func TestIncludeCurrentDefaultsToTrueOnTheWireAndIsHonouredWhenFalse(t *testing.
 func conflictDetails(t *testing.T, err error) map[string]any {
 	t.Helper()
 	var conflict *markdown.ConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("err = %v, want a version conflict", err)
-	}
+	assert.Must(t, errors.As(err, &conflict), "err = %v, want a version conflict", err)
 	return conflict.Details()
 }
 
@@ -516,34 +393,20 @@ func TestAHeadOnlyReadSaysHowMuchItLeftOut(t *testing.T) {
 	head, err := web.MCPDocsRead(ctx, f.deps, f.caller, f.game, web.DocsReadInput{
 		Path: "lore/long.md", HeadOnly: true,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsRead head_only: %v", err)
-	}
-	if !head.Truncated {
-		t.Fatal("a body cut short says so")
-	}
-	if head.BodyLength != len(body) {
-		t.Fatalf("body_length = %d, want the whole body's %d", head.BodyLength, len(body))
-	}
-	if len(head.Body) >= len(body) {
-		t.Fatalf("the preview is %d bytes of a %d-byte body", len(head.Body), len(body))
-	}
+	assert.Must(t, err == nil, "MCPDocsRead head_only: %v", err)
+	assert.Must(t, head.Truncated, "a body cut short says so")
+	assert.Must(t, head.BodyLength == len(body), "body_length = %d, want the whole body's %d", head.BodyLength, len(body))
+	assert.Must(t, len(head.Body) < len(body), "the preview is %d bytes of a %d-byte body", len(head.Body), len(body))
 	if !utf8.ValidString(head.Body) {
 		t.Fatalf("the preview is not valid UTF-8: %q", head.Body[len(head.Body)-8:])
 	}
-	if !strings.HasPrefix(body, head.Body) {
-		t.Fatal("the preview is not a prefix of the body")
-	}
+	assert.Must(t, strings.HasPrefix(body, head.Body), "the preview is not a prefix of the body")
 
 	// The same read without head_only is the whole document, and says
 	// so: false is a statement.
 	whole, err := web.MCPDocsRead(ctx, f.deps, f.caller, f.game, web.DocsReadInput{Path: "lore/long.md"})
-	if err != nil {
-		t.Fatalf("MCPDocsRead: %v", err)
-	}
-	if whole.Truncated || whole.Body != body || whole.BodyLength != len(body) {
-		t.Fatalf("a full read says truncated %v over %d bytes", whole.Truncated, len(whole.Body))
-	}
+	assert.Must(t, err == nil, "MCPDocsRead: %v", err)
+	assert.Must(t, !whole.Truncated && whole.Body == body && whole.BodyLength == len(body), "a full read says truncated %v over %d bytes", whole.Truncated, len(whole.Body))
 }
 
 // TestEveryDocsToolRefusesAnotherGamesToken is the isolation test for
@@ -648,22 +511,16 @@ func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 		}
 		registered++
 		call, ok := calls[name]
-		if !ok {
-			t.Fatalf("%s is registered and this test does not drive it: add it to the table, "+
-				"or one game's agent reaches another game's prose unnoticed", name)
-		}
+		assert.Must(t, ok, "%s is registered and this test does not drive it: add it to the table, "+
+			"or one game's agent reaches another game's prose unnoticed", name)
 		t.Run(name, func(t *testing.T) {
 			if err := call(); !errors.Is(err, web.ErrScopeViolation) {
 				t.Fatalf("err = %v, want a scope violation", err)
 			}
 		})
 	}
-	if registered != len(calls) {
-		t.Fatalf("%d docs tools are registered and the table has %d entries", registered, len(calls))
-	}
-	if registered == 0 {
-		t.Fatal("no docs tool is registered at all; this test would pass vacuously")
-	}
+	assert.Must(t, registered == len(calls), "%d docs tools are registered and the table has %d entries", registered, len(calls))
+	assert.Must(t, registered != 0, "no docs tool is registered at all; this test would pass vacuously")
 }
 
 // TestTheDocsToolsAreAbsentWithoutAMarkdownService pins the optional
@@ -688,36 +545,24 @@ func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "no-prose@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: user.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
 	session := connectMCP(t, httpSrv.URL, token)
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	for _, tool := range tools.Tools {
-		if strings.HasPrefix(tool.Name, "docs.") {
-			t.Fatalf("%s is served by an instance with no markdown service behind it", tool.Name)
-		}
+		assert.Must(t, !strings.HasPrefix(tool.Name, "docs."), "%s is served by an instance with no markdown service behind it", tool.Name)
 	}
-	if len(tools.Tools) == 0 {
-		t.Fatal("the server served no tools at all; this test would pass vacuously")
-	}
+	assert.Must(t, len(tools.Tools) != 0, "the server served no tools at all; this test would pass vacuously")
 }
 
 // TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt drives the
@@ -756,15 +601,9 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.write", map[string]any{
 		"path": "lore/duskwood.md", "content": "# Duskwood\n", "expected_version": 0,
 	}), &doc)
-	if doc.CreatedAt == "" || doc.UpdatedAt == "" {
-		t.Fatalf("a document that does not say when it changed: %+v", doc)
-	}
-	if doc.CreatedBy == nil || doc.CreatedBy.Kind != "token" || doc.CreatedBy.Label != "agent" {
-		t.Fatalf("created_by = %+v, want the writing token named", doc.CreatedBy)
-	}
-	if doc.UpdatedBy == nil || doc.UpdatedBy.Label != "agent" {
-		t.Fatalf("updated_by = %+v, want the writing token named", doc.UpdatedBy)
-	}
+	assert.Must(t, doc.CreatedAt != "" && doc.UpdatedAt != "", "a document that does not say when it changed: %+v", doc)
+	assert.Must(t, doc.CreatedBy != nil && doc.CreatedBy.Kind == "token" && doc.CreatedBy.Label == "agent", "created_by = %+v, want the writing token named", doc.CreatedBy)
+	assert.Must(t, doc.UpdatedBy != nil && doc.UpdatedBy.Label == "agent", "updated_by = %+v, want the writing token named", doc.UpdatedBy)
 
 	var listing struct {
 		Items []struct {
@@ -776,19 +615,11 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 		} `json:"items"`
 	}
 	decodeStructured(t, callOK(t, session, "docs.list", map[string]any{}), &listing)
-	if len(listing.Items) != 1 {
-		t.Fatalf("%d rows, want the one document", len(listing.Items))
-	}
+	assert.Must(t, len(listing.Items) == 1, "%d rows, want the one document", len(listing.Items))
 	row := listing.Items[0]
-	if row.UpdatedAt != doc.UpdatedAt || row.CreatedAt != doc.CreatedAt {
-		t.Fatalf("the listing row disagrees with the document: %+v vs %+v", row, doc)
-	}
-	if row.UpdatedBy == nil || row.UpdatedBy.Label != "agent" {
-		t.Fatalf("a listing row that does not say who changed the document: %+v", row)
-	}
-	if row.CreatedBy == nil || row.CreatedBy.ID != doc.CreatedBy.ID {
-		t.Fatalf("the listing row's author disagrees with the document's: %+v", row)
-	}
+	assert.Must(t, row.UpdatedAt == doc.UpdatedAt && row.CreatedAt == doc.CreatedAt, "the listing row disagrees with the document: %+v vs %+v", row, doc)
+	assert.Must(t, row.UpdatedBy != nil && row.UpdatedBy.Label == "agent", "a listing row that does not say who changed the document: %+v", row)
+	assert.Must(t, row.CreatedBy != nil && row.CreatedBy.ID == doc.CreatedBy.ID, "the listing row's author disagrees with the document's: %+v", row)
 
 	var history struct {
 		Items []struct {
@@ -801,17 +632,11 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 	}
 	decodeStructured(t, callOK(t, session, "docs.history",
 		map[string]any{"path": "lore/duskwood.md"}), &history)
-	if len(history.Items) != 1 {
-		t.Fatalf("%d versions, want 1", len(history.Items))
-	}
+	assert.Must(t, len(history.Items) == 1, "%d versions, want 1", len(history.Items))
 	entry := history.Items[0]
-	if entry.AuthorKind != "token" || entry.AuthorID == "" {
-		t.Fatalf("history entry = %+v, want the author pair", entry)
-	}
-	if entry.AuthorLabel != "agent" {
-		t.Fatalf("author_label = %q: a history that cannot name a token makes every agent "+
-			"read as \"an agent\"", entry.AuthorLabel)
-	}
+	assert.Must(t, entry.AuthorKind == "token" && entry.AuthorID != "", "history entry = %+v, want the author pair", entry)
+	assert.Must(t, entry.AuthorLabel == "agent", "author_label = %q: a history that cannot name a token makes every agent "+
+		"read as \"an agent\"", entry.AuthorLabel)
 
 	// A conflict names who wrote the version to merge onto, with the body
 	// and without it: the author is what decides whether to merge or ask,
@@ -824,12 +649,8 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 				"expected_version": 0, "include_current": include,
 			},
 		})
-		if err != nil {
-			t.Fatalf("CallTool(docs.write): %v", err)
-		}
-		if !stale.IsError {
-			t.Fatal("writing onto a version that moved must fail")
-		}
+		assert.Must(t, err == nil, "CallTool(docs.write): %v", err)
+		assert.Must(t, stale.IsError, "writing onto a version that moved must fail")
 		var conflict struct {
 			Error   string `json:"error"`
 			Details struct {
@@ -842,19 +663,11 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 			} `json:"details"`
 		}
 		decodeToolText(t, stale, &conflict)
-		if conflict.Error != "version_conflict" {
-			t.Fatalf("error = %q, want version_conflict", conflict.Error)
-		}
-		if conflict.Details.CurrentAuthorKind != "token" ||
-			conflict.Details.CurrentAuthorLabel != "agent" ||
-			conflict.Details.CurrentAuthorID == "" {
-			t.Fatalf("include_current %v: the conflict does not say who wrote the version "+
-				"to merge onto: %+v", include, conflict.Details)
-		}
-		if conflict.Details.CurrentUpdatedAt == "" {
-			t.Fatalf("include_current %v: the conflict does not say when: %+v",
-				include, conflict.Details)
-		}
+		assert.Must(t, conflict.Error == "version_conflict", "error = %q, want version_conflict", conflict.Error)
+		assert.Must(t, conflict.Details.CurrentAuthorKind == "token" && conflict.Details.CurrentAuthorLabel == "agent" && conflict.Details.CurrentAuthorID != "", "include_current %v: the conflict does not say who wrote the version "+
+			"to merge onto: %+v", include, conflict.Details)
+		assert.Must(t, conflict.Details.CurrentUpdatedAt != "", "include_current %v: the conflict does not say when: %+v",
+			include, conflict.Details)
 		// The body is the half include_current does gate, and this loop
 		// is what tells the two rules apart.
 		if hasBody := conflict.Details.CurrentBody != ""; hasBody != include {
@@ -931,23 +744,15 @@ func TestTheLinkListingPagesOnBothSides(t *testing.T) {
 			seen = append(seen, e.EntityKey)
 		}
 		if !answer.Truncated {
-			if answer.NextCursor != "" {
-				t.Fatalf("truncated false beside a cursor %q: the pair must agree",
-					answer.NextCursor)
-			}
+			assert.Must(t, answer.NextCursor == "", "truncated false beside a cursor %q: the pair must agree",
+				answer.NextCursor)
 			break
 		}
-		if answer.NextCursor == "" {
-			t.Fatal("truncated true with no cursor to continue from")
-		}
+		assert.Must(t, answer.NextCursor != "", "truncated true with no cursor to continue from")
 		cursor = answer.NextCursor
-		if len(seen) > 6 {
-			t.Fatal("the walk did not terminate")
-		}
+		assert.Must(t, len(seen) <= 6, "the walk did not terminate")
 	}
-	if strings.Join(seen, " ") != strings.Join(keys, " ") {
-		t.Fatalf("walked %v, want %v exactly once each", seen, keys)
-	}
+	assert.Must(t, strings.Join(seen, " ") == strings.Join(keys, " "), "walked %v, want %v exactly once each", seen, keys)
 
 	// The entity side pages too, and a document-side cursor is refused
 	// there: the two sides sort on different columns.
@@ -955,13 +760,9 @@ func TestTheLinkListingPagesOnBothSides(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.links.list", map[string]any{
 		"entity_type": "quest", "entity_key": "alpha", "limit": 1,
 	}), &entitySide)
-	if len(entitySide.Documents) != 1 || entitySide.Documents[0].Path != "lore/westfall.md" {
-		t.Fatalf("entity side = %+v, want the one document", entitySide.Documents)
-	}
-	if !entitySide.Truncated || entitySide.NextCursor == "" {
-		t.Fatalf("one document at a limit of one is a full page and carries a cursor: %+v",
-			entitySide)
-	}
+	assert.Must(t, len(entitySide.Documents) == 1 && entitySide.Documents[0].Path == "lore/westfall.md", "entity side = %+v, want the one document", entitySide.Documents)
+	assert.Must(t, entitySide.Truncated && entitySide.NextCursor != "", "one document at a limit of one is a full page and carries a cursor: %+v",
+		entitySide)
 
 	crossed, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "docs.links.list",
@@ -969,12 +770,8 @@ func TestTheLinkListingPagesOnBothSides(t *testing.T) {
 			"entity_type": "quest", "entity_key": "alpha", "cursor": firstLinkCursor(t, session),
 		},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(docs.links.list): %v", err)
-	}
-	if !crossed.IsError {
-		t.Fatal("a document-side cursor must be refused on the entity side")
-	}
+	assert.Must(t, err == nil, "CallTool(docs.links.list): %v", err)
+	assert.Must(t, crossed.IsError, "a document-side cursor must be refused on the entity side")
 
 	// A document's own answer says whether its attachments are all of
 	// them, and for three of them they are.
@@ -986,9 +783,7 @@ func TestTheLinkListingPagesOnBothSides(t *testing.T) {
 	}
 	decodeStructured(t, callOK(t, session, "docs.read",
 		map[string]any{"path": "lore/westfall.md"}), &doc)
-	if len(doc.Links) != 3 || doc.LinksTruncated {
-		t.Fatalf("read = %+v, want all three attachments and links_truncated false", doc)
-	}
+	assert.Must(t, len(doc.Links) == 3 && !doc.LinksTruncated, "read = %+v, want all three attachments and links_truncated false", doc)
 }
 
 // firstLinkCursor is the cursor of a document-side page of one, for the
@@ -1000,9 +795,7 @@ func firstLinkCursor(t *testing.T, session *mcp.ClientSession) string {
 	}
 	decodeStructured(t, callOK(t, session, "docs.links.list",
 		map[string]any{"path": "lore/westfall.md", "limit": 1}), &page)
-	if page.NextCursor == "" {
-		t.Fatal("a full page of one must carry a cursor")
-	}
+	assert.Must(t, page.NextCursor != "", "a full page of one must carry a cursor")
 	return page.NextCursor
 }
 
@@ -1050,19 +843,13 @@ func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
 		},
 	}), &batch)
 
-	if batch.Count != 3 || len(batch.Written) != 3 {
-		t.Fatalf("count = %d over %d written, want 3 and 3", batch.Count, len(batch.Written))
-	}
-	if len(batch.Failed) != 1 {
-		t.Fatalf("failed = %+v, want exactly the malformed path", batch.Failed)
-	}
+	assert.Must(t, batch.Count == 3 && len(batch.Written) == 3, "count = %d over %d written, want 3 and 3", batch.Count, len(batch.Written))
+	assert.Must(t, len(batch.Failed) == 1, "failed = %+v, want exactly the malformed path", batch.Failed)
 	if batch.Failed[0].Index != 2 || batch.Failed[0].Key != "lore//westfall.md" ||
 		batch.Failed[0].Code != "invalid_input" {
 		t.Fatalf("failure = %+v, want index 2 at that path coded invalid_input", batch.Failed[0])
 	}
-	if batch.Failed[0].Message == "" {
-		t.Fatal("a failure with no message is a failure a caller cannot act on")
-	}
+	assert.Must(t, batch.Failed[0].Message != "", "a failure with no message is a failure a caller cannot act on")
 
 	// Every written entry has to be true of the stored document, and the
 	// version it names has to be the one a follow-up edit passes.
@@ -1074,9 +861,7 @@ func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
 		}
 		decodeStructured(t, callOK(t, session, "docs.read",
 			map[string]any{"path": w.Path}), &doc)
-		if doc.ID != w.ID || doc.Version != w.Version || doc.Path != w.Path {
-			t.Fatalf("written %+v does not describe the stored document %+v", w, doc)
-		}
+		assert.Must(t, doc.ID == w.ID && doc.Version == w.Version && doc.Path == w.Path, "written %+v does not describe the stored document %+v", w, doc)
 	}
 	edit := batch.Written[0]
 	var edited struct {
@@ -1085,22 +870,16 @@ func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.write", map[string]any{
 		"path": edit.Path, "content": "rewritten\n", "expected_version": edit.Version,
 	}), &edited)
-	if edited.Version != edit.Version+1 {
-		t.Fatalf("the batch's own version was not the one to edit from: %d then %d",
-			edit.Version, edited.Version)
-	}
+	assert.Must(t, edited.Version == edit.Version+1, "the batch's own version was not the one to edit from: %d then %d",
+		edit.Version, edited.Version)
 
 	// The item that failed left nothing behind, under either spelling of
 	// the path it named.
 	missing, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "docs.read", Arguments: map[string]any{"path": "lore/westfall.md"},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(docs.read): %v", err)
-	}
-	if !missing.IsError {
-		t.Fatal("the refused item must not have landed")
-	}
+	assert.Must(t, err == nil, "CallTool(docs.read): %v", err)
+	assert.Must(t, missing.IsError, "the refused item must not have landed")
 
 	// A second run of the same batch is a re-seed with stale claims: each
 	// item still says expected_version 0 and each document now exists, so
@@ -1112,17 +891,10 @@ func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
 			item("lore/elwynn.md", "# Elwynn\n"),
 		},
 	}), &batch)
-	if batch.Count != 0 || len(batch.Failed) != 2 {
-		t.Fatalf("re-seed = %+v, want two conflicts and nothing written", batch)
-	}
+	assert.Must(t, batch.Count == 0 && len(batch.Failed) == 2, "re-seed = %+v, want two conflicts and nothing written", batch)
 	for _, failure := range batch.Failed {
-		if failure.Code != "version_conflict" {
-			t.Fatalf("failure = %+v, want version_conflict for a claim that moved", failure)
-		}
-		if strings.Contains(failure.Message, "Duskwood") ||
-			strings.Contains(failure.Message, "Elwynn") {
-			t.Fatalf("failure %+v echoes a body; a batch never does", failure)
-		}
+		assert.Must(t, failure.Code == "version_conflict", "failure = %+v, want version_conflict for a claim that moved", failure)
+		assert.Must(t, !strings.Contains(failure.Message, "Duskwood") && !strings.Contains(failure.Message, "Elwynn"), "failure %+v echoes a body; a batch never does", failure)
 	}
 }
 
@@ -1140,9 +912,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, f.token)
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	names := map[string]bool{}
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
@@ -1152,9 +922,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 		"docs.read_version", "docs.revert", "docs.diff", "docs.links.list",
 		"docs.links.add", "docs.links.remove",
 	} {
-		if !names[want] {
-			t.Fatalf("the served tool list is missing %q", want)
-		}
+		assert.Must(t, names[want], "the served tool list is missing %q", want)
 	}
 	// A tool description is documentation an agent acts on, so an empty
 	// one is a tool nobody can use correctly; this is the only place the
@@ -1172,13 +940,9 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 		if !strings.HasPrefix(tool.Name, "docs.") {
 			continue
 		}
-		if tool.Description == "" {
-			t.Fatalf("%s is served with no description at all", tool.Name)
-		}
-		if strings.Contains(tool.Description, "%!") {
-			t.Fatalf("%s's description has a formatting fault in it: %s",
-				tool.Name, tool.Description)
-		}
+		assert.Must(t, tool.Description != "", "%s is served with no description at all", tool.Name)
+		assert.Must(t, !strings.Contains(tool.Description, "%!"), "%s's description has a formatting fault in it: %s",
+			tool.Name, tool.Description)
 	}
 
 	var written struct {
@@ -1190,17 +954,13 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 		"path": "lore/hogger.md", "content": hoggerContent,
 		"kind": "script", "message": "the first draft", "expected_version": 0,
 	}), &written)
-	if written.Version != 1 || written.Title != "The Fall of Hogger" {
-		t.Fatalf("written = %+v, want version 1 titled from the frontmatter", written)
-	}
+	assert.Must(t, written.Version == 1 && written.Title == "The Fall of Hogger", "written = %+v, want version 1 titled from the frontmatter", written)
 
 	decodeStructured(t, callOK(t, session, "docs.write", map[string]any{
 		"path": "lore/hogger.md", "content": "second draft\n",
 		"message": "rewrite", "expected_version": 1,
 	}), &written)
-	if written.Version != 2 || written.Body != "second draft\n" {
-		t.Fatalf("written = %+v, want version 2 carrying the new body", written)
-	}
+	assert.Must(t, written.Version == 2 && written.Body == "second draft\n", "written = %+v, want version 2 carrying the new body", written)
 
 	// A stale write is a version_conflict carrying the current body, and
 	// that is what an agent parses out of the error result.
@@ -1210,12 +970,8 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 			"path": "lore/hogger.md", "content": "third", "expected_version": 1,
 		},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(docs.write): %v", err)
-	}
-	if !stale.IsError {
-		t.Fatal("writing onto a version that moved must fail")
-	}
+	assert.Must(t, err == nil, "CallTool(docs.write): %v", err)
+	assert.Must(t, stale.IsError, "writing onto a version that moved must fail")
 	var conflict struct {
 		Error   string `json:"error"`
 		Details struct {
@@ -1224,12 +980,8 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 		} `json:"details"`
 	}
 	decodeToolText(t, stale, &conflict)
-	if conflict.Error != "version_conflict" {
-		t.Fatalf("error = %q, want version_conflict", conflict.Error)
-	}
-	if conflict.Details.CurrentVersion != 2 || conflict.Details.CurrentBody != "second draft\n" {
-		t.Fatalf("details = %+v, want the current version and body to merge onto", conflict.Details)
-	}
+	assert.Must(t, conflict.Error == "version_conflict", "error = %q, want version_conflict", conflict.Error)
+	assert.Must(t, conflict.Details.CurrentVersion == 2 && conflict.Details.CurrentBody == "second draft\n", "details = %+v, want the current version and body to merge onto", conflict.Details)
 
 	// docs.diff over the two versions, and the flag that says whether it
 	// was computed line by line.
@@ -1240,12 +992,8 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.diff", map[string]any{
 		"path": "lore/hogger.md", "from_version": 1, "to_version": 2,
 	}), &diff)
-	if diff.Coarse {
-		t.Fatalf("a two-line change came back coarse: %q", diff.Unified)
-	}
-	if !strings.Contains(diff.Unified, "+second draft") {
-		t.Fatalf("unified = %q, want the added line", diff.Unified)
-	}
+	assert.Must(t, !diff.Coarse, "a two-line change came back coarse: %q", diff.Unified)
+	assert.Must(t, strings.Contains(diff.Unified, "+second draft"), "unified = %q, want the added line", diff.Unified)
 
 	// docs.revert writes forward.
 	var reverted struct {
@@ -1255,9 +1003,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.revert", map[string]any{
 		"path": "lore/hogger.md", "to_version": 1, "expected_version": 2,
 	}), &reverted)
-	if reverted.Version != 3 || !strings.Contains(reverted.Body, "Act one") {
-		t.Fatalf("reverted = %+v, want version 3 carrying version 1's body", reverted)
-	}
+	assert.Must(t, reverted.Version == 3 && strings.Contains(reverted.Body, "Act one"), "reverted = %+v, want version 3 carrying version 1's body", reverted)
 
 	// docs.delete is soft, and the version it answers with is the one
 	// that brings the document back.
@@ -1268,19 +1014,13 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.delete", map[string]any{
 		"path": "lore/hogger.md", "message": "cut", "expected_version": 3,
 	}), &deleted)
-	if !deleted.Deleted || deleted.Version != 4 {
-		t.Fatalf("deleted = %+v, want the tombstone's version and deleted true", deleted)
-	}
+	assert.Must(t, deleted.Deleted && deleted.Version == 4, "deleted = %+v, want the tombstone's version and deleted true", deleted)
 
 	gone, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "docs.read", Arguments: map[string]any{"path": "lore/hogger.md"},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(docs.read): %v", err)
-	}
-	if !gone.IsError {
-		t.Fatal("a deleted document is not found")
-	}
+	assert.Must(t, err == nil, "CallTool(docs.read): %v", err)
+	assert.Must(t, gone.IsError, "a deleted document is not found")
 
 	var resurrected struct {
 		Version int32 `json:"version"`
@@ -1289,9 +1029,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.write", map[string]any{
 		"path": "lore/hogger.md", "content": "back", "expected_version": 4,
 	}), &resurrected)
-	if resurrected.Deleted || resurrected.Version != 5 {
-		t.Fatalf("resurrected = %+v, want a live document at version 5", resurrected)
-	}
+	assert.Must(t, !resurrected.Deleted && resurrected.Version == 5, "resurrected = %+v, want a live document at version 5", resurrected)
 
 	// The history is all five, newest first, with the tombstone marked.
 	var history struct {
@@ -1305,17 +1043,13 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "docs.history", map[string]any{
 		"path": "lore/hogger.md",
 	}), &history)
-	if len(history.Items) != 5 || history.Items[0].Version != 5 {
-		t.Fatalf("history = %+v, want five versions newest first", history.Items)
-	}
+	assert.Must(t, len(history.Items) == 5 && history.Items[0].Version == 5, "history = %+v, want five versions newest first", history.Items)
 	if !history.Items[1].Deleted || history.Items[1].Message != "cut" {
 		t.Fatalf("version 4 = %+v, want the tombstone with its message", history.Items[1])
 	}
 	for _, item := range history.Items {
-		if item.AuthorKind != "token" {
-			t.Fatalf("version %d was written by %q, want the agent's token",
-				item.Version, item.AuthorKind)
-		}
+		assert.Must(t, item.AuthorKind == "token", "version %d was written by %q, want the agent's token",
+			item.Version, item.AuthorKind)
 	}
 }
 
@@ -1333,19 +1067,13 @@ func TestADocsToolCallIsRefusedForAnotherGamesIDOverTheWire(t *testing.T) {
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "docs.list", Arguments: map[string]any{"game": f.otherSlug},
 	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("a docs tool stating another game's id must be refused")
-	}
+	assert.Must(t, err == nil, "CallTool: %v", err)
+	assert.Must(t, result.IsError, "a docs tool stating another game's id must be refused")
 	var body struct {
 		Error string `json:"error"`
 	}
 	decodeToolText(t, result, &body)
-	if body.Error != "scope_violation" {
-		t.Fatalf("error = %q, want scope_violation", body.Error)
-	}
+	assert.Must(t, body.Error == "scope_violation", "error = %q, want scope_violation", body.Error)
 }
 
 // writeDoc is a one-line document write for the tests below, which care
@@ -1411,9 +1139,7 @@ func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
 
 	// 1. A soft-deleted document is absent by default.
 	live, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{})
-	if err != nil {
-		t.Fatalf("MCPDocsList: %v", err)
-	}
+	assert.Must(t, err == nil, "MCPDocsList: %v", err)
 	if got := paths(live); len(got) != 2 || got[0] != "lore/hogger.md" || got[1] != "lore/kobolds.md" {
 		t.Fatalf("listing = %v, want the two live documents", got)
 	}
@@ -1422,17 +1148,13 @@ func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
 	// is. A listing that answers deleted false for a tombstone is a
 	// listing a client cannot use include_deleted with at all.
 	all, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{IncludeDeleted: true})
-	if err != nil {
-		t.Fatalf("MCPDocsList include_deleted: %v", err)
-	}
+	assert.Must(t, err == nil, "MCPDocsList include_deleted: %v", err)
 	if got := paths(all); len(got) != 3 {
 		t.Fatalf("listing with include_deleted = %v, want all three documents", got)
 	}
 	for _, item := range all.Items {
 		want := item.Path == "lore/zzz-cut.md"
-		if item.Deleted != want {
-			t.Fatalf("row %s says deleted %v, want %v", item.Path, item.Deleted, want)
-		}
+		assert.Must(t, item.Deleted == want, "row %s says deleted %v, want %v", item.Path, item.Deleted, want)
 	}
 
 	// 3. The entity filter narrows to the documents attached to that
@@ -1441,9 +1163,7 @@ func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
 	byEntity, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
 		EntityType: "quest", EntityKey: "kobold-candles",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsList by entity: %v", err)
-	}
+	assert.Must(t, err == nil, "MCPDocsList by entity: %v", err)
 	if got := paths(byEntity); len(got) != 1 || got[0] != "lore/kobolds.md" {
 		t.Fatalf("listing by entity = %v, want only the document attached to that quest", got)
 	}
@@ -1451,36 +1171,22 @@ func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
 	// 4. A page that does not hold everything says so and carries the
 	// cursor to the rest.
 	first, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{Limit: 1})
-	if err != nil {
-		t.Fatalf("MCPDocsList limit 1: %v", err)
-	}
-	if len(first.Items) != 1 || !first.Truncated || first.NextCursor == nil {
-		t.Fatalf("first page = %+v, want one row, truncated and a cursor", first)
-	}
+	assert.Must(t, err == nil, "MCPDocsList limit 1: %v", err)
+	assert.Must(t, len(first.Items) == 1 && first.Truncated && first.NextCursor != nil, "first page = %+v, want one row, truncated and a cursor", first)
 	second, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
 		Limit: 1, Cursor: *first.NextCursor,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsList second page: %v", err)
-	}
-	if len(second.Items) != 1 || second.Items[0].Path == first.Items[0].Path {
-		t.Fatalf("second page = %+v, want the next row and not the first again", second.Items)
-	}
+	assert.Must(t, err == nil, "MCPDocsList second page: %v", err)
+	assert.Must(t, len(second.Items) == 1 && second.Items[0].Path != first.Items[0].Path, "second page = %+v, want the next row and not the first again", second.Items)
 	// The cursor is issued whenever a page came back full, so the page
 	// after the last row is the empty one, and that is the page that
 	// says the listing is over.
-	if second.NextCursor == nil {
-		t.Fatalf("second page = %+v, want a cursor while the page is still full", second)
-	}
+	assert.Must(t, second.NextCursor != nil, "second page = %+v, want a cursor while the page is still full", second)
 	last, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
 		Limit: 1, Cursor: *second.NextCursor,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsList past the last row: %v", err)
-	}
-	if len(last.Items) != 0 || last.Truncated || last.NextCursor != nil {
-		t.Fatalf("page past the end = %+v, want empty and untruncated", last)
-	}
+	assert.Must(t, err == nil, "MCPDocsList past the last row: %v", err)
+	assert.Must(t, len(last.Items) == 0 && !last.Truncated && last.NextCursor == nil, "page past the end = %+v, want empty and untruncated", last)
 }
 
 // TestAHistoryPageSaysWhenThereIsMore is the history half of the paging
@@ -1504,24 +1210,16 @@ func TestAHistoryPageSaysWhenThereIsMore(t *testing.T) {
 	first, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.game, web.DocsHistoryInput{
 		Path: "lore/hogger.md", Limit: 1,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsHistory: %v", err)
-	}
-	if len(first.Items) != 1 || !first.Truncated || first.NextCursor == nil {
-		t.Fatalf("first page = %+v, want one version, truncated and a cursor", first)
-	}
+	assert.Must(t, err == nil, "MCPDocsHistory: %v", err)
+	assert.Must(t, len(first.Items) == 1 && first.Truncated && first.NextCursor != nil, "first page = %+v, want one version, truncated and a cursor", first)
 	if first.Items[0].Version != 3 {
 		t.Fatalf("first row is version %d, want the newest", first.Items[0].Version)
 	}
 	second, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.game, web.DocsHistoryInput{
 		Path: "lore/hogger.md", Limit: 1, Cursor: *first.NextCursor,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsHistory second page: %v", err)
-	}
-	if len(second.Items) != 1 || second.Items[0].Version != 2 {
-		t.Fatalf("second page = %+v, want version 2", second.Items)
-	}
+	assert.Must(t, err == nil, "MCPDocsHistory second page: %v", err)
+	assert.Must(t, len(second.Items) == 1 && second.Items[0].Version == 2, "second page = %+v, want version 2", second.Items)
 }
 
 // TestADiffTooLargeToCompareSaysCoarseOnTheWire pins the one field of
@@ -1562,12 +1260,8 @@ func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
 	whole, err := web.MCPDocsDiff(ctx, f.deps, f.caller, f.game, web.DocsDiffInput{
 		Path: "lore/epic.md", FromVersion: 1, ToVersion: 2,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsDiff: %v", err)
-	}
-	if !whole.Coarse {
-		t.Fatalf("diff = %+v, want coarse true past the comparison bound", whole)
-	}
+	assert.Must(t, err == nil, "MCPDocsDiff: %v", err)
+	assert.Must(t, whole.Coarse, "diff = %+v, want coarse true past the comparison bound", whole)
 
 	// And the same tool answers coarse false for an edit inside a body
 	// of the same size, which is the half that makes the field worth
@@ -1576,12 +1270,8 @@ func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
 	small, err := web.MCPDocsDiff(ctx, f.deps, f.caller, f.game, web.DocsDiffInput{
 		Path: "lore/epic.md", FromVersion: 2, ToVersion: 3,
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsDiff the small edit: %v", err)
-	}
-	if small.Coarse {
-		t.Fatalf("diff = %+v, want coarse false for a one-line edit", small)
-	}
+	assert.Must(t, err == nil, "MCPDocsDiff the small edit: %v", err)
+	assert.Must(t, !small.Coarse, "diff = %+v, want coarse false for a one-line edit", small)
 }
 
 // TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites pins the rule
@@ -1604,9 +1294,7 @@ func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, f.token)
 
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	described := map[string]string{}
 	for _, tool := range tools.Tools {
 		described[tool.Name] = tool.Description
@@ -1618,9 +1306,7 @@ func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 	// else the number is unambiguous and asserting the wording would
 	// only make the test brittle.
 	wantKind := "kind is free text of at most " + strconv.Itoa(markdown.MaxKindLen) + " bytes"
-	if !strings.Contains(described["docs.write"], wantKind) {
-		t.Errorf("docs.write's description does not disclose the kind bound: want %q", wantKind)
-	}
+	assert.Should(t, strings.Contains(described["docs.write"], wantKind), "docs.write's description does not disclose the kind bound: want %q", wantKind)
 
 	for _, tc := range []struct {
 		tool  string
@@ -1635,13 +1321,9 @@ func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 		{"docs.links.add", strconv.Itoa(markdown.MaxRoleLen), "the role bound"},
 	} {
 		description, served := described[tc.tool]
-		if !served {
-			t.Fatalf("%s is not served at all", tc.tool)
-		}
-		if !strings.Contains(description, tc.bound) {
-			t.Errorf("%s's description does not name %s (%s): %s",
-				tc.tool, tc.what, tc.bound, description)
-		}
+		assert.Must(t, served, "%s is not served at all", tc.tool)
+		assert.Should(t, strings.Contains(description, tc.bound), "%s's description does not name %s (%s): %s",
+			tc.tool, tc.what, tc.bound, description)
 	}
 }
 
@@ -1670,9 +1352,7 @@ func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
 	_, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
 		Path: "lore/hogger.md",
 	})
-	if !errors.Is(err, metamodel.ErrNotFound) {
-		t.Fatalf("MCPDocsLinksList on a deleted document = %v, want not_found", err)
-	}
+	assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "MCPDocsLinksList on a deleted document = %v, want not_found", err)
 
 	// The links themselves are not gone, which is the other half of what
 	// docs.delete promises: the entity side stops listing the document,
@@ -1680,12 +1360,8 @@ func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
 	fromEntity, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
 		EntityType: "quest", EntityKey: "wanted-hogger",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsLinksList by entity: %v", err)
-	}
-	if len(fromEntity.Documents) != 0 {
-		t.Fatalf("entity lists %+v, want no deleted document", fromEntity.Documents)
-	}
+	assert.Must(t, err == nil, "MCPDocsLinksList by entity: %v", err)
+	assert.Must(t, len(fromEntity.Documents) == 0, "entity lists %+v, want no deleted document", fromEntity.Documents)
 	if _, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
 		Path: "lore/hogger.md", Content: "# Hogger\n", ExpectedVersion: int32Ptr(2),
 	}); err != nil {
@@ -1694,10 +1370,6 @@ func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
 	back, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
 		Path: "lore/hogger.md",
 	})
-	if err != nil {
-		t.Fatalf("MCPDocsLinksList after the resurrection: %v", err)
-	}
-	if len(back.Entities) != 1 || back.Entities[0].Role != "script" {
-		t.Fatalf("links after the resurrection = %+v, want the attachment back", back.Entities)
-	}
+	assert.Must(t, err == nil, "MCPDocsLinksList after the resurrection: %v", err)
+	assert.Must(t, len(back.Entities) == 1 && back.Entities[0].Role == "script", "links after the resurrection = %+v, want the attachment back", back.Entities)
 }

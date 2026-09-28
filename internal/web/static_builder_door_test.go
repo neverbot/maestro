@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestTheBuilderDoorIsDecidedFromTheStoredQuery is a source guard over
@@ -30,17 +32,11 @@ func TestTheBuilderDoorIsDecidedFromTheStoredQuery(t *testing.T) {
 		{"static/pages/builder.js", "the builder decides whether to open what it was pointed at"},
 	} {
 		source, err := os.ReadFile(page.path)
-		if err != nil {
-			t.Fatalf("read %s: %v", page.path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", page.path, err)
 		text := string(source)
-		if !strings.Contains(text, "roundTrips(") {
-			t.Errorf("%s never calls roundTrips: %s, and §4 says that decision is made against "+
-				"the stored bytes every time", page.path, page.what)
-		}
-		if !strings.Contains(text, "TOO_MUCH") {
-			t.Errorf("%s never says TOO_MUCH: a query the builder cannot hold has to be explained "+
-				"in the spike's own words rather than by a control that is simply missing", page.path)
-		}
+		assert.Should(t, strings.Contains(text, "roundTrips("), "%s never calls roundTrips: %s, and §4 says that decision is made against "+
+			"the stored bytes every time", page.path, page.what)
+		assert.Should(t, strings.Contains(text, "TOO_MUCH"), "%s never says TOO_MUCH: a query the builder cannot hold has to be explained "+
+			"in the spike's own words rather than by a control that is simply missing", page.path)
 	}
 }

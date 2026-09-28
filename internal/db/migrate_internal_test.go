@@ -19,6 +19,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // newTestDatabase creates a uniquely named, unmigrated database and drops
@@ -35,9 +37,7 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 	defer cancel()
 
 	adminDB, err := pgxpool.New(ctx, adminURL)
-	if err != nil {
-		t.Fatalf("open admin pool: %v", err)
-	}
+	assert.Must(t, err == nil, "open admin pool: %v", err)
 	t.Cleanup(adminDB.Close)
 
 	// **The millisecond stamp is load-bearing and this file is where it
@@ -68,15 +68,11 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 	})
 
 	u, err := url.Parse(adminURL)
-	if err != nil || u.Scheme == "" {
-		t.Fatalf("TEST_DATABASE_URL must be a postgres:// URL, got %q", adminURL)
-	}
+	assert.Must(t, err == nil && u.Scheme != "", "TEST_DATABASE_URL must be a postgres:// URL, got %q", adminURL)
 	u.Path = "/" + name
 
 	pool, err := NewPool(ctx, u.String())
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
+	assert.Must(t, err == nil, "connect test database: %v", err)
 	t.Cleanup(pool.Close)
 
 	return pool
@@ -100,12 +96,8 @@ func TestMigrateUpDownUp(t *testing.T) {
 	ctx := context.Background()
 
 	files, err := fs.Glob(migrationsFS, "migrations/*.sql")
-	if err != nil {
-		t.Fatalf("list migrations: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no migrations found; this test would assert nothing")
-	}
+	assert.Must(t, err == nil, "list migrations: %v", err)
+	assert.Must(t, len(files) != 0, "no migrations found; this test would assert nothing")
 
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -120,12 +112,8 @@ func TestMigrateUpDownUp(t *testing.T) {
 	err = pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users')`,
 	).Scan(&exists)
-	if err != nil {
-		t.Fatalf("query users after down: %v", err)
-	}
-	if exists {
-		t.Fatalf("table users still exists after migrateDown")
-	}
+	assert.Must(t, err == nil, "query users after down: %v", err)
+	assert.Must(t, !exists, "table users still exists after migrateDown")
 
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate after down: %v", err)
@@ -134,12 +122,8 @@ func TestMigrateUpDownUp(t *testing.T) {
 	err = pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users')`,
 	).Scan(&exists)
-	if err != nil {
-		t.Fatalf("query users after re-up: %v", err)
-	}
-	if !exists {
-		t.Fatalf("table users was not recreated after re-up")
-	}
+	assert.Must(t, err == nil, "query users after re-up: %v", err)
+	assert.Must(t, exists, "table users was not recreated after re-up")
 }
 
 // TestMigrateRefusesToServeAgainstANewerSchema pins checkNoSchemaDrift:
@@ -173,12 +157,8 @@ func TestMigrateRefusesToServeAgainstANewerSchema(t *testing.T) {
 	}
 
 	err := Migrate(ctx, pool)
-	if err == nil {
-		t.Fatal("Migrate succeeded against a database ahead of this binary's known migrations, want an error")
-	}
-	if !strings.Contains(err.Error(), "ahead of") {
-		t.Fatalf("err = %v, want it to explain the schema is ahead of this binary", err)
-	}
+	assert.Must(t, err != nil, "Migrate succeeded against a database ahead of this binary's known migrations, want an error")
+	assert.Must(t, strings.Contains(err.Error(), "ahead of"), "err = %v, want it to explain the schema is ahead of this binary", err)
 }
 
 // TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt is the sharper
@@ -237,9 +217,7 @@ func TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt(t *testing.T) {
 		if err := pool.QueryRow(ctx, p.count).Scan(&before[i]); err != nil {
 			t.Fatalf("count %s: %v", p.what, err)
 		}
-		if before[i] == 0 {
-			t.Fatalf("%s is absent before the rollback; this probe would assert nothing", p.what)
-		}
+		assert.Must(t, before[i] != 0, "%s is absent before the rollback; this probe would assert nothing", p.what)
 	}
 
 	// **Down *to* a version, not one step down.** This test used to take

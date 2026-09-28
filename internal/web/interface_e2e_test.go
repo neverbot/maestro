@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -321,13 +322,8 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	// The shell resolves nothing server-side, so what the browser gets at
 	// /g/{slug} is bytes, and what fills the three lanes is the summary.
 	shell := w.get(t, w.human, "/g/"+w.slug)
-	if shell.Code != http.StatusOK {
-		t.Fatalf("GET /g/%s = %d, want 200", w.slug, shell.Code)
-	}
-	if !strings.Contains(shell.Body.String(), "<!doctype html") &&
-		!strings.Contains(shell.Body.String(), "<!DOCTYPE html") {
-		t.Fatalf("GET /g/%s did not answer with a shell:\n%s", w.slug, first(shell.Body.String(), 200))
-	}
+	assert.Must(t, shell.Code == http.StatusOK, "GET /g/%s = %d, want 200", w.slug, shell.Code)
+	assert.Must(t, strings.Contains(shell.Body.String(), "<!doctype html") || strings.Contains(shell.Body.String(), "<!DOCTYPE html"), "GET /g/%s did not answer with a shell:\n%s", w.slug, first(shell.Body.String(), 200))
 
 	var summary struct {
 		EntityTypes []struct {
@@ -361,18 +357,14 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 		} `json:"items"`
 	}
 	w.decode(t, w.get(t, w.human, w.api("/views")), &listing)
-	if len(listing.Items) != 1 || listing.Items[0].Key != "mage-quests" || listing.Items[0].Renderer != "graph" {
-		t.Fatalf("the views lane holds %+v", listing.Items)
-	}
+	assert.Must(t, len(listing.Items) == 1 && listing.Items[0].Key == "mage-quests" && listing.Items[0].Renderer == "graph", "the views lane holds %+v", listing.Items)
 	var docs struct {
 		Items []struct {
 			Path string `json:"path"`
 		} `json:"items"`
 	}
 	w.decode(t, w.get(t, w.human, w.api("/docs")), &docs)
-	if len(docs.Items) != 1 || docs.Items[0].Path != "lore/westfall.md" {
-		t.Fatalf("the prose lane holds %+v", docs.Items)
-	}
+	assert.Must(t, len(docs.Items) == 1 && docs.Items[0].Path == "lore/westfall.md", "the prose lane holds %+v", docs.Items)
 
 	// --- Step 3: the view, its parameter, and the two durations --------
 	//
@@ -387,9 +379,7 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 		Version        int             `json:"version"`
 	}
 	w.decode(t, w.get(t, w.human, w.api("/views/by-key/mage-quests")), &row)
-	if row.Renderer != "graph" {
-		t.Fatalf("the row the page reads says renderer %q", row.Renderer)
-	}
+	assert.Must(t, row.Renderer == "graph", "the row the page reads says renderer %q", row.Renderer)
 
 	envelope := w.run(t, map[string]any{"key": "mage-quests", "params": map[string]any{"class_key": "mage"}})
 	if got := nodeKeys(envelope); !equalStrings(got, sortedCopy(append([]string{"mage"}, interfaceReachable...))) {
@@ -399,9 +389,7 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	// duration is the client's own and cannot be asserted here, which is
 	// why the driven run's value is recorded in this file's header
 	// instead of asserted.
-	if envelope.Stats.DurationMs < 0 {
-		t.Errorf("stats.duration_ms = %d", envelope.Stats.DurationMs)
-	}
+	assert.Should(t, envelope.Stats.DurationMs >= 0, "stats.duration_ms = %d", envelope.Stats.DurationMs)
 	// The colour slot every legend row is built from. Two distinct
 	// values over the four quests, and *absent* on the seed class — which
 	// is the row the legend calls "not set" and the drawing dashes.
@@ -415,10 +403,8 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 		}
 		zones[fmt.Sprint(value)]++
 	}
-	if len(zones) != 2 || unset != 1 {
-		t.Errorf("color_by came back with %d values and %d unset nodes; the legend needs two rows and an unset row",
-			len(zones), unset)
-	}
+	assert.Should(t, len(zones) == 2 && unset == 1, "color_by came back with %d values and %d unset nodes; the legend needs two rows and an unset row",
+		len(zones), unset)
 
 	// --- Steps 5 and 6: the write, and what a second page sees ---------
 	//
@@ -439,9 +425,7 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	for _, drag := range drags {
 		rec := w.post(t, w.human, w.api("/views/by-key/mage-quests/positions"),
 			map[string]any{"positions": []web.ViewsPositionInput{drag}})
-		if rec.Code != http.StatusOK {
-			t.Fatalf("POST positions for %s = %d: %s", drag.EntityKey, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "POST positions for %s = %d: %s", drag.EntityKey, rec.Code, rec.Body.String())
 	}
 
 	// **The event carries identity and no coordinates**, which is the one
@@ -468,12 +452,8 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	stored := positionsByKey(reloaded)
 	for _, drag := range drags {
 		got, ok := stored[drag.EntityKey]
-		if !ok {
-			t.Fatalf("%s lost its position across the reload", drag.EntityKey)
-		}
-		if got.X != drag.X || got.Y != drag.Y || !got.Pinned {
-			t.Errorf("%s came back at (%v, %v) pinned=%v, want (%v, %v) pinned", drag.EntityKey, got.X, got.Y, got.Pinned, drag.X, drag.Y)
-		}
+		assert.Must(t, ok, "%s lost its position across the reload", drag.EntityKey)
+		assert.Should(t, got.X == drag.X && got.Y == drag.Y && got.Pinned, "%s came back at (%v, %v) pinned=%v, want (%v, %v) pinned", drag.EntityKey, got.X, got.Y, got.Pinned, drag.X, drag.Y)
 	}
 	if _, ok := stored["mage"]; ok {
 		t.Errorf("the seed class came back with a position; nobody placed it")
@@ -510,19 +490,15 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	}
 
 	widened := w.run(t, map[string]any{"key": "mage-quests", "params": map[string]any{"class_key": "mage"}})
-	if len(widened.Nodes) != len(envelope.Nodes)+12 {
-		t.Fatalf("the picture went from %d nodes to %d; twelve arrived", len(envelope.Nodes), len(widened.Nodes))
-	}
+	assert.Must(t, len(widened.Nodes) == len(envelope.Nodes)+12, "the picture went from %d nodes to %d; twelve arrived", len(envelope.Nodes), len(widened.Nodes))
 	// **Coordinate equality, not by eye.** The twelve arriving must not
 	// move the four a designer placed, and `mixed` layout is exactly the
 	// mode in which they could.
 	after := positionsByKey(widened)
 	for _, drag := range drags {
 		got := after[drag.EntityKey]
-		if got.X != drag.X || got.Y != drag.Y {
-			t.Errorf("%s moved from (%v, %v) to (%v, %v) when twelve quests arrived",
-				drag.EntityKey, drag.X, drag.Y, got.X, got.Y)
-		}
+		assert.Should(t, got.X == drag.X && got.Y == drag.Y, "%s moved from (%v, %v) to (%v, %v) when twelve quests arrived",
+			drag.EntityKey, drag.X, drag.Y, got.X, got.Y)
 	}
 	// And the twelve arrive with no row of their own, which is what makes
 	// them the ones a client places and counts.
@@ -545,13 +521,8 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 		t.Fatalf("relation_types.rename: %v", err)
 	}
 	renamed := w.run(t, map[string]any{"key": "mage-quests"})
-	if len(renamed.Nodes) == 0 {
-		t.Fatalf("the rename stopped the view drawing; the reference is by id and should still resolve")
-	}
-	if len(renamed.Stale) != 1 || renamed.Stale[0].Pointer != "/traverse/0/via/0" ||
-		renamed.Stale[0].Was != "available_to" || renamed.Stale[0].Now != "usable_by" {
-		t.Fatalf("the advisory the title strip renders is %+v", renamed.Stale)
-	}
+	assert.Must(t, len(renamed.Nodes) != 0, "the rename stopped the view drawing; the reference is by id and should still resolve")
+	assert.Must(t, len(renamed.Stale) == 1 && renamed.Stale[0].Pointer == "/traverse/0/via/0" && renamed.Stale[0].Was == "available_to" && renamed.Stale[0].Now == "usable_by", "the advisory the title strip renders is %+v", renamed.Stale)
 
 	if _, err := web.MCPRelationTypesRemove(context.Background(), w.deps, w.agent, w.game,
 		web.RelationTypesRemoveInput{Key: "requires", Cascade: true}); err != nil {
@@ -560,9 +531,7 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 
 	// **No picture at all**, and the pointers the panel puts on screen.
 	refusal := w.postRaw(t, w.human, w.api("/views/run"), map[string]any{"key": "mage-quests"})
-	if refusal.Code != http.StatusConflict && refusal.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("a stale view ran with status %d: %s", refusal.Code, refusal.Body.String())
-	}
+	assert.Must(t, refusal.Code == http.StatusConflict || refusal.Code == http.StatusUnprocessableEntity, "a stale view ran with status %d: %s", refusal.Code, refusal.Body.String())
 	var problem struct {
 		Error   string `json:"error"`
 		Details struct {
@@ -575,21 +544,15 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	if err := json.Unmarshal(refusal.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("the refusal is not JSON: %s", refusal.Body.String())
 	}
-	if problem.Error != "query_stale" {
-		t.Fatalf("the refusal is %q, want query_stale: %s", problem.Error, refusal.Body.String())
-	}
+	assert.Must(t, problem.Error == "query_stale", "the refusal is %q, want query_stale: %s", problem.Error, refusal.Body.String())
 	pointers := map[string]string{}
 	for _, field := range problem.Details.Fields {
 		pointers[field.Path] = field.Message
 	}
 	for _, want := range []string{"/traverse/0/via/0", "/edges/1/via/0"} {
 		message, ok := pointers[want]
-		if !ok {
-			t.Fatalf("the panel has no row for %s; it has %v", want, pointers)
-		}
-		if strings.TrimSpace(message) == "" {
-			t.Errorf("the row at %s carries no sentence; the panel renders the server's own words", want)
-		}
+		assert.Must(t, ok, "the panel has no row for %s; it has %v", want, pointers)
+		assert.Should(t, strings.TrimSpace(message) != "", "the row at %s carries no sentence; the panel renders the server's own words", want)
 	}
 	// The one sentence the panel must carry verbatim names the missing
 	// key, because it is the only thing a designer can act on.
@@ -601,13 +564,9 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 	// "Run anyway" is one more run with one more member, and it draws the
 	// reduced picture: every node, one edge fewer.
 	best := w.run(t, map[string]any{"key": "mage-quests", "on_stale": "best_effort"})
-	if len(best.Nodes) != len(widened.Nodes) {
-		t.Errorf("best effort drew %d nodes, want %d", len(best.Nodes), len(widened.Nodes))
-	}
-	if len(best.Edges) != len(widened.Edges)-1 {
-		t.Errorf("best effort drew %d edges, want %d — the dropped step is one edge",
-			len(best.Edges), len(widened.Edges)-1)
-	}
+	assert.Should(t, len(best.Nodes) == len(widened.Nodes), "best effort drew %d nodes, want %d", len(best.Nodes), len(widened.Nodes))
+	assert.Should(t, len(best.Edges) == len(widened.Edges)-1, "best effort drew %d edges, want %d — the dropped step is one edge",
+		len(best.Edges), len(widened.Edges)-1)
 	// The banner names the dropped step, so the reduced picture cannot be
 	// mistaken for a whole one.
 	dropped := false
@@ -616,9 +575,7 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 			dropped = true
 		}
 	}
-	if !dropped {
-		t.Errorf("the best-effort picture does not name the step it dropped: %+v", best.Stale)
-	}
+	assert.Should(t, dropped, "the best-effort picture does not name the step it dropped: %+v", best.Stale)
 
 	// The repair, which is an edit of the document and not of the
 	// placement: after it the view is clean and the four coordinates are
@@ -632,16 +589,12 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 		t.Fatalf("the repair: %v", err)
 	}
 	repaired := w.run(t, map[string]any{"key": "mage-quests"})
-	if len(repaired.Stale) != 0 {
-		t.Errorf("the repaired view still reports %+v", repaired.Stale)
-	}
+	assert.Should(t, len(repaired.Stale) == 0, "the repaired view still reports %+v", repaired.Stale)
 	final := positionsByKey(repaired)
 	for _, drag := range drags {
 		got := final[drag.EntityKey]
-		if got.X != drag.X || got.Y != drag.Y {
-			t.Errorf("%s moved during the repair, from (%v, %v) to (%v, %v)",
-				drag.EntityKey, drag.X, drag.Y, got.X, got.Y)
-		}
+		assert.Should(t, got.X == drag.X && got.Y == drag.Y, "%s moved during the repair, from (%v, %v) to (%v, %v)",
+			drag.EntityKey, drag.X, drag.Y, got.X, got.Y)
 	}
 }
 
@@ -661,12 +614,8 @@ func TestTheInterfaceEndToEnd(t *testing.T) {
 func shippedAsset(t *testing.T, name string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("static", filepath.FromSlash(name)))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
-	if len(raw) == 0 {
-		t.Fatalf("%s is empty", name)
-	}
+	assert.Must(t, err == nil, "read %s: %v", name, err)
+	assert.Must(t, len(raw) != 0, "%s is empty", name)
 	return string(raw)
 }
 
@@ -681,12 +630,8 @@ func TestTheRenderersLegendReachesTheFrame(t *testing.T) {
 			"so a view coloured by a slot said nowhere what any of its hues meant")
 	}
 	scene := shippedAsset(t, "render/scene.js")
-	if !strings.Contains(scene, "export function legendModel(") {
-		t.Error("render/scene.js no longer builds the frame's legend model")
-	}
-	if !regexp.MustCompile(`(?m)^\s*legend: empty \?`).MatchString(scene) {
-		t.Error("frameFor no longer carries a legend on the frame it returns")
-	}
+	assert.Should(t, strings.Contains(scene, "export function legendModel("), "render/scene.js no longer builds the frame's legend model")
+	assert.Should(t, regexp.MustCompile(`(?m)^\s*legend: empty \?`).MatchString(scene), "frameFor no longer carries a legend on the frame it returns")
 	frame := shippedAsset(t, "components/mst-view-frame.js")
 	if !strings.Contains(frame, "this.legend(frame.legend)") {
 		t.Error("mst-view-frame no longer renders frame.legend: the model would be built and dropped, " +
@@ -698,10 +643,8 @@ func TestTheRenderersLegendReachesTheFrame(t *testing.T) {
 	// this names the reason at the one place that most wants one.
 	for i := 1; i <= 8; i++ {
 		rule := fmt.Sprintf(".legend .hue-%d { background: var(--data-%d); }", i, i)
-		if !strings.Contains(frame, rule) {
-			t.Errorf("mst-view-frame has no rule painting hue %d; a swatch painted from the model "+
-				"instead would be a style attribute, which this instance's policy silently drops", i)
-		}
+		assert.Should(t, strings.Contains(frame, rule), "mst-view-frame has no rule painting hue %d; a swatch painted from the model "+
+			"instead would be a style attribute, which this instance's policy silently drops", i)
 	}
 }
 
@@ -717,16 +660,10 @@ func TestTheMapRendererIsGivenAComposition(t *testing.T) {
 			"new to a saved arrangement goes to the shelf instead of being placed and counted, " +
 			"and the band \"n new nodes were placed automatically\" can never fire")
 	}
-	if !strings.Contains(page, "export function mapComposition(") {
-		t.Error("pages/view.js no longer builds the map's composition")
-	}
-	if !strings.Contains(page, "row: state.row,") {
-		t.Error("the scene options no longer carry the view row, which is where the map's layout mode comes from")
-	}
+	assert.Should(t, strings.Contains(page, "export function mapComposition("), "pages/view.js no longer builds the map's composition")
+	assert.Should(t, strings.Contains(page, "row: state.row,"), "the scene options no longer carry the view row, which is where the map's layout mode comes from")
 	m := shippedAsset(t, "render/map.js")
-	if !strings.Contains(m, "placementsOf(options.layout)") {
-		t.Error("render/map.js no longer reads a composition; if the reader moved, this guard is naming the wrong line")
-	}
+	assert.Should(t, strings.Contains(m, "placementsOf(options.layout)"), "render/map.js no longer reads a composition; if the reader moved, this guard is naming the wrong line")
 }
 
 // TestTheTwinsSelectionHasAListener closes the third. The behavioural
@@ -744,9 +681,7 @@ func TestTheTwinsSelectionHasAListener(t *testing.T) {
 			"which is the whole keyboard path of the accessibility spine")
 	}
 	twin := shippedAsset(t, "components/mst-twin.js")
-	if !strings.Contains(twin, `export const SELECT_EVENT = "mst-select";`) {
-		t.Error("mst-twin no longer names the event the page binds; the two spellings have come apart")
-	}
+	assert.Should(t, strings.Contains(twin, `export const SELECT_EVENT = "mst-select";`), "mst-twin no longer names the event the page binds; the two spellings have come apart")
 }
 
 // --- The world ---------------------------------------------------------
@@ -774,23 +709,15 @@ func newInterfaceWorld(t *testing.T) *interfaceWorld {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: owner.ID, Label: "content agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	agent, err := web.CallerForToken(ctx, ids, secret)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	w := &interfaceWorld{
 		srv:  srv,
 		ts:   httptest.NewServer(srv),
@@ -913,9 +840,7 @@ func (w *interfaceWorld) get(t *testing.T, cookie *http.Cookie, path string) *ht
 func (w *interfaceWorld) postRaw(t *testing.T, cookie *http.Cookie, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
@@ -931,9 +856,7 @@ func (w *interfaceWorld) post(t *testing.T, cookie *http.Cookie, path string, bo
 
 func (w *interfaceWorld) decode(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d: %s", rec.Code, rec.Body.String())
 	if err := json.Unmarshal(rec.Body.Bytes(), v); err != nil {
 		t.Fatalf("decode: %v\n%s", err, first(rec.Body.String(), 400))
 	}
@@ -1064,9 +987,7 @@ func waitForEvents(t *testing.T, stream chan streamEvent, kind string, want int)
 	for len(got) < want {
 		select {
 		case event, ok := <-stream:
-			if !ok {
-				t.Fatalf("the stream closed after %d %s event(s), want %d", len(got), kind, want)
-			}
+			assert.Must(t, ok, "the stream closed after %d %s event(s), want %d", len(got), kind, want)
 			if event.Kind == kind {
 				got = append(got, event)
 			}

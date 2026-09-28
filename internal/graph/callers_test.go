@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 const selfPath = "github.com/neverbot/maestro/internal/graph"
@@ -22,12 +24,8 @@ func packageNames(t *testing.T, marker string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "walk.go", nil, parser.ParseComments)
-	if err != nil {
-		t.Fatalf("parse walk.go: %v", err)
-	}
-	if f.Doc == nil {
-		t.Fatal("walk.go carries no package comment at all")
-	}
+	assert.Must(t, err == nil, "parse walk.go: %v", err)
+	assert.Must(t, f.Doc != nil, "walk.go carries no package comment at all")
 	for _, para := range strings.Split(f.Doc.Text(), "\n\n") {
 		flat := strings.Join(strings.Split(para, "\n"), " ")
 		if !strings.Contains(flat, marker) {
@@ -54,9 +52,7 @@ func importers(t *testing.T) []string {
 	t.Helper()
 	out, err := exec.Command("go", "list", "-f",
 		`{{.ImportPath}}|{{join .Imports " "}}`, "github.com/neverbot/maestro/...").Output()
-	if err != nil {
-		t.Fatalf("go list: %v", err)
-	}
+	assert.Must(t, err == nil, "go list: %v", err)
 	var found []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		path, imports, ok := strings.Cut(line, "|")
@@ -94,19 +90,15 @@ func TestThePackageCommentNamesItsCallersAndOnlyItsCallers(t *testing.T) {
 			"being compared: either go list failed to see the module or the walk has lost " +
 			"its only caller")
 	}
-	if strings.Join(named, ",") != strings.Join(actual, ",") {
-		t.Errorf("the package comment names the callers %v and the module's import graph says "+
-			"%v; a package comment claiming callers it cannot point at, or missing one it has, "+
-			"is the defect the sentence exists to prevent", named, actual)
-	}
+	assert.Should(t, strings.Join(named, ",") == strings.Join(actual, ","), "the package comment names the callers %v and the module's import graph says "+
+		"%v; a package comment claiming callers it cannot point at, or missing one it has, "+
+		"is the defect the sentence exists to prevent", named, actual)
 	have := map[string]bool{}
 	for _, p := range actual {
 		have[p] = true
 	}
 	for _, p := range notYet {
-		if have[p] {
-			t.Errorf("the package comment says %s is not a caller yet, and it imports this "+
-				"package: move it to the callers line in the commit that added the import", p)
-		}
+		assert.Should(t, !(have[p]), "the package comment says %s is not a caller yet, and it imports this "+
+			"package: move it to the callers line in the commit that added the import", p)
 	}
 }

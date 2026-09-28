@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -48,9 +49,7 @@ func holdRemoval(t *testing.T, pool *pgxpool.Pool, table string, id uuid.UUID) (
 	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin the removing transaction: %v", err)
-	}
+	assert.Must(t, err == nil, "begin the removing transaction: %v", err)
 	done := false
 	t.Cleanup(func() {
 		if !done {
@@ -59,12 +58,8 @@ func holdRemoval(t *testing.T, pool *pgxpool.Pool, table string, id uuid.UUID) (
 	})
 	// The table name is a literal from this file, never caller data.
 	tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE id = $1", id)
-	if err != nil {
-		t.Fatalf("delete from %s: %v", table, err)
-	}
-	if tag.RowsAffected() != 1 {
-		t.Fatalf("the removal deleted %d rows of %s", tag.RowsAffected(), table)
-	}
+	assert.Must(t, err == nil, "delete from %s: %v", table, err)
+	assert.Must(t, tag.RowsAffected() == 1, "the removal deleted %d rows of %s", tag.RowsAffected(), table)
 	return func() {
 		done = true
 		if err := tx.Commit(ctx); err != nil {
@@ -78,22 +73,12 @@ func holdRemoval(t *testing.T, pool *pgxpool.Pool, table string, id uuid.UUID) (
 // conflict.
 func requireRemoved(t *testing.T, err error, address string) {
 	t.Helper()
-	if !errors.Is(err, metamodel.ErrNotFound) {
-		t.Fatalf("err = %v, want not_found", err)
-	}
-	if errors.Is(err, metamodel.ErrVersionConflict) {
-		t.Fatalf("err = %v, want not_found and *not* a version conflict: merging onto a "+
-			"version is the one recovery that cannot work when the row is gone", err)
-	}
-	if !strings.Contains(err.Error(), "was removed") {
-		t.Fatalf("err = %v, want it to say the row was removed", err)
-	}
-	if !strings.Contains(err.Error(), address) {
-		t.Fatalf("err = %v, want the row named as %s", err, address)
-	}
-	if !strings.Contains(err.Error(), "no expected_version") {
-		t.Fatalf("err = %v, want it to name the recovery: send it again with no claim", err)
-	}
+	assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found", err)
+	assert.Must(t, !errors.Is(err, metamodel.ErrVersionConflict), "err = %v, want not_found and *not* a version conflict: merging onto a "+
+		"version is the one recovery that cannot work when the row is gone", err)
+	assert.Must(t, strings.Contains(err.Error(), "was removed"), "err = %v, want it to say the row was removed", err)
+	assert.Must(t, strings.Contains(err.Error(), address), "err = %v, want the row named as %s", err, address)
+	assert.Must(t, strings.Contains(err.Error(), "no expected_version"), "err = %v, want it to name the recovery: send it again with no claim", err)
 }
 
 func TestRemovedArea(t *testing.T) {
@@ -126,9 +111,7 @@ func TestRemovedArea(t *testing.T) {
 		typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("declare: %v", err)
-		}
+		assert.Must(t, err == nil, "declare: %v", err)
 
 		commitRemoval := holdRemoval(t, pool, "entity_types", typ.ID)
 
@@ -204,12 +187,8 @@ func TestRemovedArea(t *testing.T) {
 		typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
-		if typ.Version != 1 {
-			t.Fatalf("Version = %d, want 1", typ.Version)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
+		assert.Must(t, typ.Version == 1, "Version = %d, want 1", typ.Version)
 
 		// And a re-creation after a real removal, still claiming nothing,
 		// still works — which is the recovery the refusal above names, so it
@@ -220,12 +199,8 @@ func TestRemovedArea(t *testing.T) {
 		again, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("deliberate re-creation with no claim: %v", err)
-		}
-		if again.ID == typ.ID {
-			t.Fatal("the removed row cannot have come back; this is a new one")
-		}
+		assert.Must(t, err == nil, "deliberate re-creation with no claim: %v", err)
+		assert.Must(t, again.ID != typ.ID, "the removed row cannot have come back; this is a new one")
 	})
 
 	// TestRemovedArea's "every upsert of this shape refuses a claim against a
@@ -285,9 +260,7 @@ func TestRemovedArea(t *testing.T) {
 			// The edge is named by both ends as well as by its type: an edge
 			// has no key of its own, so this is the only address a caller
 			// could compare against what it holds.
-			if !strings.Contains(err.Error(), `"defias"`) || !strings.Contains(err.Error(), `"hogger"`) {
-				t.Fatalf("err = %v, want both endpoints named", err)
-			}
+			assert.Must(t, strings.Contains(err.Error(), `"defias"`) && strings.Contains(err.Error(), `"hogger"`), "err = %v, want both endpoints named", err)
 		})
 	})
 
@@ -313,9 +286,7 @@ func TestRemovedArea(t *testing.T) {
 		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
 		})
-		if err != nil {
-			t.Fatalf("seed the entity: %v", err)
-		}
+		assert.Must(t, err == nil, "seed the entity: %v", err)
 
 		commitRemoval := holdRemoval(t, pool, "entities", row.ID)
 
@@ -357,20 +328,14 @@ func TestRemovedArea(t *testing.T) {
 	// once with nothing in either of them to see.
 	t.Run("a removal refusal is not a conflict on either surface", func(t *testing.T) {
 		err := error(&metamodel.RemovedError{Subject: "entity type", Address: `"quest"`, Claimed: 4})
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatal("a RemovedError must read as not_found")
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "a RemovedError must read as not_found")
 		for name, sentinel := range map[string]error{
 			"ErrVersionConflict": metamodel.ErrVersionConflict,
 			"ErrInvalidInput":    metamodel.ErrInvalidInput,
 			"ErrInUse":           metamodel.ErrInUse,
 		} {
-			if errors.Is(err, sentinel) {
-				t.Fatalf("a RemovedError must not read as %s", name)
-			}
+			assert.Must(t, !errors.Is(err, sentinel), "a RemovedError must not read as %s", name)
 		}
-		if !strings.Contains(err.Error(), "version 4") {
-			t.Fatalf("Error() = %q, want the version the caller claimed", err.Error())
-		}
+		assert.Must(t, strings.Contains(err.Error(), "version 4"), "Error() = %q, want the version the caller claimed", err.Error())
 	})
 }

@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 func questSchema() Schema {
@@ -27,9 +29,7 @@ func TestValidateAcceptsAWellFormedRow(t *testing.T) {
 		"difficulty": "normal",
 		"tags":       []any{"starter", "kill"},
 	})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if out["min_level"] != float64(20) {
 		t.Fatalf("min_level = %v", out["min_level"])
 	}
@@ -47,9 +47,7 @@ func TestValidateLeavesAnUndeclaredOptionalFieldAbsent(t *testing.T) {
 	// when omitted, never zero-filled.
 	schema := Schema{{Key: "repeatable", Type: FieldBool}}
 	out, err := schema.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if _, present := out["repeatable"]; present {
 		t.Fatal("a field with no declared default must stay absent when omitted")
 	}
@@ -57,38 +55,24 @@ func TestValidateLeavesAnUndeclaredOptionalFieldAbsent(t *testing.T) {
 
 func TestValidateRejectsUnknownField(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(1), "min_lvl": float64(3)})
-	if err == nil {
-		t.Fatal("an unknown field must be an error, never silently dropped")
-	}
-	if !strings.Contains(err.Error(), "min_lvl") {
-		t.Fatalf("the error must name the offending field, got %q", err)
-	}
+	assert.Must(t, err != nil, "an unknown field must be an error, never silently dropped")
+	assert.Must(t, strings.Contains(err.Error(), "min_lvl"), "the error must name the offending field, got %q", err)
 }
 
 func TestValidateRejectsMissingRequiredField(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"summary": "no level given"})
-	if err == nil {
-		t.Fatal("a missing required field must be an error")
-	}
-	if !strings.Contains(err.Error(), "min_level") {
-		t.Fatalf("error = %q, want it to name min_level", err)
-	}
+	assert.Must(t, err != nil, "a missing required field must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "min_level"), "error = %q, want it to name min_level", err)
 }
 
 func TestValidateRejectsWrongType(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": "veinte"})
-	if err == nil {
-		t.Fatal("a string in a number field must be an error")
-	}
-	if !strings.Contains(err.Error(), "fields.min_level") {
-		t.Fatalf("error = %q, want the field path", err)
-	}
+	assert.Must(t, err != nil, "a string in a number field must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "fields.min_level"), "error = %q, want the field path", err)
 	// Assert on the type complaint, not merely on "some error": min_level also
 	// carries a minimum, and a validator that skipped the type check entirely
 	// would still reject "veinte" for being below it.
-	if !strings.Contains(err.Error(), "expected number") {
-		t.Fatalf("error = %q, want it to report the type mismatch", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "expected number"), "error = %q, want it to report the type mismatch", err)
 }
 
 func TestValidateEnforcesRange(t *testing.T) {
@@ -107,12 +91,8 @@ func TestValidateEnforcesRange(t *testing.T) {
 		"negative below min": {float64(-3), "fields.min_level: must be at least 1"},
 	} {
 		_, err := questSchema().Validate(map[string]any{"min_level": tc.value})
-		if err == nil {
-			t.Fatalf("%s: %v was accepted", name, tc.value)
-		}
-		if err.Error() != "schema_violation: "+tc.want {
-			t.Fatalf("%s: error = %q, want %q", name, err, tc.want)
-		}
+		assert.Must(t, err != nil, "%s: %v was accepted", name, tc.value)
+		assert.Must(t, err.Error() == "schema_violation: "+tc.want, "%s: error = %q, want %q", name, err, tc.want)
 	}
 }
 
@@ -128,23 +108,15 @@ func TestValidateAcceptsTheBoundsThemselves(t *testing.T) {
 
 func TestValidateEnforcesEnumOptions(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "difficulty": "impossible"})
-	if err == nil {
-		t.Fatal("a value outside the enum options must be an error")
-	}
+	assert.Must(t, err != nil, "a value outside the enum options must be an error")
 	want := `schema_violation: fields.difficulty: "impossible" is not one of [trivial normal elite]`
-	if err.Error() != want {
-		t.Fatalf("error = %q, want %q", err, want)
-	}
+	assert.Must(t, err.Error() == want, "error = %q, want %q", err, want)
 }
 
 func TestValidateRejectsANonTextValueInAnEnumField(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "difficulty": 3})
-	if err == nil {
-		t.Fatal("a number in an enum field must be an error")
-	}
-	if !strings.Contains(err.Error(), "fields.difficulty: expected one of [trivial normal elite], got int") {
-		t.Fatalf("error = %q, want the enum type message naming the options", err)
-	}
+	assert.Must(t, err != nil, "a number in an enum field must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "fields.difficulty: expected one of [trivial normal elite], got int"), "error = %q, want the enum type message naming the options", err)
 }
 
 // L5: enum matching compares exact bytes. Neither case nor Unicode
@@ -174,30 +146,20 @@ func TestValidateMatchesEnumOptionsByExactBytes(t *testing.T) {
 
 func TestValidateChecksListElements(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": []any{"ok", 3}})
-	if err == nil {
-		t.Fatal("a non-text element in a list<text> must be an error")
-	}
+	assert.Must(t, err != nil, "a non-text element in a list<text> must be an error")
 	want := "schema_violation: fields.tags: element 1 is int, expected text"
-	if err.Error() != want {
-		t.Fatalf("error = %q, want %q; the index and the offending type both matter to whoever fixes it", err, want)
-	}
+	assert.Must(t, err.Error() == want, "error = %q, want %q; the index and the offending type both matter to whoever fixes it", err, want)
 }
 
 func TestValidateRejectsANonListInAListField(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": "starter"})
-	if err == nil {
-		t.Fatal("a bare string in a list<text> field must be an error")
-	}
-	if !strings.Contains(err.Error(), "fields.tags: expected a list of text, got string") {
-		t.Fatalf("error = %q, want the list type message", err)
-	}
+	assert.Must(t, err != nil, "a bare string in a list<text> field must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "fields.tags: expected a list of text, got string"), "error = %q, want the list type message", err)
 }
 
 func TestValidateKeepsAWellFormedListAsStrings(t *testing.T) {
 	out, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": []any{"starter", "kill"}})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	list, ok := out["tags"].([]any)
 	if !ok || len(list) != 2 || list[0] != "starter" || list[1] != "kill" {
 		t.Fatalf("tags = %#v, want the two strings in order", out["tags"])
@@ -207,9 +169,7 @@ func TestValidateKeepsAWellFormedListAsStrings(t *testing.T) {
 func TestValidateAppliesDefaults(t *testing.T) {
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: true}}
 	out, err := schema.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if out["repeatable"] != true {
 		t.Fatalf("repeatable = %v, want the declared default", out["repeatable"])
 	}
@@ -217,14 +177,10 @@ func TestValidateAppliesDefaults(t *testing.T) {
 
 func TestValidateReportsEveryProblemAtOnce(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"difficulty": "impossible", "nonsense": 1})
-	if err == nil {
-		t.Fatal("expected errors")
-	}
+	assert.Must(t, err != nil, "expected errors")
 	msg := err.Error()
 	for _, want := range []string{"min_level", "difficulty", "nonsense"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("error %q does not mention %q; a seeding agent needs every problem in one pass", msg, want)
-		}
+		assert.Must(t, strings.Contains(msg, want), "error %q does not mention %q; a seeding agent needs every problem in one pass", msg, want)
 	}
 }
 
@@ -245,34 +201,22 @@ func TestSchemaRejectsEnumWithoutOptions(t *testing.T) {
 func TestSchemaRejectsMissingType(t *testing.T) {
 	schema := Schema{{Key: "difficulty"}}
 	err := schema.Check()
-	if err == nil {
-		t.Fatal("a field with no declared type must be rejected")
-	}
-	if !strings.Contains(err.Error(), "type is required") {
-		t.Fatalf("error = %q, want it to say the type is missing", err)
-	}
+	assert.Must(t, err != nil, "a field with no declared type must be rejected")
+	assert.Must(t, strings.Contains(err.Error(), "type is required"), "error = %q, want it to say the type is missing", err)
 }
 
 func TestSchemaRejectsUnknownType(t *testing.T) {
 	schema := Schema{{Key: "colour", Type: FieldType("rgb")}}
 	err := schema.Check()
-	if err == nil {
-		t.Fatal("a field with an unknown type must be rejected")
-	}
-	if !strings.Contains(err.Error(), "unknown type rgb") {
-		t.Fatalf("error = %q, want it to name the unknown type", err)
-	}
+	assert.Must(t, err != nil, "a field with an unknown type must be rejected")
+	assert.Must(t, strings.Contains(err.Error(), "unknown type rgb"), "error = %q, want it to name the unknown type", err)
 }
 
 func TestSchemaRejectsEmptyKey(t *testing.T) {
 	schema := Schema{{Type: FieldText}}
 	err := schema.Check()
-	if err == nil {
-		t.Fatal("a field with no key must be rejected")
-	}
-	if !strings.Contains(err.Error(), "key is required") {
-		t.Fatalf("error = %q, want it to say the key is missing", err)
-	}
+	assert.Must(t, err != nil, "a field with no key must be rejected")
+	assert.Must(t, strings.Contains(err.Error(), "key is required"), "error = %q, want it to say the key is missing", err)
 }
 
 // A schema that never went through Check can still reach Validate. An unknown
@@ -281,33 +225,21 @@ func TestSchemaRejectsEmptyKey(t *testing.T) {
 func TestValidateRejectsUnknownFieldType(t *testing.T) {
 	schema := Schema{{Key: "colour", Type: FieldType("rgb")}}
 	_, err := schema.Validate(map[string]any{"colour": "red"})
-	if err == nil {
-		t.Fatal("a value for a field of unknown type must be an error")
-	}
-	if !strings.Contains(err.Error(), `unknown field type "rgb"`) {
-		t.Fatalf("error = %q, want it to name the unknown type", err)
-	}
+	assert.Must(t, err != nil, "a value for a field of unknown type must be an error")
+	assert.Must(t, strings.Contains(err.Error(), `unknown field type "rgb"`), "error = %q, want it to name the unknown type", err)
 }
 
 func TestValidateRejectsFieldWithNoType(t *testing.T) {
 	schema := Schema{{Key: "colour"}}
 	_, err := schema.Validate(map[string]any{"colour": "red"})
-	if err == nil {
-		t.Fatal("a value for a field with no declared type must be an error")
-	}
-	if !strings.Contains(err.Error(), "declares no type") {
-		t.Fatalf("error = %q, want a message distinct from the unknown-type one", err)
-	}
+	assert.Must(t, err != nil, "a value for a field with no declared type must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "declares no type"), "error = %q, want a message distinct from the unknown-type one", err)
 }
 
 func TestValidateTreatsNullAsAbsent(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": nil})
-	if err == nil {
-		t.Fatal("an explicit null in a required field must be an error")
-	}
-	if !strings.Contains(err.Error(), "fields.min_level: is required") {
-		t.Fatalf("error = %q, want the required-field message", err)
-	}
+	assert.Must(t, err != nil, "an explicit null in a required field must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "fields.min_level: is required"), "error = %q, want the required-field message", err)
 }
 
 func TestValidateAppliesADeclaredZeroValuedDefault(t *testing.T) {
@@ -316,9 +248,7 @@ func TestValidateAppliesADeclaredZeroValuedDefault(t *testing.T) {
 	// default, and must be applied like any other declared default.
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
 	out, err := schema.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if v, present := out["repeatable"]; !present || v != false {
 		t.Fatalf("out = %v, want the declared false default to be applied", out)
 	}
@@ -326,9 +256,7 @@ func TestValidateAppliesADeclaredZeroValuedDefault(t *testing.T) {
 
 func TestValidateAcceptsIntegerNumbers(t *testing.T) {
 	out, err := questSchema().Validate(map[string]any{"min_level": 20})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if out["min_level"] != float64(20) {
 		t.Fatalf("min_level = %#v, want a float64", out["min_level"])
 	}
@@ -336,33 +264,21 @@ func TestValidateAcceptsIntegerNumbers(t *testing.T) {
 
 func TestValidationErrorIsSchemaViolation(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"nope": 1})
-	if !errors.Is(err, ErrSchemaViolation) {
-		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = false", err)
-	}
+	assert.Must(t, errors.Is(err, ErrSchemaViolation), "errors.Is(%v, ErrSchemaViolation) = false", err)
 }
 
 func TestVersionConflictErrorIsErrVersionConflict(t *testing.T) {
 	err := error(&VersionConflictError{Current: 7})
-	if !errors.Is(err, ErrVersionConflict) {
-		t.Fatal("errors.Is(err, ErrVersionConflict) = false")
-	}
-	if !strings.Contains(err.Error(), "7") {
-		t.Fatalf("error = %q, want it to report the current version", err)
-	}
+	assert.Must(t, errors.Is(err, ErrVersionConflict), "errors.Is(err, ErrVersionConflict) = false")
+	assert.Must(t, strings.Contains(err.Error(), "7"), "error = %q, want it to report the current version", err)
 }
 
 func TestSchemaRoundTripsThroughJSON(t *testing.T) {
 	raw, err := questSchema().JSON()
-	if err != nil {
-		t.Fatalf("JSON: %v", err)
-	}
+	assert.Must(t, err == nil, "JSON: %v", err)
 	back, err := ParseSchema(raw)
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
-	if len(back) != len(questSchema()) {
-		t.Fatalf("round trip gave %d fields, want %d", len(back), len(questSchema()))
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
+	assert.Must(t, len(back) == len(questSchema()), "round trip gave %d fields, want %d", len(back), len(questSchema()))
 	if back[0].Key != "min_level" || back[0].Type != FieldNumber ||
 		back[0].Min == nil || *back[0].Min != 1 || back[0].Max == nil || *back[0].Max != 70 {
 		t.Fatalf("first field did not survive the round trip: %#v", back[0])
@@ -383,30 +299,20 @@ func TestSchemaRoundTripPreservesADeclaredZeroValuedDefault(t *testing.T) {
 	// agent-shaped field_schema arriving over MCP and validated straight
 	// away, is first.
 	fromWire, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":false}]`))
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
 	wireOut, err := fromWire.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if v, present := wireOut["repeatable"]; !present || v != false {
 		t.Fatalf("out = %v, want the default declared in agent-shaped JSON to be applied", wireOut)
 	}
 
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
 	raw, err := schema.JSON()
-	if err != nil {
-		t.Fatalf("JSON: %v", err)
-	}
+	assert.Must(t, err == nil, "JSON: %v", err)
 	back, err := ParseSchema(raw)
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
 	out, err := back.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if v, present := out["repeatable"]; !present || v != false {
 		t.Fatalf("out = %v, want the declared false default to survive the round trip and be applied", out)
 	}
@@ -415,12 +321,8 @@ func TestSchemaRoundTripPreservesADeclaredZeroValuedDefault(t *testing.T) {
 func TestSchemaRejectsADefaultOfTheWrongType(t *testing.T) {
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: "yes"}}
 	err := schema.Check()
-	if err == nil {
-		t.Fatal("a default of the wrong type must be rejected")
-	}
-	if !strings.Contains(err.Error(), "field_schema[0]") {
-		t.Fatalf("error = %q, want the field_schema path", err)
-	}
+	assert.Must(t, err != nil, "a default of the wrong type must be rejected")
+	assert.Must(t, strings.Contains(err.Error(), "field_schema[0]"), "error = %q, want the field_schema path", err)
 }
 
 func TestSchemaRejectsADefaultOutsideItsBounds(t *testing.T) {
@@ -453,9 +355,7 @@ func TestSchemaAcceptsAWellFormedDefault(t *testing.T) {
 
 func TestParseSchemaAcceptsEmptyInputAndRejectsGarbage(t *testing.T) {
 	s, err := ParseSchema(nil)
-	if err != nil || len(s) != 0 {
-		t.Fatalf("ParseSchema(nil) = %v, %v; want an empty schema", s, err)
-	}
+	assert.Must(t, err == nil && len(s) == 0, "ParseSchema(nil) = %v, %v; want an empty schema", s, err)
 	if _, err := ParseSchema([]byte(`{"not":"a list"}`)); err == nil {
 		t.Fatal("a schema that is not a list must fail to parse")
 	}
@@ -468,16 +368,12 @@ func TestParseSchemaInfersHasDefaultFromThePresenceOfTheDefaultKey(t *testing.T)
 	// nothing else. There is no "has_default" sibling on the wire, so the
 	// presence of the key — not a second flag — is what declares a default.
 	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":false}]`))
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
 	if !back[0].HasDefault {
 		t.Fatalf("field = %#v, want HasDefault true because the JSON carries a default key", back[0])
 	}
 	out, err := back.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if v, present := out["repeatable"]; !present || v != false {
 		t.Fatalf("out = %v, want the declared false default applied", out)
 	}
@@ -485,16 +381,12 @@ func TestParseSchemaInfersHasDefaultFromThePresenceOfTheDefaultKey(t *testing.T)
 
 func TestParseSchemaTreatsAnAbsentDefaultKeyAsNoDefault(t *testing.T) {
 	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool"}]`))
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
 	if back[0].HasDefault {
 		t.Fatalf("field = %#v, want HasDefault false when no default key is present", back[0])
 	}
 	out, err := back.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if _, present := out["repeatable"]; present {
 		t.Fatal("a field with no declared default must stay absent when omitted")
 	}
@@ -505,9 +397,7 @@ func TestParseSchemaTreatsAnExplicitNullDefaultAsNoDefault(t *testing.T) {
 	// treats a null value as an absent one. A null default is therefore no
 	// default, not a default of nil.
 	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":null}]`))
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
 	if back[0].HasDefault {
 		t.Fatalf("field = %#v, want HasDefault false for a null default", back[0])
 	}
@@ -538,26 +428,16 @@ func TestParseSchemaRejectsAnUnknownKeyInAFieldDeclaration(t *testing.T) {
 func TestSchemaJSONOmitsHasDefaultAndSpellsTheDefaultOnce(t *testing.T) {
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
 	raw, err := schema.JSON()
-	if err != nil {
-		t.Fatalf("JSON: %v", err)
-	}
-	if strings.Contains(string(raw), "has_default") {
-		t.Fatalf("JSON = %s, want no has_default key on the wire", raw)
-	}
-	if !strings.Contains(string(raw), `"default":false`) {
-		t.Fatalf("JSON = %s, want the declared false default spelled out", raw)
-	}
+	assert.Must(t, err == nil, "JSON: %v", err)
+	assert.Must(t, !strings.Contains(string(raw), "has_default"), "JSON = %s, want no has_default key on the wire", raw)
+	assert.Must(t, strings.Contains(string(raw), `"default":false`), "JSON = %s, want the declared false default spelled out", raw)
 }
 
 func TestSchemaJSONOmitsTheDefaultKeyWhenNoDefaultIsDeclared(t *testing.T) {
 	schema := Schema{{Key: "repeatable", Type: FieldBool}}
 	raw, err := schema.JSON()
-	if err != nil {
-		t.Fatalf("JSON: %v", err)
-	}
-	if strings.Contains(string(raw), "default") {
-		t.Fatalf("JSON = %s, want no default key when none is declared", raw)
-	}
+	assert.Must(t, err == nil, "JSON: %v", err)
+	assert.Must(t, !strings.Contains(string(raw), "default"), "JSON = %s, want no default key when none is declared", raw)
 }
 
 // --- H2: a default is a value, and goes through the same coercion --------
@@ -568,9 +448,7 @@ func TestValidateNormalisesAnAppliedDefault(t *testing.T) {
 	// the same field and every reader downstream has to handle both.
 	schema := Schema{{Key: "min_level", Type: FieldNumber, HasDefault: true, Default: 20}}
 	out, err := schema.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if v, ok := out["min_level"].(float64); !ok || v != 20 {
 		t.Fatalf("min_level = %#v, want float64(20) exactly as an explicit 20 would give", out["min_level"])
 	}
@@ -582,18 +460,10 @@ func TestValidateRejectsAnUncheckedBadDefault(t *testing.T) {
 	// ever produce.
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: "yes"}}
 	out, err := schema.Validate(map[string]any{})
-	if err == nil {
-		t.Fatalf("out = %v, want a bad default to be an error rather than stored", out)
-	}
-	if !strings.Contains(err.Error(), "fields.repeatable") {
-		t.Fatalf("error = %q, want the value-level field path", err)
-	}
-	if !strings.Contains(err.Error(), "expected true or false") {
-		t.Fatalf("error = %q, want it to report why the default is not a bool", err)
-	}
-	if !strings.Contains(err.Error(), "default") {
-		t.Fatalf("error = %q, want it to say the offending value is the schema's default", err)
-	}
+	assert.Must(t, err != nil, "out = %v, want a bad default to be an error rather than stored", out)
+	assert.Must(t, strings.Contains(err.Error(), "fields.repeatable"), "error = %q, want the value-level field path", err)
+	assert.Must(t, strings.Contains(err.Error(), "expected true or false"), "error = %q, want it to report why the default is not a bool", err)
+	assert.Must(t, strings.Contains(err.Error(), "default"), "error = %q, want it to say the offending value is the schema's default", err)
 }
 
 // --- M1/L1: numbers -------------------------------------------------------
@@ -611,24 +481,16 @@ func TestValidateRejectsNonFiniteNumbers(t *testing.T) {
 	} {
 		schema := Schema{{Key: "score", Type: FieldNumber}}
 		_, err := schema.Validate(map[string]any{"score": value})
-		if err == nil {
-			t.Fatalf("%s was accepted; a number field must hold a finite number", name)
-		}
-		if !strings.Contains(err.Error(), "fields.score: must be a finite number") {
-			t.Fatalf("%s: error = %q, want the finite-number message at the field path", name, err)
-		}
+		assert.Must(t, err != nil, "%s was accepted; a number field must hold a finite number", name)
+		assert.Must(t, strings.Contains(err.Error(), "fields.score: must be a finite number"), "%s: error = %q, want the finite-number message at the field path", name, err)
 	}
 }
 
 func TestSchemaRejectsANonFiniteDefault(t *testing.T) {
 	schema := Schema{{Key: "score", Type: FieldNumber, HasDefault: true, Default: math.NaN()}}
 	err := schema.Check()
-	if err == nil {
-		t.Fatal("a NaN default must be rejected")
-	}
-	if !strings.Contains(err.Error(), "must be a finite number") {
-		t.Fatalf("error = %q, want the finite-number message", err)
-	}
+	assert.Must(t, err != nil, "a NaN default must be rejected")
+	assert.Must(t, strings.Contains(err.Error(), "must be a finite number"), "error = %q, want the finite-number message", err)
 }
 
 func TestValidateAcceptsEveryNumericShapeADecoderCanProduce(t *testing.T) {
@@ -653,9 +515,7 @@ func TestValidateAcceptsEveryNumericShapeADecoderCanProduce(t *testing.T) {
 		"json.Number": json.Number("7"),
 	} {
 		out, err := schema.Validate(map[string]any{"score": raw})
-		if err != nil {
-			t.Fatalf("%s: Validate: %v", name, err)
-		}
+		assert.Must(t, err == nil, "%s: Validate: %v", name, err)
 		if v, ok := out["score"].(float64); !ok || v != 7 {
 			t.Fatalf("%s: score = %#v, want float64(7)", name, out["score"])
 		}
@@ -665,12 +525,8 @@ func TestValidateAcceptsEveryNumericShapeADecoderCanProduce(t *testing.T) {
 func TestValidateRejectsAJSONNumberThatIsNotANumber(t *testing.T) {
 	schema := Schema{{Key: "score", Type: FieldNumber}}
 	_, err := schema.Validate(map[string]any{"score": json.Number("veinte")})
-	if err == nil {
-		t.Fatal("a json.Number holding a non-number must be an error")
-	}
-	if !strings.Contains(err.Error(), "expected number") {
-		t.Fatalf("error = %q, want the type message", err)
-	}
+	assert.Must(t, err != nil, "a json.Number holding a non-number must be an error")
+	assert.Must(t, strings.Contains(err.Error(), "expected number"), "error = %q, want the type message", err)
 }
 
 // --- M2: a schema declaration must itself be meaningful -------------------
@@ -679,9 +535,7 @@ func TestValidateRejectsAJSONNumberThatIsNotANumber(t *testing.T) {
 func checkProblems(t *testing.T, s Schema) string {
 	t.Helper()
 	err := s.Check()
-	if err == nil {
-		t.Fatalf("schema %v was accepted; want it rejected", s)
-	}
+	assert.Must(t, err != nil, "schema %v was accepted; want it rejected", s)
 	return err.Error()
 }
 
@@ -702,9 +556,7 @@ func TestSchemaRejectsAKeyThatIsNotAnIdentifier(t *testing.T) {
 		"non-ASCII":       "nivel_mínimo",
 	} {
 		msg := checkProblems(t, Schema{{Key: key, Type: FieldText}})
-		if !strings.Contains(msg, "key must be lower_snake_case") {
-			t.Fatalf("%s (%q): error = %q, want the key-format message", name, key, msg)
-		}
+		assert.Must(t, strings.Contains(msg, "key must be lower_snake_case"), "%s (%q): error = %q, want the key-format message", name, key, msg)
 	}
 }
 
@@ -718,16 +570,12 @@ func TestSchemaAcceptsAWellFormedKey(t *testing.T) {
 
 func TestSchemaRejectsAnOverlongKey(t *testing.T) {
 	msg := checkProblems(t, Schema{{Key: strings.Repeat("a", maxKeyLen+1), Type: FieldText}})
-	if !strings.Contains(msg, "key must be at most") {
-		t.Fatalf("error = %q, want the key-length message", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "key must be at most"), "error = %q, want the key-length message", msg)
 }
 
 func TestSchemaRejectsAMinimumAboveItsMaximum(t *testing.T) {
 	msg := checkProblems(t, Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(70), Max: ptrFloat(1)}})
-	if !strings.Contains(msg, "min 70 is above max 1") {
-		t.Fatalf("error = %q, want it to name both bounds", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "min 70 is above max 1"), "error = %q, want it to name both bounds", msg)
 }
 
 func TestSchemaAcceptsAMinimumEqualToItsMaximum(t *testing.T) {
@@ -742,26 +590,20 @@ func TestSchemaRejectsBoundsOnANonNumberField(t *testing.T) {
 	for _, ft := range []FieldType{FieldText, FieldLongText, FieldBool, FieldEnum, FieldListText} {
 		schema := Schema{{Key: "a", Type: ft, Options: []string{"x"}, Min: ptrFloat(1)}}
 		msg := checkProblems(t, schema)
-		if !strings.Contains(msg, "min and max apply only to a number field") {
-			t.Fatalf("%s: error = %q, want the misplaced-bounds message", ft, msg)
-		}
+		assert.Must(t, strings.Contains(msg, "min and max apply only to a number field"), "%s: error = %q, want the misplaced-bounds message", ft, msg)
 	}
 }
 
 func TestSchemaRejectsOptionsOnANonEnumField(t *testing.T) {
 	for _, ft := range []FieldType{FieldText, FieldLongText, FieldNumber, FieldBool, FieldListText} {
 		msg := checkProblems(t, Schema{{Key: "a", Type: ft, Options: []string{"x"}}})
-		if !strings.Contains(msg, "options apply only to an enum field") {
-			t.Fatalf("%s: error = %q, want the misplaced-options message", ft, msg)
-		}
+		assert.Must(t, strings.Contains(msg, "options apply only to an enum field"), "%s: error = %q, want the misplaced-options message", ft, msg)
 	}
 }
 
 func TestSchemaRejectsDuplicateEnumOptions(t *testing.T) {
 	msg := checkProblems(t, Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"normal", "normal"}}})
-	if !strings.Contains(msg, `duplicate option "normal"`) {
-		t.Fatalf("error = %q, want it to name the duplicated option", msg)
-	}
+	assert.Must(t, strings.Contains(msg, `duplicate option "normal"`), "error = %q, want it to name the duplicated option", msg)
 }
 
 func TestSchemaRejectsAnEmptyEnumOption(t *testing.T) {
@@ -770,9 +612,7 @@ func TestSchemaRejectsAnEmptyEnumOption(t *testing.T) {
 		"whitespace only": {"normal", "  "},
 	} {
 		msg := checkProblems(t, Schema{{Key: "difficulty", Type: FieldEnum, Options: opts}})
-		if !strings.Contains(msg, "option 1 is empty") {
-			t.Fatalf("%s: error = %q, want the empty-option message with its index", name, msg)
-		}
+		assert.Must(t, strings.Contains(msg, "option 1 is empty"), "%s: error = %q, want the empty-option message with its index", name, msg)
 	}
 }
 
@@ -783,9 +623,7 @@ func TestSchemaRejectsARequiredFieldWithADefault(t *testing.T) {
 	// makes Required dead: no row could ever fail for omitting the field. A
 	// field either has a fallback or it does not.
 	msg := checkProblems(t, Schema{{Key: "repeatable", Type: FieldBool, Required: true, HasDefault: true, Default: false}})
-	if !strings.Contains(msg, "a required field cannot also declare a default") {
-		t.Fatalf("error = %q, want the required-plus-default message", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "a required field cannot also declare a default"), "error = %q, want the required-plus-default message", msg)
 }
 
 // --- M5: one pass reports every problem, including on a bad key -----------
@@ -794,12 +632,8 @@ func TestSchemaReportsEveryProblemOnAFieldWithABadKey(t *testing.T) {
 	// A bad key must not hide the rest of the field. The package's whole
 	// contract is that one call reports everything an agent has to fix.
 	msg := checkProblems(t, Schema{{Key: "", Type: FieldType("rgb")}})
-	if !strings.Contains(msg, "key is required") {
-		t.Fatalf("error = %q, want the missing-key problem", msg)
-	}
-	if !strings.Contains(msg, "unknown type rgb") {
-		t.Fatalf("error = %q, want the unknown-type problem reported in the same pass", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "key is required"), "error = %q, want the missing-key problem", msg)
+	assert.Must(t, strings.Contains(msg, "unknown type rgb"), "error = %q, want the unknown-type problem reported in the same pass", msg)
 }
 
 func TestSchemaStillRejectsDuplicateKeysWhenAnEarlierFieldIsBroken(t *testing.T) {
@@ -808,31 +642,21 @@ func TestSchemaStillRejectsDuplicateKeysWhenAnEarlierFieldIsBroken(t *testing.T)
 		{Key: "a", Type: FieldText},
 		{Key: "a", Type: FieldNumber},
 	})
-	if !strings.Contains(msg, "duplicate key a") {
-		t.Fatalf("error = %q, want the duplicate reported alongside the empty key", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "duplicate key a"), "error = %q, want the duplicate reported alongside the empty key", msg)
 }
 
 // --- a schema declaration failure is not a value failure ------------------
 
 func TestSchemaErrorIsInvalidSchemaAndNotASchemaViolation(t *testing.T) {
 	err := (Schema{{Key: "difficulty", Type: FieldEnum}}).Check()
-	if !errors.Is(err, ErrInvalidSchema) {
-		t.Fatalf("errors.Is(%v, ErrInvalidSchema) = false", err)
-	}
-	if errors.Is(err, ErrSchemaViolation) {
-		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = true; a bad declaration is not a bad row", err)
-	}
-	if !strings.HasPrefix(err.Error(), "invalid_schema: ") {
-		t.Fatalf("error = %q, want it to lead with the invalid_schema code", err)
-	}
+	assert.Must(t, errors.Is(err, ErrInvalidSchema), "errors.Is(%v, ErrInvalidSchema) = false", err)
+	assert.Must(t, !errors.Is(err, ErrSchemaViolation), "errors.Is(%v, ErrSchemaViolation) = true; a bad declaration is not a bad row", err)
+	assert.Must(t, strings.HasPrefix(err.Error(), "invalid_schema: "), "error = %q, want it to lead with the invalid_schema code", err)
 }
 
 func TestValidationErrorIsNotAnInvalidSchema(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"nope": 1})
-	if errors.Is(err, ErrInvalidSchema) {
-		t.Fatalf("errors.Is(%v, ErrInvalidSchema) = true; a bad row is not a bad declaration", err)
-	}
+	assert.Must(t, !errors.Is(err, ErrInvalidSchema), "errors.Is(%v, ErrInvalidSchema) = true; a bad row is not a bad declaration", err)
 }
 
 // --- M4: the order of reported problems is deterministic ------------------
@@ -848,12 +672,8 @@ func TestValidateReportsUnknownFieldsInAStableOrder(t *testing.T) {
 		"fields.zulu: unknown field for this type"
 	for i := 0; i < 20; i++ {
 		_, err := questSchema().Validate(values)
-		if err == nil {
-			t.Fatal("expected errors")
-		}
-		if err.Error() != want {
-			t.Fatalf("run %d: error = %q, want %q", i, err, want)
-		}
+		assert.Must(t, err != nil, "expected errors")
+		assert.Must(t, err.Error() == want, "run %d: error = %q, want %q", i, err, want)
 	}
 }
 
@@ -861,15 +681,11 @@ func TestValidateReportsUnknownFieldsBeforeFieldProblemsInSchemaOrder(t *testing
 	// The whole message is ordered: unknown keys first, sorted, then each
 	// declared field in the order the schema declares it.
 	_, err := questSchema().Validate(map[string]any{"nonsense": 1, "difficulty": "impossible"})
-	if err == nil {
-		t.Fatal("expected errors")
-	}
+	assert.Must(t, err != nil, "expected errors")
 	want := "schema_violation: fields.nonsense: unknown field for this type; " +
 		"fields.min_level: is required; " +
 		`fields.difficulty: "impossible" is not one of [trivial normal elite]`
-	if err.Error() != want {
-		t.Fatalf("error = %q, want %q", err, want)
-	}
+	assert.Must(t, err.Error() == want, "error = %q, want %q", err, want)
 }
 
 // --- text and bool: the coercions with no negative test until now ---------
@@ -896,9 +712,7 @@ func TestValidateRejectsANonTextValueInATextField(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%s: %s was accepted and stored as %#v", ft, name, out["summary"])
 			}
-			if err.Error() != "schema_violation: "+tc.want {
-				t.Fatalf("%s/%s: error = %q, want %q", ft, name, err, tc.want)
-			}
+			assert.Must(t, err.Error() == "schema_violation: "+tc.want, "%s/%s: error = %q, want %q", ft, name, err, tc.want)
 		}
 	}
 }
@@ -906,9 +720,7 @@ func TestValidateRejectsANonTextValueInATextField(t *testing.T) {
 func TestValidateKeepsTextExactly(t *testing.T) {
 	schema := Schema{{Key: "summary", Type: FieldText}}
 	out, err := schema.Validate(map[string]any{"summary": "  Kill twelve boars.  "})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	if out["summary"] != "  Kill twelve boars.  " {
 		t.Fatalf("summary = %q, want the string stored verbatim, untrimmed", out["summary"])
 	}
@@ -928,21 +740,15 @@ func TestValidateRejectsANonBoolValueInABoolField(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s was accepted and stored as %#v", name, out["repeatable"])
 		}
-		if err.Error() != "schema_violation: "+tc.want {
-			t.Fatalf("%s: error = %q, want %q", name, err, tc.want)
-		}
+		assert.Must(t, err.Error() == "schema_violation: "+tc.want, "%s: error = %q, want %q", name, err, tc.want)
 	}
 }
 
 func TestValidateRejectsAnUnknownFieldWithTheExactMessage(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(1), "min_lvl": float64(3)})
-	if err == nil {
-		t.Fatal("an unknown field must be an error")
-	}
+	assert.Must(t, err != nil, "an unknown field must be an error")
 	want := "schema_violation: fields.min_lvl: unknown field for this type"
-	if err.Error() != want {
-		t.Fatalf("error = %q, want %q", err, want)
-	}
+	assert.Must(t, err.Error() == want, "error = %q, want %q", err, want)
 }
 
 // --- CheckValues: re-validate stored rows without touching them ----------
@@ -951,15 +757,9 @@ func TestCheckValuesReportsTheSameProblemsAsValidate(t *testing.T) {
 	values := map[string]any{"difficulty": "impossible", "nonsense": 1}
 	_, want := questSchema().Validate(values)
 	got := questSchema().CheckValues(values)
-	if want == nil || got == nil {
-		t.Fatalf("Validate err = %v, CheckValues err = %v; both must fail", want, got)
-	}
-	if got.Error() != want.Error() {
-		t.Fatalf("CheckValues = %q, Validate = %q; the two must agree exactly", got, want)
-	}
-	if !errors.Is(got, ErrSchemaViolation) {
-		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = false", got)
-	}
+	assert.Must(t, want != nil && got != nil, "Validate err = %v, CheckValues err = %v; both must fail", want, got)
+	assert.Must(t, got.Error() == want.Error(), "CheckValues = %q, Validate = %q; the two must agree exactly", got, want)
+	assert.Must(t, errors.Is(got, ErrSchemaViolation), "errors.Is(%v, ErrSchemaViolation) = false", got)
 }
 
 func TestCheckValuesAcceptsARowThatValidateAccepts(t *testing.T) {
@@ -997,9 +797,7 @@ func TestCheckValuesDoesNotMutateTheRowItInspects(t *testing.T) {
 	if err := questSchema().CheckValues(values); err != nil {
 		t.Fatalf("CheckValues: %v", err)
 	}
-	if len(values) != 1 {
-		t.Fatalf("values = %v, want the row untouched", values)
-	}
+	assert.Must(t, len(values) == 1, "values = %v, want the row untouched", values)
 	if _, present := values["repeatable"]; present {
 		t.Fatalf("values = %v; CheckValues must not back-fill a default into a stored row", values)
 	}
@@ -1017,12 +815,8 @@ func TestCheckValuesTreatsAMissingFieldWithADefaultAsSatisfied(t *testing.T) {
 		t.Fatalf("CheckValues: %v", err)
 	}
 	err := schema.CheckValues(map[string]any{})
-	if err == nil {
-		t.Fatal("a row missing a required field with no default must be flagged invalid")
-	}
-	if err.Error() != "schema_violation: fields.min_level: is required" {
-		t.Fatalf("error = %q, want the required-field message", err)
-	}
+	assert.Must(t, err != nil, "a row missing a required field with no default must be flagged invalid")
+	assert.Must(t, err.Error() == "schema_violation: fields.min_level: is required", "error = %q, want the required-field message", err)
 }
 
 // --- Re-review findings ---
@@ -1039,29 +833,21 @@ func TestParseSchemaWrapsAMalformedSchemaAsErrInvalidSchema(t *testing.T) {
 		"truncated":     []byte(`[{"key":"a"`),
 	} {
 		_, err := ParseSchema(raw)
-		if err == nil {
-			t.Fatalf("%s: ParseSchema: want an error", name)
-		}
-		if !errors.Is(err, ErrInvalidSchema) {
-			t.Fatalf("%s: ParseSchema error = %v, want errors.Is(err, ErrInvalidSchema)", name, err)
-		}
+		assert.Must(t, err != nil, "%s: ParseSchema: want an error", name)
+		assert.Must(t, errors.Is(err, ErrInvalidSchema), "%s: ParseSchema error = %v, want errors.Is(err, ErrInvalidSchema)", name, err)
 	}
 }
 
 func TestSchemaRejectsANonFiniteMinimum(t *testing.T) {
 	nan := math.NaN()
 	msg := checkProblems(t, Schema{{Key: "a", Type: FieldNumber, Min: &nan}})
-	if !strings.Contains(msg, "must be finite") {
-		t.Fatalf("error = %q, want a finiteness message for a non-finite min", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "must be finite"), "error = %q, want a finiteness message for a non-finite min", msg)
 }
 
 func TestSchemaRejectsANonFiniteMaximum(t *testing.T) {
 	inf := math.Inf(1)
 	msg := checkProblems(t, Schema{{Key: "a", Type: FieldNumber, Max: &inf}})
-	if !strings.Contains(msg, "must be finite") {
-		t.Fatalf("error = %q, want a finiteness message for a non-finite max", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "must be finite"), "error = %q, want a finiteness message for a non-finite max", msg)
 }
 
 func TestSchemaRejectsANonFiniteMinimumEvenReachedOnlyFromGo(t *testing.T) {
@@ -1102,9 +888,7 @@ func TestSchemaAcceptsAGoNativeStringSliceDefaultOnAListTextField(t *testing.T) 
 		t.Fatalf("Check: %v", err)
 	}
 	out, err := schema.Validate(map[string]any{})
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	assert.Must(t, err == nil, "Validate: %v", err)
 	got, ok := out["tags"].([]any)
 	if !ok || len(got) != 2 || got[0] != "x" || got[1] != "y" {
 		t.Fatalf("tags = %#v, want [x y] as []any", out["tags"])
@@ -1116,46 +900,30 @@ func TestMaxKeyLenBoundary(t *testing.T) {
 		t.Fatalf("a key of exactly maxKeyLen characters must be accepted: %v", err)
 	}
 	msg := checkProblems(t, Schema{{Key: strings.Repeat("a", maxKeyLen+1), Type: FieldText}})
-	if !strings.Contains(msg, "key must be at most") {
-		t.Fatalf("error = %q, want the key-length message", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "key must be at most"), "error = %q, want the key-length message", msg)
 }
 
 func TestParseSchemaOfEmptyBytesReturnsAnEmptyNonNilSchema(t *testing.T) {
 	s, err := ParseSchema([]byte{})
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
-	}
-	if s == nil {
-		t.Fatal("ParseSchema([]byte{}) = nil, want a non-nil empty Schema{}")
-	}
-	if len(s) != 0 {
-		t.Fatalf("ParseSchema([]byte{}) = %v, want empty", s)
-	}
+	assert.Must(t, err == nil, "ParseSchema: %v", err)
+	assert.Must(t, s != nil, "ParseSchema([]byte{}) = nil, want a non-nil empty Schema{}")
+	assert.Must(t, len(s) == 0, "ParseSchema([]byte{}) = %v, want empty", s)
 }
 
 func TestNilSchemaJSONEncodesAsAnEmptyArrayNotNull(t *testing.T) {
 	var s Schema
 	raw, err := s.JSON()
-	if err != nil {
-		t.Fatalf("JSON: %v", err)
-	}
-	if string(raw) != "[]" {
-		t.Fatalf("JSON() on a nil schema = %s, want []", raw)
-	}
+	assert.Must(t, err == nil, "JSON: %v", err)
+	assert.Must(t, string(raw) == "[]", "JSON() on a nil schema = %s, want []", raw)
 }
 
 func TestSchemaRejectsEnumWithoutOptionsMessage(t *testing.T) {
 	msg := checkProblems(t, Schema{{Key: "a", Type: FieldEnum}})
-	if !strings.Contains(msg, "an enum field needs options") {
-		t.Fatalf("error = %q, want the enum-needs-options message", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "an enum field needs options"), "error = %q, want the enum-needs-options message", msg)
 }
 
 func TestSchemaRejectsABadDefaultWithTheDefaultPrefix(t *testing.T) {
 	schema := Schema{{Key: "a", Type: FieldBool, HasDefault: true, Default: "yes"}}
 	msg := checkProblems(t, schema)
-	if !strings.Contains(msg, "default: ") {
-		t.Fatalf("error = %q, want the \"default: \" prefix", msg)
-	}
+	assert.Must(t, strings.Contains(msg, "default: "), "error = %q, want the \"default: \" prefix", msg)
 }

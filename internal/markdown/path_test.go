@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -15,12 +16,8 @@ import (
 func fieldProblem(t *testing.T, err error) metamodel.FieldError {
 	t.Helper()
 	var v *metamodel.ValidationError
-	if !errors.As(err, &v) {
-		t.Fatalf("want a *metamodel.ValidationError, got %#v", err)
-	}
-	if len(v.Fields) != 1 {
-		t.Fatalf("want exactly one field problem, got %d: %v", len(v.Fields), v.Fields)
-	}
+	assert.Must(t, errors.As(err, &v), "want a *metamodel.ValidationError, got %#v", err)
+	assert.Must(t, len(v.Fields) == 1, "want exactly one field problem, got %d: %v", len(v.Fields), v.Fields)
 	return v.Fields[0]
 }
 
@@ -71,19 +68,11 @@ func TestEveryBadPathIsInvalidInputAtPathPath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := markdown.CheckPath(tc.path)
-			if err == nil {
-				t.Fatalf("CheckPath(%q) = nil, want a refusal", tc.path)
-			}
-			if !errors.Is(err, metamodel.ErrInvalidInput) {
-				t.Fatalf("CheckPath(%q) must be invalid_input, got %v", tc.path, err)
-			}
+			assert.Must(t, err != nil, "CheckPath(%q) = nil, want a refusal", tc.path)
+			assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "CheckPath(%q) must be invalid_input, got %v", tc.path, err)
 			problem := fieldProblem(t, err)
-			if problem.Path != "path" {
-				t.Fatalf("problem path = %q, want %q", problem.Path, "path")
-			}
-			if !strings.Contains(problem.Message, tc.message) {
-				t.Fatalf("message %q does not contain %q", problem.Message, tc.message)
-			}
+			assert.Must(t, problem.Path == "path", "problem path = %q, want %q", problem.Path, "path")
+			assert.Must(t, strings.Contains(problem.Message, tc.message), "message %q does not contain %q", problem.Message, tc.message)
 		})
 	}
 }

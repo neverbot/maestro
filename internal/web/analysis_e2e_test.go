@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -81,38 +82,26 @@ func newTwoGames(t *testing.T) *twoGames {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	admin, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "admin@example.test", DisplayName: "Admin", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser admin: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser admin: %v", err)
 	if err := ids.SetAdmin(ctx, admin.ID, true); err != nil {
 		t.Fatalf("SetAdmin: %v", err)
 	}
 	mmo, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("create the MMORPG: %v", err)
-	}
+	assert.Must(t, err == nil, "create the MMORPG: %v", err)
 	race, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("create the racing career: %v", err)
-	}
+	assert.Must(t, err == nil, "create the racing career: %v", err)
 	mint := func(project, user uuid.UUID, label string) (web.Caller, string) {
 		t.Helper()
 		secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 			ProjectID: project, UserID: user, Label: label,
 		})
-		if err != nil {
-			t.Fatalf("CreateAPIToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CreateAPIToken %s: %v", label, err)
 		caller, err := web.CallerForToken(ctx, ids, secret)
-		if err != nil {
-			t.Fatalf("CallerForToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CallerForToken %s: %v", label, err)
 		return caller, secret
 	}
 	agent, mmoSecret := mint(mmo.ID, owner.ID, "azeroth agent")
@@ -302,9 +291,7 @@ func (w *twoGames) seedMMORPG(t *testing.T) {
 	// test a state the writer cannot produce.
 	current, err := web.MCPRelationTypesGet(ctx, w.deps, w.agent, w.mmo,
 		web.RelationTypesGetInput{Key: "reveals"})
-	if err != nil {
-		t.Fatalf("relation_types.get reveals: %v", err)
-	}
+	assert.Must(t, err == nil, "relation_types.get reveals: %v", err)
 	version := current.Version
 	if _, err := web.MCPRelationTypesUpsert(ctx, w.deps, w.agent, w.mmo,
 		web.RelationTypesUpsertInput{
@@ -395,9 +382,7 @@ func (w *twoGames) cycles(t *testing.T, caller web.Caller, game uuid.UUID) analy
 	t.Helper()
 	got, err := web.MCPAnalysisCycles(context.Background(), w.deps, caller, game,
 		web.AnalysisCyclesInput{})
-	if err != nil {
-		t.Fatalf("analysis.cycles: %v", err)
-	}
+	assert.Must(t, err == nil, "analysis.cycles: %v", err)
 	return got
 }
 
@@ -405,9 +390,7 @@ func (w *twoGames) unreachable(t *testing.T, caller web.Caller, game uuid.UUID,
 	in web.AnalysisUnreachableInput) analysis.UnreachableResult {
 	t.Helper()
 	got, err := web.MCPAnalysisUnreachable(context.Background(), w.deps, caller, game, in)
-	if err != nil {
-		t.Fatalf("analysis.unreachable: %v", err)
-	}
+	assert.Must(t, err == nil, "analysis.unreachable: %v", err)
 	return got
 }
 
@@ -415,9 +398,7 @@ func (w *twoGames) orphans(t *testing.T, caller web.Caller, game uuid.UUID) anal
 	t.Helper()
 	got, err := web.MCPAnalysisOrphans(context.Background(), w.deps, caller, game,
 		web.AnalysisOrphansInput{})
-	if err != nil {
-		t.Fatalf("analysis.orphans: %v", err)
-	}
+	assert.Must(t, err == nil, "analysis.orphans: %v", err)
 	return got
 }
 
@@ -433,9 +414,7 @@ func (w *twoGames) writeMainStoryRoute(t *testing.T) analysis.Route {
 			Key: "main-story", Name: "The main story", Steps: steps,
 			ExpectedVersion: new(int32),
 		})
-	if err != nil {
-		t.Fatalf("routes.upsert: %v", err)
-	}
+	assert.Must(t, err == nil, "routes.upsert: %v", err)
 	return route
 }
 
@@ -443,9 +422,7 @@ func (w *twoGames) checkMainStory(t *testing.T) analysis.RouteCheck {
 	t.Helper()
 	got, err := web.MCPRoutesCheck(context.Background(), w.deps, w.agent, w.mmo,
 		web.RoutesCheckInput{Key: "main-story"})
-	if err != nil {
-		t.Fatalf("routes.check: %v", err)
-	}
+	assert.Must(t, err == nil, "routes.check: %v", err)
 	return got
 }
 
@@ -503,26 +480,18 @@ func TestTheFourAnalysesFindWhatIsWrongAndNotWhatIsNot(t *testing.T) {
 	// legitimate connects_to ring. A map joined in a circle is a map that
 	// works; reporting it would send a designer to cut a road.
 	got := w.cycles(t, w.agent, w.mmo)
-	if !cycleContains(got.Cycles, "q-loop-a", "q-loop-b", "q-loop-c") {
-		t.Errorf("the three-cycle is not reported: %+v", got.Cycles)
-	}
-	if !cycleContains(got.Cycles, "q-ouroboros") {
-		t.Errorf("the self-loop is not reported as a cycle of length one: %+v", got.Cycles)
-	}
+	assert.Should(t, cycleContains(got.Cycles, "q-loop-a", "q-loop-b", "q-loop-c"), "the three-cycle is not reported: %+v", got.Cycles)
+	assert.Should(t, cycleContains(got.Cycles, "q-ouroboros"), "the self-loop is not reported as a cycle of length one: %+v", got.Cycles)
 	for _, cycle := range got.Cycles {
 		for _, edge := range cycle.Edges {
-			if edge.RelationType == "connects_to" {
-				t.Errorf("a connects_to ring is reported as a prerequisite cycle: %+v", cycle)
-			}
+			assert.Should(t, edge.RelationType != "connects_to", "a connects_to ring is reported as a prerequisite cycle: %+v", cycle)
 			if edge.RelationType == "" {
 				t.Error("a cycle edge names no relation type, which is the field this " +
 					"whole widening of internal/graph exists for")
 			}
 		}
 	}
-	if got.EdgesWalked == 0 {
-		t.Error("the cycle report walked no edge, so its findings came from nowhere")
-	}
+	assert.Should(t, got.EdgesWalked != 0, "the cycle report walked no edge, so its findings came from nowhere")
 
 	// Unreachable: the two quests behind the loop, and **not** the lore
 	// (ignored) and **not** the quest behind the flagged edge, which is
@@ -550,9 +519,7 @@ func TestTheFourAnalysesFindWhatIsWrongAndNotWhatIsNot(t *testing.T) {
 			"invalid edges by default: a field-schema edit on `reveals` must not make " +
 			"a quest report as unreachable")
 	}
-	if report.ReachableTotal == 0 || len(report.PerType) == 0 {
-		t.Errorf("the report counts no reachable entity and no type: %+v", report)
-	}
+	assert.Should(t, report.ReachableTotal != 0 && len(report.PerType) != 0, "the report counts no reachable entity and no type: %+v", report)
 	if report.InvalidEdgesFollowed == 0 {
 		t.Error("the report followed no invalid edge and says so, but one exists: " +
 			"silence about a real limit is the correct-and-unasserted defect with the " +
@@ -563,24 +530,18 @@ func TestTheFourAnalysesFindWhatIsWrongAndNotWhatIsNot(t *testing.T) {
 	// edge is flagged. Calling the second an orphan would send a designer
 	// to delete content that has edges.
 	orphaned := orphanKeys(w.orphans(t, w.agent, w.mmo).Findings)
-	if !orphaned["q-decorated"] {
-		t.Errorf("q-decorated's only edge is an annotation and it is not reported as an "+
-			"orphan: %v", orphaned)
-	}
+	assert.Should(t, orphaned["q-decorated"], "q-decorated's only edge is an annotation and it is not reported as an "+
+		"orphan: %v", orphaned)
 	if orphaned["q-flagged"] {
 		t.Error("q-flagged has an edge, flagged invalid, and is reported as an orphan: " +
 			"an entity whose only edge is invalid is not an orphan")
 	}
-	if orphaned["q-tutorial"] {
-		t.Error("the first quest of the main story is reported as an orphan")
-	}
+	assert.Should(t, !(orphaned["q-tutorial"]), "the first quest of the main story is reported as an orphan")
 
 	// Routes: eight steps over the main story, ok throughout.
 	w.writeMainStoryRoute(t)
 	check := w.checkMainStory(t)
-	if !check.Holds || check.StepsOK != len(mmoQuestChain) {
-		t.Fatalf("the main story does not hold: %+v", check.Steps)
-	}
+	assert.Must(t, check.Holds && check.StepsOK == len(mmoQuestChain), "the main story does not hold: %+v", check.Steps)
 }
 
 // --- Step 4: the negative halves, all five at once ---
@@ -600,9 +561,7 @@ func TestTheNegativeHalvesAreCountedAndNotMerelyEmpty(t *testing.T) {
 	// A hand-built clean game: same instance, its own vocabulary, no
 	// loops, nothing unreachable, nothing orphaned.
 	clean, err := w.deps.Projects.Create(ctx, "clean", "Clean", w.agent.UserID)
-	if err != nil {
-		t.Fatalf("create the clean game: %v", err)
-	}
+	assert.Must(t, err == nil, "create the clean game: %v", err)
 	cleanAgent := w.mintFor(t, clean.ID, "clean agent")
 	if _, err := web.MCPTypesUpsert(ctx, w.deps, cleanAgent, clean.ID,
 		web.TypesUpsertInput{Key: "step", Label: "Step", LabelPlural: "Steps"}); err != nil {
@@ -637,41 +596,25 @@ func TestTheNegativeHalvesAreCountedAndNotMerelyEmpty(t *testing.T) {
 	// 1. An acyclic game reports zero cycles **and says how many edges it
 	//    walked**.
 	cycles := w.cycles(t, cleanAgent, clean.ID)
-	if len(cycles.Cycles) != 0 || len(cycles.ContainmentCycles) != 0 {
-		t.Errorf("an acyclic game reports cycles: %+v", cycles)
-	}
-	if cycles.EdgesWalked == 0 || cycles.SeedTotal == 0 {
-		t.Errorf("the acyclic report walked %d edges from %d seeds: zero of either makes "+
-			"\"no cycles\" the answer of a walk that never ran",
-			cycles.EdgesWalked, cycles.SeedTotal)
-	}
+	assert.Should(t, len(cycles.Cycles) == 0 && len(cycles.ContainmentCycles) == 0, "an acyclic game reports cycles: %+v", cycles)
+	assert.Should(t, cycles.EdgesWalked != 0 && cycles.SeedTotal != 0, "the acyclic report walked %d edges from %d seeds: zero of either makes "+
+		"\"no cycles\" the answer of a walk that never ran",
+		cycles.EdgesWalked, cycles.SeedTotal)
 
 	// 2. Everything is reachable, **and every entity was counted**.
 	reach := w.unreachable(t, cleanAgent, clean.ID, web.AnalysisUnreachableInput{})
-	if len(reach.Findings) != 0 {
-		t.Errorf("a game where everything is reachable reports %+v", reach.Findings)
-	}
-	if reach.ReachableTotal != len(chain) {
-		t.Errorf("reachable_total = %d, want %d: an empty findings list over a game "+
-			"nothing was counted in is the same JSON as a clean bill of health",
-			reach.ReachableTotal, len(chain))
-	}
-	if reach.EdgesWalked == 0 {
-		t.Error("the reachability report walked no edge")
-	}
+	assert.Should(t, len(reach.Findings) == 0, "a game where everything is reachable reports %+v", reach.Findings)
+	assert.Should(t, reach.ReachableTotal == len(chain), "reachable_total = %d, want %d: an empty findings list over a game "+
+		"nothing was counted in is the same JSON as a clean bill of health",
+		reach.ReachableTotal, len(chain))
+	assert.Should(t, reach.EdgesWalked != 0, "the reachability report walked no edge")
 
 	// 3. No orphans, **and every entity considered**.
 	orphans, err := web.MCPAnalysisOrphans(ctx, w.deps, cleanAgent, clean.ID,
 		web.AnalysisOrphansInput{})
-	if err != nil {
-		t.Fatalf("analysis.orphans: %v", err)
-	}
-	if len(orphans.Findings) != 0 {
-		t.Errorf("a game with no orphans reports %+v", orphans.Findings)
-	}
-	if orphans.ConsideredTotal != int64(len(chain)) {
-		t.Errorf("considered_total = %d, want %d", orphans.ConsideredTotal, len(chain))
-	}
+	assert.Must(t, err == nil, "analysis.orphans: %v", err)
+	assert.Should(t, len(orphans.Findings) == 0, "a game with no orphans reports %+v", orphans.Findings)
+	assert.Should(t, orphans.ConsideredTotal == int64(len(chain)), "considered_total = %d, want %d", orphans.ConsideredTotal, len(chain))
 
 	// 4. A route that holds, **and it names its seed set and its step
 	//    count**.
@@ -686,12 +629,8 @@ func TestTheNegativeHalvesAreCountedAndNotMerelyEmpty(t *testing.T) {
 	}
 	check, err := web.MCPRoutesCheck(ctx, w.deps, cleanAgent, clean.ID,
 		web.RoutesCheckInput{Key: "the-walk"})
-	if err != nil {
-		t.Fatalf("routes.check: %v", err)
-	}
-	if !check.Holds || check.StepsChecked != len(chain) {
-		t.Errorf("the clean route does not hold: %+v", check)
-	}
+	assert.Must(t, err == nil, "routes.check: %v", err)
+	assert.Should(t, check.Holds && check.StepsChecked == len(chain), "the clean route does not hold: %+v", check)
 	if check.Seeds.Total == 0 {
 		t.Error("the verdict names no seed set, so \"it holds\" rests on a walk that " +
 			"started nowhere")
@@ -700,9 +639,7 @@ func TestTheNegativeHalvesAreCountedAndNotMerelyEmpty(t *testing.T) {
 	// 5. A game that declared nothing is **refused**, carrying the
 	//    catalogue, on every analysis that walks an edge.
 	bare, err := w.deps.Projects.Create(ctx, "bare", "Bare", w.agent.UserID)
-	if err != nil {
-		t.Fatalf("create the bare game: %v", err)
-	}
+	assert.Must(t, err == nil, "create the bare game: %v", err)
 	bareAgent := w.mintFor(t, bare.ID, "bare agent")
 	if _, err := web.MCPTypesUpsert(ctx, w.deps, bareAgent, bare.ID,
 		web.TypesUpsertInput{Key: "thing", Label: "Thing", LabelPlural: "Things"}); err != nil {
@@ -740,13 +677,9 @@ func (w *twoGames) mintFor(t *testing.T, project uuid.UUID, label string) web.Ca
 		identity.CreateAPITokenRequest{
 			ProjectID: project, UserID: w.agent.UserID, Label: label,
 		})
-	if err != nil {
-		t.Fatalf("CreateAPIToken %s: %v", label, err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken %s: %v", label, err)
 	caller, err := web.CallerForToken(context.Background(), w.deps.Identity, secret)
-	if err != nil {
-		t.Fatalf("CallerForToken %s: %v", label, err)
-	}
+	assert.Must(t, err == nil, "CallerForToken %s: %v", label, err)
 	return caller
 }
 
@@ -764,17 +697,13 @@ func TestTheSameEngineAnalysesAnMMORPGAndARacingCareer(t *testing.T) {
 
 	mmoCycles := w.cycles(t, w.agent, w.mmo)
 	raceCycles := w.cycles(t, w.racer, w.race)
-	if len(mmoCycles.Cycles) == 0 {
-		t.Error("the MMORPG reports no cycle")
-	}
+	assert.Should(t, len(mmoCycles.Cycles) != 0, "the MMORPG reports no cycle")
 	if len(raceCycles.Cycles) == 0 {
 		t.Error("the racing career reports no cycle, so this test asserts nothing about " +
 			"a second vocabulary")
 	}
-	if !cycleContains(raceCycles.Cycles, "r-loop-x", "r-loop-y") {
-		t.Errorf("the racing career's own two-cycle is not the one reported: %+v",
-			raceCycles.Cycles)
-	}
+	assert.Should(t, cycleContains(raceCycles.Cycles, "r-loop-x", "r-loop-y"), "the racing career's own two-cycle is not the one reported: %+v",
+		raceCycles.Cycles)
 
 	// The vocabularies really are disjoint, asserted rather than assumed:
 	// a fixture that accidentally shared a key would make every
@@ -789,10 +718,8 @@ func TestTheSameEngineAnalysesAnMMORPGAndARacingCareer(t *testing.T) {
 			shared++
 		}
 	}
-	if shared != 0 {
-		t.Errorf("%d relation type keys are shared between the two games; this test's "+
-			"whole claim is that they are not", shared)
-	}
+	assert.Should(t, shared == 0, "%d relation type keys are shared between the two games; this test's "+
+		"whole claim is that they are not", shared)
 
 	// And the racing game finds its own unreachable content.
 	raceReach := w.unreachable(t, w.racer, w.race, web.AnalysisUnreachableInput{})
@@ -834,9 +761,7 @@ func TestATypoFixMakesARouteStaleAndAReCheckMakesItGreen(t *testing.T) {
 	// on its first run.
 	current, err := web.MCPEntitiesGet(ctx, w.deps, w.agent, w.mmo,
 		web.EntitiesGetInput{TypeKey: "lore", Key: "l-song"})
-	if err != nil {
-		t.Fatalf("entities.get: %v", err)
-	}
+	assert.Must(t, err == nil, "entities.get: %v", err)
 	version := current.Version
 	if _, err := web.MCPEntitiesUpsert(ctx, w.deps, w.agent, w.mmo, web.EntitiesUpsertInput{
 		Items: []web.EntityItemInput{{TypeKey: "lore", Key: "l-song", Name: "The Song",
@@ -847,19 +772,13 @@ func TestATypoFixMakesARouteStaleAndAReCheckMakesItGreen(t *testing.T) {
 
 	route, err2 := web.MCPRoutesGet(ctx, w.deps, w.agent, w.mmo,
 		web.RoutesGetInput{Key: "main-story"})
-	if err2 != nil {
-		t.Fatalf("routes.get: %v", err2)
-	}
-	if route.Status != analysis.RouteStale {
-		t.Fatalf("status = %q after an unrelated write, want %q: the counter is coarse "+
-			"and this is what that means", route.Status, analysis.RouteStale)
-	}
+	assert.Must(t, err2 == nil, "routes.get: %v", err2)
+	assert.Must(t, route.Status == analysis.RouteStale, "status = %q after an unrelated write, want %q: the counter is coarse "+
+		"and this is what that means", route.Status, analysis.RouteStale)
 	// **Stale is neither green nor red**: the stored verdict is still
 	// there and still says the route held, and what has changed is that
 	// it is about a game that has since moved.
-	if len(route.LastCheck) == 0 {
-		t.Error("a stale route lost its stored verdict; stale is not broken")
-	}
+	assert.Should(t, len(route.LastCheck) != 0, "a stale route lost its stored verdict; stale is not broken")
 
 	if check := w.checkMainStory(t); !check.Holds || check.Status != analysis.RouteChecked {
 		t.Fatalf("a re-check did not make the route green again: %+v", check.Status)
@@ -888,20 +807,12 @@ func TestDeletingAStepsEntityLeavesATombstoneAndAStaleRoute(t *testing.T) {
 
 	route, err := web.MCPRoutesGet(ctx, w.deps, w.agent, w.mmo,
 		web.RoutesGetInput{Key: "main-story"})
-	if err != nil {
-		t.Fatalf("routes.get: %v", err)
-	}
-	if len(route.Steps) != len(mmoQuestChain) {
-		t.Fatalf("the route has %d steps, want %d: a step must not disappear with its "+
-			"entity", len(route.Steps), len(mmoQuestChain))
-	}
+	assert.Must(t, err == nil, "routes.get: %v", err)
+	assert.Must(t, len(route.Steps) == len(mmoQuestChain), "the route has %d steps, want %d: a step must not disappear with its "+
+		"entity", len(route.Steps), len(mmoQuestChain))
 	step := route.Steps[3]
-	if step.EntityID != nil || step.Key != deleted || step.EntityType != "quest" {
-		t.Errorf("the tombstone reads %+v, want a null id beside quest/%s", step, deleted)
-	}
-	if route.Status != analysis.RouteStale {
-		t.Errorf("status = %q after a deletion, want %q", route.Status, analysis.RouteStale)
-	}
+	assert.Should(t, step.EntityID == nil && step.Key == deleted && step.EntityType == "quest", "the tombstone reads %+v, want a null id beside quest/%s", step, deleted)
+	assert.Should(t, route.Status == analysis.RouteStale, "status = %q after a deletion, want %q", route.Status, analysis.RouteStale)
 
 	check := w.checkMainStory(t)
 	if check.Steps[3].Verdict != analysis.VerdictMissingEntity {
@@ -938,9 +849,7 @@ func TestRenamingQuestToMissionLeavesTheRouteHealthyAndTheTraitsIntact(t *testin
 
 	current, err := web.MCPTypesGet(ctx, w.deps, w.agent, w.mmo,
 		web.TypesGetInput{Key: "quest"})
-	if err != nil {
-		t.Fatalf("types.get: %v", err)
-	}
+	assert.Must(t, err == nil, "types.get: %v", err)
 	version := current.Version
 	if _, err := web.MCPTypesRename(ctx, w.deps, w.agent, w.mmo, web.TypesRenameInput{
 		From: "quest", To: "mission", ExpectedVersion: &version,
@@ -949,31 +858,23 @@ func TestRenamingQuestToMissionLeavesTheRouteHealthyAndTheTraitsIntact(t *testin
 	}
 
 	check := w.checkMainStory(t)
-	if !check.Holds {
-		t.Fatalf("a rename broke a healthy route: %+v", check.Steps)
-	}
+	assert.Must(t, check.Holds, "a rename broke a healthy route: %+v", check.Steps)
 	for _, step := range check.Steps {
-		if step.EntityType != "quest" {
-			t.Errorf("step %d spells its type %q: a rename does not rewrite a stored step",
-				step.Position, step.EntityType)
-		}
+		assert.Should(t, step.EntityType == "quest", "step %d spells its type %q: a rename does not rewrite a stored step",
+			step.Position, step.EntityType)
 		if step.TypeRenamed == nil {
 			t.Errorf("step %d says nothing about the key having moved", step.Position)
 			continue
 		}
-		if step.TypeRenamed.Was != "quest" || step.TypeRenamed.Now != "mission" {
-			t.Errorf("step %d reports %+v, want quest → mission", step.Position,
-				step.TypeRenamed)
-		}
+		assert.Should(t, step.TypeRenamed.Was == "quest" && step.TypeRenamed.Now == "mission", "step %d reports %+v, want quest → mission", step.Position,
+			step.TypeRenamed)
 	}
 
 	// The traits live on the relation type's row, which a rename of an
 	// entity type does not touch, so the engine reads the game exactly as
 	// it did before.
 	got := w.cycles(t, w.agent, w.mmo)
-	if !cycleContains(got.Cycles, "q-loop-a", "q-loop-b", "q-loop-c") {
-		t.Errorf("after renaming an entity type the three-cycle is gone: %+v", got.Cycles)
-	}
+	assert.Should(t, cycleContains(got.Cycles, "q-loop-a", "q-loop-b", "q-loop-c"), "after renaming an entity type the three-cycle is gone: %+v", got.Cycles)
 }
 
 // --- Step 8: the refusals, over the transport ---
@@ -1079,12 +980,8 @@ func TestTheAnalysisRefusalsHoldOverTheTransport(t *testing.T) {
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("CallTool(%s): %v", tc.tool, err)
-			}
-			if !result.IsError {
-				t.Fatalf("%s answered rather than refusing", tc.tool)
-			}
+			assert.Must(t, err == nil, "CallTool(%s): %v", tc.tool, err)
+			assert.Must(t, result.IsError, "%s answered rather than refusing", tc.tool)
 			var body map[string]any
 			decodeToolText(t, result, &body)
 			if body["error"] != tc.code {
@@ -1092,9 +989,7 @@ func TestTheAnalysisRefusalsHoldOverTheTransport(t *testing.T) {
 			}
 			message, _ := body["message"].(string)
 			for _, want := range tc.mentions {
-				if !strings.Contains(message, want) {
-					t.Errorf("the refusal does not name %q: %s", want, message)
-				}
+				assert.Should(t, strings.Contains(message, want), "the refusal does not name %q: %s", want, message)
 			}
 		})
 	}
@@ -1133,12 +1028,8 @@ func TestAnAnalysisWithTheWrongGamesTokenIsAScopeViolationEvenForAnAdmin(t *test
 			result, err := session.CallTool(ctx, &mcp.CallToolParams{
 				Name: "analysis.cycles", Arguments: map[string]any{"game": w.mmoSlug},
 			})
-			if err != nil {
-				t.Fatalf("CallTool: %v", err)
-			}
-			if !result.IsError {
-				t.Fatal("a token bound to another game analysed this one")
-			}
+			assert.Must(t, err == nil, "CallTool: %v", err)
+			assert.Must(t, result.IsError, "a token bound to another game analysed this one")
 			var body map[string]any
 			decodeToolText(t, result, &body)
 			if body["error"] != "scope_violation" {
@@ -1163,32 +1054,20 @@ func TestTheRESTMirrorAnswersTheSameAnalysisAsTheTool(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodPost,
 		httpSrv.URL+"/api/games/"+w.mmoSlug+"/analysis/cycles", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("build the request: %v", err)
-	}
+	assert.Must(t, err == nil, "build the request: %v", err)
 	req.Header.Set("Authorization", "Bearer "+w.mmoSecret)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST the analysis: %v", err)
-	}
+	assert.Must(t, err == nil, "POST the analysis: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 	var overREST analysis.CyclesResult
 	if err := json.NewDecoder(resp.Body).Decode(&overREST); err != nil {
 		t.Fatalf("decode the REST answer: %v", err)
 	}
-	if len(overREST.Cycles) != len(overTheTool.Cycles) {
-		t.Fatalf("the tool found %d cycles and the REST mirror found %d",
-			len(overTheTool.Cycles), len(overREST.Cycles))
-	}
-	if len(overREST.Cycles) == 0 {
-		t.Fatal("both surfaces found nothing, so this comparison is between two empty lists")
-	}
-	if !cycleContains(overREST.Cycles, "q-loop-a", "q-loop-b", "q-loop-c") {
-		t.Errorf("the REST mirror's answer does not carry the three-cycle: %+v",
-			overREST.Cycles)
-	}
+	assert.Must(t, len(overREST.Cycles) == len(overTheTool.Cycles), "the tool found %d cycles and the REST mirror found %d",
+		len(overTheTool.Cycles), len(overREST.Cycles))
+	assert.Must(t, len(overREST.Cycles) != 0, "both surfaces found nothing, so this comparison is between two empty lists")
+	assert.Should(t, cycleContains(overREST.Cycles, "q-loop-a", "q-loop-b", "q-loop-c"), "the REST mirror's answer does not carry the three-cycle: %+v",
+		overREST.Cycles)
 }

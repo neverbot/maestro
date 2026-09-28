@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 )
 
@@ -14,27 +15,17 @@ import (
 
 func TestRenderProducesHTMLFromMarkdown(t *testing.T) {
 	got, err := markdown.Render("# Duskwood\n\nThe *worgen* came at dusk.\n")
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if !strings.Contains(got, "<h1>Duskwood</h1>") || !strings.Contains(got, "<em>worgen</em>") {
-		t.Fatalf("html = %q, want a heading and emphasis", got)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Must(t, strings.Contains(got, "<h1>Duskwood</h1>") && strings.Contains(got, "<em>worgen</em>"), "html = %q, want a heading and emphasis", got)
 }
 
 func TestRawHTMLInABodyIsNotRendered(t *testing.T) {
 	got, err := markdown.Render("<script>alert(1)</script>\n\nhello\n")
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if strings.Contains(got, "<script>") {
-		t.Fatalf("html = %q: raw HTML must not survive rendering", got)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Must(t, !strings.Contains(got, "<script>"), "html = %q: raw HTML must not survive rendering", got)
 	// The prose around it still arrives: dropping the markup must not
 	// drop the document.
-	if !strings.Contains(got, "hello") {
-		t.Fatalf("html = %q, want the prose beside the dropped markup", got)
-	}
+	assert.Must(t, strings.Contains(got, "hello"), "html = %q, want the prose beside the dropped markup", got)
 }
 
 // TestAnInlineHTMLSpanIsNotRendered is the other half of the one above:
@@ -45,12 +36,8 @@ func TestRawHTMLInABodyIsNotRendered(t *testing.T) {
 // blocked block-level script does not need — rendering as markup.
 func TestAnInlineHTMLSpanIsNotRendered(t *testing.T) {
 	got, err := markdown.Render("Duskwood is <img src=x onerror=alert(1)> haunted.\n")
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if strings.Contains(got, "<img") || strings.Contains(got, "onerror") {
-		t.Fatalf("html = %q: inline raw HTML must not survive rendering either", got)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Must(t, !strings.Contains(got, "<img") && !strings.Contains(got, "onerror"), "html = %q: inline raw HTML must not survive rendering either", got)
 }
 
 // TestADangerousLinkSchemeIsNeutralised drives the allowlist: anything
@@ -93,21 +80,15 @@ func TestADangerousLinkSchemeIsNeutralised(t *testing.T) {
 		{"custom app scheme", "[click](maestro-agent://run?cmd=rm)\n", `href="#"`},
 	} {
 		got, err := markdown.Render(tc.body)
-		if err != nil {
-			t.Fatalf("Render(%q): %v", tc.body, err)
-		}
-		if !strings.Contains(got, tc.want) {
-			t.Fatalf("%s: Render(%q) = %q, want the destination neutralised to %s",
-				tc.name, tc.body, got, tc.want)
-		}
+		assert.Must(t, err == nil, "Render(%q): %v", tc.body, err)
+		assert.Must(t, strings.Contains(got, tc.want), "%s: Render(%q) = %q, want the destination neutralised to %s",
+			tc.name, tc.body, got, tc.want)
 		for _, forbidden := range []string{
 			"javascript:", "JavaScript:", "data:text/html", "vbscript:",
 			"file:", "ftp:", "tel:", "about:", "blob:", "maestro-agent:",
 		} {
-			if strings.Contains(got, forbidden) {
-				t.Fatalf("%s: Render(%q) = %q, which still carries %q",
-					tc.name, tc.body, got, forbidden)
-			}
+			assert.Must(t, !strings.Contains(got, forbidden), "%s: Render(%q) = %q, which still carries %q",
+				tc.name, tc.body, got, forbidden)
 		}
 	}
 }
@@ -148,28 +129,18 @@ func TestAnEntityEncodedSchemeIsResolvedBeforeItIsJudged(t *testing.T) {
 		"[click](%6aavascript:alert(1))\n",     // percent-encoded, still refused
 	} {
 		got, err := markdown.Render(body)
-		if err != nil {
-			t.Fatalf("Render(%q): %v", body, err)
-		}
-		if strings.Contains(got, "javascript:") {
-			t.Fatalf("Render(%q) = %q: the entity resolves to a live javascript: href",
-				body, got)
-		}
-		if !strings.Contains(got, `href="#"`) && !strings.Contains(got, `src="#"`) {
-			t.Fatalf("Render(%q) = %q, want the destination neutralised to #", body, got)
-		}
+		assert.Must(t, err == nil, "Render(%q): %v", body, err)
+		assert.Must(t, !strings.Contains(got, "javascript:"), "Render(%q) = %q: the entity resolves to a live javascript: href",
+			body, got)
+		assert.Must(t, strings.Contains(got, `href="#"`) || strings.Contains(got, `src="#"`), "Render(%q) = %q, want the destination neutralised to #", body, got)
 	}
 }
 
 func TestOrdinaryLinksSurvive(t *testing.T) {
 	got, err := markdown.Render("[a](https://example.com) [b](lore/duskwood) [c](#top) [d](mailto:a@b.c)\n")
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
 	for _, want := range []string{"https://example.com", "lore/duskwood", "#top", "mailto:a@b.c"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("html = %q dropped %q", got, want)
-		}
+		assert.Must(t, strings.Contains(got, want), "html = %q dropped %q", got, want)
 	}
 }
 
@@ -179,41 +150,23 @@ func TestOrdinaryLinksSurvive(t *testing.T) {
 // payload one element along.
 func TestAnImageDestinationIsJudgedTheSameWayALinksIs(t *testing.T) {
 	got, err := markdown.Render("![art](https://example.com/a.png) ![bad](javascript:alert(1))\n")
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if strings.Contains(got, "javascript:") {
-		t.Fatalf("html = %q: an image destination is judged like a link's", got)
-	}
-	if !strings.Contains(got, "https://example.com/a.png") {
-		t.Fatalf("html = %q dropped an ordinary image", got)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Must(t, !strings.Contains(got, "javascript:"), "html = %q: an image destination is judged like a link's", got)
+	assert.Must(t, strings.Contains(got, "https://example.com/a.png"), "html = %q dropped an ordinary image", got)
 }
 
 func TestARelativePathWithAColonIsNotReadAsAScheme(t *testing.T) {
 	got, err := markdown.Render("[a](docs/act:two)\n")
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if !strings.Contains(got, "docs/act:two") {
-		t.Fatalf("html = %q, want the relative reference intact", got)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Must(t, strings.Contains(got, "docs/act:two"), "html = %q, want the relative reference intact", got)
 }
 
 func TestADiffRendersAsClassedLinesWithItsSourceEscaped(t *testing.T) {
 	got := markdown.RenderDiff("@@ -1,1 +1,1 @@\n-# old\n+# <b>new</b>\n")
-	if !strings.Contains(got, `class="diff-removed"`) || !strings.Contains(got, `class="diff-added"`) {
-		t.Fatalf("html = %q, want classed lines", got)
-	}
-	if !strings.Contains(got, `class="diff-hunk"`) {
-		t.Fatalf("html = %q, want the hunk header classed as one", got)
-	}
-	if strings.Contains(got, "<b>") {
-		t.Fatalf("html = %q: a diff's lines are source and must be escaped, not rendered", got)
-	}
-	if !strings.Contains(got, "&lt;b&gt;") {
-		t.Fatalf("html = %q, want the source escaped and visible", got)
-	}
+	assert.Must(t, strings.Contains(got, `class="diff-removed"`) && strings.Contains(got, `class="diff-added"`), "html = %q, want classed lines", got)
+	assert.Must(t, strings.Contains(got, `class="diff-hunk"`), "html = %q, want the hunk header classed as one", got)
+	assert.Must(t, !strings.Contains(got, "<b>"), "html = %q: a diff's lines are source and must be escaped, not rendered", got)
+	assert.Must(t, strings.Contains(got, "&lt;b&gt;"), "html = %q, want the source escaped and visible", got)
 }
 
 // TestADiffsFileAndContextLinesAreClassedApart pins the two classes the
@@ -224,15 +177,11 @@ func TestADiffRendersAsClassedLinesWithItsSourceEscaped(t *testing.T) {
 func TestADiffsFileAndContextLinesAreClassedApart(t *testing.T) {
 	got := markdown.RenderDiff("--- a\n+++ b\n@@ -1,2 +1,2 @@\n unchanged\n-gone\n")
 	for _, want := range []string{`class="diff-file"`, `class="diff-context"`} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("html = %q, want %s", got, want)
-		}
+		assert.Must(t, strings.Contains(got, want), "html = %q, want %s", got, want)
 	}
 	// And the file header is not read as a removal, which is the
 	// distinction this test exists for.
-	if strings.Contains(got, `class="diff-removed">--- a`) {
-		t.Fatalf("html = %q: a file header must not be classed as a removed line", got)
-	}
+	assert.Must(t, !strings.Contains(got, `class="diff-removed">--- a`), "html = %q: a file header must not be classed as a removed line", got)
 }
 
 // TestAnAutolinkDestinationIsJudgedTheSameWayALinksIs is the third node
@@ -266,22 +215,16 @@ func TestAnAutolinkDestinationIsJudgedTheSameWayALinksIs(t *testing.T) {
 		{"mixed case", "Read <JavaScript:alert(1)>.\n"},
 	} {
 		got, err := markdown.Render(tc.body)
-		if err != nil {
-			t.Fatalf("Render(%q): %v", tc.body, err)
-		}
-		if !strings.Contains(got, `href="#"`) {
-			t.Fatalf("%s: Render(%q) = %q, want the destination neutralised to #",
-				tc.name, tc.body, got)
-		}
+		assert.Must(t, err == nil, "Render(%q): %v", tc.body, err)
+		assert.Must(t, strings.Contains(got, `href="#"`), "%s: Render(%q) = %q, want the destination neutralised to #",
+			tc.name, tc.body, got)
 		for _, forbidden := range []string{
 			`href="javascript:`, `href="JavaScript:`, `href="vbscript:`,
 			`href="data:`, `href="file:`, `href="ftp:`, `href="tel:`,
 			`href="about:`, `href="blob:`, `href="maestro-agent:`,
 		} {
-			if strings.Contains(got, forbidden) {
-				t.Fatalf("%s: Render(%q) = %q, which still carries %q",
-					tc.name, tc.body, got, forbidden)
-			}
+			assert.Must(t, !strings.Contains(got, forbidden), "%s: Render(%q) = %q, which still carries %q",
+				tc.name, tc.body, got, forbidden)
 		}
 	}
 }
@@ -300,15 +243,9 @@ func TestOrdinaryAutolinksSurvive(t *testing.T) {
 		{"See <a@b.c>.\n", `href="mailto:a@b.c"`, ">a@b.c<"},
 	} {
 		got, err := markdown.Render(tc.body)
-		if err != nil {
-			t.Fatalf("Render(%q): %v", tc.body, err)
-		}
-		if !strings.Contains(got, tc.wantHref) {
-			t.Fatalf("Render(%q) = %q, want %s", tc.body, got, tc.wantHref)
-		}
-		if !strings.Contains(got, tc.wantText) {
-			t.Fatalf("Render(%q) = %q, want the label %s intact", tc.body, got, tc.wantText)
-		}
+		assert.Must(t, err == nil, "Render(%q): %v", tc.body, err)
+		assert.Must(t, strings.Contains(got, tc.wantHref), "Render(%q) = %q, want %s", tc.body, got, tc.wantHref)
+		assert.Must(t, strings.Contains(got, tc.wantText), "Render(%q) = %q, want the label %s intact", tc.body, got, tc.wantText)
 	}
 }
 
@@ -333,16 +270,10 @@ func TestAnAutolinkLabelIsEscapedAndNotReRendered(t *testing.T) {
 		{"See <https://example.com/?a=1&b=%22x%22> end.\n", "&amp;b=", `&b="x"`},
 	} {
 		got, err := markdown.Render(tc.body)
-		if err != nil {
-			t.Fatalf("Render(%q): %v", tc.body, err)
-		}
-		if !strings.Contains(got, tc.want) {
-			t.Fatalf("Render(%q) = %q, want the label to carry %q", tc.body, got, tc.want)
-		}
-		if strings.Contains(got, tc.notWant) {
-			t.Fatalf("Render(%q) = %q: the label was re-resolved into %q",
-				tc.body, got, tc.notWant)
-		}
+		assert.Must(t, err == nil, "Render(%q): %v", tc.body, err)
+		assert.Must(t, strings.Contains(got, tc.want), "Render(%q) = %q, want the label to carry %q", tc.body, got, tc.want)
+		assert.Must(t, !strings.Contains(got, tc.notWant), "Render(%q) = %q: the label was re-resolved into %q",
+			tc.body, got, tc.notWant)
 	}
 }
 
@@ -360,22 +291,14 @@ func TestAnAutolinkLabelIsEscapedAndNotReRendered(t *testing.T) {
 func TestEveryAutolinkInAParagraphIsJudged(t *testing.T) {
 	body := "a <https://example.com/1> b <https://example.com/2> c <javascript:alert(1)> d\n"
 	got, err := markdown.Render(body)
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if strings.Contains(got, `href="javascript:`) {
-		t.Fatalf("html = %q: the third autolink was never judged", got)
-	}
-	if !strings.Contains(got, `href="#"`) {
-		t.Fatalf("html = %q, want the last destination neutralised", got)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Must(t, !strings.Contains(got, `href="javascript:`), "html = %q: the third autolink was never judged", got)
+	assert.Must(t, strings.Contains(got, `href="#"`), "html = %q, want the last destination neutralised", got)
 	// And the two ahead of it, and the prose between them, all survive.
 	for _, want := range []string{
 		`href="https://example.com/1"`, `href="https://example.com/2"`, "c ", " d",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("html = %q dropped %q", got, want)
-		}
+		assert.Must(t, strings.Contains(got, want), "html = %q dropped %q", got, want)
 	}
 }
 
@@ -395,23 +318,13 @@ func TestRenderDocAdmitsATableAndRenderStillDoesNot(t *testing.T) {
 	const body = "| Trait | What it means |\n| --- | --- |\n| `unlocks` | it opens something |\n"
 
 	site, err := markdown.RenderDoc(body)
-	if err != nil {
-		t.Fatalf("RenderDoc: %v", err)
-	}
-	if !strings.Contains(site, "<table") {
-		t.Errorf("the documentation site rendered a table as text: %q", site)
-	}
-	if !strings.Contains(site, "<code>unlocks</code>") {
-		t.Errorf("a cell's own markdown was not rendered: %q", site)
-	}
+	assert.Must(t, err == nil, "RenderDoc: %v", err)
+	assert.Should(t, strings.Contains(site, "<table"), "the documentation site rendered a table as text: %q", site)
+	assert.Should(t, strings.Contains(site, "<code>unlocks</code>"), "a cell's own markdown was not rendered: %q", site)
 
 	prose, err := markdown.Render(body)
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if strings.Contains(prose, "<table") {
-		t.Errorf("a game's prose rendered a table, which this product has never promised to draw: %q", prose)
-	}
+	assert.Must(t, err == nil, "Render: %v", err)
+	assert.Should(t, !strings.Contains(prose, "<table"), "a game's prose rendered a table, which this product has never promised to draw: %q", prose)
 }
 
 // TestRenderDocKeepsTheLinkAllowlist pins that the site's renderer shares
@@ -421,10 +334,6 @@ func TestRenderDocAdmitsATableAndRenderStillDoesNot(t *testing.T) {
 // Mutation: drop the transformer from docRenderer and this fails.
 func TestRenderDocKeepsTheLinkAllowlist(t *testing.T) {
 	out, err := markdown.RenderDoc("[click](javascript:alert(1))")
-	if err != nil {
-		t.Fatalf("RenderDoc: %v", err)
-	}
-	if strings.Contains(strings.ToLower(out), "javascript:") {
-		t.Errorf("the site's renderer let a javascript: destination through: %q", out)
-	}
+	assert.Must(t, err == nil, "RenderDoc: %v", err)
+	assert.Should(t, !strings.Contains(strings.ToLower(out), "javascript:"), "the site's renderer let a javascript: destination through: %q", out)
 }

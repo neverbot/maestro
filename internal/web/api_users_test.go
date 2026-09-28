@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 )
 
@@ -29,16 +30,12 @@ func TestOnlyAnAdministratorReadsTheAccounts(t *testing.T) {
 	req.AddCookie(loginAs(t, srv, "second@example.test"))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("a plain account reading /api/users: status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "a plain account reading /api/users: status = %d, want 403: %s", rec.Code, rec.Body.String())
 
 	// And an unauthenticated caller gets nothing either.
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/users", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("an anonymous caller reading /api/users: status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "an anonymous caller reading /api/users: status = %d, want 401", rec.Code)
 }
 
 // TestTheAccountListingSaysWhoIsWhoAndPages covers what the screen reads
@@ -50,9 +47,7 @@ func TestTheAccountListingSaysWhoIsWhoAndPages(t *testing.T) {
 	// The first account made on an instance is its administrator, which
 	// is BootstrapFirstAdmin's rule and is what makes this caller one.
 	admin, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "admin@example.test", DisplayName: "Admin", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if err := ids.SetAdmin(ctx, admin.ID, true); err != nil {
 		t.Fatalf("SetAdmin: %v", err)
 	}
@@ -69,9 +64,7 @@ func TestTheAccountListingSaysWhoIsWhoAndPages(t *testing.T) {
 		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("list users%s: status = %d: %s", query, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "list users%s: status = %d: %s", query, rec.Code, rec.Body.String())
 		var body struct {
 			Users      []map[string]any `json:"users"`
 			NextCursor string           `json:"next_cursor"`
@@ -83,14 +76,10 @@ func TestTheAccountListingSaysWhoIsWhoAndPages(t *testing.T) {
 	}
 
 	_, all := read("")
-	if len(all) != 3 {
-		t.Fatalf("the instance has 3 accounts and the listing answered %d", len(all))
-	}
+	assert.Must(t, len(all) == 3, "the instance has 3 accounts and the listing answered %d", len(all))
 	// Oldest first, so the list does not reshuffle under a reader every
 	// time somebody signs up.
-	if all[0]["email"] != "admin@example.test" {
-		t.Errorf("the listing is not in creation order: %+v", all)
-	}
+	assert.Should(t, all[0]["email"] == "admin@example.test", "the listing is not in creation order: %+v", all)
 	mine := 0
 	admins := 0
 	for _, user := range all {
@@ -104,29 +93,17 @@ func TestTheAccountListingSaysWhoIsWhoAndPages(t *testing.T) {
 			t.Fatal("the listing publishes a password hash")
 		}
 	}
-	if mine != 1 {
-		t.Errorf("%d rows are marked as the caller's own, want exactly 1", mine)
-	}
-	if admins != 1 {
-		t.Errorf("%d rows are marked administrator, want exactly 1", admins)
-	}
+	assert.Should(t, mine == 1, "%d rows are marked as the caller's own, want exactly 1", mine)
+	assert.Should(t, admins == 1, "%d rows are marked administrator, want exactly 1", admins)
 
 	// **A cursor is a bookmark and pages once.** A page that answered
 	// the same rows again would loop the screen for ever.
 	cursor, first := read("?page_size=2")
-	if len(first) != 2 || cursor == "" {
-		t.Fatalf("first page = %d rows, cursor %q, want 2 and a cursor", len(first), cursor)
-	}
+	assert.Must(t, len(first) == 2 && cursor != "", "first page = %d rows, cursor %q, want 2 and a cursor", len(first), cursor)
 	next, second := read("?page_size=2&cursor=" + cursor)
-	if len(second) != 1 {
-		t.Fatalf("second page = %d rows, want the remaining 1", len(second))
-	}
-	if second[0]["id"] == first[0]["id"] || second[0]["id"] == first[1]["id"] {
-		t.Errorf("the second page repeats a row from the first")
-	}
-	if next != "" {
-		t.Errorf("the last page still offers a cursor: %q", next)
-	}
+	assert.Must(t, len(second) == 1, "second page = %d rows, want the remaining 1", len(second))
+	assert.Should(t, second[0]["id"] != first[0]["id"] && second[0]["id"] != first[1]["id"], "the second page repeats a row from the first")
+	assert.Should(t, next == "", "the last page still offers a cursor: %q", next)
 
 	// A cursor this listing did not issue is refused rather than answered
 	// with the first page, which would page a caller in a circle.
@@ -134,9 +111,7 @@ func TestTheAccountListingSaysWhoIsWhoAndPages(t *testing.T) {
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("a made-up cursor: status = %d, want 400", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusBadRequest, "a made-up cursor: status = %d, want 400", rec.Code)
 }
 
 // TestAnAccountIsEditedByItsIDAndKeepsTheLastAdministrator is the write
@@ -167,12 +142,8 @@ func TestAnAccountIsEditedByItsIDAndKeepsTheLastAdministrator(t *testing.T) {
 
 	// The name and the address, together.
 	code, body := patch(other.ID.String(), `{"display_name":"Renamed","email":"renamed@example.test"}`)
-	if code != http.StatusOK {
-		t.Fatalf("edit: status = %d: %+v", code, body)
-	}
-	if body["display_name"] != "Renamed" || body["email"] != "renamed@example.test" {
-		t.Fatalf("the answer does not carry the edit: %+v", body)
-	}
+	assert.Must(t, code == http.StatusOK, "edit: status = %d: %+v", code, body)
+	assert.Must(t, body["display_name"] == "Renamed" && body["email"] == "renamed@example.test", "the answer does not carry the edit: %+v", body)
 	// **The address is how they sign in**, so the change has to have
 	// reached the thing that authenticates: the old one must stop
 	// working and the new one must start.
@@ -186,9 +157,7 @@ func TestAnAccountIsEditedByItsIDAndKeepsTheLastAdministrator(t *testing.T) {
 	// An address another account already uses is refused, and nothing
 	// changes.
 	code, _ = patch(other.ID.String(), `{"email":"admin@example.test"}`)
-	if code != http.StatusConflict {
-		t.Errorf("moving an account onto a taken address: status = %d, want 409", code)
-	}
+	assert.Should(t, code == http.StatusConflict, "moving an account onto a taken address: status = %d, want 409", code)
 
 	// The standing, and the rule behind it: the instance keeps one
 	// administrator. Promoting the other first is what makes the
@@ -213,12 +182,8 @@ func TestAnAccountIsEditedByItsIDAndKeepsTheLastAdministrator(t *testing.T) {
 	// administrator now, so it is `other` who has to ask.
 	cookie = loginAs(t, srv, "renamed@example.test")
 	code, body = patch(other.ID.String(), `{"is_admin":false}`)
-	if code != http.StatusConflict {
-		t.Fatalf("demoting the last administrator: status = %d, want 409: %+v", code, body)
-	}
-	if body["error"] != "last_admin" {
-		t.Errorf("the refusal is not the last-administrator one: %+v", body)
-	}
+	assert.Must(t, code == http.StatusConflict, "demoting the last administrator: status = %d, want 409: %+v", code, body)
+	assert.Should(t, body["error"] == "last_admin", "the refusal is not the last-administrator one: %+v", body)
 
 	// An id that names nobody, and a malformed one, are both "no such
 	// user" rather than a 500.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -19,36 +20,20 @@ func TestMCPWhoamiReportsTheTokenProject(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 
 	out, err := web.MCPWhoami(ctx, web.MCPDeps{Identity: ids, Projects: projSvc}, caller)
-	if err != nil {
-		t.Fatalf("MCPWhoami: %v", err)
-	}
-	if out.UserID != user.ID {
-		t.Fatal("whoami reported the wrong user")
-	}
-	if out.ProjectID == nil || *out.ProjectID != project.ID {
-		t.Fatal("whoami did not report the token's project")
-	}
-	if out.ProjectSlug != "azeroth" {
-		t.Fatalf("ProjectSlug = %q, want azeroth", out.ProjectSlug)
-	}
+	assert.Must(t, err == nil, "MCPWhoami: %v", err)
+	assert.Must(t, out.UserID == user.ID, "whoami reported the wrong user")
+	assert.Must(t, out.ProjectID != nil && *out.ProjectID == project.ID, "whoami did not report the token's project")
+	assert.Must(t, out.ProjectSlug == "azeroth", "ProjectSlug = %q, want azeroth", out.ProjectSlug)
 }
 
 func TestMCPGamesGetRefusesAnotherProject(t *testing.T) {
@@ -57,26 +42,16 @@ func TestMCPGamesGetRefusesAnotherProject(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer2@example.test", DisplayName: "Designer", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	mine, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create mine: %v", err)
-	}
+	assert.Must(t, err == nil, "Create mine: %v", err)
 	theirs, err := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
-	if err != nil {
-		t.Fatalf("Create theirs: %v", err)
-	}
+	assert.Must(t, err == nil, "Create theirs: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 
 	if _, err := web.MCPGamesGet(ctx, web.MCPDeps{Identity: ids, Projects: projSvc}, caller, theirs.ID); err == nil {
 		t.Fatal("a token must not read another game, even one its user owns")
@@ -102,26 +77,16 @@ func TestMCPGamesGetRefusesAnotherProjectForAdmins(t *testing.T) {
 		t.Fatalf("BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := ids.Authenticate(ctx, cfg.FirstAdminEmail, cfg.FirstAdminPassword)
-	if err != nil {
-		t.Fatalf("Authenticate admin: %v", err)
-	}
+	assert.Must(t, err == nil, "Authenticate admin: %v", err)
 	mine, err := projSvc.Create(ctx, "azeroth", "Azeroth", admin.ID)
-	if err != nil {
-		t.Fatalf("Create mine: %v", err)
-	}
+	assert.Must(t, err == nil, "Create mine: %v", err)
 	theirs, err := projSvc.Create(ctx, "le-mans", "Le Mans", admin.ID)
-	if err != nil {
-		t.Fatalf("Create theirs: %v", err)
-	}
+	assert.Must(t, err == nil, "Create theirs: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: admin.ID, Label: "admin agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	if _, err := web.MCPGamesGet(ctx, web.MCPDeps{Identity: ids, Projects: projSvc}, caller, theirs.ID); err == nil {
 		t.Fatal("admin tokens are not exempt from project scope")
 	}
@@ -133,39 +98,23 @@ func TestMCPGamesListReturnsExactlyTheTokensOneGame(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer3@example.test", DisplayName: "Designer", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	mine, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create mine: %v", err)
-	}
+	assert.Must(t, err == nil, "Create mine: %v", err)
 	if _, err := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID); err != nil {
 		t.Fatalf("Create le-mans: %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 
 	out, err := web.MCPGamesList(ctx, web.MCPDeps{Identity: ids, Projects: projSvc}, caller)
-	if err != nil {
-		t.Fatalf("MCPGamesList: %v", err)
-	}
-	if len(out.Items) != 1 || out.Items[0].ID != mine.ID {
-		t.Fatalf("items = %+v, want exactly [%s]", out.Items, mine.ID)
-	}
-	if out.Truncated {
-		t.Fatal("Truncated = true for a single-item result")
-	}
-	if out.NextCursor != nil {
-		t.Fatalf("NextCursor = %v, want nil for a single-item result", out.NextCursor)
-	}
+	assert.Must(t, err == nil, "MCPGamesList: %v", err)
+	assert.Must(t, len(out.Items) == 1 && out.Items[0].ID == mine.ID, "items = %+v, want exactly [%s]", out.Items, mine.ID)
+	assert.Must(t, !out.Truncated, "Truncated = true for a single-item result")
+	assert.Must(t, out.NextCursor == nil, "NextCursor = %v, want nil for a single-item result", out.NextCursor)
 }
 
 func TestMCPGamesGetReturnsTheCallersOwnGame(t *testing.T) {
@@ -174,29 +123,17 @@ func TestMCPGamesGetReturnsTheCallersOwnGame(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer4@example.test", DisplayName: "Designer", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	mine, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create mine: %v", err)
-	}
+	assert.Must(t, err == nil, "Create mine: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	out, err := web.MCPGamesGet(ctx, web.MCPDeps{Identity: ids, Projects: projSvc}, caller, mine.ID)
-	if err != nil {
-		t.Fatalf("MCPGamesGet: %v", err)
-	}
-	if out.Slug != "azeroth" {
-		t.Fatalf("Slug = %q, want azeroth", out.Slug)
-	}
+	assert.Must(t, err == nil, "MCPGamesGet: %v", err)
+	assert.Must(t, out.Slug == "azeroth", "Slug = %q, want azeroth", out.Slug)
 }
 
 // TestMCPGamesGetReportsNotFoundForAMissingProject exercises the actual
@@ -223,9 +160,7 @@ func TestMCPGamesGetReportsNotFoundForAMissingProject(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer5@example.test", DisplayName: "Designer", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	missing := uuid.New()
 	tokenID := uuid.New()
@@ -242,17 +177,11 @@ func TestCallerForTokenRejectsARevokedToken(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer6@example.test", DisplayName: "Designer", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, summary, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: summary.ID}); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
 	}

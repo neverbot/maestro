@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/web"
@@ -69,57 +70,33 @@ func TestSearchReturnsBothKindsInOneLabelledList(t *testing.T) {
 	// A word from the quest's own name that the script does not carry: an
 	// entity hit, and nothing else.
 	byName, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "wanted"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(byName.Items) != 1 || byName.Items[0].Kind != "entity" ||
-		byName.Items[0].Entity == nil || byName.Items[0].Entity.Key != "hogger" {
-		t.Fatalf("searching the quest's name gave %+v, want one entity hit", byName.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(byName.Items) == 1 && byName.Items[0].Kind == "entity" && byName.Items[0].Entity != nil && byName.Items[0].Entity.Key == "hogger", "searching the quest's name gave %+v, want one entity hit", byName.Items)
 	if byName.Items[0].Document != nil {
 		t.Fatalf("an entity hit carries a document half: %+v", byName.Items[0])
 	}
 
 	// A line of dialogue: a document hit, and it names the quest.
 	byLine, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "candle"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(byLine.Items) != 1 || byLine.Items[0].Kind != "document" {
-		t.Fatalf("searching a line of dialogue gave %+v, want one document hit", byLine.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(byLine.Items) == 1 && byLine.Items[0].Kind == "document", "searching a line of dialogue gave %+v, want one document hit", byLine.Items)
 	hit := byLine.Items[0]
-	if hit.Entity != nil {
-		t.Fatalf("a document hit carries an entity half: %+v", hit)
-	}
+	assert.Must(t, hit.Entity == nil, "a document hit carries an entity half: %+v", hit)
 	doc := hit.Document
-	if doc == nil || doc.Path != "scripts/hogger" || doc.Title != "The Confrontation" ||
-		doc.DocKind != "script" || doc.Version != 1 || doc.ID == uuid.Nil {
-		t.Fatalf("document half = %+v, want the script read back in full", doc)
-	}
-	if len(doc.LinkedTo) != 1 || doc.LinkedTo[0].EntityKey != "hogger" ||
-		doc.LinkedTo[0].EntityTypeKey != "quest" || doc.LinkedTo[0].Name != "Wanted: Hogger" ||
-		doc.LinkedTo[0].Role != "script" {
-		t.Fatalf("linked_to = %+v, want the quest the script belongs to", doc.LinkedTo)
-	}
+	assert.Must(t, doc != nil && doc.Path == "scripts/hogger" && doc.Title == "The Confrontation" && doc.DocKind == "script" && doc.Version == 1 && doc.ID != uuid.Nil, "document half = %+v, want the script read back in full", doc)
+	assert.Must(t, len(doc.LinkedTo) == 1 && doc.LinkedTo[0].EntityKey == "hogger" && doc.LinkedTo[0].EntityTypeKey == "quest" && doc.LinkedTo[0].Name == "Wanted: Hogger" && doc.LinkedTo[0].Role == "script", "linked_to = %+v, want the quest the script belongs to", doc.LinkedTo)
 
 	// One query that both indexes answer — the quest is *named* Hogger
 	// and the script's dialogue says it — so: one list, both labels.
 	both, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "hogger"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(both.Items) != 2 {
-		t.Fatalf("%d hits for a query both indexes answer, want 2: %+v", len(both.Items), both.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(both.Items) == 2, "%d hits for a query both indexes answer, want 2: %+v", len(both.Items), both.Items)
 	kinds := map[string]int{}
 	for _, item := range both.Items {
 		kinds[item.Kind]++
 	}
-	if kinds["entity"] != 1 || kinds["document"] != 1 {
-		t.Fatalf("kinds = %v, want one of each in the one list", kinds)
-	}
+	assert.Must(t, kinds["entity"] == 1 && kinds["document"] == 1, "kinds = %v, want one of each in the one list", kinds)
 }
 
 func TestSearchNarrowsToOneKind(t *testing.T) {
@@ -138,12 +115,8 @@ func TestSearchNarrowsToOneKind(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 				web.SearchInput{Query: query, Kind: tc.kind})
-			if err != nil {
-				t.Fatalf("MCPSearch: %v", err)
-			}
-			if len(out.Items) != 1 {
-				t.Fatalf("%d hits, want the one of kind %q: %+v", len(out.Items), tc.want, out.Items)
-			}
+			assert.Must(t, err == nil, "MCPSearch: %v", err)
+			assert.Must(t, len(out.Items) == 1, "%d hits, want the one of kind %q: %+v", len(out.Items), tc.want, out.Items)
 			if out.Items[0].Kind != tc.want {
 				t.Fatalf("kind = %q, want %q", out.Items[0].Kind, tc.want)
 			}
@@ -168,21 +141,12 @@ func TestSearchNarrowsDocumentsByDocKind(t *testing.T) {
 	}
 
 	all, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "candle"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(all.Items) != 2 {
-		t.Fatalf("%d hits with no doc_kind, want 2: %+v", len(all.Items), all.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(all.Items) == 2, "%d hits with no doc_kind, want 2: %+v", len(all.Items), all.Items)
 	narrowed, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "candle", DocKind: "script"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(narrowed.Items) != 1 || narrowed.Items[0].Document == nil ||
-		narrowed.Items[0].Document.Path != "scripts/hogger" {
-		t.Fatalf("doc_kind narrowed to %+v, want only the script", narrowed.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(narrowed.Items) == 1 && narrowed.Items[0].Document != nil && narrowed.Items[0].Document.Path == "scripts/hogger", "doc_kind narrowed to %+v, want only the script", narrowed.Items)
 }
 
 // TestAnUnrecognisedSearchKindIsRefused, and its two neighbours below,
@@ -223,16 +187,10 @@ func TestAnUnrecognisedSearchKindIsRefused(t *testing.T) {
 // they name.
 func requireMCPFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("want a refusal at %q, got nil", wantPath)
-	}
+	assert.Must(t, err != nil, "want a refusal at %q, got nil", wantPath)
 	var mcpErr *web.MCPError
-	if !errors.As(err, &mcpErr) {
-		t.Fatalf("want a *web.MCPError, got %#v", err)
-	}
-	if mcpErr.Code != "invalid_input" {
-		t.Fatalf("code = %q, want invalid_input: %v", mcpErr.Code, err)
-	}
+	assert.Must(t, errors.As(err, &mcpErr), "want a *web.MCPError, got %#v", err)
+	assert.Must(t, mcpErr.Code == "invalid_input", "code = %q, want invalid_input: %v", mcpErr.Code, err)
 	fields, _ := mcpErr.Details["fields"].([]map[string]string)
 	for _, field := range fields {
 		if field["path"] == wantPath && strings.Contains(field["message"], wantMessage) {
@@ -275,12 +233,8 @@ func TestSearchRanksANamedHitAboveAMentionAcrossKinds(t *testing.T) {
 	}
 
 	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "gnoll pack"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(out.Items) != 2 {
-		t.Fatalf("items = %+v, want both", out.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(out.Items) == 2, "items = %+v, want both", out.Items)
 	if out.Items[0].Kind != "document" || out.Items[0].Document == nil ||
 		out.Items[0].Document.Path != "lore/the-pack" || !out.Items[0].NameMatch {
 		t.Fatalf("first hit = %+v, want the document the query names, flagged", out.Items[0])
@@ -298,10 +252,8 @@ func TestSearchRanksANamedHitAboveAMentionAcrossKinds(t *testing.T) {
 	// every adjacent pair — the assertion that generalises past this
 	// fixture.
 	for i := 1; i < len(out.Items); i++ {
-		if !out.Items[i-1].NameMatch && out.Items[i].NameMatch {
-			t.Fatalf("items[%d].NameMatch = false sorted before items[%d].NameMatch = true: "+
-				"the wire order and the wire field disagree", i-1, i)
-		}
+		assert.Must(t, out.Items[i-1].NameMatch || !out.Items[i].NameMatch, "items[%d].NameMatch = false sorted before items[%d].NameMatch = true: "+
+			"the wire order and the wire field disagree", i-1, i)
 	}
 }
 
@@ -351,27 +303,19 @@ func TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls(t *testing.T) {
 	var first []string
 	for call := 0; call < 20; call++ {
 		out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "gnoll pack"})
-		if err != nil {
-			t.Fatalf("MCPSearch: %v", err)
-		}
+		assert.Must(t, err == nil, "MCPSearch: %v", err)
 		order := make([]string, 0, len(out.Items))
 		for _, item := range out.Items {
-			if item.Document == nil {
-				t.Fatalf("hit %+v is not a document hit", item)
-			}
+			assert.Must(t, item.Document != nil, "hit %+v is not a document hit", item)
 			order = append(order, item.Document.Path)
 		}
-		if len(order) != equalRanked {
-			t.Fatalf("%d hits, want all %d documents", len(order), equalRanked)
-		}
+		assert.Must(t, len(order) == equalRanked, "%d hits, want all %d documents", len(order), equalRanked)
 		if call == 0 {
 			first = order
 			continue
 		}
-		if strings.Join(order, ",") != strings.Join(first, ",") {
-			t.Fatalf("call %d answered %v, call 0 answered %v: two identical calls must "+
-				"answer identically", call, order, first)
-		}
+		assert.Must(t, strings.Join(order, ",") == strings.Join(first, ","), "call %d answered %v, call 0 answered %v: two identical calls must "+
+			"answer identically", call, order, first)
 	}
 }
 
@@ -387,16 +331,10 @@ func TestAnEmptySearchAnswerIsAnEmptyListAndNotNull(t *testing.T) {
 
 	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "murloc"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
 	raw, err := json.Marshal(out)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(raw), `"items":[]`) {
-		t.Fatalf("an empty answer marshals as %s, want an empty array", raw)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, strings.Contains(string(raw), `"items":[]`), "an empty answer marshals as %s, want an empty array", raw)
 }
 
 // TestASearchNeverLeavesTheTokensGame is the isolation the whole surface
@@ -443,9 +381,7 @@ func TestTheSearchWireTypesCarryExactlyTheseKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.value)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
+			assert.Must(t, err == nil, "marshal: %v", err)
 			var keyed map[string]json.RawMessage
 			if err := json.Unmarshal(raw, &keyed); err != nil {
 				t.Fatalf("decode %s: %v", raw, err)
@@ -455,11 +391,9 @@ func TestTheSearchWireTypesCarryExactlyTheseKeys(t *testing.T) {
 				got = append(got, k)
 			}
 			slices.Sort(got)
-			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-				t.Fatalf("wire keys = %v, want %v — a search wire type grew a field; decide "+
-					"whether an agent should see it, then update this list and the "+
-					"hand-written output schema beside it", got, tc.want)
-			}
+			assert.Must(t, strings.Join(got, ",") == strings.Join(tc.want, ","), "wire keys = %v, want %v — a search wire type grew a field; decide "+
+				"whether an agent should see it, then update this list and the "+
+				"hand-written output schema beside it", got, tc.want)
 		})
 	}
 }
@@ -483,9 +417,7 @@ func TestTheRESTMirrorAnswersWithTheSameLabelledHits(t *testing.T) {
 	}
 
 	rec := f.as(t, http.MethodGet, "/search?query=candle", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d: %s", rec.Code, rec.Body.String())
 	var out struct {
 		Items []struct {
 			Kind     string `json:"kind"`
@@ -498,10 +430,7 @@ func TestTheRESTMirrorAnswersWithTheSameLabelledHits(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode %s: %v", rec.Body.String(), err)
 	}
-	if len(out.Items) != 1 || out.Items[0].Kind != "document" ||
-		out.Items[0].Document == nil || out.Items[0].Document.Path != "scripts/hogger" {
-		t.Fatalf("REST search = %s, want the labelled document hit", rec.Body.String())
-	}
+	assert.Must(t, len(out.Items) == 1 && out.Items[0].Kind == "document" && out.Items[0].Document != nil && out.Items[0].Document.Path == "scripts/hogger", "REST search = %s, want the labelled document hit", rec.Body.String())
 
 	// The filters the mirror has to read for itself, since a parameter a
 	// person cannot spell in a URL is a filter this surface does not
@@ -510,14 +439,9 @@ func TestTheRESTMirrorAnswersWithTheSameLabelledHits(t *testing.T) {
 	if err := json.Unmarshal(narrowed.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode %s: %v", narrowed.Body.String(), err)
 	}
-	if len(out.Items) != 0 {
-		t.Fatalf("kind=entity over the REST mirror returned %s", narrowed.Body.String())
-	}
+	assert.Must(t, len(out.Items) == 0, "kind=entity over the REST mirror returned %s", narrowed.Body.String())
 	refused := f.as(t, http.MethodGet, "/search?query=candle&kind=quest", nil)
-	if refused.Code != http.StatusBadRequest ||
-		!strings.Contains(refused.Body.String(), "invalid_input") {
-		t.Fatalf("an unrecognised kind over REST = %d %s", refused.Code, refused.Body.String())
-	}
+	assert.Must(t, refused.Code == http.StatusBadRequest && strings.Contains(refused.Body.String(), "invalid_input"), "an unrecognised kind over REST = %d %s", refused.Code, refused.Body.String())
 }
 
 // TestADocumentHitPassesTheToolsOwnOutputSchema is the half no
@@ -548,14 +472,9 @@ func TestADocumentHitPassesTheToolsOwnOutputSchema(t *testing.T) {
 		} `json:"items"`
 	}
 	decodeStructured(t, callOK(t, session, "search", map[string]any{"query": "candle"}), &out)
-	if len(out.Items) != 1 || out.Items[0].Kind != "document" || out.Items[0].Document == nil {
-		t.Fatalf("search over the transport = %+v, want one document hit", out.Items)
-	}
+	assert.Must(t, len(out.Items) == 1 && out.Items[0].Kind == "document" && out.Items[0].Document != nil, "search over the transport = %+v, want one document hit", out.Items)
 	doc := out.Items[0].Document
-	if doc.Path != "scripts/hogger" || len(doc.LinkedTo) != 1 ||
-		doc.LinkedTo[0].EntityKey != "hogger" || doc.LinkedTo[0].Role != "script" {
-		t.Fatalf("document hit over the transport = %+v", doc)
-	}
+	assert.Must(t, doc.Path == "scripts/hogger" && len(doc.LinkedTo) == 1 && doc.LinkedTo[0].EntityKey == "hogger" && doc.LinkedTo[0].Role == "script", "document hit over the transport = %+v", doc)
 }
 
 // TestAMergedAnswerIsCutAtTheLimitAndSaysSo is the merge's own bound.
@@ -572,16 +491,10 @@ func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
 
 	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "hogger", Limit: 1})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(out.Items) != 1 {
-		t.Fatalf("%d hits for limit 1, want the merged answer cut to one: %+v",
-			len(out.Items), out.Items)
-	}
-	if !out.Truncated {
-		t.Fatal("an answer that filled the limit must say so: there is no cursor to be absent")
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(out.Items) == 1, "%d hits for limit 1, want the merged answer cut to one: %+v",
+		len(out.Items), out.Items)
+	assert.Must(t, out.Truncated, "an answer that filled the limit must say so: there is no cursor to be absent")
 	// The quest is *named* Hogger and the script only says the word, so
 	// the entity is what a merge-then-cut keeps.
 	if out.Items[0].Kind != "entity" || !out.Items[0].NameMatch {
@@ -591,12 +504,8 @@ func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
 	// reported as truncated, so `truncated` is not simply always true.
 	roomy, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "hogger", Limit: 5})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(roomy.Items) != 2 || roomy.Truncated {
-		t.Fatalf("two hits under a limit of five = %+v, truncated %v", roomy.Items, roomy.Truncated)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(roomy.Items) == 2 && !roomy.Truncated, "two hits under a limit of five = %+v, truncated %v", roomy.Items, roomy.Truncated)
 }
 
 // TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks is the
@@ -666,35 +575,23 @@ func TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks(t *testing.T) {
 
 	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "gnoll pack", Limit: 2 * groupSize})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(out.Items) != 2*groupSize {
-		t.Fatalf("%d hits, want both groups in full: %+v", len(out.Items), out.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(out.Items) == 2*groupSize, "%d hits, want both groups in full: %+v", len(out.Items), out.Items)
 
 	// The higher-ranked block (documents, 0.649) must lead the
 	// lower-ranked one (entities, 0.396): the reversal is real, not just
 	// a same-order coincidence.
 	for i, item := range out.Items[:groupSize] {
-		if item.Kind != "document" || item.Document == nil {
-			t.Fatalf("item %d = %+v, want a document (the higher-ranked block)", i, item)
-		}
+		assert.Must(t, item.Kind == "document" && item.Document != nil, "item %d = %+v, want a document (the higher-ranked block)", i, item)
 		wantTitle := fmt.Sprintf("Note %02d", i)
-		if item.Document.Title != wantTitle {
-			t.Fatalf("document block[%d].Title = %q, want %q: title-then-id tie-break not "+
-				"preserved across the merge", i, item.Document.Title, wantTitle)
-		}
+		assert.Must(t, item.Document.Title == wantTitle, "document block[%d].Title = %q, want %q: title-then-id tie-break not "+
+			"preserved across the merge", i, item.Document.Title, wantTitle)
 	}
 	for i, item := range out.Items[groupSize:] {
-		if item.Kind != "entity" || item.Entity == nil {
-			t.Fatalf("item %d = %+v, want an entity (the lower-ranked block)", groupSize+i, item)
-		}
+		assert.Must(t, item.Kind == "entity" && item.Entity != nil, "item %d = %+v, want an entity (the lower-ranked block)", groupSize+i, item)
 		wantName := fmt.Sprintf("Camp %02d", i)
-		if item.Entity.Name != wantName {
-			t.Fatalf("entity block[%d].Name = %q, want %q: name-then-id tie-break not "+
-				"preserved across the merge", i, item.Entity.Name, wantName)
-		}
+		assert.Must(t, item.Entity.Name == wantName, "entity block[%d].Name = %q, want %q: name-then-id tie-break not "+
+			"preserved across the merge", i, item.Entity.Name, wantName)
 	}
 }
 
@@ -720,19 +617,13 @@ func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T
 	_, err := web.MCPSearch(ctx, noMarkdown, f.caller, f.game,
 		web.SearchInput{Query: "gnoll", Kind: "document"})
 	var domainErr *web.MCPError
-	if !errors.As(err, &domainErr) || domainErr.Code != "not_found" {
-		t.Fatalf("MCPSearch(kind=document, no markdown service) = %v, want a not_found MCPError", err)
-	}
+	assert.Must(t, errors.As(err, &domainErr) && domainErr.Code == "not_found", "MCPSearch(kind=document, no markdown service) = %v, want a not_found MCPError", err)
 
 	// kind "" is unaffected: it still degrades to entities alone rather
 	// than failing.
 	both, err := web.MCPSearch(ctx, noMarkdown, f.caller, f.game, web.SearchInput{Query: "gnoll"})
-	if err != nil {
-		t.Fatalf("MCPSearch(kind=\"\", no markdown service): %v", err)
-	}
-	if len(both.Items) != 0 {
-		t.Fatalf("no entities matched \"gnoll\", got %+v", both.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch(kind=\"\", no markdown service): %v", err)
+	assert.Must(t, len(both.Items) == 0, "no entities matched \"gnoll\", got %+v", both.Items)
 }
 
 // TestASearchOmitsFieldsUnlessAskedToBeVerbose pins the flag Task 9's
@@ -768,12 +659,8 @@ func TestASearchOmitsFieldsUnlessAskedToBeVerbose(t *testing.T) {
 	}
 
 	plain, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "wanted"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(plain.Items) != 1 || plain.Items[0].Entity == nil {
-		t.Fatalf("search = %+v, want one entity hit", plain.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(plain.Items) == 1 && plain.Items[0].Entity != nil, "search = %+v, want one entity hit", plain.Items)
 	if plain.Items[0].Entity.Fields != nil {
 		t.Fatalf("a search nobody asked to be verbose carried fields: %+v", plain.Items[0].Entity)
 	}
@@ -784,22 +671,13 @@ func TestASearchOmitsFieldsUnlessAskedToBeVerbose(t *testing.T) {
 		t.Fatalf("a non-verbose hit lost part of its identity: %+v", got)
 	}
 	raw, err := json.Marshal(plain.Items[0])
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(raw), "fields") {
-		t.Fatalf("a non-verbose hit carries a fields key on the wire: %s", raw)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, !strings.Contains(string(raw), "fields"), "a non-verbose hit carries a fields key on the wire: %s", raw)
 
 	verbose, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
 		web.SearchInput{Query: "wanted", Verbose: true})
-	if err != nil {
-		t.Fatalf("MCPSearch verbose: %v", err)
-	}
-	if len(verbose.Items) != 1 || verbose.Items[0].Entity == nil ||
-		verbose.Items[0].Entity.Fields["briefing"] != briefing {
-		t.Fatalf("a verbose search left the row's values out: %+v", verbose.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch verbose: %v", err)
+	assert.Must(t, len(verbose.Items) == 1 && verbose.Items[0].Entity != nil && verbose.Items[0].Entity.Fields["briefing"] == briefing, "a verbose search left the row's values out: %+v", verbose.Items)
 }
 
 // TestTheRESTMirrorTakesTheSameVerboseFlag is the other half of the flag:
@@ -828,9 +706,7 @@ func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
 	read := func(t *testing.T, path string) map[string]json.RawMessage {
 		t.Helper()
 		rec := f.as(t, http.MethodGet, path, nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "GET %s = %d: %s", path, rec.Code, rec.Body.String())
 		var out struct {
 			Items []struct {
 				Entity map[string]json.RawMessage `json:"entity"`
@@ -839,9 +715,7 @@ func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 			t.Fatalf("decode %s: %v", rec.Body.String(), err)
 		}
-		if len(out.Items) != 1 {
-			t.Fatalf("GET %s answered with %s, want one hit", path, rec.Body.String())
-		}
+		assert.Must(t, len(out.Items) == 1, "GET %s answered with %s, want one hit", path, rec.Body.String())
 		return out.Items[0].Entity
 	}
 
@@ -853,10 +727,7 @@ func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
 		t.Fatalf("verbose=true over REST returned %s", fields)
 	}
 	refused := f.as(t, http.MethodGet, "/search?query=wanted&verbose=", nil)
-	if refused.Code != http.StatusBadRequest ||
-		!strings.Contains(refused.Body.String(), "invalid_input") {
-		t.Fatalf("?verbose= over REST = %d %s", refused.Code, refused.Body.String())
-	}
+	assert.Must(t, refused.Code == http.StatusBadRequest && strings.Contains(refused.Body.String(), "invalid_input"), "?verbose= over REST = %d %s", refused.Code, refused.Body.String())
 }
 
 // TestSearchFindsAnEntityByItsKeyOverTheToolSurface carries 0010's change
@@ -875,9 +746,7 @@ func TestSearchFindsAnEntityByItsKeyOverTheToolSurface(t *testing.T) {
 	seedSearchable(t, f)
 
 	hits, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "hogger"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
 	// "hogger" is both the entity's key and a word of its name, and it is
 	// also a word of the attached script's body, so this call proves the
 	// key does not break the merge either.
@@ -888,9 +757,7 @@ func TestSearchFindsAnEntityByItsKeyOverTheToolSurface(t *testing.T) {
 			break
 		}
 	}
-	if entity == nil || entity.Entity.Key != "hogger" || !entity.NameMatch {
-		t.Fatalf("searching a word of the name gave %+v, want the named entity first", hits.Items)
-	}
+	assert.Must(t, entity != nil && entity.Entity.Key == "hogger" && entity.NameMatch, "searching a word of the name gave %+v, want the named entity first", hits.Items)
 
 	// And a handle that is nothing but a handle. The script's body does
 	// not carry it and neither does any name.
@@ -900,13 +767,8 @@ func TestSearchFindsAnEntityByItsKeyOverTheToolSurface(t *testing.T) {
 		t.Fatalf("MCPEntitiesUpsert: %v", err)
 	}
 	byKey, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "circuit-000"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(byKey.Items) != 1 || byKey.Items[0].Entity == nil ||
-		byKey.Items[0].Entity.Key != "circuit-000" {
-		t.Fatalf("searching a row's key gave %+v, want that row", byKey.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(byKey.Items) == 1 && byKey.Items[0].Entity != nil && byKey.Items[0].Entity.Key == "circuit-000", "searching a row's key gave %+v, want that row", byKey.Items)
 	if byKey.Items[0].NameMatch {
 		t.Fatalf("a hit found by its key alone claims name_match: %+v", byKey.Items[0])
 	}

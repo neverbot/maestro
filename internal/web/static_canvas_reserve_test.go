@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestTheDrawingsHoleIsReservedBeforeItArrives is a source guard over
@@ -32,33 +34,23 @@ import (
 func TestTheDrawingsHoleIsReservedBeforeItArrives(t *testing.T) {
 	t.Parallel()
 	styles, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatalf("read styles.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read styles.css: %v", err)
 	rule := regexp.MustCompile(`#view-root:empty\s*\{[^}]*\}`)
 	found := rule.FindString(string(styles))
 	if found == "" {
 		t.Fatal("no `#view-root:empty` rule: the drawing's hole is not reserved, so the page jumps " +
 			"when the picture arrives")
 	}
-	if !strings.Contains(found, "min-height") {
-		t.Errorf("the reservation sets no min-height:\n%s", found)
-	}
+	assert.Should(t, strings.Contains(found, "min-height"), "the reservation sets no min-height:\n%s", found)
 
 	canvas, err := os.ReadFile("static/components/mst-canvas.js")
-	if err != nil {
-		t.Fatalf("read mst-canvas.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read mst-canvas.js: %v", err)
 	// The numbers mst-canvas sizes itself with, taken from its own
 	// source rather than repeated here: a reservation that stops
 	// matching the box it reserves for is the same jump again.
 	for _, size := range []string{"70vh", "22rem"} {
-		if !strings.Contains(string(canvas), size) {
-			t.Fatalf("mst-canvas no longer sizes itself with %s, so this guard is comparing "+
-				"the reservation against a number nothing uses", size)
-		}
-		if !strings.Contains(found, size) {
-			t.Errorf("the reservation does not use %s, which is what the canvas will take:\n%s", size, found)
-		}
+		assert.Must(t, strings.Contains(string(canvas), size), "mst-canvas no longer sizes itself with %s, so this guard is comparing "+
+			"the reservation against a number nothing uses", size)
+		assert.Should(t, strings.Contains(found, size), "the reservation does not use %s, which is what the canvas will take:\n%s", size, found)
 	}
 }

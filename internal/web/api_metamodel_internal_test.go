@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
@@ -86,9 +87,7 @@ func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.writeDomainError(rec, httptest.NewRequest(http.MethodGet, "/api/games/x/entities", nil), tc.err)
 
-			if rec.Code != tc.status {
-				t.Errorf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
-			}
+			assert.Should(t, rec.Code == tc.status, "status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			var rest struct {
 				Error   string `json:"error"`
 				Message string `json:"message"`
@@ -96,9 +95,7 @@ func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &rest); err != nil {
 				t.Fatalf("decode %q: %v", rec.Body.String(), err)
 			}
-			if rest.Error != tc.code {
-				t.Errorf("code = %q, want %q", rest.Error, tc.code)
-			}
+			assert.Should(t, rest.Error == tc.code, "code = %q, want %q", rest.Error, tc.code)
 
 			// The same error through the MCP surface, which is what
 			// "twin" has to mean: one vocabulary regardless of who asked.
@@ -114,9 +111,7 @@ func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 			if err := json.Unmarshal([]byte(text.Text), &agent); err != nil {
 				t.Fatalf("decode %q: %v", text.Text, err)
 			}
-			if agent.Error != rest.Error {
-				t.Errorf("MCP said %q and REST said %q for the same error", agent.Error, rest.Error)
-			}
+			assert.Should(t, agent.Error == rest.Error, "MCP said %q and REST said %q for the same error", agent.Error, rest.Error)
 		})
 	}
 }
@@ -141,16 +136,10 @@ func TestTheRetryableAdviceIsTheSameOnBothSurfaces(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)
 	}
-	if !strings.Contains(body.Message, "send the same request again") {
-		t.Errorf("message = %q, want the first sentence", body.Message)
-	}
-	if !strings.Contains(body.Message, "ask for less") {
-		t.Errorf("message = %q, want the second sentence an agent already gets", body.Message)
-	}
+	assert.Should(t, strings.Contains(body.Message, "send the same request again"), "message = %q, want the first sentence", body.Message)
+	assert.Should(t, strings.Contains(body.Message, "ask for less"), "message = %q, want the second sentence an agent already gets", body.Message)
 	// The database's own words stay in the log, on this surface too.
-	if strings.Contains(body.Message, "canceling statement") {
-		t.Errorf("message = %q leaks the database's own text", body.Message)
-	}
+	assert.Should(t, !strings.Contains(body.Message, "canceling statement"), "message = %q leaks the database's own text", body.Message)
 }
 
 // codeOfResult pulls the wire code out of an MCP error result. Every
@@ -158,9 +147,7 @@ func TestTheRetryableAdviceIsTheSameOnBothSurfaces(t *testing.T) {
 // (mcpErrorResult), and this is the only thing an agent branches on.
 func codeOfResult(t *testing.T, result *mcp.CallToolResult) string {
 	t.Helper()
-	if !result.IsError {
-		t.Fatal("the result is not an error result")
-	}
+	assert.Must(t, result.IsError, "the result is not an error result")
 	text, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("content[0] = %T, want *mcp.TextContent", result.Content[0])
@@ -213,9 +200,7 @@ func TestEveryViewsSentinelHasAWireCode(t *testing.T) {
 		views.CodeQueryStale:           errCodeQueryStale,
 	}
 	sentinels := views.Sentinels()
-	if len(sentinels) == 0 {
-		t.Fatal("views.Sentinels() is empty; this test would pass vacuously")
-	}
+	assert.Must(t, len(sentinels) != 0, "views.Sentinels() is empty; this test would pass vacuously")
 	for _, sentinel := range sentinels {
 		result := mcpErrorFor(context.Background(), "views.run", Caller{}, sentinel)
 		code := codeOfResult(t, result)
@@ -230,9 +215,7 @@ func TestEveryViewsSentinelHasAWireCode(t *testing.T) {
 				sentinel, code)
 			continue
 		}
-		if code != expected {
-			t.Errorf("%v maps to %q, want %q", sentinel, code, expected)
-		}
+		assert.Should(t, code == expected, "%v maps to %q, want %q", sentinel, code, expected)
 	}
 }
 
@@ -250,9 +233,7 @@ func TestEveryViewsSentinelHasARESTStatus(t *testing.T) {
 		views.CodeQueryStale:           http.StatusConflict,
 	}
 	sentinels := views.Sentinels()
-	if len(sentinels) == 0 {
-		t.Fatal("views.Sentinels() is empty; this test would pass vacuously")
-	}
+	assert.Must(t, len(sentinels) != 0, "views.Sentinels() is empty; this test would pass vacuously")
 	for _, sentinel := range sentinels {
 		rec := httptest.NewRecorder()
 		srv.writeDomainError(rec, httptest.NewRequest(http.MethodPost, "/api/games/x/views/run", nil), sentinel)
@@ -261,12 +242,8 @@ func TestEveryViewsSentinelHasARESTStatus(t *testing.T) {
 			t.Errorf("%v is a sentinel this test does not name; it answered %d", sentinel, rec.Code)
 			continue
 		}
-		if rec.Code != expected {
-			t.Errorf("%v answered %d, want %d: %s", sentinel, rec.Code, expected, rec.Body.String())
-		}
-		if rec.Code == http.StatusInternalServerError {
-			t.Errorf("%v is a 500: a caller-fixable failure must never be one", sentinel)
-		}
+		assert.Should(t, rec.Code == expected, "%v answered %d, want %d: %s", sentinel, rec.Code, expected, rec.Body.String())
+		assert.Should(t, rec.Code != http.StatusInternalServerError, "%v is a 500: a caller-fixable failure must never be one", sentinel)
 	}
 }
 
@@ -284,9 +261,7 @@ func TestAQueryRefusalPublishesItsPointersOnBothSurfaces(t *testing.T) {
 
 	result := mcpErrorFor(context.Background(), "views.validate", Caller{}, err)
 	details := detailsOfResult(t, result)
-	if details == nil {
-		t.Fatal("the MCP refusal carried no details at all")
-	}
+	assert.Must(t, details != nil, "the MCP refusal carried no details at all")
 	fields, ok := details["fields"].([]any)
 	if !ok || len(fields) != 1 {
 		t.Fatalf("details.fields = %v, want the one problem", details["fields"])
@@ -306,9 +281,7 @@ func TestAQueryRefusalPublishesItsPointersOnBothSurfaces(t *testing.T) {
 	if jsonErr := json.Unmarshal(rec.Body.Bytes(), &body); jsonErr != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), jsonErr)
 	}
-	if len(body.Details.Fields) != 1 || body.Details.Fields[0]["path"] != "/traverse/0/via/0" {
-		t.Fatalf("REST details.fields = %v, want the same pointer", body.Details.Fields)
-	}
+	assert.Must(t, len(body.Details.Fields) == 1 && body.Details.Fields[0]["path"] == "/traverse/0/via/0", "REST details.fields = %v, want the same pointer", body.Details.Fields)
 }
 
 // TestAStaleViewCarriesItsDiagnosticsBesideItsFields pins the second
@@ -332,9 +305,7 @@ func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
 	}
 
 	details := detailsOfResult(t, mcpErrorFor(context.Background(), "views.run", Caller{}, err))
-	if details == nil {
-		t.Fatal("a stale refusal carried no details at all")
-	}
+	assert.Must(t, details != nil, "a stale refusal carried no details at all")
 	if _, ok := details["fields"]; !ok {
 		t.Error("details carried no fields: the addressed half is what an agent acts on")
 	}
@@ -343,10 +314,7 @@ func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
 		t.Fatalf("details.stale = %v, want the two diagnostics", details["stale"])
 	}
 	renamed, _ := stale[0].(map[string]any)
-	if renamed["code"] != "relation_type_renamed" || renamed["pointer"] != "/traverse/0/via/0" ||
-		renamed["was"] != "available_to" || renamed["now"] != "usable_by" {
-		t.Errorf("the rename diagnostic = %v, want its code, pointer and both spellings", renamed)
-	}
+	assert.Should(t, renamed["code"] == "relation_type_renamed" && renamed["pointer"] == "/traverse/0/via/0" && renamed["was"] == "available_to" && renamed["now"] == "usable_by", "the rename diagnostic = %v, want its code, pointer and both spellings", renamed)
 	// A type that is gone carries `was` and no `now`, because the game
 	// says nothing. Absent rather than empty: the two are different
 	// statements and only the first is true.
@@ -357,9 +325,7 @@ func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.writeDomainError(rec, httptest.NewRequest(http.MethodPost, "/api/games/x/views/run", nil), err)
-	if rec.Code != http.StatusConflict {
-		t.Errorf("REST status = %d, want 409", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusConflict, "REST status = %d, want 409", rec.Code)
 	var body struct {
 		Details struct {
 			Stale []map[string]string `json:"stale"`
@@ -368,9 +334,7 @@ func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
 	if jsonErr := json.Unmarshal(rec.Body.Bytes(), &body); jsonErr != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), jsonErr)
 	}
-	if len(body.Details.Stale) != 2 {
-		t.Fatalf("REST details.stale = %v, want the same two", body.Details.Stale)
-	}
+	assert.Must(t, len(body.Details.Stale) == 2, "REST details.stale = %v, want the same two", body.Details.Stale)
 }
 
 // TestATimedOutViewKeepsItsAdviceOnBothSurfaces is the arm ordering,
@@ -416,16 +380,12 @@ func TestATimedOutViewKeepsItsAdviceOnBothSurfaces(t *testing.T) {
 		t.Fatalf("decode %q: %v", text.Text, err)
 	}
 	for _, want := range []string{"max_depth", "max_nodes", "max_edges", "5s"} {
-		if !strings.Contains(agent.Message, want) {
-			t.Errorf("the MCP message does not name %s: %q", want, agent.Message)
-		}
+		assert.Should(t, strings.Contains(agent.Message, want), "the MCP message does not name %s: %q", want, agent.Message)
 	}
 
 	rec := httptest.NewRecorder()
 	srv.writeDomainError(rec, httptest.NewRequest(http.MethodPost, "/api/games/x/views/run", nil), timeout)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Errorf("REST status = %d, want 503", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusServiceUnavailable, "REST status = %d, want 503", rec.Code)
 	var browser struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
@@ -433,11 +393,7 @@ func TestATimedOutViewKeepsItsAdviceOnBothSurfaces(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &browser); err != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)
 	}
-	if browser.Error != errCodeRetryable {
-		t.Errorf("REST code = %q, want %q", browser.Error, errCodeRetryable)
-	}
-	if browser.Message != agent.Message {
-		t.Errorf("a designer was told %q and an agent %q for the same failure",
-			browser.Message, agent.Message)
-	}
+	assert.Should(t, browser.Error == errCodeRetryable, "REST code = %q, want %q", browser.Error, errCodeRetryable)
+	assert.Should(t, browser.Message == agent.Message, "a designer was told %q and an agent %q for the same failure",
+		browser.Message, agent.Message)
 }

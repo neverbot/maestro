@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // parseFails is the assertion every negative case below uses: the parse
@@ -13,16 +15,10 @@ import (
 func parseFails(t *testing.T, doc, wantPointer, wantMessageContains string) {
 	t.Helper()
 	_, err := ParseQuery([]byte(doc))
-	if err == nil {
-		t.Fatalf("this document must be refused: %s", doc)
-	}
-	if !errors.Is(err, ErrQueryInvalid) {
-		t.Fatalf("must be query_invalid, got %v", err)
-	}
+	assert.Must(t, err != nil, "this document must be refused: %s", doc)
+	assert.Must(t, errors.Is(err, ErrQueryInvalid), "must be query_invalid, got %v", err)
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
 	for _, f := range qe.Fields {
 		if f.Path == wantPointer && strings.Contains(f.Message, wantMessageContains) {
 			return
@@ -36,12 +32,8 @@ func parseFails(t *testing.T, doc, wantPointer, wantMessageContains string) {
 // would pass this whole file.
 func TestTheSimplestUsefulQueryParses(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}]}`))
-	if err != nil {
-		t.Fatalf("must parse: %v", err)
-	}
-	if len(q.From) != 1 || q.From[0].Type != "quest" {
-		t.Fatalf("from did not survive the parse: %+v", q.From)
-	}
+	assert.Must(t, err == nil, "must parse: %v", err)
+	assert.Must(t, len(q.From) == 1 && q.From[0].Type == "quest", "from did not survive the parse: %+v", q.From)
 	// `as` defaults to the type key, and the default is applied at parse
 	// time rather than at compile time so that every later stage sees one
 	// spelling of the set name.
@@ -109,17 +101,13 @@ func TestADirectionIsOneOfThree(t *testing.T) {
 func TestDepthTakesBothSpellings(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","as":"q"}],` +
 		`"traverse":[{"from":"q","via":"requires","depth":3,"as":"r"}]}`))
-	if err != nil {
-		t.Fatalf("a scalar depth must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "a scalar depth must parse: %v", err)
 	if q.Traverse[0].Depth.Min != 1 || q.Traverse[0].Depth.Max != 3 {
 		t.Fatalf("depth 3 must mean {min:1,max:3}, got %+v", q.Traverse[0].Depth)
 	}
 	q, err = ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","as":"q"}],` +
 		`"traverse":[{"from":"q","via":"requires","depth":{"min":2,"max":4},"as":"r"}]}`))
-	if err != nil {
-		t.Fatalf("an object depth must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "an object depth must parse: %v", err)
 	if q.Traverse[0].Depth.Min != 2 || q.Traverse[0].Depth.Max != 4 {
 		t.Fatalf("got %+v", q.Traverse[0].Depth)
 	}
@@ -136,17 +124,13 @@ func TestDepthTakesBothSpellings(t *testing.T) {
 func TestViaTakesBothSpellings(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","as":"q"}],` +
 		`"traverse":[{"from":"q","via":"requires","as":"r"}]}`))
-	if err != nil {
-		t.Fatalf("a scalar via must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "a scalar via must parse: %v", err)
 	if len(q.Traverse[0].Via) != 1 || q.Traverse[0].Via[0] != "requires" {
 		t.Fatalf(`via "requires" must decode to one element, got %v`, q.Traverse[0].Via)
 	}
 	q, err = ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","as":"q"}],` +
 		`"traverse":[{"from":"q","via":["requires","unlocks"],"as":"r"}]}`))
-	if err != nil {
-		t.Fatalf("a list via must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "a list via must parse: %v", err)
 	if len(q.Traverse[0].Via) != 2 {
 		t.Fatalf("got %v", q.Traverse[0].Via)
 	}
@@ -187,29 +171,21 @@ func TestEveryProblemWithOneQueryIsReportedInOnePass(t *testing.T) {
 	doc := `{"v":9,"from":[{"type":"has space","as":"q"}],` +
 		`"traverse":[{"from":"missing","via":"requires","direction":"sideways","as":"r"}]}`
 	_, err := ParseQuery([]byte(doc))
-	if err == nil {
-		t.Fatal("this document must be refused")
-	}
+	assert.Must(t, err != nil, "this document must be refused")
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
 	want := []string{"/v", "/from/0/type", "/traverse/0/from", "/traverse/0/direction"}
 	got := map[string]bool{}
 	for _, f := range qe.Fields {
 		got[f.Path] = true
 	}
 	for _, ptr := range want {
-		if !got[ptr] {
-			t.Errorf("the problem at %s was not reported in the same pass; got %v", ptr, qe.Fields)
-		}
+		assert.Should(t, got[ptr], "the problem at %s was not reported in the same pass; got %v", ptr, qe.Fields)
 	}
 	// The problems are ordered by pointer so two runs over the same
 	// document read the same way in a diff.
 	for i := 1; i < len(qe.Fields); i++ {
-		if qe.Fields[i-1].Path > qe.Fields[i].Path {
-			t.Fatalf("problems must be ordered by pointer, got %v", qe.Fields)
-		}
+		assert.Must(t, qe.Fields[i-1].Path <= qe.Fields[i].Path, "problems must be ordered by pointer, got %v", qe.Fields)
 	}
 }
 
@@ -252,13 +228,9 @@ func TestANodeEntryNamesADeclaredSet(t *testing.T) {
 func TestNodesDefaultToEverySetInDeclarationOrder(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","as":"q"},{"type":"zone"}],` +
 		`"traverse":[{"from":"q","via":"requires","as":"r"}]}`))
-	if err != nil {
-		t.Fatalf("must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "must parse: %v", err)
 	want := []string{"q", "zone", "r"}
-	if len(q.Nodes) != len(want) {
-		t.Fatalf("nodes must default to every declared set, got %+v", q.Nodes)
-	}
+	assert.Must(t, len(q.Nodes) == len(want), "nodes must default to every declared set, got %+v", q.Nodes)
 	for i, name := range want {
 		if q.Nodes[i].Set != name {
 			t.Fatalf("nodes[%d] = %q, want %q", i, q.Nodes[i].Set, name)
@@ -346,9 +318,7 @@ func TestEveryPredicateInAParsedQueryIsNormalised(t *testing.T) {
 	  "traverse":[{"from":"q","via":"requires","as":"r",
 	               "where":{"field":"tier","op":"eq","value":2},
 	               "edge_where":{"field":"weight","op":"eq","value":3}}]}`))
-	if err != nil {
-		t.Fatalf("must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "must parse: %v", err)
 
 	// Every leaf reachable from every predicate position, and the
 	// reference each one must carry.
@@ -359,10 +329,8 @@ func TestEveryPredicateInAParsedQueryIsNormalised(t *testing.T) {
 		"/traverse/0/edge_where":        q.Traverse[0].EdgeWhere,
 	}
 	for at, leaf := range leaves {
-		if leaf.FieldRef.Key != leaf.Field {
-			t.Errorf("the predicate at %s was not normalised: field %q, FieldRef %+v — "+
-				"Task 4 reads FieldRef and never Field", at, leaf.Field, leaf.FieldRef)
-		}
+		assert.Should(t, leaf.FieldRef.Key == leaf.Field, "the predicate at %s was not normalised: field %q, FieldRef %+v — "+
+			"Task 4 reads FieldRef and never Field", at, leaf.Field, leaf.FieldRef)
 		if want := strings.HasPrefix(leaf.Field, "@"); leaf.FieldRef.Builtin != want {
 			t.Errorf("the predicate at %s must record that %q is a built-in: %v, want %v",
 				at, leaf.Field, leaf.FieldRef.Builtin, want)
@@ -371,9 +339,7 @@ func TestEveryPredicateInAParsedQueryIsNormalised(t *testing.T) {
 	// The built-in leaf is the one that makes Builtin mean something: with
 	// it missing, every reference above could be a declared field key and
 	// the assertion would hold with the flag hard-wired to false.
-	if !q.From[0].Where.All[1].Not.Any[0].FieldRef.Builtin {
-		t.Fatal("@name must be recorded as a built-in")
-	}
+	assert.Must(t, q.From[0].Where.All[1].Not.Any[0].FieldRef.Builtin, "@name must be recorded as a built-in")
 }
 
 // TestALabelDefaultsToTheEntityName pins the last default applyDefaults
@@ -382,24 +348,14 @@ func TestEveryPredicateInAParsedQueryIsNormalised(t *testing.T) {
 // default in this file is pinned; this one was not.
 func TestALabelDefaultsToTheEntityName(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}]}`))
-	if err != nil {
-		t.Fatalf("must parse: %v", err)
-	}
-	if q.Project == nil {
-		t.Fatal("project must default to an empty projection rather than staying nil")
-	}
-	if q.Project.Label == nil || q.Project.Label.Attr != AttrName {
-		t.Fatalf("label must default to %q, got %+v", AttrName, q.Project.Label)
-	}
+	assert.Must(t, err == nil, "must parse: %v", err)
+	assert.Must(t, q.Project != nil, "project must default to an empty projection rather than staying nil")
+	assert.Must(t, q.Project.Label != nil && q.Project.Label.Attr == AttrName, "label must default to %q, got %+v", AttrName, q.Project.Label)
 	// A document that said what it wanted keeps it: the default is a
 	// default and not an overwrite.
 	q, err = ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}],"project":{"label":"title"}}`))
-	if err != nil {
-		t.Fatalf("must parse: %v", err)
-	}
-	if q.Project.Label.Attr != "title" {
-		t.Fatalf("an explicit label must survive the default, got %+v", q.Project.Label)
-	}
+	assert.Must(t, err == nil, "must parse: %v", err)
+	assert.Must(t, q.Project.Label.Attr == "title", "an explicit label must survive the default, got %+v", q.Project.Label)
 }
 
 // TestASetOfProblemsIsOrderedByIndexNotByPointerString pins the order
@@ -425,15 +381,9 @@ func TestASetOfProblemsIsOrderedByIndexNotByPointerString(t *testing.T) {
 	b.WriteString(`]}`)
 	_, err := ParseQuery([]byte(b.String()))
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("want a *QueryError, got %v", err)
-	}
-	if len(qe.Fields) != 2 {
-		t.Fatalf("want two problems, got %v", qe.Fields)
-	}
-	if qe.Fields[0].Path != "/from/2/type" || qe.Fields[1].Path != "/from/10/type" {
-		t.Fatalf("want /from/2/type before /from/10/type, got %v", qe.Fields)
-	}
+	assert.Must(t, errors.As(err, &qe), "want a *QueryError, got %v", err)
+	assert.Must(t, len(qe.Fields) == 2, "want two problems, got %v", qe.Fields)
+	assert.Must(t, qe.Fields[0].Path == "/from/2/type" && qe.Fields[1].Path == "/from/10/type", "want /from/2/type before /from/10/type, got %v", qe.Fields)
 }
 
 // TestAParameterKeyIsDeclaredOnce pins the rule a duplicate set name

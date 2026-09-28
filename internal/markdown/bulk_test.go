@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -47,32 +48,18 @@ func TestBulkArea(t *testing.T) {
 			{Path: "lore//westfall", Content: "# Westfall\n", ExpectedVersion: ptrInt32(0)},
 			batchItem("lore/redridge", "delta-secret"),
 		}, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("WriteMany: %v", err)
-		}
-		if len(result.Succeeded) != 3 || len(result.Written) != 3 {
-			t.Fatalf("succeeded = %d / written = %d, want 3 and 3",
-				len(result.Succeeded), len(result.Written))
-		}
-		if len(result.Failed) != 1 {
-			t.Fatalf("failed = %+v, want exactly one", result.Failed)
-		}
+		assert.Must(t, err == nil, "WriteMany: %v", err)
+		assert.Must(t, len(result.Succeeded) == 3 && len(result.Written) == 3, "succeeded = %d / written = %d, want 3 and 3",
+			len(result.Succeeded), len(result.Written))
+		assert.Must(t, len(result.Failed) == 1, "failed = %+v, want exactly one", result.Failed)
 		failure := result.Failed[0]
-		if failure.Index != 2 {
-			t.Fatalf("the failure must carry its own index, got %d", failure.Index)
-		}
-		if failure.Key != "lore//westfall" {
-			t.Fatalf("the failure must name the path the caller sent, got %q", failure.Key)
-		}
-		if failure.Code != "invalid_input" {
-			t.Fatalf("code = %q, want invalid_input for a malformed path", failure.Code)
-		}
+		assert.Must(t, failure.Index == 2, "the failure must carry its own index, got %d", failure.Index)
+		assert.Must(t, failure.Key == "lore//westfall", "the failure must name the path the caller sent, got %q", failure.Key)
+		assert.Must(t, failure.Code == "invalid_input", "code = %q, want invalid_input for a malformed path", failure.Code)
 		// A batch report is the one place one item's content could leak into
 		// a neighbour's error.
 		for _, leaked := range []string{"alpha-secret", "beta-secret", "delta-secret"} {
-			if strings.Contains(failure.Message, leaked) {
-				t.Fatalf("message %q leaks %q from another item", failure.Message, leaked)
-			}
+			assert.Must(t, !strings.Contains(failure.Message, leaked), "message %q leaks %q from another item", failure.Message, leaked)
 		}
 		// Every landed item is readable, the one after the failure included:
 		// item 4 landing cannot depend on item 3.
@@ -88,13 +75,9 @@ func TestBulkArea(t *testing.T) {
 		// has to be true of the stored row.
 		for _, w := range result.Written {
 			row, err := svc.Read(ctx, game, w.Path)
-			if err != nil {
-				t.Fatalf("read %q: %v", w.Path, err)
-			}
-			if w.ID != row.ID || w.Version != row.CurrentVersion {
-				t.Fatalf("written %+v does not match the stored row (%v, v%d)",
-					w, row.ID, row.CurrentVersion)
-			}
+			assert.Must(t, err == nil, "read %q: %v", w.Path, err)
+			assert.Must(t, w.ID == row.ID && w.Version == row.CurrentVersion, "written %+v does not match the stored row (%v, v%d)",
+				w, row.ID, row.CurrentVersion)
 		}
 	})
 
@@ -112,18 +95,10 @@ func TestBulkArea(t *testing.T) {
 			{Path: "lore//westfall", Content: "# Westfall\n", ExpectedVersion: ptrInt32(0)},
 			batchItem("lore/redridge", "delta"),
 		}, metamodel.BulkAtomic)
-		if err == nil {
-			t.Fatal("an atomic batch with a bad item must fail as a whole")
-		}
-		if !errors.Is(err, markdown.ErrInvalidInput) {
-			t.Fatalf("err = %v, want it to still read as invalid_input through the wrapping", err)
-		}
-		if !strings.Contains(err.Error(), `item 2 ("lore//westfall")`) {
-			t.Fatalf("err = %v, want it to name the failing item", err)
-		}
-		if len(result.Succeeded) != 0 || len(result.Written) != 0 || len(result.Failed) != 0 {
-			t.Fatalf("a failed atomic batch reports nothing as done: %+v", result)
-		}
+		assert.Must(t, err != nil, "an atomic batch with a bad item must fail as a whole")
+		assert.Must(t, errors.Is(err, markdown.ErrInvalidInput), "err = %v, want it to still read as invalid_input through the wrapping", err)
+		assert.Must(t, strings.Contains(err.Error(), `item 2 ("lore//westfall")`), "err = %v, want it to name the failing item", err)
+		assert.Must(t, len(result.Succeeded) == 0 && len(result.Written) == 0 && len(result.Failed) == 0, "a failed atomic batch reports nothing as done: %+v", result)
 		for _, path := range []string{"lore/duskwood", "lore/elwynn", "lore/redridge"} {
 			if _, err := svc.Read(ctx, game, path); !errors.Is(err, markdown.ErrNotFound) {
 				t.Fatalf("%q survived a rolled-back atomic batch: %v", path, err)
@@ -141,12 +116,8 @@ func TestBulkArea(t *testing.T) {
 			batchItem("lore/elwynn", "beta"),
 			batchItem("lore/redridge", "delta"),
 		}, metamodel.BulkAtomic)
-		if err != nil {
-			t.Fatalf("WriteMany: %v", err)
-		}
-		if len(result.Written) != 3 || len(result.Failed) != 0 {
-			t.Fatalf("result = %+v, want three written and none failed", result)
-		}
+		assert.Must(t, err == nil, "WriteMany: %v", err)
+		assert.Must(t, len(result.Written) == 3 && len(result.Failed) == 0, "result = %+v, want three written and none failed", result)
 		for _, path := range []string{"lore/duskwood", "lore/elwynn", "lore/redridge"} {
 			if _, err := svc.Read(ctx, game, path); err != nil {
 				t.Fatalf("read %q back after an atomic batch: %v", path, err)
@@ -187,40 +158,22 @@ func TestBulkArea(t *testing.T) {
 			},
 			batchItem("lore/redridge", "delta"),
 		}, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("WriteMany: %v", err)
-		}
-		if len(result.Failed) != 1 {
-			t.Fatalf("failed = %+v, want exactly one", result.Failed)
-		}
+		assert.Must(t, err == nil, "WriteMany: %v", err)
+		assert.Must(t, len(result.Failed) == 1, "failed = %+v, want exactly one", result.Failed)
 		failure := result.Failed[0]
-		if failure.Index != 1 || failure.Key != "lore/duskwood" {
-			t.Fatalf("failure = %+v, want index 1 naming lore/duskwood", failure)
-		}
-		if failure.Code != "version_conflict" {
-			t.Fatalf("code = %q, want version_conflict: a stale claim is per-item and per-item "+
-				"fixable, like a schema violation", failure.Code)
-		}
-		if !strings.Contains(failure.Message, "version 1") {
-			t.Fatalf("message = %q, want it to name the version to merge onto", failure.Message)
-		}
+		assert.Must(t, failure.Index == 1 && failure.Key == "lore/duskwood", "failure = %+v, want index 1 naming lore/duskwood", failure)
+		assert.Must(t, failure.Code == "version_conflict", "code = %q, want version_conflict: a stale claim is per-item and per-item "+
+			"fixable, like a schema violation", failure.Code)
+		assert.Must(t, strings.Contains(failure.Message, "version 1"), "message = %q, want it to name the version to merge onto", failure.Message)
 		// Even though this item asked for the echo: four hundred conflicts
 		// must not answer with four hundred bodies.
-		if strings.Contains(failure.Message, stored) {
-			t.Fatalf("message = %q echoes the current body; a batch never does", failure.Message)
-		}
-		if len(result.Written) != 2 {
-			t.Fatalf("written = %+v, want the two items whose claims were true", result.Written)
-		}
+		assert.Must(t, !strings.Contains(failure.Message, stored), "message = %q echoes the current body; a batch never does", failure.Message)
+		assert.Must(t, len(result.Written) == 2, "written = %+v, want the two items whose claims were true", result.Written)
 		// The refused item is untouched, not half-written.
 		row, err := svc.Read(ctx, game, "lore/duskwood")
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
-		if row.CurrentVersion != 1 || !strings.Contains(row.BodyMd, stored) {
-			t.Fatalf("the refused item moved the document: v%d, body %q",
-				row.CurrentVersion, row.BodyMd)
-		}
+		assert.Must(t, err == nil, "read: %v", err)
+		assert.Must(t, row.CurrentVersion == 1 && strings.Contains(row.BodyMd, stored), "the refused item moved the document: v%d, body %q",
+			row.CurrentVersion, row.BodyMd)
 	})
 
 	// TestBulkArea's "a batch item without an expected version fails alone"
@@ -236,21 +189,15 @@ func TestBulkArea(t *testing.T) {
 			{Path: "lore/elwynn", Content: "# Elwynn\n"},
 			batchItem("lore/redridge", "delta"),
 		}, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("WriteMany: %v", err)
-		}
-		if len(result.Failed) != 1 || result.Failed[0].Index != 1 {
-			t.Fatalf("failed = %+v, want exactly item 1", result.Failed)
-		}
+		assert.Must(t, err == nil, "WriteMany: %v", err)
+		assert.Must(t, len(result.Failed) == 1 && result.Failed[0].Index == 1, "failed = %+v, want exactly item 1", result.Failed)
 		if code := result.Failed[0].Code; code != "invalid_input" {
 			t.Fatalf("code = %q, want invalid_input", code)
 		}
 		if msg := result.Failed[0].Message; !strings.Contains(msg, "expected_version") {
 			t.Fatalf("message = %q, want it to name expected_version", msg)
 		}
-		if len(result.Written) != 2 {
-			t.Fatalf("written = %+v, want the other two", result.Written)
-		}
+		assert.Must(t, len(result.Written) == 2, "written = %+v, want the other two", result.Written)
 	})
 
 	// TestBulkArea's "a batch that repeats a path is diagnosed as such" case
@@ -269,32 +216,18 @@ func TestBulkArea(t *testing.T) {
 			// index folds case, so this is item 0 again.
 			batchItem("Lore/Duskwood", "second"),
 		}, metamodel.BulkPartial)
-		if err != nil {
-			t.Fatalf("WriteMany: %v", err)
-		}
-		if len(result.Failed) != 1 {
-			t.Fatalf("failed = %+v, want exactly one", result.Failed)
-		}
+		assert.Must(t, err == nil, "WriteMany: %v", err)
+		assert.Must(t, len(result.Failed) == 1, "failed = %+v, want exactly one", result.Failed)
 		failure := result.Failed[0]
-		if failure.Index != 2 || failure.Code != "invalid_input" {
-			t.Fatalf("failure = %+v, want index 2 coded invalid_input", failure)
-		}
-		if !strings.Contains(failure.Message, "item 0") {
-			t.Fatalf("message = %q, want it to name the item that already addressed the document",
-				failure.Message)
-		}
+		assert.Must(t, failure.Index == 2 && failure.Code == "invalid_input", "failure = %+v, want index 2 coded invalid_input", failure)
+		assert.Must(t, strings.Contains(failure.Message, "item 0"), "message = %q, want it to name the item that already addressed the document",
+			failure.Message)
 		// The *first* occurrence is a perfectly good item and lands.
 		row, err := svc.Read(ctx, game, "lore/duskwood")
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
-		if !strings.Contains(row.BodyMd, "first") {
-			t.Fatalf("body = %q, want the first occurrence's, not the repeat's", row.BodyMd)
-		}
-		if row.CurrentVersion != 1 {
-			t.Fatalf("version = %d: the repeat must not have written a second version",
-				row.CurrentVersion)
-		}
+		assert.Must(t, err == nil, "read: %v", err)
+		assert.Must(t, strings.Contains(row.BodyMd, "first"), "body = %q, want the first occurrence's, not the repeat's", row.BodyMd)
+		assert.Must(t, row.CurrentVersion == 1, "version = %d: the repeat must not have written a second version",
+			row.CurrentVersion)
 	})
 
 	// TestBulkArea's "an atomic batch that repeats a path is refused whole"
@@ -374,12 +307,8 @@ func TestBulkArea(t *testing.T) {
 		// the wrong comparison would refuse the batch it was sized for and
 		// every assertion above would still pass.
 		result, err := svc.WriteMany(ctx, game, items[:metamodel.MaxBulkItems], metamodel.BulkAtomic)
-		if err != nil {
-			t.Fatalf("a batch of exactly %d documents was refused: %v", metamodel.MaxBulkItems, err)
-		}
-		if len(result.Written) != metamodel.MaxBulkItems {
-			t.Fatalf("a batch of exactly %d documents wrote %d", metamodel.MaxBulkItems, len(result.Written))
-		}
+		assert.Must(t, err == nil, "a batch of exactly %d documents was refused: %v", metamodel.MaxBulkItems, err)
+		assert.Must(t, len(result.Written) == metamodel.MaxBulkItems, "a batch of exactly %d documents wrote %d", metamodel.MaxBulkItems, len(result.Written))
 	})
 
 	// TestBulkArea's "a batch announces every document it landed" case pins
@@ -407,17 +336,13 @@ func TestBulkArea(t *testing.T) {
 			select {
 			case ev := <-sub.C:
 				payload, ok := ev.Payload.(markdown.DocumentEvent)
-				if !ok {
-					t.Fatalf("payload = %#v, want a DocumentEvent", ev.Payload)
-				}
+				assert.Must(t, ok, "payload = %#v, want a DocumentEvent", ev.Payload)
 				seen[payload.Path] = true
 			case <-time.After(5 * time.Second):
 				t.Fatal("a landed document was not announced within 5s")
 			}
 		}
-		if !seen["lore/duskwood"] || !seen["lore/redridge"] {
-			t.Fatalf("announced %v, want both landed documents", seen)
-		}
+		assert.Must(t, seen["lore/duskwood"] && seen["lore/redridge"], "announced %v, want both landed documents", seen)
 		select {
 		case ev := <-sub.C:
 			t.Fatalf("a third event %v: the refused item announced nothing", ev.Payload)

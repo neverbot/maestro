@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -17,9 +18,7 @@ import (
 func resolveFor(t *testing.T, g *game, doc string) *Resolved {
 	t.Helper()
 	r, err := g.views.Resolve(context.Background(), g.projectID, mustParse(t, doc))
-	if err != nil {
-		t.Fatalf("this query must resolve; the test means to exercise the renderer: %v", err)
-	}
+	assert.Must(t, err == nil, "this query must resolve; the test means to exercise the renderer: %v", err)
 	return r
 }
 
@@ -27,16 +26,10 @@ func resolveFor(t *testing.T, g *game, doc string) *Resolved {
 // pointer, whose message contains want.
 func checkFails(t *testing.T, err error, sentinel error, ptr, want string) {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("expected a refusal at %s saying %q, got none", ptr, want)
-	}
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected %v, got %v", sentinel, err)
-	}
+	assert.Must(t, err != nil, "expected a refusal at %s saying %q, got none", ptr, want)
+	assert.Must(t, errors.Is(err, sentinel), "expected %v, got %v", sentinel, err)
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("expected a *QueryError, got %T: %v", err, err)
-	}
+	assert.Must(t, errors.As(err, &qe), "expected a *QueryError, got %T: %v", err, err)
 	for _, f := range qe.Fields {
 		if f.Path == ptr && strings.Contains(f.Message, want) {
 			return
@@ -50,9 +43,7 @@ func checkFails(t *testing.T, err error, sentinel error, ptr, want string) {
 // refusals.
 func checkPasses(t *testing.T, err error) {
 	t.Helper()
-	if err != nil {
-		t.Fatalf("this combination must be accepted: %v", err)
-	}
+	assert.Must(t, err == nil, "this combination must be accepted: %v", err)
 }
 
 // The two documents most tests here are built on: a plain quest query,
@@ -106,10 +97,8 @@ func TestRenderersArea(t *testing.T) {
 		checkFails(t, err, ErrQueryInvalid, "/renderer",
 			`"sankey" is not a renderer this catalogue has`)
 		for _, name := range RendererNames() {
-			if !strings.Contains(err.Error(), name) {
-				t.Errorf("the refusal must list %q: an agent that misspelled a renderer is "+
-					"told the catalogue, got %v", name, err)
-			}
+			assert.Should(t, strings.Contains(err.Error(), name), "the refusal must list %q: an agent that misspelled a renderer is "+
+				"told the catalogue, got %v", name, err)
 		}
 	})
 
@@ -130,9 +119,7 @@ func TestRenderersArea(t *testing.T) {
 		checkFails(t, err, ErrQueryInvalid, "/renderer_params/rank_dircetion",
 			`is not a parameter "layered" takes`)
 		for _, p := range rendererByName[RendererLayered].Params {
-			if !strings.Contains(err.Error(), p.Name) {
-				t.Errorf("the refusal must name %q, which layered does take: %v", p.Name, err)
-			}
+			assert.Should(t, strings.Contains(err.Error(), p.Name), "the refusal must name %q, which layered does take: %v", p.Name, err)
 		}
 		// A parameter of *another* renderer is not a parameter of this one:
 		// the catalogue is closed per renderer, not per union.
@@ -390,13 +377,9 @@ func TestRenderersArea(t *testing.T) {
 		} {
 			err := CheckRenderer(RendererTable, map[string]any{"columns": columns}, carrying)
 			var qe *QueryError
-			if !errors.As(err, &qe) {
-				t.Fatalf("%v: expected a *QueryError, got %v", columns, err)
-			}
-			if qe.Code != CodeQueryInvalid {
-				t.Errorf("%v answered %s: the code of a refusal must not depend on the "+
-					"order the columns were written in", columns, qe.Code)
-			}
+			assert.Must(t, errors.As(err, &qe), "%v: expected a *QueryError, got %v", columns, err)
+			assert.Should(t, qe.Code == CodeQueryInvalid, "%v answered %s: the code of a refusal must not depend on the "+
+				"order the columns were written in", columns, qe.Code)
 		}
 
 		// Ten indices, so the pointer order is the numeric one rather than
@@ -407,13 +390,9 @@ func TestRenderersArea(t *testing.T) {
 		}
 		err = CheckRenderer(RendererTable, map[string]any{"columns": many}, carrying)
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("expected a *QueryError, got %v", err)
-		}
-		if len(qe.Fields) != 11 {
-			t.Fatalf("expected all eleven columns to be reported, got %d: %v",
-				len(qe.Fields), qe.Fields)
-		}
+		assert.Must(t, errors.As(err, &qe), "expected a *QueryError, got %v", err)
+		assert.Must(t, len(qe.Fields) == 11, "expected all eleven columns to be reported, got %d: %v",
+			len(qe.Fields), qe.Fields)
 		for i, f := range qe.Fields {
 			if want := pointer("renderer_params", "columns", i); f.Path != want {
 				t.Errorf("problem %d is at %s, want %s", i, f.Path, want)
@@ -468,10 +447,8 @@ func TestRenderersArea(t *testing.T) {
 		// The description an agent reads must say where it went, or the
 		// refusal above is a dead end.
 		description := RendererDescription()
-		if !strings.Contains(description, "views.set_background") {
-			t.Errorf("the generated description must name views.set_background, since " +
-				"the background is refused as a parameter and set nowhere else")
-		}
+		assert.Should(t, strings.Contains(description, "views.set_background"), "the generated description must name views.set_background, since "+
+			"the background is refused as a parameter and set nowhere else")
 	})
 
 	t.Run("map in fields mode refuses non numeric coordinates", func(t *testing.T) {
@@ -586,9 +563,7 @@ func TestRenderersArea(t *testing.T) {
 		checkFails(t, err, ErrQueryInvalid, "/renderer_params/color_by",
 			`"rank" is not a projection slot`)
 		for _, slot := range slotNames() {
-			if !strings.Contains(err.Error(), slot) {
-				t.Errorf("the refusal must list the %q slot: %v", slot, err)
-			}
+			assert.Should(t, strings.Contains(err.Error(), slot), "the refusal must list the %q slot: %v", slot, err)
 		}
 	})
 
@@ -651,9 +626,7 @@ func TestRenderersArea(t *testing.T) {
 		}, resolveFor(t, g, questQuery))
 		checkFails(t, err, ErrQueryInvalid, "/renderer_params/lane_by",
 			"must name a projection slot, got a number")
-		if strings.Contains(err.Error(), "no_such_field") {
-			t.Fatalf("the shape problem is answered on its own: %v", err)
-		}
+		assert.Must(t, !strings.Contains(err.Error(), "no_such_field"), "the shape problem is answered on its own: %v", err)
 		// And with the shape fixed, the requirement is what comes back.
 		checkFails(t, CheckRenderer(RendererTimeline, map[string]any{
 			"axis_field": "no_such_field", "lane_by": "label",
@@ -673,12 +646,8 @@ func TestRenderersArea(t *testing.T) {
 			"edge_labels": "yes", "cluster_by": 1,
 		}, resolveFor(t, g, questQuery))
 		var qe *QueryError
-		if !errors.As(err, &qe) {
-			t.Fatalf("expected a *QueryError, got %v", err)
-		}
-		if len(qe.Fields) != 5 {
-			t.Fatalf("expected all five problems in one pass, got %v", qe.Fields)
-		}
+		assert.Must(t, errors.As(err, &qe), "expected a *QueryError, got %v", err)
+		assert.Must(t, len(qe.Fields) == 5, "expected all five problems in one pass, got %v", qe.Fields)
 		// And in a stable order rather than the map's, which has none.
 		//
 		// **The mechanism, measured rather than assumed.** The previous
@@ -714,18 +683,14 @@ func TestRenderersArea(t *testing.T) {
 				"edge_labels": "yes", "cluster_by": 1,
 			}, r)
 			var qe *QueryError
-			if !errors.As(err, &qe) {
-				t.Fatalf("run %d: expected a *QueryError, got %v", run, err)
-			}
+			assert.Must(t, errors.As(err, &qe), "run %d: expected a *QueryError, got %v", run, err)
 			var got []string
 			for _, f := range qe.Fields {
 				got = append(got, f.Path)
 			}
-			if fmt.Sprint(got) != fmt.Sprint(want) {
-				t.Fatalf("run %d came back as %v, want %v: sortProblems is what makes a "+
-					"refusal reproducible, and a refusal that is only usually in order "+
-					"is one a test cannot assert past its first line", run, got, want)
-			}
+			assert.Must(t, fmt.Sprint(got) == fmt.Sprint(want), "run %d came back as %v, want %v: sortProblems is what makes a "+
+				"refusal reproducible, and a refusal that is only usually in order "+
+				"is one a test cannot assert past its first line", run, got, want)
 		}
 	})
 
@@ -734,9 +699,7 @@ func TestRenderersArea(t *testing.T) {
 	// silently pass. A check that cannot see the query is not a check.
 	t.Run("a renderer is judged against a resolved query", func(t *testing.T) {
 		err := CheckRenderer(RendererGraph, map[string]any{"color_by": "label"}, nil)
-		if err == nil || !strings.Contains(err.Error(), "needs a resolved query") {
-			t.Fatalf("a nil resolved query must be refused, got %v", err)
-		}
+		assert.Must(t, err != nil && strings.Contains(err.Error(), "needs a resolved query"), "a nil resolved query must be refused, got %v", err)
 		// The unknown-renderer refusal is deliberately answerable without
 		// one: it reads nothing but the name.
 		checkFails(t, CheckRenderer("sankey", nil, nil), ErrQueryInvalid, "/renderer",
@@ -769,9 +732,7 @@ func TestRenderersArea(t *testing.T) {
 			{Query: full.Query},
 		} {
 			err := CheckRenderer(RendererGraph, map[string]any{"color_by": "label"}, half)
-			if err == nil || !strings.Contains(err.Error(), "needs a resolved query") {
-				t.Fatalf("a half-built resolved query must be refused, got %v", err)
-			}
+			assert.Must(t, err != nil && strings.Contains(err.Error(), "needs a resolved query"), "a half-built resolved query must be refused, got %v", err)
 		}
 	})
 
@@ -810,10 +771,8 @@ func TestRenderersArea(t *testing.T) {
 				for _, f := range qe.Fields {
 					found = found || f.Path == ptr
 				}
-				if !found {
-					t.Errorf("%s.%s (%s) took %v and the refusal named %v instead",
-						renderer.Name, p.Name, p.Kind, wrong, qe.Fields)
-				}
+				assert.Should(t, found, "%s.%s (%s) took %v and the refusal named %v instead",
+					renderer.Name, p.Name, p.Kind, wrong, qe.Fields)
 			}
 		}
 	})
@@ -836,11 +795,9 @@ func TestRenderersArea(t *testing.T) {
 			}
 		}
 		for kind := range paramCheckers {
-			if !used[kind] {
-				t.Errorf("kind %q is judged by a checker no parameter declares: it is "+
-					"unreachable, and an unreachable arm is a kind somebody meant to use",
-					kind)
-			}
+			assert.Should(t, used[kind], "kind %q is judged by a checker no parameter declares: it is "+
+				"unreachable, and an unreachable arm is a kind somebody meant to use",
+				kind)
 			// The same both-arms shape for the prose half. A kind with no
 			// phrase prints its own identifier into the description an agent
 			// reads — "x_field: number_field." names a Go constant at a
@@ -889,18 +846,14 @@ func TestRenderersArea(t *testing.T) {
 					"one kind of sentence this catalogue must never print", r.Name)
 			case r.Requires != nil:
 				documented++
-				if !strings.Contains(RendererDescription(), r.RequiresDoc) {
-					t.Errorf("%q's requirement is written on the table and printed "+
-						"nowhere", r.Name)
-				}
+				assert.Should(t, strings.Contains(RendererDescription(), r.RequiresDoc), "%q's requirement is written on the table and printed "+
+					"nowhere", r.Name)
 			}
 		}
 		// The vacuity check: this test asserts nothing over a catalogue whose
 		// Requires closures have all been deleted.
-		if documented < 5 {
-			t.Fatalf("the catalogue declares %d requirements and this test needs the "+
-				"five it has (graph, layered, nested, map, timeline)", documented)
-		}
+		assert.Must(t, documented >= 5, "the catalogue declares %d requirements and this test needs the "+
+			"five it has (graph, layered, nested, map, timeline)", documented)
 		// And the three sentences an agent cannot get anywhere else, named
 		// individually so that deleting a requirement quietly is a failure
 		// here as well as above.
@@ -909,9 +862,7 @@ func TestRenderersArea(t *testing.T) {
 			`in "manual" mode — which is the default — neither`,
 			"the same options in the same order",
 		} {
-			if !strings.Contains(RendererDescription(), want) {
-				t.Errorf("the description must say %q", want)
-			}
+			assert.Should(t, strings.Contains(RendererDescription(), want), "the description must say %q", want)
 		}
 	})
 
@@ -1003,10 +954,8 @@ func TestRenderersArea(t *testing.T) {
 		// The vacuity check: an arm that matches nothing asserts nothing, and
 		// this test would pass over a catalogue whose Required flags had all
 		// been deleted.
-		if required < 2 {
-			t.Fatalf("the catalogue declares %d required parameters and this test needs "+
-				"the two it has (nested's contain_via, timeline's axis_field)", required)
-		}
+		assert.Must(t, required >= 2, "the catalogue declares %d required parameters and this test needs "+
+			"the two it has (nested's contain_via, timeline's axis_field)", required)
 	})
 
 	// TestRenderersArea's "every renderer declares its parameters and the
@@ -1032,13 +981,9 @@ func TestRenderersArea(t *testing.T) {
 			}
 			seen := map[string]bool{}
 			for _, p := range r.Params {
-				if p.Doc == "" {
-					t.Errorf("%s.%s has no documentation: its meaning is written nowhere",
-						r.Name, p.Name)
-				}
-				if seen[p.Name] {
-					t.Errorf("%s declares %q twice", r.Name, p.Name)
-				}
+				assert.Should(t, p.Doc != "", "%s.%s has no documentation: its meaning is written nowhere",
+					r.Name, p.Name)
+				assert.Should(t, !(seen[p.Name]), "%s declares %q twice", r.Name, p.Name)
 				seen[p.Name] = true
 			}
 		}
@@ -1066,9 +1011,7 @@ func TestRenderersArea(t *testing.T) {
 				printed[current] = append(printed[current], m[1])
 			}
 		}
-		if fmt.Sprint(order) != fmt.Sprint(RendererNames()) {
-			t.Errorf("the description prints %v and the catalogue is %v", order, RendererNames())
-		}
+		assert.Should(t, fmt.Sprint(order) == fmt.Sprint(RendererNames()), "the description prints %v and the catalogue is %v", order, RendererNames())
 		for _, r := range renderers {
 			if fmt.Sprint(printed[r.Name]) != fmt.Sprint(r.paramNames()) {
 				t.Errorf("%q declares %v and the description prints %v",
@@ -1076,10 +1019,8 @@ func TestRenderersArea(t *testing.T) {
 			}
 			for _, p := range r.Params {
 				for _, value := range p.Values {
-					if !strings.Contains(RendererDescription(), value) {
-						t.Errorf("%s.%s admits %q and the description never prints it",
-							r.Name, p.Name, value)
-					}
+					assert.Should(t, strings.Contains(RendererDescription(), value), "%s.%s admits %q and the description never prints it",
+						r.Name, p.Name, value)
 				}
 			}
 		}
@@ -1102,9 +1043,7 @@ func TestRenderersArea(t *testing.T) {
 		// alone: no cursor on views.run, and the escape hatch named so it is
 		// not invented twice.
 		for _, want := range []string{"views.run has no cursor", "views.run_table"} {
-			if !strings.Contains(RendererDescription(), want) {
-				t.Errorf("the table renderer's description must say %q", want)
-			}
+			assert.Should(t, strings.Contains(RendererDescription(), want), "the table renderer's description must say %q", want)
 		}
 	})
 
@@ -1224,18 +1163,14 @@ func TestRenderersArea(t *testing.T) {
 		for _, forbidden := range []string{
 			"Task ", "§", "finding ", "correction ", ".sql", ".go",
 		} {
-			if strings.Contains(description, forbidden) {
-				t.Errorf("the renderer description contains %q, which names something only "+
-					"this repository knows: an agent reading it cannot act on that",
-					forbidden)
-			}
+			assert.Should(t, !strings.Contains(description, forbidden), "the renderer description contains %q, which names something only "+
+				"this repository knows: an agent reading it cannot act on that",
+				forbidden)
 		}
 		// The vacuity guard: a description that had gone empty would pass
 		// every assertion above.
-		if len(description) < 1000 {
-			t.Fatalf("the description is %d characters, which is too short to be the "+
-				"catalogue: this test would pass over nothing", len(description))
-		}
+		assert.Must(t, len(description) >= 1000, "the description is %d characters, which is too short to be the "+
+			"catalogue: this test would pass over nothing", len(description))
 	})
 }
 

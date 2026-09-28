@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -34,9 +35,7 @@ func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNoContent, "status = %d, want 204: %s", rec.Code, rec.Body.String())
 
 	var newCookie *http.Cookie
 	for _, c := range rec.Result().Cookies() {
@@ -44,12 +43,8 @@ func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *
 			newCookie = c
 		}
 	}
-	if newCookie == nil {
-		t.Fatal("handleChangePassword did not set a new session cookie")
-	}
-	if newCookie.Value == cookieHere.Value {
-		t.Fatal("the new session cookie must not reuse the old session's token")
-	}
+	assert.Must(t, newCookie != nil, "handleChangePassword did not set a new session cookie")
+	assert.Must(t, newCookie.Value != cookieHere.Value, "the new session cookie must not reuse the old session's token")
 
 	// The request's own session is dead (ChangePassword revokes
 	// everything), but the freshly issued cookie must work.
@@ -57,34 +52,26 @@ func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *
 	meReq.AddCookie(newCookie)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("/api/me with the freshly issued cookie = %d, want 200: %s", meRec.Code, meRec.Body.String())
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "/api/me with the freshly issued cookie = %d, want 200: %s", meRec.Code, meRec.Body.String())
 
 	// The other tab's session must be dead.
 	otherReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	otherReq.AddCookie(cookieElsewhere)
 	otherRec := httptest.NewRecorder()
 	srv.ServeHTTP(otherRec, otherReq)
-	if otherRec.Code != http.StatusUnauthorized {
-		t.Fatalf("/api/me with the other tab's cookie = %d, want 401", otherRec.Code)
-	}
+	assert.Must(t, otherRec.Code == http.StatusUnauthorized, "/api/me with the other tab's cookie = %d, want 401", otherRec.Code)
 
 	// The new password authenticates a fresh login; the old one no longer does.
 	oldReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@example.test","password":"password12345"}`))
 	oldReq.Header.Set("Content-Type", "application/json")
 	oldRec := httptest.NewRecorder()
 	srv.ServeHTTP(oldRec, oldReq)
-	if oldRec.Code != http.StatusUnauthorized {
-		t.Fatalf("login with old password = %d, want 401", oldRec.Code)
-	}
+	assert.Must(t, oldRec.Code == http.StatusUnauthorized, "login with old password = %d, want 401", oldRec.Code)
 	newReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@example.test","password":"newpassword12345"}`))
 	newReq.Header.Set("Content-Type", "application/json")
 	newRec := httptest.NewRecorder()
 	srv.ServeHTTP(newRec, newReq)
-	if newRec.Code != http.StatusOK {
-		t.Fatalf("login with new password = %d, want 200: %s", newRec.Code, newRec.Body.String())
-	}
+	assert.Must(t, newRec.Code == http.StatusOK, "login with new password = %d, want 200: %s", newRec.Code, newRec.Body.String())
 }
 
 // TestChangePasswordRejectsWrongCurrentPassword is the endpoint-level
@@ -105,9 +92,7 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401: %s", rec.Code, rec.Body.String())
 
 	// The original session must still be live — a rejected attempt has
 	// no side effect.
@@ -115,9 +100,7 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 	meReq.AddCookie(cookie)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("the caller's own session must survive a rejected attempt, /api/me = %d", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "the caller's own session must survive a rejected attempt, /api/me = %d", meRec.Code)
 }
 
 func TestChangePasswordRejectsSamePassword(t *testing.T) {
@@ -135,9 +118,7 @@ func TestChangePasswordRejectsSamePassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422: %s", rec.Code, rec.Body.String())
 }
 
 func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
@@ -155,9 +136,7 @@ func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422: %s", rec.Code, rec.Body.String())
 }
 
 // TestChangePasswordRejectsTokenCaller mirrors
@@ -170,13 +149,9 @@ func TestChangePasswordRejectsTokenCaller(t *testing.T) {
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/me/password", strings.NewReader(`{"current_password":"password12345","new_password":"newpassword12345"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -184,9 +159,7 @@ func TestChangePasswordRejectsTokenCaller(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403: %s", rec.Code, rec.Body.String())
 }
 
 // TestChangePasswordIsRateLimitedPerAccount pins the limiter's own key
@@ -213,9 +186,7 @@ func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
 		last = httptest.NewRecorder()
 		srv.ServeHTTP(last, req)
 	}
-	if last.Code != http.StatusUnauthorized {
-		t.Fatalf("last of 10 attempts = %d, want 401 (still under budget)", last.Code)
-	}
+	assert.Must(t, last.Code == http.StatusUnauthorized, "last of 10 attempts = %d, want 401 (still under budget)", last.Code)
 
 	// The 11th exhausts the budget.
 	req := httptest.NewRequest(http.MethodPatch, "/api/me/password", strings.NewReader(`{"current_password":"wrong","new_password":"newpassword12345"}`))
@@ -223,9 +194,7 @@ func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("11th attempt = %d, want 429", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusTooManyRequests, "11th attempt = %d, want 429", rec.Code)
 
 	// The other account's own budget is untouched.
 	otherReq := httptest.NewRequest(http.MethodPatch, "/api/me/password", strings.NewReader(`{"current_password":"wrong","new_password":"newpassword12345"}`))
@@ -233,9 +202,7 @@ func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
 	otherReq.Header.Set("Content-Type", "application/json")
 	otherRec := httptest.NewRecorder()
 	srv.ServeHTTP(otherRec, otherReq)
-	if otherRec.Code != http.StatusUnauthorized {
-		t.Fatalf("other account's own attempt = %d, want 401 (its own budget is untouched)", otherRec.Code)
-	}
+	assert.Must(t, otherRec.Code == http.StatusUnauthorized, "other account's own attempt = %d, want 401 (its own budget is untouched)", otherRec.Code)
 }
 
 // TestChangePasswordSucceedsWithCorrectPasswordEvenAfterWrongGuessBudgetExhausted
@@ -274,9 +241,7 @@ func TestChangePasswordSucceedsWithCorrectPasswordEvenAfterWrongGuessBudgetExhau
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("correct password after budget exhaustion = %d, want 204: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNoContent, "correct password after budget exhaustion = %d, want 204: %s", rec.Code, rec.Body.String())
 }
 
 // TestChangePasswordFloodLimiterBoundsRepeatedAttemptsRegardlessOfCorrectness
@@ -311,7 +276,5 @@ func TestChangePasswordFloodLimiterBoundsRepeatedAttemptsRegardlessOfCorrectness
 		last = httptest.NewRecorder()
 		srv.ServeHTTP(last, req)
 	}
-	if last.Code != http.StatusTooManyRequests {
-		t.Fatalf("61st attempt = %d, want 429", last.Code)
-	}
+	assert.Must(t, last.Code == http.StatusTooManyRequests, "61st attempt = %d, want 429", last.Code)
 }

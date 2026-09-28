@@ -1,6 +1,10 @@
 package testutil
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
+)
 
 func TestReplaceDBName(t *testing.T) {
 	cases := []struct {
@@ -40,17 +44,11 @@ func TestReplaceDBName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := replaceDBName(tc.rawURL, tc.dbName)
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("replaceDBName(%q) = %q, nil; want an error", tc.rawURL, got)
-				}
+				assert.Must(t, err != nil, "replaceDBName(%q) = %q, nil; want an error", tc.rawURL, got)
 				return
 			}
-			if err != nil {
-				t.Fatalf("replaceDBName(%q): %v", tc.rawURL, err)
-			}
-			if got != tc.want {
-				t.Fatalf("replaceDBName(%q) = %q, want %q", tc.rawURL, got, tc.want)
-			}
+			assert.Must(t, err == nil, "replaceDBName(%q): %v", tc.rawURL, err)
+			assert.Must(t, got == tc.want, "replaceDBName(%q) = %q, want %q", tc.rawURL, got, tc.want)
 		})
 	}
 }

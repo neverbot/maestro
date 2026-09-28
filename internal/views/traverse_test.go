@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // chainOfQuests seeds a prerequisite chain of five quests — c1 requires
@@ -36,9 +38,7 @@ func chainOfQuests(t *testing.T, g *game) {
 func runQuery(t *testing.T, g *game, doc string) Result {
 	t.Helper()
 	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	assert.Must(t, err == nil, "run: %v", err)
 	return res
 }
 
@@ -86,14 +86,10 @@ func TestTraverseArea(t *testing.T) {
 		// The fourth ancestor is one hop past the bound. It is reachable, it
 		// is of the right type, and nothing but the depth bound keeps it out.
 		for _, n := range res.Nodes {
-			if n.Key == "c5" {
-				t.Fatalf("c5 is four hops away and the step asked for three")
-			}
+			assert.Must(t, n.Key != "c5", "c5 is four hops away and the step asked for three")
 		}
-		if res.Stats.MaxDepthReached != 3 {
-			t.Errorf("the deepest node came back at three hops, stats say %d",
-				res.Stats.MaxDepthReached)
-		}
+		assert.Should(t, res.Stats.MaxDepthReached == 3, "the deepest node came back at three hops, stats say %d",
+			res.Stats.MaxDepthReached)
 	})
 
 	// TestTraverseArea's "a cycle in content is drawn rather than hung" case
@@ -124,9 +120,7 @@ func TestTraverseArea(t *testing.T) {
 		// earlier shape of the walk suppressed exactly that row, so the one
 		// thing a designer needs to see about a prerequisite cycle was the one
 		// thing no picture could show.
-		if len(res.Edges) != 3 {
-			t.Fatalf("a three-cycle has three edges, got %d", len(res.Edges))
-		}
+		assert.Must(t, len(res.Edges) == 3, "a three-cycle has three edges, got %d", len(res.Edges))
 		closing := false
 		byID := map[uuid.UUID]string{}
 		for _, n := range res.Nodes {
@@ -137,17 +131,13 @@ func TestTraverseArea(t *testing.T) {
 				closing = true
 			}
 		}
-		if !closing {
-			t.Errorf("the edge that closes the cycle (z requires x) must be drawn")
-		}
+		assert.Should(t, closing, "the edge that closes the cycle (z requires x) must be drawn")
 		// x is the seed and is two hops from nothing: it is claimed by the
 		// `start` entry at depth 0, and z, at two, is the furthest node the
 		// picture holds. The closing hop onto x at depth 3 is an edge, not a
 		// third distance to the same quest.
-		if res.Stats.MaxDepthReached != 2 {
-			t.Errorf("z is the furthest node at two hops and x is the seed at none, stats say %d",
-				res.Stats.MaxDepthReached)
-		}
+		assert.Should(t, res.Stats.MaxDepthReached == 2, "z is the furthest node at two hops and x is the seed at none, stats say %d",
+			res.Stats.MaxDepthReached)
 		// **The counts alone do not see the path guard**, and this is where
 		// that is said. The plan's own mutation for this test — break the
 		// guard and watch it hang — neither hangs nor fails: the depth bound
@@ -169,10 +159,8 @@ func TestTraverseArea(t *testing.T) {
 		// the views-level half: it says the defect is visible in the
 		// envelope a designer reads, not that it is the only thing that could
 		// have caused it.
-		if res.Truncated.Depth {
-			t.Errorf("the whole cycle is drawn and there is nothing past it, so this picture " +
-				"is not depth-truncated")
-		}
+		assert.Should(t, !res.Truncated.Depth, "the whole cycle is drawn and there is nothing past it, so this picture "+
+			"is not depth-truncated")
 	})
 
 	// TestTraverseArea's "min depth drops the near hops" case is the
@@ -219,9 +207,7 @@ func TestTraverseArea(t *testing.T) {
 		// Four edges, not eight: every edge of the chain is traversed once
 		// from each end under `any`, and a walk that emitted one arm per
 		// direction would hand each of them back twice.
-		if len(res.Edges) != 4 {
-			t.Fatalf("the four edges of the chain are drawn once each, got %d", len(res.Edges))
-		}
+		assert.Must(t, len(res.Edges) == 4, "the four edges of the chain are drawn once each, got %d", len(res.Edges))
 	})
 
 	// TestTraverseArea's "truncated depth is flagged" case is the field Task 7
@@ -243,9 +229,7 @@ func TestTraverseArea(t *testing.T) {
 			"nodes":[{"set":"chain"}]}`
 
 		cut := runQuery(t, g, fmt.Sprintf(doc, 2))
-		if !cut.Truncated.Depth {
-			t.Errorf("the chain runs two hops past the bound and the flag says it did not")
-		}
+		assert.Should(t, cut.Truncated.Depth, "the chain runs two hops past the bound and the flag says it did not")
 		if got := sortedKeysOf(cut); !equalStrings(got, []string{"c2", "c3"}) {
 			t.Errorf("the hop past the bound must be dropped, not drawn: %v", got)
 		}
@@ -254,10 +238,8 @@ func TestTraverseArea(t *testing.T) {
 		// is the assertion that separates a measured flag from "the deepest
 		// node sits at max_depth", which would report a whole picture partial.
 		whole := runQuery(t, g, fmt.Sprintf(doc, 4))
-		if whole.Truncated.Depth {
-			t.Errorf("the chain ends exactly at the bound, so nothing was cut off: %+v",
-				whole.Truncated)
-		}
+		assert.Should(t, !whole.Truncated.Depth, "the chain ends exactly at the bound, so nothing was cut off: %+v",
+			whole.Truncated)
 		if got := sortedKeysOf(whole); !equalStrings(got, []string{"c2", "c3", "c4", "c5"}) {
 			t.Errorf("control: four hops reaches the whole chain, got %v", got)
 		}
@@ -279,10 +261,8 @@ func TestTraverseArea(t *testing.T) {
 		if got := sortedKeysOf(hop); !equalStrings(got, []string{"c2"}) {
 			t.Fatalf("control: one hop from c1 is c2, got %v", got)
 		}
-		if hop.Truncated.Depth {
-			t.Errorf("a one-hop step is not probed, so it cannot report a depth truncation; "+
-				"c3, c4 and c5 lie past it and the flag stays false: %+v", hop.Truncated)
-		}
+		assert.Should(t, !hop.Truncated.Depth, "a one-hop step is not probed, so it cannot report a depth truncation; "+
+			"c3, c4 and c5 lie past it and the flag stays false: %+v", hop.Truncated)
 	})
 
 	// TestTraverseArea's "a complete picture of a dense graph is not depth
@@ -322,10 +302,8 @@ func TestTraverseArea(t *testing.T) {
 
 		// Four hops: t4 is one hop further and nothing else is missing.
 		cut := runQuery(t, g, fmt.Sprintf(doc, 4))
-		if !cut.Truncated.Depth {
-			t.Errorf("t4 is five hops from k1 and the bound is four, so the picture is "+
-				"genuinely cut short: %+v", cut.Truncated)
-		}
+		assert.Should(t, cut.Truncated.Depth, "t4 is five hops from k1 and the bound is four, so the picture is "+
+			"genuinely cut short: %+v", cut.Truncated)
 		if got := sortedKeysOf(cut); equalStrings(got, []string{}) {
 			t.Fatalf("control: the four-hop picture must not be empty")
 		}
@@ -338,15 +316,11 @@ func TestTraverseArea(t *testing.T) {
 		if got := sortedKeysOf(whole); !equalStrings(got, want) {
 			t.Fatalf("five hops reaches the whole graph, got %v", got)
 		}
-		if len(whole.Edges) != 19 {
-			t.Fatalf("the whole graph is fifteen clique edges and four tail edges, got %d",
-				len(whole.Edges))
-		}
-		if whole.Truncated.Depth {
-			t.Errorf("every node and every edge is drawn, so nothing is past the bound that "+
-				"the picture does not hold; the deeper paths through the clique reach "+
-				"nothing new: %+v", whole.Truncated)
-		}
+		assert.Must(t, len(whole.Edges) == 19, "the whole graph is fifteen clique edges and four tail edges, got %d",
+			len(whole.Edges))
+		assert.Should(t, !whole.Truncated.Depth, "every node and every edge is drawn, so nothing is past the bound that "+
+			"the picture does not hold; the deeper paths through the clique reach "+
+			"nothing new: %+v", whole.Truncated)
 	})
 
 	// TestTraverseArea's "a walk row cap is reported rather than losing
@@ -384,29 +358,19 @@ func TestTraverseArea(t *testing.T) {
 		// difference: with room for every traversal the picture is whole and
 		// nothing is flagged.
 		whole := runQuery(t, g, fmt.Sprintf(doc, 5000))
-		if len(whole.Edges) != 22 {
-			t.Fatalf("control: the whole graph is twenty-two relations, got %d", len(whole.Edges))
-		}
-		if whole.Truncated.Nodes || whole.Truncated.Edges || whole.Truncated.Depth {
-			t.Fatalf("control: nothing is truncated at max_nodes 5000: %+v", whole.Truncated)
-		}
+		assert.Must(t, len(whole.Edges) == 22, "control: the whole graph is twenty-two relations, got %d", len(whole.Edges))
+		assert.Must(t, !whole.Truncated.Nodes && !whole.Truncated.Edges && !whole.Truncated.Depth, "control: nothing is truncated at max_nodes 5000: %+v", whole.Truncated)
 
 		// And the cut: fewer edges than the graph holds, with neither cap
 		// reached — twenty-two relations is well under max_edges 1000, and
 		// the eight nodes are under max_nodes 8.
 		cut := runQuery(t, g, fmt.Sprintf(doc, 8))
-		if len(cut.Edges) >= 22 {
-			t.Fatalf("the walk's row cap must cut this picture for the flag to be about "+
-				"anything; got %d edges", len(cut.Edges))
-		}
-		if len(cut.Nodes) > 8 || len(cut.Edges) > 1000 {
-			t.Fatalf("neither element cap may be the thing that fired: %d nodes, %d edges",
-				len(cut.Nodes), len(cut.Edges))
-		}
-		if !cut.Truncated.Nodes || !cut.Truncated.Edges {
-			t.Errorf("a walk that hit its row cap handed back fewer traversals than the graph "+
-				"holds, and both element flags say so: %+v", cut.Truncated)
-		}
+		assert.Must(t, len(cut.Edges) < 22, "the walk's row cap must cut this picture for the flag to be about "+
+			"anything; got %d edges", len(cut.Edges))
+		assert.Must(t, len(cut.Nodes) <= 8 && len(cut.Edges) <= 1000, "neither element cap may be the thing that fired: %d nodes, %d edges",
+			len(cut.Nodes), len(cut.Edges))
+		assert.Should(t, cut.Truncated.Nodes && cut.Truncated.Edges, "a walk that hit its row cap handed back fewer traversals than the graph "+
+			"holds, and both element flags say so: %+v", cut.Truncated)
 	})
 
 	// TestTraverseArea's "a walk CT es binds are renumbered into the outer
@@ -539,10 +503,8 @@ func TestTraverseArea(t *testing.T) {
 		if got := sortedKeysOf(res); !equalStrings(got, []string{"m2"}) {
 			t.Fatalf("the chain is one hop long, got %v", got)
 		}
-		if res.Stats.MaxDepthReached != 1 {
-			t.Errorf("the walk asked for four hops and found one; stats say %d",
-				res.Stats.MaxDepthReached)
-		}
+		assert.Should(t, res.Stats.MaxDepthReached == 1, "the walk asked for four hops and found one; stats say %d",
+			res.Stats.MaxDepthReached)
 	})
 
 	// TestTraverseArea's "a walk from a walk counts its depth from the seed"
@@ -570,10 +532,8 @@ func TestTraverseArea(t *testing.T) {
 		// c5 is four hops from the seed: two through the first walk, two more
 		// through the second. Counted from the second walk's own anchor it
 		// would be two.
-		if res.Stats.MaxDepthReached != 4 {
-			t.Errorf("the deepest node is four hops from the seed selector, stats say %d",
-				res.Stats.MaxDepthReached)
-		}
+		assert.Should(t, res.Stats.MaxDepthReached == 4, "the deepest node is four hops from the seed selector, stats say %d",
+			res.Stats.MaxDepthReached)
 	})
 
 	// TestTraverseArea's "a walk from a set that reached a node twice counts
@@ -610,10 +570,8 @@ func TestTraverseArea(t *testing.T) {
 		// d4 is two hops from the seed the short way (d1 -> d3 -> d4) and
 		// three the long way. The picture reports the graph's distance, not
 		// the longest spelling of it that happened to be walked.
-		if res.Stats.MaxDepthReached != 2 {
-			t.Errorf("the deepest node is two hops from the seed, stats say %d",
-				res.Stats.MaxDepthReached)
-		}
+		assert.Should(t, res.Stats.MaxDepthReached == 2, "the deepest node is two hops from the seed, stats say %d",
+			res.Stats.MaxDepthReached)
 	})
 }
 
@@ -716,21 +674,15 @@ func TestAWalkStaysInsideOneGame(t *testing.T) {
 		t.Fatalf("the walk must reach this game's own quest and nothing else, got %v", got)
 	}
 	for _, n := range res.Nodes {
-		if n.ID == foreignTarget {
-			t.Errorf("a quest of another game came back through the walk")
-		}
+		assert.Should(t, n.ID != foreignTarget, "a quest of another game came back through the walk")
 	}
 	// The edges are asserted too, because the node arms filter on the
 	// project themselves: a walk that left the game would still have its
 	// far node dropped there and would hand back the edge pointing at it.
-	if len(res.Edges) != 1 {
-		t.Fatalf("one legitimate edge is drawn, got %d", len(res.Edges))
-	}
+	assert.Must(t, len(res.Edges) == 1, "one legitimate edge is drawn, got %d", len(res.Edges))
 	mine := map[uuid.UUID]bool{}
 	rows, err := g.pool.Query(ctx, `SELECT id FROM entities WHERE project_id = $1`, g.projectID)
-	if err != nil {
-		t.Fatalf("read this game's entities: %v", err)
-	}
+	assert.Must(t, err == nil, "read this game's entities: %v", err)
 	defer rows.Close()
 	for rows.Next() {
 		var eid uuid.UUID
@@ -740,8 +692,6 @@ func TestAWalkStaysInsideOneGame(t *testing.T) {
 		mine[eid] = true
 	}
 	for _, e := range res.Edges {
-		if !mine[e.Source] || !mine[e.Target] {
-			t.Errorf("an edge of this picture has an endpoint in another game: %+v", e)
-		}
+		assert.Should(t, mine[e.Source] && mine[e.Target], "an edge of this picture has an endpoint in another game: %+v", e)
 	}
 }

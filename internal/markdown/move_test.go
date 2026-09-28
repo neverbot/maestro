@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 )
 
@@ -31,9 +32,7 @@ func TestMoveArea(t *testing.T) {
 			Path: "lore/dusk", Content: "one\n", Kind: ptrString("lore"),
 			ExpectedVersion: ptrInt32(0), Message: "first",
 		})
-		if err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		assert.Must(t, err == nil, "write: %v", err)
 		if _, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "lore/dusk", Content: "two\n", ExpectedVersion: ptrInt32(1), Message: "second",
 		}); err != nil {
@@ -44,43 +43,25 @@ func TestMoveArea(t *testing.T) {
 			From: "lore/dusk", To: "zones/duskwood/lore", ExpectedVersion: ptrInt32(2),
 			Message: "filed under its zone",
 		})
-		if err != nil {
-			t.Fatalf("Move: %v", err)
-		}
-		if moved.ID != first.ID {
-			t.Fatalf("the move produced a different document (%s, was %s): it must be the "+
-				"same row, or the history forked exactly as writing-and-deleting did",
-				moved.ID, first.ID)
-		}
-		if moved.Path != "zones/duskwood/lore" {
-			t.Fatalf("Path = %q, want the destination", moved.Path)
-		}
-		if moved.CurrentVersion != 3 {
-			t.Fatalf("CurrentVersion = %d, want 3: the numbering continues rather than "+
-				"restarting at one", moved.CurrentVersion)
-		}
+		assert.Must(t, err == nil, "Move: %v", err)
+		assert.Must(t, moved.ID == first.ID, "the move produced a different document (%s, was %s): it must be the "+
+			"same row, or the history forked exactly as writing-and-deleting did",
+			moved.ID, first.ID)
+		assert.Must(t, moved.Path == "zones/duskwood/lore", "Path = %q, want the destination", moved.Path)
+		assert.Must(t, moved.CurrentVersion == 3, "CurrentVersion = %d, want 3: the numbering continues rather than "+
+			"restarting at one", moved.CurrentVersion)
 		// The two things a fork would have lost: the kind, and the creator.
-		if moved.Kind != "lore" {
-			t.Fatalf("Kind = %q, want it carried across the move", moved.Kind)
-		}
+		assert.Must(t, moved.Kind == "lore", "Kind = %q, want it carried across the move", moved.Kind)
 
 		// Every past version is still there, still readable, still numbered
 		// from one.
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "zones/duskwood/lore"})
-		if err != nil {
-			t.Fatalf("History at the new path: %v", err)
-		}
-		if len(page.Versions) != 3 {
-			t.Fatalf("history has %d versions, want 3", len(page.Versions))
-		}
+		assert.Must(t, err == nil, "History at the new path: %v", err)
+		assert.Must(t, len(page.Versions) == 3, "history has %d versions, want 3", len(page.Versions))
 		v1, err := svc.ReadVersion(ctx, game, "zones/duskwood/lore", 1)
-		if err != nil {
-			t.Fatalf("ReadVersion 1 through the new path: %v", err)
-		}
-		if v1.BodyMd != "one\n" || v1.Message != "first" {
-			t.Fatalf("version 1 = (%q, %q), want the writing from before the move",
-				v1.BodyMd, v1.Message)
-		}
+		assert.Must(t, err == nil, "ReadVersion 1 through the new path: %v", err)
+		assert.Must(t, v1.BodyMd == "one\n" && v1.Message == "first", "version 1 = (%q, %q), want the writing from before the move",
+			v1.BodyMd, v1.Message)
 
 		// The old path is free, not tombstoned: a move is not a delete, so
 		// nothing was left behind to resurrect.
@@ -90,13 +71,9 @@ func TestMoveArea(t *testing.T) {
 		written, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "lore/dusk", Content: "a new one\n", ExpectedVersion: ptrInt32(0),
 		})
-		if err != nil {
-			t.Fatalf("the old path must be free to create at, got %v", err)
-		}
-		if written.CurrentVersion != 1 || written.ID == moved.ID {
-			t.Fatalf("writing at the vacated path continued the moved document instead of "+
-				"creating a new one (version %d, id %s)", written.CurrentVersion, written.ID)
-		}
+		assert.Must(t, err == nil, "the old path must be free to create at, got %v", err)
+		assert.Must(t, written.CurrentVersion == 1 && written.ID != moved.ID, "writing at the vacated path continued the moved document instead of "+
+			"creating a new one (version %d, id %s)", written.CurrentVersion, written.ID)
 	})
 
 	// TestMoveArea's "a history shows where each version was written" case is
@@ -126,18 +103,14 @@ func TestMoveArea(t *testing.T) {
 		}
 
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "zones/dusk"})
-		if err != nil {
-			t.Fatalf("History: %v", err)
-		}
+		assert.Must(t, err == nil, "History: %v", err)
 		want := map[int32]string{1: "lore/dusk", 2: "zones/dusk", 3: "zones/dusk"}
 		for _, v := range page.Versions {
 			if v.Path != want[v.Version] {
 				t.Fatalf("version %d was written at %q, want %q", v.Version, v.Path, want[v.Version])
 			}
 		}
-		if len(page.Versions) != 3 {
-			t.Fatalf("history has %d versions, want 3", len(page.Versions))
-		}
+		assert.Must(t, len(page.Versions) == 3, "history has %d versions, want 3", len(page.Versions))
 	})
 
 	// TestMoveArea's "the version a move appends carries the new path and the
@@ -162,28 +135,15 @@ func TestMoveArea(t *testing.T) {
 		}
 
 		before, err := svc.ReadVersion(ctx, game, "zones/dusk", 1)
-		if err != nil {
-			t.Fatalf("ReadVersion 1: %v", err)
-		}
+		assert.Must(t, err == nil, "ReadVersion 1: %v", err)
 		after, err := svc.ReadVersion(ctx, game, "zones/dusk", 2)
-		if err != nil {
-			t.Fatalf("ReadVersion 2: %v", err)
-		}
-		if after.BodyMd != before.BodyMd || after.Title != before.Title ||
-			after.Summary != before.Summary || string(after.Frontmatter) != string(before.Frontmatter) {
-			t.Fatalf("the move's snapshot changed the writing: body %q vs %q, title %q vs %q",
-				after.BodyMd, before.BodyMd, after.Title, before.Title)
-		}
-		if before.Path != "lore/dusk" || after.Path != "zones/dusk" {
-			t.Fatalf("paths = %q then %q, want lore/dusk then zones/dusk: the path is the only "+
-				"thing a move's version row changes", before.Path, after.Path)
-		}
-		if after.Message != "wrong shelf" {
-			t.Fatalf("Message = %q, want the caller's own", after.Message)
-		}
-		if after.Deleted {
-			t.Fatal("a move's snapshot is marked as a tombstone")
-		}
+		assert.Must(t, err == nil, "ReadVersion 2: %v", err)
+		assert.Must(t, after.BodyMd == before.BodyMd && after.Title == before.Title && after.Summary == before.Summary && string(after.Frontmatter) == string(before.Frontmatter), "the move's snapshot changed the writing: body %q vs %q, title %q vs %q",
+			after.BodyMd, before.BodyMd, after.Title, before.Title)
+		assert.Must(t, before.Path == "lore/dusk" && after.Path == "zones/dusk", "paths = %q then %q, want lore/dusk then zones/dusk: the path is the only "+
+			"thing a move's version row changes", before.Path, after.Path)
+		assert.Must(t, after.Message == "wrong shelf", "Message = %q, want the caller's own", after.Message)
+		assert.Must(t, !after.Deleted, "a move's snapshot is marked as a tombstone")
 	})
 
 	// TestMoveArea's "a moved document keeps its links" case is the payoff of
@@ -210,20 +170,12 @@ func TestMoveArea(t *testing.T) {
 
 		// From the document's side.
 		links, err := svc.LinksByDocument(ctx, game, "zones/dusk", markdown.LinksFilter{})
-		if err != nil {
-			t.Fatalf("LinksByDocument at the new path: %v", err)
-		}
-		if len(links.Links) != 1 || links.Links[0].EntityKey != "wanted-hogger" {
-			t.Fatalf("the move lost the attachment: %+v", links.Links)
-		}
+		assert.Must(t, err == nil, "LinksByDocument at the new path: %v", err)
+		assert.Must(t, len(links.Links) == 1 && links.Links[0].EntityKey == "wanted-hogger", "the move lost the attachment: %+v", links.Links)
 		// And from the entity's, where the document's *new* path must show.
 		docs, err := svc.LinksByEntity(ctx, game, "quest", "wanted-hogger", markdown.LinksFilter{})
-		if err != nil {
-			t.Fatalf("LinksByEntity: %v", err)
-		}
-		if len(docs.Links) != 1 || docs.Links[0].Path != "zones/dusk" {
-			t.Fatalf("the quest still lists %+v, want one document at zones/dusk", docs.Links)
-		}
+		assert.Must(t, err == nil, "LinksByEntity: %v", err)
+		assert.Must(t, len(docs.Links) == 1 && docs.Links[0].Path == "zones/dusk", "the quest still lists %+v, want one document at zones/dusk", docs.Links)
 	})
 
 	// TestMoveArea's "a case only move is refused as a respelling" case is the
@@ -250,13 +202,9 @@ func TestMoveArea(t *testing.T) {
 		// And the document is untouched: not moved, not versioned, not
 		// respelled behind the refusal.
 		row, err := svc.Read(ctx, game, "lore/duskwood")
-		if err != nil {
-			t.Fatalf("Read after the refusal: %v", err)
-		}
-		if row.Path != "lore/duskwood" || row.CurrentVersion != 1 {
-			t.Fatalf("the refused move left the document at %q version %d",
-				row.Path, row.CurrentVersion)
-		}
+		assert.Must(t, err == nil, "Read after the refusal: %v", err)
+		assert.Must(t, row.Path == "lore/duskwood" && row.CurrentVersion == 1, "the refused move left the document at %q version %d",
+			row.Path, row.CurrentVersion)
 
 		// A move to the byte-identical path is the same family of refusal
 		// with its own wording, because "you asked for nothing" and "you
@@ -293,12 +241,8 @@ func TestMoveArea(t *testing.T) {
 		// Neither end moved and neither end was versioned.
 		for _, path := range []string{"lore/dusk", "zones/dusk"} {
 			row, err := svc.Read(ctx, game, path)
-			if err != nil {
-				t.Fatalf("Read %s: %v", path, err)
-			}
-			if row.CurrentVersion != 1 || row.BodyMd != path+"\n" {
-				t.Fatalf("%s = version %d body %q after a refused move", path, row.CurrentVersion, row.BodyMd)
-			}
+			assert.Must(t, err == nil, "Read %s: %v", path, err)
+			assert.Must(t, row.CurrentVersion == 1 && row.BodyMd == path+"\n", "%s = version %d body %q after a refused move", path, row.CurrentVersion, row.BodyMd)
 		}
 
 		// A destination taken under another casing is the same refusal and
@@ -402,14 +346,10 @@ func TestMoveArea(t *testing.T) {
 		})
 		requireRefusal(t, err)
 		conflict := requireConflict(t, err)
-		if conflict.Current != 2 {
-			t.Fatalf("Current = %d, want 2", conflict.Current)
-		}
+		assert.Must(t, conflict.Current == 2, "Current = %d, want 2", conflict.Current)
 		// A caller changing an address is not merging prose, so the body is
 		// not echoed — the same choice deleteRefusal makes.
-		if conflict.Include {
-			t.Fatal("a refused move echoed the document's body")
-		}
+		assert.Must(t, !conflict.Include, "a refused move echoed the document's body")
 		if _, err := svc.Read(ctx, game, "zones/dusk"); !errors.Is(err, markdown.ErrNotFound) {
 			t.Fatalf("the refused move landed anyway: %v", err)
 		}
@@ -455,26 +395,16 @@ func TestMoveArea(t *testing.T) {
 		moved, err := svc.Move(ctx, game, markdown.MoveInput{
 			From: "lore/dusk", To: "zones/dusk", ExpectedVersion: ptrInt32(1),
 		})
-		if err != nil {
-			t.Fatalf("Move: %v", err)
-		}
+		assert.Must(t, err == nil, "Move: %v", err)
 
 		ev := nextEvent(t, sub)
-		if ev.Kind != "document.moved" {
-			t.Fatalf("Kind = %q, want document.moved: a move is not a write, and a client "+
-				"treating it as one would re-fetch a path that is no longer there", ev.Kind)
-		}
+		assert.Must(t, ev.Kind == "document.moved", "Kind = %q, want document.moved: a move is not a write, and a client "+
+			"treating it as one would re-fetch a path that is no longer there", ev.Kind)
 		payload, ok := ev.Payload.(markdown.MoveEvent)
-		if !ok {
-			t.Fatalf("payload = %#v, want a markdown.MoveEvent", ev.Payload)
-		}
-		if payload.From != "lore/dusk" || payload.To != "zones/dusk" {
-			t.Fatalf("payload = (%q -> %q), want lore/dusk -> zones/dusk", payload.From, payload.To)
-		}
-		if payload.ID != moved.ID || payload.Version != moved.CurrentVersion {
-			t.Fatalf("payload = (%s, v%d), want (%s, v%d)",
-				payload.ID, payload.Version, moved.ID, moved.CurrentVersion)
-		}
+		assert.Must(t, ok, "payload = %#v, want a markdown.MoveEvent", ev.Payload)
+		assert.Must(t, payload.From == "lore/dusk" && payload.To == "zones/dusk", "payload = (%q -> %q), want lore/dusk -> zones/dusk", payload.From, payload.To)
+		assert.Must(t, payload.ID == moved.ID && payload.Version == moved.CurrentVersion, "payload = (%s, v%d), want (%s, v%d)",
+			payload.ID, payload.Version, moved.ID, moved.CurrentVersion)
 	})
 
 	// TestMoveArea's "no move is announced when the move is refused" case.
@@ -551,9 +481,7 @@ func TestMoveArea(t *testing.T) {
 			if err == nil {
 				continue
 			}
-			if strings.Contains(err.Error(), "40P01") || strings.Contains(err.Error(), "deadlock") {
-				t.Fatalf("mover %d met a deadlock: %v", i, err)
-			}
+			assert.Must(t, !strings.Contains(err.Error(), "40P01") && !strings.Contains(err.Error(), "deadlock"), "mover %d met a deadlock: %v", i, err)
 			// Every other refusal is legitimate: whichever move loses finds
 			// its destination occupied, and the answer names it.
 			requireFieldError(t, err, "to", "")
@@ -588,13 +516,9 @@ func TestMoveArea(t *testing.T) {
 		}
 
 		tombstone, err := svc.ReadVersion(ctx, game, "lore/duskwood", 2)
-		if err != nil {
-			t.Fatalf("ReadVersion: %v", err)
-		}
-		if tombstone.Path != "lore/duskwood" {
-			t.Fatalf("the tombstone records %q, want the stored spelling %q",
-				tombstone.Path, "lore/duskwood")
-		}
+		assert.Must(t, err == nil, "ReadVersion: %v", err)
+		assert.Must(t, tombstone.Path == "lore/duskwood", "the tombstone records %q, want the stored spelling %q",
+			tombstone.Path, "lore/duskwood")
 	})
 }
 
@@ -607,7 +531,5 @@ func TestMoveArea(t *testing.T) {
 // needs it.
 func requireRefusal(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("want a refusal, got none")
-	}
+	assert.Must(t, err != nil, "want a refusal, got none")
 }

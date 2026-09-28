@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 )
 
@@ -72,17 +73,11 @@ func TestListArea(t *testing.T) {
 			ExpectedVersion: ptrInt32(0),
 			Actor:           markdown.Actor{UserID: &designer},
 		})
-		if err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		assert.Must(t, err == nil, "write: %v", err)
 
 		page, err := svc.List(ctx, game, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 2 {
-			t.Fatalf("%d documents, want 2", len(page.Documents))
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 2, "%d documents, want 2", len(page.Documents))
 		if page.Documents[0].Path != "lore/duskwood" || page.Documents[1].Path != "scripts/hogger" {
 			t.Fatalf("paths = %q, %q, want path order",
 				page.Documents[0].Path, page.Documents[1].Path)
@@ -112,18 +107,12 @@ func TestListArea(t *testing.T) {
 			CreatedAt:      written.CreatedAt.Time,
 			UpdatedAt:      written.UpdatedAt.Time,
 		}
-		if got != want {
-			t.Fatalf("summary = %+v, want %+v", got, want)
-		}
+		assert.Must(t, got == want, "summary = %+v, want %+v", got, want)
 		for name, author := range map[string]markdown.Author{
 			"created_by": gotCreatedBy, "updated_by": gotUpdatedBy,
 		} {
-			if author.Kind != "user" || author.ID == nil || *author.ID != designer {
-				t.Fatalf("%s = %+v, want the designer %v", name, author, designer)
-			}
-			if author.Label != "designer@example.test" {
-				t.Fatalf("%s label = %q, want the designer's display name", name, author.Label)
-			}
+			assert.Must(t, author.Kind == "user" && author.ID != nil && *author.ID == designer, "%s = %+v, want the designer %v", name, author, designer)
+			assert.Must(t, author.Label == "designer@example.test", "%s label = %q, want the designer's display name", name, author.Label)
 		}
 		if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 			t.Fatal("a listing row that says nothing about when the document changed " +
@@ -161,12 +150,8 @@ func TestListArea(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		page, err := svc.List(ctx, game, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 1 {
-			t.Fatalf("%d documents, want 1", len(page.Documents))
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 1, "%d documents, want 1", len(page.Documents))
 		row := reflect.ValueOf(page.Documents[0])
 		for i := 0; i < row.NumField(); i++ {
 			field := row.Type().Field(i)
@@ -189,16 +174,10 @@ func TestListArea(t *testing.T) {
 		seedDocuments(t, svc, game, "scripts", 5)
 
 		first, err := svc.List(ctx, game, markdown.ListFilter{Limit: 25})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(first.Documents) != 25 || first.NextCursor == "" {
-			t.Fatalf("first page = %d docs, cursor %q", len(first.Documents), first.NextCursor)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(first.Documents) == 25 && first.NextCursor != "", "first page = %d docs, cursor %q", len(first.Documents), first.NextCursor)
 		second, err := svc.List(ctx, game, markdown.ListFilter{Limit: 25, Cursor: first.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
 		if second.Documents[0].Path != "lore/doc-025" {
 			t.Fatalf("second page starts at %q, want lore/doc-025", second.Documents[0].Path)
 		}
@@ -252,13 +231,9 @@ func TestListArea(t *testing.T) {
 		filtered, err := svc.List(ctx, game, markdown.ListFilter{
 			Limit: 2, EntityType: "quest", EntityKey: "wanted-hogger",
 		})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(filtered.Documents) != 2 || filtered.NextCursor == "" {
-			t.Fatalf("filtered page = %d docs, cursor %q",
-				len(filtered.Documents), filtered.NextCursor)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(filtered.Documents) == 2 && filtered.NextCursor != "", "filtered page = %d docs, cursor %q",
+			len(filtered.Documents), filtered.NextCursor)
 
 		// The same position, carried to the unfiltered listing and to a
 		// listing filtered on another entity. Both would page perfectly.
@@ -277,12 +252,8 @@ func TestListArea(t *testing.T) {
 			Limit: 2, Cursor: filtered.NextCursor,
 			EntityType: "QUEST", EntityKey: "Wanted-Hogger",
 		})
-		if err != nil {
-			t.Fatalf("a cursor must survive a respelling of its own filter: %v", err)
-		}
-		if len(same.Documents) != 2 || same.Documents[0].Path != "scripts/act-2" {
-			t.Fatalf("second filtered page = %+v, want scripts/act-2 first", same.Documents)
-		}
+		assert.Must(t, err == nil, "a cursor must survive a respelling of its own filter: %v", err)
+		assert.Must(t, len(same.Documents) == 2 && same.Documents[0].Path == "scripts/act-2", "second filtered page = %+v, want scripts/act-2 first", same.Documents)
 	})
 
 	t.Run("a cursor from another games listing is refused", func(t *testing.T) {
@@ -294,9 +265,7 @@ func TestListArea(t *testing.T) {
 		seedDocuments(t, svc, outland, "lore", 30)
 
 		first, err := svc.List(ctx, azeroth, markdown.ListFilter{Limit: 25})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
 		_, err = svc.List(ctx, outland, markdown.ListFilter{Limit: 25, Cursor: first.NextCursor})
 		requireFieldError(t, err, "cursor", "different listing")
 	})
@@ -308,37 +277,21 @@ func TestListArea(t *testing.T) {
 		seedDocuments(t, svc, game, "lore", 4)
 
 		page, err := svc.List(ctx, game, markdown.ListFilter{Limit: 4})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if page.NextCursor == "" {
-			t.Fatal("a full page must carry a cursor, even when it is the last one")
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, page.NextCursor != "", "a full page must carry a cursor, even when it is the last one")
 		empty, err := svc.List(ctx, game, markdown.ListFilter{Limit: 4, Cursor: page.NextCursor})
-		if err != nil {
-			t.Fatalf("final page: %v", err)
-		}
-		if len(empty.Documents) != 0 || empty.NextCursor != "" {
-			t.Fatalf("final page = %d docs with cursor %q, want empty and no cursor",
-				len(empty.Documents), empty.NextCursor)
-		}
+		assert.Must(t, err == nil, "final page: %v", err)
+		assert.Must(t, len(empty.Documents) == 0 && empty.NextCursor == "", "final page = %d docs with cursor %q, want empty and no cursor",
+			len(empty.Documents), empty.NextCursor)
 		// A page that came back short carries no cursor at all, which is the
 		// other half of the rule and the one a caller loops on.
 		short, err := svc.List(ctx, game, markdown.ListFilter{Limit: 3, Cursor: ""})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if short.NextCursor == "" {
-			t.Fatal("a full page of three must carry a cursor")
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, short.NextCursor != "", "a full page of three must carry a cursor")
 		rest, err := svc.List(ctx, game, markdown.ListFilter{Limit: 3, Cursor: short.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
-		if len(rest.Documents) != 1 || rest.NextCursor != "" {
-			t.Fatalf("short page = %d docs with cursor %q, want 1 and no cursor",
-				len(rest.Documents), rest.NextCursor)
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
+		assert.Must(t, len(rest.Documents) == 1 && rest.NextCursor == "", "short page = %d docs with cursor %q, want 1 and no cursor",
+			len(rest.Documents), rest.NextCursor)
 	})
 
 	// TestListArea's "an empty listing is an empty page and not nil" case pins
@@ -352,16 +305,10 @@ func TestListArea(t *testing.T) {
 		game := newGame(t, pool, "azeroth")
 
 		page, err := svc.List(context.Background(), game, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
 		encoded, err := json.Marshal(page.Documents)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		if string(encoded) != "[]" {
-			t.Fatalf("an empty listing marshals as %s, want []", encoded)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
+		assert.Must(t, string(encoded) == "[]", "an empty listing marshals as %s, want []", encoded)
 	})
 
 	t.Run("a path prefix filter does not treat underscore as a wildcard", func(t *testing.T) {
@@ -376,24 +323,16 @@ func TestListArea(t *testing.T) {
 			}
 		}
 		page, err := svc.List(ctx, game, markdown.ListFilter{PathPrefix: "lore_x"})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 1 || page.Documents[0].Path != "lore_x/one" {
-			t.Fatalf("documents = %+v, want only lore_x/one: `_` is a path character, not a wildcard",
-				page.Documents)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 1 && page.Documents[0].Path == "lore_x/one", "documents = %+v, want only lore_x/one: `_` is a path character, not a wildcard",
+			page.Documents)
 		// And the prefix folds case, like every other path comparison in
 		// this domain: a subtree is not two subtrees because someone
 		// capitalised it.
 		folded, err := svc.List(ctx, game, markdown.ListFilter{PathPrefix: "LORE_X/"})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(folded.Documents) != 1 || folded.Documents[0].Path != "lore_x/one" {
-			t.Fatalf("documents = %+v, want the prefix matched without regard to case",
-				folded.Documents)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(folded.Documents) == 1 && folded.Documents[0].Path == "lore_x/one", "documents = %+v, want the prefix matched without regard to case",
+			folded.Documents)
 	})
 
 	t.Run("a listing filters by kind and by entity", func(t *testing.T) {
@@ -417,22 +356,14 @@ func TestListArea(t *testing.T) {
 		}
 
 		byKind, err := svc.List(ctx, game, markdown.ListFilter{Kind: "SCRIPT"})
-		if err != nil {
-			t.Fatalf("List by kind: %v", err)
-		}
-		if len(byKind.Documents) != 1 || byKind.Documents[0].Path != "scripts/hogger" {
-			t.Fatalf("by kind = %+v, want the script (kinds fold case)", byKind.Documents)
-		}
+		assert.Must(t, err == nil, "List by kind: %v", err)
+		assert.Must(t, len(byKind.Documents) == 1 && byKind.Documents[0].Path == "scripts/hogger", "by kind = %+v, want the script (kinds fold case)", byKind.Documents)
 
 		byEntity, err := svc.List(ctx, game, markdown.ListFilter{
 			EntityType: "quest", EntityKey: "wanted-hogger",
 		})
-		if err != nil {
-			t.Fatalf("List by entity: %v", err)
-		}
-		if len(byEntity.Documents) != 1 || byEntity.Documents[0].Path != "scripts/hogger" {
-			t.Fatalf("by entity = %+v, want the script", byEntity.Documents)
-		}
+		assert.Must(t, err == nil, "List by entity: %v", err)
+		assert.Must(t, len(byEntity.Documents) == 1 && byEntity.Documents[0].Path == "scripts/hogger", "by entity = %+v, want the script", byEntity.Documents)
 	})
 
 	// TestListArea's "a document attached to two entities appears once in a
@@ -462,13 +393,9 @@ func TestListArea(t *testing.T) {
 		page, err := svc.List(ctx, game, markdown.ListFilter{
 			EntityType: "quest", EntityKey: "wanted-hogger",
 		})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 1 {
-			t.Fatalf("%d rows for one document attached to two entities, want 1: %+v",
-				len(page.Documents), page.Documents)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 1, "%d rows for one document attached to two entities, want 1: %+v",
+			len(page.Documents), page.Documents)
 	})
 
 	t.Run("an unknown filter key is not found rather than an empty page", func(t *testing.T) {
@@ -593,36 +520,22 @@ func TestListArea(t *testing.T) {
 		}
 
 		page, err := svc.List(ctx, game, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 1 {
-			t.Fatalf("%d documents, want 1", len(page.Documents))
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 1, "%d documents, want 1", len(page.Documents))
 		withDeleted, err := svc.List(ctx, game, markdown.ListFilter{IncludeDeleted: true})
-		if err != nil {
-			t.Fatalf("List including deleted: %v", err)
-		}
-		if len(withDeleted.Documents) != 2 {
-			t.Fatalf("%d documents, want 2", len(withDeleted.Documents))
-		}
+		assert.Must(t, err == nil, "List including deleted: %v", err)
+		assert.Must(t, len(withDeleted.Documents) == 2, "%d documents, want 2", len(withDeleted.Documents))
 		var seen bool
 		for _, doc := range withDeleted.Documents {
 			if doc.Path != "lore/doc-000" {
 				continue
 			}
 			seen = true
-			if !doc.Deleted {
-				t.Fatal("a deleted document in the listing must say it is deleted")
-			}
+			assert.Must(t, doc.Deleted, "a deleted document in the listing must say it is deleted")
 		}
-		if !seen {
-			t.Fatal("the deleted document is not in the listing that asked for it")
-		}
+		assert.Must(t, seen, "the deleted document is not in the listing that asked for it")
 		for _, doc := range page.Documents {
-			if doc.Deleted {
-				t.Fatalf("%q is listed as deleted in a listing that excludes them", doc.Path)
-			}
+			assert.Must(t, !doc.Deleted, "%q is listed as deleted in a listing that excludes them", doc.Path)
 		}
 	})
 
@@ -634,12 +547,8 @@ func TestListArea(t *testing.T) {
 		seedDocuments(t, svc, azeroth, "lore", 3)
 
 		page, err := svc.List(ctx, outland, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != 0 {
-			t.Fatalf("outland sees %d of azeroth's documents, want none", len(page.Documents))
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == 0, "outland sees %d of azeroth's documents, want none", len(page.Documents))
 	})
 
 	// TestListArea's "the limit is clamped rather than folded onto the
@@ -658,37 +567,21 @@ func TestListArea(t *testing.T) {
 		seedDocuments(t, svc, game, "lore", 60)
 
 		atCap, err := svc.List(ctx, game, markdown.ListFilter{Limit: markdown.MaxDocumentPage})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
 		overCap, err := svc.List(ctx, game, markdown.ListFilter{Limit: markdown.MaxDocumentPage + 1})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(atCap.Documents) != 60 {
-			t.Fatalf("asking for the cap returned %d of 60 documents", len(atCap.Documents))
-		}
-		if len(atCap.Documents) != len(overCap.Documents) {
-			t.Fatalf("asking for one more than the cap returned %d rather than %d: "+
-				"a limit over the cap is clamped, never folded onto the default",
-				len(overCap.Documents), len(atCap.Documents))
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(atCap.Documents) == 60, "asking for the cap returned %d of 60 documents", len(atCap.Documents))
+		assert.Must(t, len(atCap.Documents) == len(overCap.Documents), "asking for one more than the cap returned %d rather than %d: "+
+			"a limit over the cap is clamped, never folded onto the default",
+			len(overCap.Documents), len(atCap.Documents))
 		none, err := svc.List(ctx, game, markdown.ListFilter{Limit: 0})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(none.Documents) != int(markdown.DefaultDocumentPage) {
-			t.Fatalf("%d documents with no limit, want the default %d",
-				len(none.Documents), markdown.DefaultDocumentPage)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(none.Documents) == int(markdown.DefaultDocumentPage), "%d documents with no limit, want the default %d",
+			len(none.Documents), markdown.DefaultDocumentPage)
 		negative, err := svc.List(ctx, game, markdown.ListFilter{Limit: -1})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(negative.Documents) != int(markdown.DefaultDocumentPage) {
-			t.Fatalf("%d documents for a negative limit, want the default %d",
-				len(negative.Documents), markdown.DefaultDocumentPage)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(negative.Documents) == int(markdown.DefaultDocumentPage), "%d documents for a negative limit, want the default %d",
+			len(negative.Documents), markdown.DefaultDocumentPage)
 	})
 
 	// TestListArea's "a cap exceeding fixture is actually capped at the cap"
@@ -705,16 +598,10 @@ func TestListArea(t *testing.T) {
 		seedDocuments(t, svc, game, "lore", int(markdown.MaxDocumentPage)+1)
 
 		page, err := svc.List(ctx, game, markdown.ListFilter{Limit: markdown.MaxDocumentPage + 50})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(page.Documents) != int(markdown.MaxDocumentPage) {
-			t.Fatalf("%d documents, want the cap of %d: a limit over the cap must still be capped, "+
-				"not treated as no bound at all", len(page.Documents), markdown.MaxDocumentPage)
-		}
-		if page.NextCursor == "" {
-			t.Fatal("a page at the cap with rows still behind it must carry a cursor")
-		}
+		assert.Must(t, err == nil, "List: %v", err)
+		assert.Must(t, len(page.Documents) == int(markdown.MaxDocumentPage), "%d documents, want the cap of %d: a limit over the cap must still be capped, "+
+			"not treated as no bound at all", len(page.Documents), markdown.MaxDocumentPage)
+		assert.Must(t, page.NextCursor != "", "a page at the cap with rows still behind it must carry a cursor")
 	})
 
 	// TestListArea's "a listings cursor is refused when it is not one" case

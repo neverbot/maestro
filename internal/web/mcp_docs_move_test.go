@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/web"
 )
 
@@ -25,30 +26,18 @@ func TestAMoveOnTheSurfaceKeepsTheDocumentAndAnswersWithItsNewAddress(t *testing
 		Path: "lore/dusk.md", Content: "# Duskwood\n\nA wood.\n",
 		Kind: stringPtr("lore"), ExpectedVersion: int32Ptr(0),
 	})
-	if err != nil {
-		t.Fatalf("docs.write: %v", err)
-	}
+	assert.Must(t, err == nil, "docs.write: %v", err)
 
 	moved, err := web.MCPDocsMove(ctx, f.deps, f.caller, f.game, web.DocsMoveInput{
 		From: "lore/dusk.md", To: "zones/duskwood/lore.md",
 		ExpectedVersion: int32Ptr(1), Message: "filed under its zone",
 	})
-	if err != nil {
-		t.Fatalf("docs.move: %v", err)
-	}
-	if moved.Path != "zones/duskwood/lore.md" || moved.Version != 2 {
-		t.Fatalf("move answered (%q, v%d), want the destination at version 2",
-			moved.Path, moved.Version)
-	}
-	if moved.ID != written.ID {
-		t.Fatalf("move answered a different document: %s, was %s", moved.ID, written.ID)
-	}
-	if moved.Kind != "lore" {
-		t.Fatalf("Kind = %q, want it carried across", moved.Kind)
-	}
-	if moved.Deleted {
-		t.Fatal("a moved document came back marked deleted")
-	}
+	assert.Must(t, err == nil, "docs.move: %v", err)
+	assert.Must(t, moved.Path == "zones/duskwood/lore.md" && moved.Version == 2, "move answered (%q, v%d), want the destination at version 2",
+		moved.Path, moved.Version)
+	assert.Must(t, moved.ID == written.ID, "move answered a different document: %s, was %s", moved.ID, written.ID)
+	assert.Must(t, moved.Kind == "lore", "Kind = %q, want it carried across", moved.Kind)
+	assert.Must(t, !moved.Deleted, "a moved document came back marked deleted")
 	// The version the move answers with is the one a following write has
 	// to pass, and that is the whole reason a summary is returned rather
 	// than nothing. Asserted by using it.
@@ -65,21 +54,13 @@ func TestAMoveOnTheSurfaceKeepsTheDocumentAndAnswersWithItsNewAddress(t *testing
 	}
 	read, err := web.MCPDocsRead(ctx, f.deps, f.caller, f.game,
 		web.DocsReadInput{Path: "zones/duskwood/lore.md"})
-	if err != nil {
-		t.Fatalf("docs.read at the new path: %v", err)
-	}
-	if read.Version != 3 {
-		t.Fatalf("Version = %d, want 3", read.Version)
-	}
+	assert.Must(t, err == nil, "docs.read at the new path: %v", err)
+	assert.Must(t, read.Version == 3, "Version = %d, want 3", read.Version)
 
 	// And the listing lists it once, at the new path.
 	page, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{})
-	if err != nil {
-		t.Fatalf("docs.list: %v", err)
-	}
-	if len(page.Items) != 1 || page.Items[0].Path != "zones/duskwood/lore.md" {
-		t.Fatalf("listing = %+v, want one row at the new path", page.Items)
-	}
+	assert.Must(t, err == nil, "docs.list: %v", err)
+	assert.Must(t, len(page.Items) == 1 && page.Items[0].Path == "zones/duskwood/lore.md", "listing = %+v, want one row at the new path", page.Items)
 }
 
 // TestAHistoryOnTheSurfaceSaysWhereEachVersionWasWritten. The path is on
@@ -104,12 +85,8 @@ func TestAHistoryOnTheSurfaceSaysWhereEachVersionWasWritten(t *testing.T) {
 
 	hist, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.game,
 		web.DocsHistoryInput{Path: "zones/dusk.md"})
-	if err != nil {
-		t.Fatalf("docs.history: %v", err)
-	}
-	if len(hist.Items) != 2 {
-		t.Fatalf("history has %d items, want 2", len(hist.Items))
-	}
+	assert.Must(t, err == nil, "docs.history: %v", err)
+	assert.Must(t, len(hist.Items) == 2, "history has %d items, want 2", len(hist.Items))
 	// Newest first.
 	if hist.Items[0].Path != "zones/dusk.md" || hist.Items[1].Path != "lore/dusk.md" {
 		t.Fatalf("history paths = %q then %q, want zones/dusk.md then lore/dusk.md",
@@ -126,12 +103,8 @@ func TestAHistoryOnTheSurfaceSaysWhereEachVersionWasWritten(t *testing.T) {
 	// And the same field survives JSON, which is where a struct field
 	// with the wrong tag would quietly vanish.
 	encoded, err := json.Marshal(hist.Items[1])
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(encoded), `"path":"lore/dusk.md"`) {
-		t.Fatalf("a history row on the wire = %s, want it to carry its own path", encoded)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, strings.Contains(string(encoded), `"path":"lore/dusk.md"`), "a history row on the wire = %s, want it to carry its own path", encoded)
 }
 
 // TestReadingAVersionOfAMovedDocumentAnswersWithItsOwnPath. docs.
@@ -157,23 +130,15 @@ func TestReadingAVersionOfAMovedDocumentAnswersWithItsOwnPath(t *testing.T) {
 
 	v1, err := web.MCPDocsReadVersion(ctx, f.deps, f.caller, f.game,
 		web.DocsReadVersionInput{Path: "zones/dusk.md", Version: 1})
-	if err != nil {
-		t.Fatalf("docs.read_version 1: %v", err)
-	}
-	if v1.Path != "lore/dusk.md" {
-		t.Fatalf("version 1 answers path %q, want the address it was written at", v1.Path)
-	}
+	assert.Must(t, err == nil, "docs.read_version 1: %v", err)
+	assert.Must(t, v1.Path == "lore/dusk.md", "version 1 answers path %q, want the address it was written at", v1.Path)
 
 	// The casing half: a caller addressing the document under another
 	// spelling is answered with the stored one.
 	v2, err := web.MCPDocsReadVersion(ctx, f.deps, f.caller, f.game,
 		web.DocsReadVersionInput{Path: "ZONES/DUSK.MD", Version: 2})
-	if err != nil {
-		t.Fatalf("docs.read_version 2 under another casing: %v", err)
-	}
-	if v2.Path != "zones/dusk.md" {
-		t.Fatalf("version 2 answers path %q, want the stored spelling", v2.Path)
-	}
+	assert.Must(t, err == nil, "docs.read_version 2 under another casing: %v", err)
+	assert.Must(t, v2.Path == "zones/dusk.md", "version 2 answers path %q, want the stored spelling", v2.Path)
 }
 
 // TestTheMoveRefusalsReachTheSurfaceWithTheirFields. Every refusal Move
@@ -234,13 +199,9 @@ func TestTheMoveRefusalsReachTheSurfaceWithTheirFields(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+f.token)
 			rec := httptest.NewRecorder()
 			f.srv.ServeHTTP(rec, req)
-			if rec.Code != tc.status {
-				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
-			}
+			assert.Must(t, rec.Code == tc.status, "status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			body := rec.Body.String()
-			if !strings.Contains(body, `"`+tc.field+`"`) || !strings.Contains(body, tc.says) {
-				t.Fatalf("the refusal does not name %q or say %q:\n%s", tc.field, tc.says, body)
-			}
+			assert.Must(t, strings.Contains(body, `"`+tc.field+`"`) && strings.Contains(body, tc.says), "the refusal does not name %q or say %q:\n%s", tc.field, tc.says, body)
 		})
 	}
 	// The "two bad paths" case above must carry *both* ends, which is the
@@ -250,10 +211,7 @@ func TestTheMoveRefusalsReachTheSurfaceWithTheirFields(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	rec := httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if !strings.Contains(rec.Body.String(), `"from"`) ||
-		!strings.Contains(rec.Body.String(), `"to"`) {
-		t.Fatalf("two bad paths were not reported at two names:\n%s", rec.Body.String())
-	}
+	assert.Must(t, strings.Contains(rec.Body.String(), `"from"`) && strings.Contains(rec.Body.String(), `"to"`), "two bad paths were not reported at two names:\n%s", rec.Body.String())
 }
 
 // TestTheKindCatalogueReachesBothSurfaces. The vocabulary is what makes
@@ -277,45 +235,27 @@ func TestTheKindCatalogueReachesBothSurfaces(t *testing.T) {
 	}
 
 	out, err := web.MCPDocsKinds(ctx, f.deps, f.caller, f.game, web.DocsKindsInput{})
-	if err != nil {
-		t.Fatalf("docs.kinds: %v", err)
-	}
-	if len(out.Kinds) != 2 ||
-		out.Kinds[0].Kind != "lore" || out.Kinds[0].DocumentCount != 2 ||
-		out.Kinds[1].Kind != "script" || out.Kinds[1].DocumentCount != 1 {
-		t.Fatalf("kinds = %+v, want lore=2 and script=1, folded", out.Kinds)
-	}
-	if out.Documents != 4 || out.Unkinded != 1 {
-		t.Fatalf("totals = (%d documents, %d unkinded), want 4 and 1",
-			out.Documents, out.Unkinded)
-	}
+	assert.Must(t, err == nil, "docs.kinds: %v", err)
+	assert.Must(t, len(out.Kinds) == 2 && out.Kinds[0].Kind == "lore" && out.Kinds[0].DocumentCount == 2 && out.Kinds[1].Kind == "script" && out.Kinds[1].DocumentCount == 1, "kinds = %+v, want lore=2 and script=1, folded", out.Kinds)
+	assert.Must(t, out.Documents == 4 && out.Unkinded == 1, "totals = (%d documents, %d unkinded), want 4 and 1",
+		out.Documents, out.Unkinded)
 
 	// Every kind it names selects exactly the documents it counted,
 	// through the tool it exists to feed.
 	for _, k := range out.Kinds {
 		page, listErr := web.MCPDocsList(ctx, f.deps, f.caller, f.game,
 			web.DocsListInput{Kind: k.Kind})
-		if listErr != nil {
-			t.Fatalf("docs.list by %q: %v", k.Kind, listErr)
-		}
-		if int64(len(page.Items)) != k.DocumentCount {
-			t.Fatalf("kind %q counts %d and lists %d", k.Kind, k.DocumentCount, len(page.Items))
-		}
+		assert.Must(t, listErr == nil, "docs.list by %q: %v", k.Kind, listErr)
+		assert.Must(t, int64(len(page.Items)) == k.DocumentCount, "kind %q counts %d and lists %d", k.Kind, k.DocumentCount, len(page.Items))
 	}
 
 	// An empty game answers with [] and not null, over the wire.
 	empty, err := web.MCPDocsKinds(ctx, f.deps, f.caller, f.game, web.DocsKindsInput{})
-	if err != nil {
-		t.Fatalf("docs.kinds: %v", err)
-	}
+	assert.Must(t, err == nil, "docs.kinds: %v", err)
 	_ = empty
 	encoded, err := json.Marshal(web.DocsKindsOutput{Kinds: []web.DocsKindCountOutput{}})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(encoded), `"kinds":[]`) {
-		t.Fatalf("an empty catalogue marshals as %s, want kinds: []", encoded)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, strings.Contains(string(encoded), `"kinds":[]`), "an empty catalogue marshals as %s, want kinds: []", encoded)
 }
 
 // TestTheRESTMirrorsOfMoveAndKinds. Both surfaces run the same function,
@@ -340,32 +280,23 @@ func TestTheRESTMirrorsOfMoveAndKinds(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	rec := httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /docs/move = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST /docs/move = %d: %s", rec.Code, rec.Body.String())
 	var moved web.DocumentSummaryOutput
 	if err := json.Unmarshal(rec.Body.Bytes(), &moved); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if moved.Path != "zones/dusk.md" || moved.Version != 2 {
-		t.Fatalf("REST move answered (%q, v%d)", moved.Path, moved.Version)
-	}
+	assert.Must(t, moved.Path == "zones/dusk.md" && moved.Version == 2, "REST move answered (%q, v%d)", moved.Path, moved.Version)
 
 	req = httptest.NewRequest(http.MethodGet, base+"/kinds", nil)
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	rec = httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /docs/kinds = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET /docs/kinds = %d: %s", rec.Code, rec.Body.String())
 	var kinds web.DocsKindsOutput
 	if err := json.Unmarshal(rec.Body.Bytes(), &kinds); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(kinds.Kinds) != 1 || kinds.Kinds[0].Kind != "lore" ||
-		kinds.Kinds[0].DocumentCount != 1 || kinds.Documents != 1 {
-		t.Fatalf("REST kinds = %+v", kinds)
-	}
+	assert.Must(t, len(kinds.Kinds) == 1 && kinds.Kinds[0].Kind == "lore" && kinds.Kinds[0].DocumentCount == 1 && kinds.Documents == 1, "REST kinds = %+v", kinds)
 
 	// A refused move comes back as a status and a field, not as a 500.
 	req = jsonRequest(http.MethodPost, base+"/move",
@@ -373,10 +304,6 @@ func TestTheRESTMirrorsOfMoveAndKinds(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	rec = httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("a case-only move over REST = %d: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "only in capitalisation") {
-		t.Fatalf("the refusal body does not say why: %s", rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "a case-only move over REST = %d: %s", rec.Code, rec.Body.String())
+	assert.Must(t, strings.Contains(rec.Body.String(), "only in capitalisation"), "the refusal body does not say why: %s", rec.Body.String())
 }

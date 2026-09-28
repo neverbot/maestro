@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The dark token set is stated twice: once inside
@@ -21,26 +23,20 @@ import (
 func TestTheTwoDarkBlocksAgree(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatalf("read the stylesheet: %v", err)
-	}
+	assert.Must(t, err == nil, "read the stylesheet: %v", err)
 	src := string(raw)
 
 	media := blockAfter(t, src, `:root:not([data-theme="light"]) {`)
 	chosen := blockAfter(t, src, `:root[data-theme="dark"] {`)
 
-	if len(media) == 0 {
-		t.Fatal("the media query declares no tokens, so this guard holds nothing")
-	}
+	assert.Must(t, len(media) != 0, "the media query declares no tokens, so this guard holds nothing")
 	for name, value := range media {
 		other, ok := chosen[name]
 		if !ok {
 			t.Errorf("%s follows the system's dark theme and is missing from the chosen one", name)
 			continue
 		}
-		if other != value {
-			t.Errorf("%s is %q when the system asks for dark and %q when a person does", name, value, other)
-		}
+		assert.Should(t, other == value, "%s is %q when the system asks for dark and %q when a person does", name, value, other)
 	}
 	for name := range chosen {
 		if _, ok := media[name]; !ok {
@@ -61,18 +57,14 @@ func TestTheTwoDarkBlocksAgree(t *testing.T) {
 func TestAChosenLightThemeSurvivesADarkSystem(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatalf("read the stylesheet: %v", err)
-	}
+	assert.Must(t, err == nil, "read the stylesheet: %v", err)
 	src := string(raw)
 	// `(?s).*?` rather than `\s*`: the block opens with a comment saying
 	// why the selector is what it is, and a guard that broke on a comment
 	// would be a guard nobody could explain themselves in front of.
 	media := regexp.MustCompile(
 		`@media \(prefers-color-scheme: dark\) \{(?s:.*?)(:root[^{]*)\{`).FindStringSubmatch(src)
-	if media == nil {
-		t.Fatal("the stylesheet has no dark media query with a :root selector in it")
-	}
+	assert.Must(t, media != nil, "the stylesheet has no dark media query with a :root selector in it")
 	if !strings.Contains(media[1], `:not([data-theme="light"])`) {
 		t.Errorf("the dark media query selects %q, which beats an explicit light choice at equal "+
 			"specificity: a person on a dark system could not choose paper", strings.TrimSpace(media[1]))
@@ -91,18 +83,14 @@ func TestAChosenLightThemeSurvivesADarkSystem(t *testing.T) {
 func TestEveryShellAppliesTheThemeBeforeItPaints(t *testing.T) {
 	t.Parallel()
 	shells, err := os.ReadDir("static")
-	if err != nil {
-		t.Fatalf("read static/: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/: %v", err)
 	seen := 0
 	for _, entry := range shells {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
 			continue
 		}
 		body, err := os.ReadFile("static/" + entry.Name())
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", entry.Name(), err)
 		src := string(body)
 		tag := regexp.MustCompile(`<script[^>]*src="/static/theme\.js"[^>]*>`).FindString(src)
 		if tag == "" {
@@ -110,15 +98,11 @@ func TestEveryShellAppliesTheThemeBeforeItPaints(t *testing.T) {
 				"the reader chose", entry.Name())
 			continue
 		}
-		if strings.Contains(tag, "defer") || strings.Contains(tag, `type="module"`) {
-			t.Errorf("%s loads the theme script as %q: a deferred script runs after the first paint, "+
-				"which is the flash it exists to prevent", entry.Name(), tag)
-		}
+		assert.Should(t, !strings.Contains(tag, "defer") && !strings.Contains(tag, `type="module"`), "%s loads the theme script as %q: a deferred script runs after the first paint, "+
+			"which is the flash it exists to prevent", entry.Name(), tag)
 		seen++
 	}
-	if seen == 0 {
-		t.Fatal("no shell was examined, so this guard holds nothing")
-	}
+	assert.Must(t, seen != 0, "no shell was examined, so this guard holds nothing")
 }
 
 // blockAfter returns the custom properties declared in the block opened
@@ -126,14 +110,10 @@ func TestEveryShellAppliesTheThemeBeforeItPaints(t *testing.T) {
 func blockAfter(t *testing.T, src, selector string) map[string]string {
 	t.Helper()
 	start := strings.Index(src, selector)
-	if start < 0 {
-		t.Fatalf("the stylesheet has no %q block", selector)
-	}
+	assert.Must(t, start >= 0, "the stylesheet has no %q block", selector)
 	rest := src[start+len(selector):]
 	end := strings.Index(rest, "}")
-	if end < 0 {
-		t.Fatalf("the %q block is never closed", selector)
-	}
+	assert.Must(t, end >= 0, "the %q block is never closed", selector)
 	out := map[string]string{}
 	for _, line := range strings.Split(rest[:end], "\n") {
 		line = strings.TrimSpace(line)

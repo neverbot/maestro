@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -25,34 +26,22 @@ func TestSessionLifecycle(t *testing.T) {
 		DisplayName: "Designer",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 	// A length check on the base64-encoded token is not the same as a
 	// check on its underlying entropy: base64 expands 32 raw bytes to a
 	// 43-character string, so "len(token) < 32" would still pass even if
 	// the token carried far fewer than 32 bytes of randomness. Decode it
 	// and check the raw byte count directly.
 	raw, err := base64.RawURLEncoding.DecodeString(token)
-	if err != nil {
-		t.Fatalf("token is not valid base64url: %v", err)
-	}
-	if len(raw) < 32 {
-		t.Fatalf("token carries %d raw bytes of entropy, want at least 32", len(raw))
-	}
+	assert.Must(t, err == nil, "token is not valid base64url: %v", err)
+	assert.Must(t, len(raw) >= 32, "token carries %d raw bytes of entropy, want at least 32", len(raw))
 
 	got, _, err := svc.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
-	if got.ID != user.ID {
-		t.Fatal("UserForSession returned a different user")
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
+	assert.Must(t, got.ID == user.ID, "UserForSession returned a different user")
 
 	if err := svc.RevokeSession(ctx, token); err != nil {
 		t.Fatalf("RevokeSession: %v", err)
@@ -83,9 +72,7 @@ func TestIssueSessionSetsExpiryFromConfig(t *testing.T) {
 		DisplayName: "TTL",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	// The database's clock: IssueSession sends the TTL as an interval and
 	// Postgres writes now() + it, so bracketing with this process' clock
@@ -93,24 +80,18 @@ func TestIssueSessionSetsExpiryFromConfig(t *testing.T) {
 	// CreateSession's own comment in identity.sql exists to remove.
 	before := dbNow(t, pool)
 	token, expiresAt, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 	after := dbNow(t, pool)
 
 	wantFrom := before.Add(cfg.SessionTTL)
 	wantTo := after.Add(cfg.SessionTTL)
-	if expiresAt.Before(wantFrom) || expiresAt.After(wantTo) {
-		t.Fatalf("expiresAt = %v, want between %v and %v (a dropped pgtype.Timestamptz{Valid: true} would report the zero time)", expiresAt, wantFrom, wantTo)
-	}
+	assert.Must(t, !expiresAt.Before(wantFrom) && !expiresAt.After(wantTo), "expiresAt = %v, want between %v and %v (a dropped pgtype.Timestamptz{Valid: true} would report the zero time)", expiresAt, wantFrom, wantTo)
 
 	// The expiry UserForSession reports back for the stored row must agree
 	// with what IssueSession returned, within Postgres's timestamptz
 	// precision.
 	_, gotExpiry, err := svc.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
 	if diff := gotExpiry.Sub(expiresAt); diff < -time.Second || diff > time.Second {
 		t.Fatalf("stored expiry = %v, want close to %v", gotExpiry, expiresAt)
 	}
@@ -127,21 +108,13 @@ func TestIssueSessionProducesDistinctTokens(t *testing.T) {
 		DisplayName: "Distinct",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	tokenA, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 	tokenB, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
-	if tokenA == tokenB {
-		t.Fatal("two calls to IssueSession must not produce the same token")
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
+	assert.Must(t, tokenA != tokenB, "two calls to IssueSession must not produce the same token")
 }
 
 func TestRevokeUnknownSessionIsANoOp(t *testing.T) {
@@ -169,18 +142,12 @@ func TestChangePasswordRevokesEverySessionOfTheAccount(t *testing.T) {
 		DisplayName: "Multi",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	tokenA, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 	tokenB, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	if err := svc.ChangePassword(ctx, user.ID, "newpassword12345"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
@@ -206,24 +173,16 @@ func TestChangePasswordLeavesOtherUsersSessionsAlone(t *testing.T) {
 	userA, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "a@example.test", DisplayName: "A", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser A: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser A: %v", err)
 	userB, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "b@example.test", DisplayName: "B", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser B: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser B: %v", err)
 
 	tokenA, _, err := svc.IssueSession(ctx, userA.ID)
-	if err != nil {
-		t.Fatalf("IssueSession A: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession A: %v", err)
 	tokenB, _, err := svc.IssueSession(ctx, userB.ID)
-	if err != nil {
-		t.Fatalf("IssueSession B: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession B: %v", err)
 
 	if err := svc.ChangePassword(ctx, userA.ID, "newpassword12345"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
@@ -254,14 +213,10 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 		DisplayName: "Extend",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	tokenHash := sha256.Sum256([]byte(token))
 	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`,
@@ -273,17 +228,11 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 	before := time.Now()
 	n, err := svc.ExtendSession(ctx, token, ttl)
 	after := time.Now()
-	if err != nil {
-		t.Fatalf("ExtendSession: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("ExtendSession rows affected = %d, want 1", n)
-	}
+	assert.Must(t, err == nil, "ExtendSession: %v", err)
+	assert.Must(t, n == 1, "ExtendSession rows affected = %d, want 1", n)
 
 	_, gotExpiry, err := svc.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
 	// The target is computed by Postgres' own now(), not the Go process',
 	// so the bracket needs a little slack for clock skew between the two
 	// — a real skew of a few milliseconds is expected; a bug that renews
@@ -291,9 +240,7 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 	// fails this.
 	const clockSkewSlack = 2 * time.Second
 	wantMin, wantMax := before.Add(ttl-clockSkewSlack), after.Add(ttl+clockSkewSlack)
-	if gotExpiry.Before(wantMin) || gotExpiry.After(wantMax) {
-		t.Fatalf("session expiry = %v, want between %v and %v (now + ttl, bracketed around the call)", gotExpiry, wantMin, wantMax)
-	}
+	assert.Must(t, !gotExpiry.Before(wantMin) && !gotExpiry.After(wantMax), "session expiry = %v, want between %v and %v (now + ttl, bracketed around the call)", gotExpiry, wantMin, wantMax)
 }
 
 // TestConcurrentRenewalsProduceExactlyOneWrite pins the property
@@ -334,13 +281,9 @@ func TestConcurrentRenewalsProduceExactlyOneWrite(t *testing.T) {
 		DisplayName: "Concurrent",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	tokenHash := sha256.Sum256([]byte(token))
 	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`,
@@ -386,14 +329,10 @@ func TestChangePasswordRotatesHashAndRevokesSessions(t *testing.T) {
 		DisplayName: "Rotate",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	if err := svc.ChangePassword(ctx, user.ID, "newpassword12345"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
@@ -421,9 +360,7 @@ func TestChangePasswordRejectsWeakPassword(t *testing.T) {
 		DisplayName: "Weak",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	if err := svc.ChangePassword(ctx, user.ID, "short"); !errors.Is(err, identity.ErrPasswordInvalid) {
 		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
@@ -441,13 +378,9 @@ func TestChangeOwnPasswordSucceedsAndRevokesSessions(t *testing.T) {
 		DisplayName: "Self Rotate",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	if err := svc.ChangeOwnPassword(ctx, user.ID, "password12345", "newpassword12345"); err != nil {
 		t.Fatalf("ChangeOwnPassword: %v", err)
@@ -477,13 +410,9 @@ func TestChangeOwnPasswordRejectsWrongCurrentPassword(t *testing.T) {
 		DisplayName: "Stolen Session",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	if err := svc.ChangeOwnPassword(ctx, user.ID, "wrongpassword", "newpassword12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
@@ -510,9 +439,7 @@ func TestChangeOwnPasswordRejectsWeakNewPassword(t *testing.T) {
 		DisplayName: "Weak New",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	if err := svc.ChangeOwnPassword(ctx, user.ID, "password12345", "short"); !errors.Is(err, identity.ErrPasswordInvalid) {
 		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
@@ -534,13 +461,9 @@ func TestChangeOwnPasswordRejectsSamePassword(t *testing.T) {
 		DisplayName: "Same Password",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	token, _, err := svc.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	if err := svc.ChangeOwnPassword(ctx, user.ID, "password12345", "password12345"); !errors.Is(err, identity.ErrPasswordUnchanged) {
 		t.Fatalf("err = %v, want ErrPasswordUnchanged", err)
@@ -563,9 +486,7 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 		DisplayName: "Stale",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	// IssueSession always mints a session s.cfg.SessionTTL in the future,
 	// so an already-expired session has to be inserted directly to
@@ -586,25 +507,17 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1`, user.ID).Scan(&before); err != nil {
 		t.Fatalf("count sessions: %v", err)
 	}
-	if before != 1 {
-		t.Fatalf("expected the expired session row to still exist before pruning, got %d rows", before)
-	}
+	assert.Must(t, before == 1, "expected the expired session row to still exist before pruning, got %d rows", before)
 
 	n, err := svc.PruneExpiredSessions(ctx)
-	if err != nil {
-		t.Fatalf("PruneExpiredSessions: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("PruneExpiredSessions reported %d rows deleted, want 1", n)
-	}
+	assert.Must(t, err == nil, "PruneExpiredSessions: %v", err)
+	assert.Must(t, n == 1, "PruneExpiredSessions reported %d rows deleted, want 1", n)
 
 	var after int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1`, user.ID).Scan(&after); err != nil {
 		t.Fatalf("count sessions: %v", err)
 	}
-	if after != 0 {
-		t.Fatalf("expected PruneExpiredSessions to delete the expired row, got %d rows remaining", after)
-	}
+	assert.Must(t, after == 0, "expected PruneExpiredSessions to delete the expired row, got %d rows remaining", after)
 }
 
 // TestDeletingUserCascadesSessions guards a revocation guarantee this
@@ -624,9 +537,7 @@ func TestDeletingUserCascadesSessions(t *testing.T) {
 		DisplayName: "Cascade",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, _, err := svc.IssueSession(ctx, user.ID); err != nil {
 		t.Fatalf("IssueSession: %v", err)
 	}
@@ -639,7 +550,5 @@ func TestDeletingUserCascadesSessions(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1`, user.ID).Scan(&n); err != nil {
 		t.Fatalf("count sessions: %v", err)
 	}
-	if n != 0 {
-		t.Fatalf("expected deleting the user to cascade-delete its sessions, got %d rows remaining", n)
-	}
+	assert.Must(t, n == 0, "expected deleting the user to cascade-delete its sessions, got %d rows remaining", n)
 }

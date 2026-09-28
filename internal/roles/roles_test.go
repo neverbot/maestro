@@ -3,6 +3,7 @@ package roles_test
 import (
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/roles"
 )
 
@@ -14,16 +15,10 @@ import (
 // doc comment for why.
 func TestValid(t *testing.T) {
 	for _, r := range roles.All() {
-		if !roles.Valid(string(r)) {
-			t.Errorf("Valid(%q) = false, want true", r)
-		}
+		assert.Should(t, roles.Valid(string(r)), "Valid(%q) = false, want true", r)
 	}
-	if roles.Valid("superadmin") {
-		t.Fatal(`Valid("superadmin") = true, want false`)
-	}
-	if roles.Valid("") {
-		t.Fatal(`Valid("") = true, want false`)
-	}
+	assert.Must(t, !roles.Valid("superadmin"), `Valid("superadmin") = true, want false`)
+	assert.Must(t, !roles.Valid(""), `Valid("") = true, want false`)
 }
 
 // TestAtLeast walks every role-and-threshold pair, including both

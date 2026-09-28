@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -27,9 +28,7 @@ func loginAs(t *testing.T, srv *web.Server, email string) *http.Cookie {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login for %s = %d: %s", email, rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "login for %s = %d: %s", email, rec.Code, rec.Body.String())
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == web.SessionCookie {
 			return c
@@ -67,9 +66,7 @@ func TestListGamesOnlyShowsMemberships(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 			t.Fatalf("decode for %s: %v", email, err)
 		}
-		if len(body.Games) != want {
-			t.Fatalf("%s sees %d games, want %d", email, len(body.Games), want)
-		}
+		assert.Must(t, len(body.Games) == want, "%s sees %d games, want %d", email, len(body.Games), want)
 	}
 }
 
@@ -85,18 +82,14 @@ func TestListGamesRejectsTokenCaller(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 func TestCreateGameRejectsTokenCaller(t *testing.T) {
@@ -107,9 +100,7 @@ func TestCreateGameRejectsTokenCaller(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	body := strings.NewReader(`{"slug":"le-mans","name":"Le Mans"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/games", body)
@@ -118,9 +109,7 @@ func TestCreateGameRejectsTokenCaller(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 func TestCreateGameRejectsInvalidSlugAsBadRequest(t *testing.T) {
@@ -137,9 +126,7 @@ func TestCreateGameRejectsInvalidSlugAsBadRequest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnprocessableEntity, "status = %d, want 422: %s", rec.Code, rec.Body.String())
 }
 
 func TestRootRedirectsToTheOnlyGame(t *testing.T) {
@@ -158,9 +145,7 @@ func TestRootRedirectsToTheOnlyGame(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusFound, "status = %d, want 302", rec.Code)
 	if got := rec.Header().Get("Location"); got != "/g/azeroth" {
 		t.Fatalf("Location = %q, want /g/azeroth", got)
 	}
@@ -196,9 +181,7 @@ func TestRootShowsPickerWithTwoGames(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (the picker)", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200 (the picker)", rec.Code)
 }
 
 func TestRootShowsPickerWithNoGames(t *testing.T) {
@@ -216,9 +199,7 @@ func TestRootShowsPickerWithNoGames(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 }
 
 func TestRootRedirectsAnonymousToLogin(t *testing.T) {
@@ -228,9 +209,7 @@ func TestRootRedirectsAnonymousToLogin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusFound, "status = %d, want 302", rec.Code)
 	if got := rec.Header().Get("Location"); got != "/login" {
 		t.Fatalf("Location = %q, want /login", got)
 	}
@@ -258,9 +237,7 @@ func TestTokenCreationRequiresMembership(t *testing.T) {
 	// 404 and not 403, since a game is addressed by its slug: a
 	// stranger must not be able to tell a game they are not in from
 	// one that does not exist (resolveGameRef).
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
 }
 
 func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
@@ -279,9 +256,7 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "status = %d, want 201: %s", rec.Code, rec.Body.String())
 	var created struct {
 		ID        string `json:"id"`
 		Token     string `json:"token"`
@@ -290,20 +265,14 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !strings.HasPrefix(created.Token, "mst_") {
-		t.Fatalf("token = %q, want the mst_ prefix", created.Token)
-	}
-	if created.TokenHint == "" {
-		t.Fatal("token_hint was empty on creation")
-	}
+	assert.Must(t, strings.HasPrefix(created.Token, "mst_"), "token = %q, want the mst_ prefix", created.Token)
+	assert.Must(t, created.TokenHint != "", "token_hint was empty on creation")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/tokens", nil)
 	listReq.AddCookie(cookie)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
-	if strings.Contains(listRec.Body.String(), created.Token) {
-		t.Fatal("the listing leaked the clear token value")
-	}
+	assert.Must(t, !strings.Contains(listRec.Body.String(), created.Token), "the listing leaked the clear token value")
 	// A test that only checks the clear value is absent would pass
 	// against an empty list too — assert the created row is actually
 	// present, by id, so a handler that silently dropped the row (or
@@ -323,9 +292,7 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 			break
 		}
 	}
-	if !found {
-		t.Fatalf("listing = %s, want it to contain id %q", listRec.Body.String(), created.ID)
-	}
+	assert.Must(t, found, "listing = %s, want it to contain id %q", listRec.Body.String(), created.ID)
 }
 
 func TestViewerCannotCreateToken(t *testing.T) {
@@ -351,9 +318,7 @@ func TestViewerCannotCreateToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403: %s", rec.Code, rec.Body.String())
 }
 
 // TestATokenIsRevokedByThePersonWhoMadeIt is the rule that replaced
@@ -395,9 +360,7 @@ func TestATokenIsRevokedByThePersonWhoMadeIt(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("create token: status = %d, want 201: %s", rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusCreated, "create token: status = %d, want 201: %s", rec.Code, rec.Body.String())
 		var created struct {
 			ID    string `json:"id"`
 			Token string `json:"token"`
@@ -431,9 +394,7 @@ func TestATokenIsRevokedByThePersonWhoMadeIt(t *testing.T) {
 	meReq.Header.Set("Authorization", "Bearer "+mineValue)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("a refused revoke killed the key anyway: /api/me = %d, want 200", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "a refused revoke killed the key anyway: /api/me = %d, want 200", meRec.Code)
 
 	// Its owner retires it, and it stops authenticating.
 	if code := revoke(editorCookie, mine); code != http.StatusNoContent {
@@ -445,9 +406,7 @@ func TestATokenIsRevokedByThePersonWhoMadeIt(t *testing.T) {
 	meReq.Header.Set("Authorization", "Bearer "+mineValue)
 	meRec = httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusUnauthorized {
-		t.Fatalf("revoked token still authenticates: status = %d, want 401", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusUnauthorized, "revoked token still authenticates: status = %d, want 401", meRec.Code)
 
 	// And the game's owner may retire anybody's.
 	theirs, theirsValue := mint(otherCookie, "their runner")
@@ -458,9 +417,7 @@ func TestATokenIsRevokedByThePersonWhoMadeIt(t *testing.T) {
 	meReq.Header.Set("Authorization", "Bearer "+theirsValue)
 	meRec = httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusUnauthorized {
-		t.Fatalf("the owner's revoke did not take: status = %d, want 401", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusUnauthorized, "the owner's revoke did not take: status = %d, want 401", meRec.Code)
 }
 
 // TestTheListingShowsYourOwnKeysAndSaysSo is the other half: the same
@@ -489,9 +446,7 @@ func TestTheListingShowsYourOwnKeysAndSaysSo(t *testing.T) {
 		req.AddCookie(loginAs(t, srv, email))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("list tokens as %s: status = %d", email, rec.Code)
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "list tokens as %s: status = %d", email, rec.Code)
 		var body struct {
 			Scope  string           `json:"scope"`
 			Tokens []map[string]any `json:"tokens"`
@@ -503,32 +458,22 @@ func TestTheListingShowsYourOwnKeysAndSaysSo(t *testing.T) {
 	}
 
 	scope, tokens := read("editor@example.test")
-	if scope != "own" {
-		t.Errorf("an editor is told the listing is %q, want \"own\"", scope)
-	}
-	if len(tokens) != 1 || tokens[0]["label"] != "the editor's" {
-		t.Fatalf("an editor sees %+v, want only their own key", tokens)
-	}
+	assert.Should(t, scope == "own", "an editor is told the listing is %q, want \"own\"", scope)
+	assert.Must(t, len(tokens) == 1 && tokens[0]["label"] == "the editor's", "an editor sees %+v, want only their own key", tokens)
 	if tokens[0]["mine"] != true {
 		t.Errorf("the editor's own key is not marked as theirs: %+v", tokens[0])
 	}
 
 	scope, tokens = read("owner@example.test")
-	if scope != "game" {
-		t.Errorf("the owner is told the listing is %q, want \"game\"", scope)
-	}
-	if len(tokens) != 2 {
-		t.Fatalf("the owner sees %d keys, want every key in the game", len(tokens))
-	}
+	assert.Should(t, scope == "game", "the owner is told the listing is %q, want \"game\"", scope)
+	assert.Must(t, len(tokens) == 2, "the owner sees %d keys, want every key in the game", len(tokens))
 	mine := 0
 	for _, token := range tokens {
 		if token["mine"] == true {
 			mine++
 		}
 	}
-	if mine != 1 {
-		t.Errorf("the owner's listing marks %d keys as theirs, want exactly 1", mine)
-	}
+	assert.Should(t, mine == 1, "the owner's listing marks %d keys as theirs, want exactly 1", mine)
 }
 
 // TestRevokingAnUnknownOrForeignTokenIsANoop pins handleRevokeToken's own
@@ -546,9 +491,7 @@ func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
 	azeroth, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	leMans, _ := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
 	foreignToken, foreignRow, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: leMans.ID, UserID: owner.ID, Label: "other game's agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	for name, tokenID := range map[string]string{"unknown": uuid.NewString(), "foreign": foreignRow.ID.String()} {
@@ -556,9 +499,7 @@ func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
 		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("%s token id: status = %d, want 204: %s", name, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusNoContent, "%s token id: status = %d, want 204: %s", name, rec.Code, rec.Body.String())
 	}
 
 	// The foreign token must still be live: azeroth's DELETE never
@@ -579,18 +520,14 @@ func TestTokenEndpointsRejectTokenCaller(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/tokens", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 func TestListMembersRequiresMembership(t *testing.T) {
@@ -613,9 +550,7 @@ func TestListMembersRequiresMembership(t *testing.T) {
 	// 404 and not 403, since a game is addressed by its slug: a
 	// stranger must not be able to tell a game they are not in from
 	// one that does not exist (resolveGameRef).
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
 }
 
 func TestListMembersNeverLeaksEmail(t *testing.T) {
@@ -632,12 +567,8 @@ func TestListMembersNeverLeaksEmail(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), "owner@example.test") {
-		t.Fatal("the member listing leaked an email address")
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
+	assert.Must(t, !strings.Contains(rec.Body.String(), "owner@example.test"), "the member listing leaked an email address")
 }
 
 // **The listing says which row is the caller's own.** The screen marks
@@ -652,9 +583,7 @@ func TestListMembersMarksTheCallerOwnRow(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	other, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, other.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -665,9 +594,7 @@ func TestListMembersMarksTheCallerOwnRow(t *testing.T) {
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		Members []struct {
@@ -679,22 +606,16 @@ func TestListMembersMarksTheCallerOwnRow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
 	}
-	if len(body.Members) != 2 {
-		t.Fatalf("members = %d, want 2", len(body.Members))
-	}
+	assert.Must(t, len(body.Members) == 2, "members = %d, want 2", len(body.Members))
 	marked := 0
 	for _, m := range body.Members {
 		if !m.You {
 			continue
 		}
 		marked++
-		if m.ID != owner.ID.String() {
-			t.Fatalf("the listing marked %s as the caller, who is %s", m.ID, owner.ID)
-		}
+		assert.Must(t, m.ID == owner.ID.String(), "the listing marked %s as the caller, who is %s", m.ID, owner.ID)
 	}
-	if marked != 1 {
-		t.Fatalf("rows marked as the caller's own = %d, want exactly 1", marked)
-	}
+	assert.Must(t, marked == 1, "rows marked as the caller's own = %d, want exactly 1", marked)
 }
 
 func TestOnlyOwnerCanChangeRole(t *testing.T) {
@@ -721,9 +642,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("editor changing a role: status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "editor changing a role: status = %d, want 403", rec.Code)
 
 	// The owner may.
 	ownerCookie := loginAs(t, srv, "owner@example.test")
@@ -733,9 +652,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("owner changing a role: status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "owner changing a role: status = %d, want 200: %s", rec.Code, rec.Body.String())
 }
 
 // TestChangeRoleDemotionReportsRevokedTokenLabels mirrors
@@ -766,18 +683,14 @@ func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 	var got struct {
 		RevokedTokens []string `json:"revoked_tokens"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got.RevokedTokens) != 1 || got.RevokedTokens[0] != "nightly export" {
-		t.Fatalf("revoked_tokens = %v, want [\"nightly export\"]", got.RevokedTokens)
-	}
+	assert.Must(t, len(got.RevokedTokens) == 1 && got.RevokedTokens[0] == "nightly export", "revoked_tokens = %v, want [\"nightly export\"]", got.RevokedTokens)
 }
 
 func TestChangeRoleOnSoleOwnerReportsLastOwner(t *testing.T) {
@@ -796,18 +709,14 @@ func TestChangeRoleOnSoleOwnerReportsLastOwner(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusConflict, "status = %d, want 409: %s", rec.Code, rec.Body.String())
 	var body2 struct {
 		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body2); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body2.Error != "last_owner" {
-		t.Fatalf("error = %q, want last_owner", body2.Error)
-	}
+	assert.Must(t, body2.Error == "last_owner", "error = %q, want last_owner", body2.Error)
 }
 
 func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
@@ -830,18 +739,14 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	req.AddCookie(viewerCookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("viewer removing self: status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "viewer removing self: status = %d, want 200: %s", rec.Code, rec.Body.String())
 	var removed struct {
 		RevokedTokens []string `json:"revoked_tokens"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&removed); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(removed.RevokedTokens) != 0 {
-		t.Fatalf("revoked_tokens = %v, want none (the viewer held no tokens)", removed.RevokedTokens)
-	}
+	assert.Must(t, len(removed.RevokedTokens) == 0, "revoked_tokens = %v, want none (the viewer held no tokens)", removed.RevokedTokens)
 
 	// The sole remaining owner may not remove themselves.
 	ownerCookie := loginAs(t, srv, "owner@example.test")
@@ -849,18 +754,14 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	req.AddCookie(ownerCookie)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("sole owner removing self: status = %d, want 409", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusConflict, "sole owner removing self: status = %d, want 409", rec.Code)
 	var body struct {
 		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Error != "last_owner" {
-		t.Fatalf("error = %q, want last_owner", body.Error)
-	}
+	assert.Must(t, body.Error == "last_owner", "error = %q, want last_owner", body.Error)
 }
 
 // TestRemoveMemberReportsRevokedTokenLabels pins the point of the 200
@@ -891,9 +792,7 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 	var body struct {
 		RevokedTokens []string `json:"revoked_tokens"`
 	}
@@ -901,13 +800,9 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	want := map[string]bool{"nightly export": true, "seed agent": true}
-	if len(body.RevokedTokens) != len(want) {
-		t.Fatalf("revoked_tokens = %v, want exactly %v", body.RevokedTokens, want)
-	}
+	assert.Must(t, len(body.RevokedTokens) == len(want), "revoked_tokens = %v, want exactly %v", body.RevokedTokens, want)
 	for _, label := range body.RevokedTokens {
-		if !want[label] {
-			t.Fatalf("unexpected revoked label %q", label)
-		}
+		assert.Must(t, want[label], "unexpected revoked label %q", label)
 	}
 }
 
@@ -933,9 +828,7 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 func TestTokenCallerCannotManageMembers(t *testing.T) {
@@ -946,18 +839,14 @@ func TestTokenCallerCannotManageMembers(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 // TestProjectScopeLookupFailureIsInternalErrorNotForbidden pins the split
@@ -987,16 +876,12 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	// A second pool at the same connection string, so closing it affects
 	// only the Projects service below, not Identity's own pool.
 	projPool, err := pgxpool.New(ctx, pool.Config().ConnConfig.ConnString())
-	if err != nil {
-		t.Fatalf("open second pool: %v", err)
-	}
+	assert.Must(t, err == nil, "open second pool: %v", err)
 	brokenProjSvc := projects.New(projPool)
 
 	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: brokenProjSvc})
@@ -1009,9 +894,7 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 for a database failure resolving membership, not 403 (indistinguishable from an actual rejection); body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusInternalServerError, "status = %d, want 500 for a database failure resolving membership, not 403 (indistinguishable from an actual rejection); body = %s", rec.Code, rec.Body.String())
 }
 
 // TestOwnerCanDeleteGame confirms the owner-only game-deletion route
@@ -1033,12 +916,8 @@ func TestOwnerCanDeleteGame(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body.String())
-	}
-	if rec.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNoContent, "status = %d, want 204: %s", rec.Code, rec.Body.String())
+	assert.Must(t, rec.Body.Len() == 0, "body = %q, want empty", rec.Body.String())
 }
 
 // TestDeleteGameRequiresMatchingConfirmSlug pins the safety property
@@ -1070,9 +949,7 @@ func TestDeleteGameRequiresMatchingConfirmSlug(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-			}
+			assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400: %s", rec.Code, rec.Body.String())
 		})
 	}
 
@@ -1103,9 +980,7 @@ func TestNonOwnerCannotDeleteGame(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 
 	// The game must still exist: a refused delete is not a partial one.
 	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
@@ -1124,18 +999,14 @@ func TestTokenCallerCannotDeleteGame(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403", rec.Code)
 }
 
 // TestNonMemberCannotDeleteGameAndLearnsNothing confirms a caller with
@@ -1163,9 +1034,7 @@ func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 	// 404 and not 403, since a game is addressed by its slug: a
 	// stranger must not be able to tell a game they are not in from
 	// one that does not exist (resolveGameRef).
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
 	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
 		t.Fatalf("RoleOf after refused delete: %v, want the game to still exist", err)
 	}
@@ -1182,21 +1051,15 @@ func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 	fakeRec := httptest.NewRecorder()
 	srv.ServeHTTP(fakeRec, fakeReq)
 
-	if fakeRec.Code != rec.Code {
-		t.Fatalf("fabricated slug status = %d, real game status = %d, want equal (no leak)", fakeRec.Code, rec.Code)
-	}
+	assert.Must(t, fakeRec.Code == rec.Code, "fabricated slug status = %d, real game status = %d, want equal (no leak)", fakeRec.Code, rec.Code)
 	for ref, body := range map[string]string{
 		project.Slug:      rec.Body.String(),
 		"not-a-real-game": fakeRec.Body.String(),
 	} {
 		quoted, err := json.Marshal("no game named " + strconv.Quote(ref) + " is available to you")
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
 		want := fmt.Sprintf(`{"error":"not_found","message":%s}`, quoted)
-		if strings.TrimSpace(body) != want {
-			t.Fatalf("%q answered %s, want %s (no leak)", ref, body, want)
-		}
+		assert.Must(t, strings.TrimSpace(body) == want, "%q answered %s, want %s (no leak)", ref, body, want)
 	}
 }
 
@@ -1211,26 +1074,20 @@ func TestDeletingGameRevokesItsTokens(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want 204: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNoContent, "delete status = %d, want 204: %s", rec.Code, rec.Body.String())
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	meReq.Header.Set("Authorization", "Bearer "+token)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusUnauthorized {
-		t.Fatalf("token after game deletion: status = %d, want 401", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusUnauthorized, "token after game deletion: status = %d, want 401", meRec.Code)
 }
 
 // TestDeletingGameTwiceIsIdempotent drives the concurrent-delete case
@@ -1258,9 +1115,7 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 	first.AddCookie(cookie)
 	firstRec := httptest.NewRecorder()
 	srv.ServeHTTP(firstRec, first)
-	if firstRec.Code != http.StatusNoContent {
-		t.Fatalf("first delete status = %d, want 204: %s", firstRec.Code, firstRec.Body.String())
-	}
+	assert.Must(t, firstRec.Code == http.StatusNoContent, "first delete status = %d, want 204: %s", firstRec.Code, firstRec.Body.String())
 
 	// The second request needs no ?confirm of its own: requireProject
 	// refuses it before handleDeleteGame ever reads the query string (see
@@ -1274,9 +1129,7 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 	// 404 and not 403, since a game is addressed by its slug: a
 	// stranger must not be able to tell a game they are not in from
 	// one that does not exist (resolveGameRef).
-	if secondRec.Code != http.StatusNotFound {
-		t.Fatalf("second delete status = %d, want 404 (membership already gone), body: %s", secondRec.Code, secondRec.Body.String())
-	}
+	assert.Must(t, secondRec.Code == http.StatusNotFound, "second delete status = %d, want 404 (membership already gone), body: %s", secondRec.Code, secondRec.Body.String())
 }
 
 // --- A game's own settings --------------------------------------------
@@ -1318,16 +1171,12 @@ func TestUpdateGameChangesTheNameAndTheAddress(t *testing.T) {
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	rec := patchGame(t, srv, cookie, project.Slug, `{"slug":"ashfall","name":"Ashfall"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 	var got struct{ Slug, Name string }
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.Slug != "ashfall" || got.Name != "Ashfall" {
-		t.Errorf("answered %+v, want the new name and address", got)
-	}
+	assert.Should(t, got.Slug == "ashfall" && got.Name == "Ashfall", "answered %+v, want the new name and address", got)
 
 	// The new address answers, and the old one does not: that break is
 	// the thing the screen warns about, so it is asserted rather than
@@ -1358,13 +1207,9 @@ func TestUpdateGameRefusesATakenAddress(t *testing.T) {
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	rec := patchGame(t, srv, cookie, project.Slug, `{"slug":"second","name":"First"}`)
-	if rec.Code != http.StatusConflict {
-		t.Errorf("status = %d, want 409", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusConflict, "status = %d, want 409", rec.Code)
 	rec = patchGame(t, srv, cookie, project.Slug, `{"slug":"Not A Slug","name":"First"}`)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("an unusable address: status = %d, want 422", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusUnprocessableEntity, "an unusable address: status = %d, want 422", rec.Code)
 }
 
 // TestOnlyAnOwnerChangesAGamesSettings. An editor may write every piece
@@ -1385,14 +1230,10 @@ func TestOnlyAnOwnerChangesAGamesSettings(t *testing.T) {
 
 	cookie := loginAs(t, srv, "editor@example.test")
 	rec := patchGame(t, srv, cookie, project.Slug, `{"slug":"ashfall","name":"Ashfall"}`)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("an editor: status = %d, want 403", rec.Code)
-	}
+	assert.Should(t, rec.Code == http.StatusForbidden, "an editor: status = %d, want 403", rec.Code)
 	// And the game did not move: the owner's own listing still names it
 	// at the address it had.
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 	rec = getJSON(t, srv, ownerCookie, "/api/games")
-	if !strings.Contains(rec.Body.String(), `"the-ashfall"`) {
-		t.Errorf("the address changed anyway: %s", rec.Body.String())
-	}
+	assert.Should(t, strings.Contains(rec.Body.String(), `"the-ashfall"`), "the address changed anyway: %s", rec.Body.String())
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -18,12 +19,8 @@ func TestMigrationsCreateIdentityTables(t *testing.T) {
 		err := pool.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)`,
 			table).Scan(&exists)
-		if err != nil {
-			t.Fatalf("query %s: %v", table, err)
-		}
-		if !exists {
-			t.Fatalf("table %s was not created", table)
-		}
+		assert.Must(t, err == nil, "query %s: %v", table, err)
+		assert.Must(t, exists, "table %s was not created", table)
 	}
 }
 

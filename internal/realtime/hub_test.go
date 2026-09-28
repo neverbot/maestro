@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/realtime"
 )
 
@@ -21,9 +22,7 @@ func TestSubscriberReceivesItsProjectEvents(t *testing.T) {
 
 	select {
 	case got := <-sub.C:
-		if got.Kind != "project.updated" {
-			t.Fatalf("Kind = %q", got.Kind)
-		}
+		assert.Must(t, got.Kind == "project.updated", "Kind = %q", got.Kind)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the event")
 	}
@@ -95,9 +94,7 @@ func TestUnsubscribeManyDistinctProjectsLeavesHubUsable(t *testing.T) {
 
 	select {
 	case got := <-sub.C:
-		if got.Kind != "still.works" {
-			t.Fatalf("Kind = %q", got.Kind)
-		}
+		assert.Must(t, got.Kind == "still.works", "Kind = %q", got.Kind)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the event")
 	}
@@ -134,15 +131,9 @@ func TestPublishAssignsPerSubscriptionSequence(t *testing.T) {
 	second := <-subA.C
 	firstForB := <-subB.C
 
-	if first.Seq != 1 {
-		t.Fatalf("first event for project a: Seq = %d, want 1", first.Seq)
-	}
-	if second.Seq != 2 {
-		t.Fatalf("second event for project a: Seq = %d, want 2", second.Seq)
-	}
-	if firstForB.Seq != 1 {
-		t.Fatalf("first event for project b: Seq = %d, want 1 (independent per project, and per subscription)", firstForB.Seq)
-	}
+	assert.Must(t, first.Seq == 1, "first event for project a: Seq = %d, want 1", first.Seq)
+	assert.Must(t, second.Seq == 2, "second event for project a: Seq = %d, want 2", second.Seq)
+	assert.Must(t, firstForB.Seq == 1, "first event for project b: Seq = %d, want 1 (independent per project, and per subscription)", firstForB.Seq)
 }
 
 // TestPublishSequenceSkipsEventsFilteredOutForThisSubscription is the
@@ -169,20 +160,12 @@ func TestPublishSequenceSkipsEventsFilteredOutForThisSubscription(t *testing.T) 
 
 	first := <-owner.C
 	second := <-owner.C
-	if first.Seq != 1 || first.Kind != "owner-only" {
-		t.Fatalf("owner's first event = %+v, want Seq 1, Kind owner-only", first)
-	}
-	if second.Seq != 2 || second.Kind != "everyone" {
-		t.Fatalf("owner's second event = %+v, want Seq 2, Kind everyone", second)
-	}
+	assert.Must(t, first.Seq == 1 && first.Kind == "owner-only", "owner's first event = %+v, want Seq 1, Kind owner-only", first)
+	assert.Must(t, second.Seq == 2 && second.Kind == "everyone", "owner's second event = %+v, want Seq 2, Kind everyone", second)
 
 	onlyEvent := <-viewer.C
-	if onlyEvent.Seq != 1 {
-		t.Fatalf("viewer's only event: Seq = %d, want 1 (the owner-only event must not have advanced its counter)", onlyEvent.Seq)
-	}
-	if onlyEvent.Kind != "everyone" {
-		t.Fatalf("viewer's only event: Kind = %q, want everyone", onlyEvent.Kind)
-	}
+	assert.Must(t, onlyEvent.Seq == 1, "viewer's only event: Seq = %d, want 1 (the owner-only event must not have advanced its counter)", onlyEvent.Seq)
+	assert.Must(t, onlyEvent.Kind == "everyone", "viewer's only event: Kind = %q, want everyone", onlyEvent.Kind)
 }
 
 // TestPublishSequenceAdvancesOnADropEvenThoughNothingWasSent pins the
@@ -216,12 +199,8 @@ func TestPublishSequenceAdvancesOnADropEvenThoughNothingWasSent(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		last = <-sub.C
 	}
-	if last.Kind != "after-the-drop" {
-		t.Fatalf("last received event Kind = %q, want after-the-drop", last.Kind)
-	}
-	if last.Seq != 66 {
-		t.Fatalf("after-the-drop Seq = %d, want 66 (64 filler + 1 dropped + itself)", last.Seq)
-	}
+	assert.Must(t, last.Kind == "after-the-drop", "last received event Kind = %q, want after-the-drop", last.Kind)
+	assert.Must(t, last.Seq == 66, "after-the-drop Seq = %d, want 66 (64 filler + 1 dropped + itself)", last.Seq)
 }
 
 // TestPublishFiltersByHumanOnly pins the other delivery gate Publish
@@ -244,14 +223,10 @@ func TestPublishFiltersByHumanOnly(t *testing.T) {
 	hub.Publish(realtime.Event{ProjectID: project, Kind: "game.deleted"})
 
 	first := <-human.C
-	if first.Kind != "token.minted" {
-		t.Fatalf("human subscriber's first Kind = %q, want token.minted", first.Kind)
-	}
+	assert.Must(t, first.Kind == "token.minted", "human subscriber's first Kind = %q, want token.minted", first.Kind)
 
 	onlyEvent := <-token.C
-	if onlyEvent.Kind != "game.deleted" {
-		t.Fatalf("token subscriber's only event Kind = %q, want game.deleted (token.minted should have been filtered by HumanOnly)", onlyEvent.Kind)
-	}
+	assert.Must(t, onlyEvent.Kind == "game.deleted", "token subscriber's only event Kind = %q, want game.deleted (token.minted should have been filtered by HumanOnly)", onlyEvent.Kind)
 }
 
 // TestPublishFiltersByMinRole pins role-gated delivery: a subscriber
@@ -273,26 +248,20 @@ func TestPublishFiltersByMinRole(t *testing.T) {
 
 	select {
 	case got := <-owner.C:
-		if got.Kind != "owner-only" {
-			t.Fatalf("owner's first event Kind = %q, want owner-only", got.Kind)
-		}
+		assert.Must(t, got.Kind == "owner-only", "owner's first event Kind = %q, want owner-only", got.Kind)
 	case <-time.After(time.Second):
 		t.Fatal("owner never received the owner-only event")
 	}
 	select {
 	case got := <-owner.C:
-		if got.Kind != "everyone" {
-			t.Fatalf("owner's second event Kind = %q, want everyone", got.Kind)
-		}
+		assert.Must(t, got.Kind == "everyone", "owner's second event Kind = %q, want everyone", got.Kind)
 	case <-time.After(time.Second):
 		t.Fatal("owner never received the everyone event")
 	}
 
 	select {
 	case got := <-viewer.C:
-		if got.Kind != "everyone" {
-			t.Fatalf("viewer received %q, want only the everyone event (owner-only should have been filtered)", got.Kind)
-		}
+		assert.Must(t, got.Kind == "everyone", "viewer received %q, want only the everyone event (owner-only should have been filtered)", got.Kind)
 	case <-time.After(time.Second):
 		t.Fatal("viewer never received the everyone event")
 	}
@@ -327,9 +296,7 @@ func TestUpdateRoleChangesFutureFiltering(t *testing.T) {
 	hub.Publish(realtime.Event{ProjectID: project, Kind: "after-promotion", MinRole: "owner"})
 	select {
 	case got := <-sub.C:
-		if got.Kind != "after-promotion" {
-			t.Fatalf("Kind = %q, want after-promotion", got.Kind)
-		}
+		assert.Must(t, got.Kind == "after-promotion", "Kind = %q, want after-promotion", got.Kind)
 	case <-time.After(time.Second):
 		t.Fatal("did not receive the owner-only event after UpdateRole")
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -89,9 +90,7 @@ func (g game) declareRelationType(t *testing.T, key, role string, traits []strin
 		in.ExpectedVersion = &version
 	}
 	row, err := g.meta.UpsertRelationType(context.Background(), g.projectID, in)
-	if err != nil {
-		t.Fatalf("declare relation type %q: %v", key, err)
-	}
+	assert.Must(t, err == nil, "declare relation type %q: %v", key, err)
 	return row.ID
 }
 
@@ -104,9 +103,7 @@ func (g game) declareRelationType(t *testing.T, key, role string, traits []strin
 func readSourceFile(t *testing.T, name string) string {
 	t.Helper()
 	raw, err := os.ReadFile(name)
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", name, err)
 	return string(raw)
 }
 
@@ -118,9 +115,7 @@ func (g game) declareEntityType(t *testing.T, key string) uuid.UUID {
 	t.Helper()
 	row, err := g.meta.UpsertEntityType(context.Background(), g.projectID,
 		metamodel.EntityTypeInput{Key: key, Label: key, LabelPlural: key + "s"})
-	if err != nil {
-		t.Fatalf("declare entity type %q: %v", key, err)
-	}
+	assert.Must(t, err == nil, "declare entity type %q: %v", key, err)
 	return row.ID
 }
 
@@ -128,9 +123,7 @@ func (g game) entity(t *testing.T, typeKey, key string) uuid.UUID {
 	t.Helper()
 	row, err := g.meta.UpsertEntity(context.Background(), g.projectID,
 		metamodel.EntityInput{TypeKey: typeKey, Key: key, Name: key})
-	if err != nil {
-		t.Fatalf("write entity %s/%s: %v", typeKey, key, err)
-	}
+	assert.Must(t, err == nil, "write entity %s/%s: %v", typeKey, key, err)
 	return row.ID
 }
 
@@ -144,9 +137,7 @@ func (g game) edge(t *testing.T, relTypeKey, typeKey, source, target string) uui
 			Source:  metamodel.Ref{TypeKey: typeKey, Key: source},
 			Target:  metamodel.Ref{TypeKey: typeKey, Key: target},
 		})
-	if err != nil {
-		t.Fatalf("write edge %s: %s -> %s: %v", relTypeKey, source, target, err)
-	}
+	assert.Must(t, err == nil, "write edge %s: %s -> %s: %v", relTypeKey, source, target, err)
 	return row.ID
 }
 
@@ -156,9 +147,7 @@ func (g game) edge(t *testing.T, relTypeKey, typeKey, source, target string) uui
 func (g game) semantics(t *testing.T) Semantics {
 	t.Helper()
 	sem, err := g.analysis.Resolve(context.Background(), g.projectID, ResolveInput{})
-	if err != nil {
-		t.Fatalf("resolve the game's semantics: %v", err)
-	}
+	assert.Must(t, err == nil, "resolve the game's semantics: %v", err)
 	return sem
 }
 
@@ -171,9 +160,7 @@ func (g game) reach(t *testing.T, p Params) Reach {
 		p.Semantics = g.semantics(t)
 	}
 	got, err := g.analysis.Reach(context.Background(), p)
-	if err != nil {
-		t.Fatalf("reach: %v", err)
-	}
+	assert.Must(t, err == nil, "reach: %v", err)
 	return got
 }
 
@@ -181,9 +168,7 @@ func (g game) reach(t *testing.T, p Params) Reach {
 func (g game) reached(t *testing.T, r Reach, typeKey, key string) bool {
 	t.Helper()
 	row, err := g.meta.EntityByKey(context.Background(), g.projectID, typeKey, key)
-	if err != nil {
-		t.Fatalf("read back %s/%s: %v", typeKey, key, err)
-	}
+	assert.Must(t, err == nil, "read back %s/%s: %v", typeKey, key, err)
 	return r.Reached[row.ID]
 }
 
@@ -212,9 +197,7 @@ func (g game) sibling(t *testing.T) game {
 func (g game) invalidate(t *testing.T, relTypeKey string) {
 	t.Helper()
 	current, err := g.meta.RelationTypeByKey(context.Background(), g.projectID, relTypeKey)
-	if err != nil {
-		t.Fatalf("read back %q: %v", relTypeKey, err)
-	}
+	assert.Must(t, err == nil, "read back %q: %v", relTypeKey, err)
 	version := current.Version
 	_, err = g.meta.UpsertRelationType(context.Background(), g.projectID,
 		metamodel.RelationTypeInput{
@@ -226,9 +209,7 @@ func (g game) invalidate(t *testing.T, relTypeKey string) {
 			AnalysisTraits: current.AnalysisTraits,
 			Schema:         metamodel.Schema{{Key: "difficulty", Type: metamodel.FieldText, Required: true}},
 		})
-	if err != nil {
-		t.Fatalf("add a required field to %q: %v", relTypeKey, err)
-	}
+	assert.Must(t, err == nil, "add a required field to %q: %v", relTypeKey, err)
 	var invalid int
 	if err := g.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM relations r JOIN relation_types rt ON rt.id = r.relation_type_id
@@ -236,10 +217,8 @@ func (g game) invalidate(t *testing.T, relTypeKey string) {
 		g.projectID, relTypeKey).Scan(&invalid); err != nil {
 		t.Fatalf("count the invalidated edges: %v", err)
 	}
-	if invalid == 0 {
-		t.Fatalf("no edge of %q came back invalid, so the fixture is not testing what it says",
-			relTypeKey)
-	}
+	assert.Must(t, invalid != 0, "no edge of %q came back invalid, so the fixture is not testing what it says",
+		relTypeKey)
 }
 
 // route writes one route with the given steps, **through the product's

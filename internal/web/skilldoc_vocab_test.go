@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/skill"
 )
 
@@ -43,15 +44,11 @@ func TestTheErrorCodeRegionIsFindable(t *testing.T) {
 	if got := strings.Count(body, errorCodeRegionEnd); got != 1 {
 		t.Fatalf("auth.go carries %d %q markers, want exactly 1", got, errorCodeRegionEnd)
 	}
-	if strings.Index(body, errorCodeRegionBegin) > strings.Index(body, errorCodeRegionEnd) {
-		t.Fatal("the vocab:error_codes end marker comes before its begin marker")
-	}
+	assert.Must(t, strings.Index(body, errorCodeRegionBegin) <= strings.Index(body, errorCodeRegionEnd), "the vocab:error_codes end marker comes before its begin marker")
 	codes := errorCodesInRegion(t)
-	if len(codes) < 12 {
-		t.Fatalf("the region holds %d codes (%v): too few to be the content surface's "+
-			"vocabulary, so the comparisons below would be checking almost nothing",
-			len(codes), codes)
-	}
+	assert.Must(t, len(codes) >= 12, "the region holds %d codes (%v): too few to be the content surface's "+
+		"vocabulary, so the comparisons below would be checking almost nothing",
+		len(codes), codes)
 }
 
 // TestBundleErrorCodesMatchTheSurface set-compares the bundle's
@@ -63,30 +60,20 @@ func TestTheErrorCodeRegionIsFindable(t *testing.T) {
 func TestBundleErrorCodesMatchTheSurface(t *testing.T) {
 	t.Parallel()
 	fences, err := skill.VocabFences(skill.Files())
-	if err != nil {
-		t.Fatalf("reading the bundle's vocab fences: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the bundle's vocab fences: %v", err)
 	bundle, err := skill.VocabWords(fences, "error_codes")
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
+	assert.Must(t, err == nil, "%v", err)
 	code := errorCodesInRegion(t)
-	if len(bundle) == 0 || len(code) == 0 {
-		t.Fatalf("the fence lists %d codes and the region holds %d: a comparison over an "+
-			"empty set passes against anything", len(bundle), len(code))
-	}
+	assert.Must(t, len(bundle) != 0 && len(code) != 0, "the fence lists %d codes and the region holds %d: a comparison over an "+
+		"empty set passes against anything", len(bundle), len(code))
 
 	missing, extra := skill.DiffVocabularies(bundle, code)
-	if len(missing) > 0 {
-		t.Errorf("the surface can return %v and the bundle's vocab:error_codes fence does "+
-			"not list them: an agent would meet an error no page taught it to recover from",
-			missing)
-	}
-	if len(extra) > 0 {
-		t.Errorf("the bundle's vocab:error_codes fence lists %v and no code in auth.go's "+
-			"delimited region carries that value: the page teaches a recovery from an error "+
-			"that never arrives", extra)
-	}
+	assert.Should(t, len(missing) <= 0, "the surface can return %v and the bundle's vocab:error_codes fence does "+
+		"not list them: an agent would meet an error no page taught it to recover from",
+		missing)
+	assert.Should(t, len(extra) <= 0, "the bundle's vocab:error_codes fence lists %v and no code in auth.go's "+
+		"delimited region carries that value: the page teaches a recovery from an error "+
+		"that never arrives", extra)
 }
 
 // TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn takes the
@@ -114,24 +101,16 @@ func TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn(t *testing.T) {
 	region := errorCodesInRegion(t)
 	emitted := mcpEmittedErrorCodes(t)
 
-	if len(emitted) < 10 {
-		t.Fatalf("only %d error codes were found reaching the MCP wire across this package "+
-			"(%v): the parse is broken, and both comparisons below would be vacuous",
-			len(emitted), emitted)
-	}
-	if len(region) == 0 {
-		t.Fatal("no codes were parsed out of the delimited region")
-	}
+	assert.Must(t, len(emitted) >= 10, "only %d error codes were found reaching the MCP wire across this package "+
+		"(%v): the parse is broken, and both comparisons below would be vacuous",
+		len(emitted), emitted)
+	assert.Must(t, len(region) != 0, "no codes were parsed out of the delimited region")
 
 	missing, extra := skill.DiffVocabularies(emitted, region)
-	if len(missing) > 0 {
-		t.Errorf("%v are inside the vocab:error_codes region and no MCP path produces them: "+
-			"the bundle would teach a recovery from an error that never arrives", missing)
-	}
-	if len(extra) > 0 {
-		t.Errorf("%v reach the MCP wire and are declared outside the vocab:error_codes "+
-			"region: an agent can receive them and the bundle never enumerates them", extra)
-	}
+	assert.Should(t, len(missing) <= 0, "%v are inside the vocab:error_codes region and no MCP path produces them: "+
+		"the bundle would teach a recovery from an error that never arrives", missing)
+	assert.Should(t, len(extra) <= 0, "%v reach the MCP wire and are declared outside the vocab:error_codes "+
+		"region: an agent can receive them and the bundle never enumerates them", extra)
 }
 
 // readSource reads one file of this package from disk. The tests here
@@ -141,9 +120,7 @@ func TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn(t *testing.T) {
 func readSource(t *testing.T, name string) string {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Clean(name))
-	if err != nil {
-		t.Fatalf("reading %s: %v", name, err)
-	}
+	assert.Must(t, err == nil, "reading %s: %v", name, err)
 	return string(body)
 }
 
@@ -166,10 +143,8 @@ func regionLines(t *testing.T) []string {
 	body := readSource(t, "auth.go")
 	begin := strings.Index(body, errorCodeRegionBegin)
 	end := strings.Index(body, errorCodeRegionEnd)
-	if begin < 0 || end < 0 || end < begin {
-		t.Fatalf("the vocab:error_codes region is not delimited in auth.go: begin at %d, "+
-			"end at %d", begin, end)
-	}
+	assert.Must(t, begin >= 0 && end >= 0 && end >= begin, "the vocab:error_codes region is not delimited in auth.go: begin at %d, "+
+		"end at %d", begin, end)
 	return strings.Split(body[begin:end], "\n")
 }
 
@@ -283,9 +258,7 @@ func errorCodeConstantValues(t *testing.T) map[string]string {
 						continue
 					}
 					unquoted, err := strconv.Unquote(literal.Value)
-					if err != nil {
-						t.Fatalf("unquoting %s: %v", literal.Value, err)
-					}
+					assert.Must(t, err == nil, "unquoting %s: %v", literal.Value, err)
 					out[name.Name] = unquoted
 				}
 			}
@@ -302,9 +275,7 @@ func errorCodeConstantValues(t *testing.T) map[string]string {
 func forEachSourceFile(t *testing.T, visit func(name string, file *ast.File)) {
 	t.Helper()
 	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("listing the package directory: %v", err)
-	}
+	assert.Must(t, err == nil, "listing the package directory: %v", err)
 	fset := token.NewFileSet()
 	parsed := 0
 	for _, entry := range entries {
@@ -313,13 +284,9 @@ func forEachSourceFile(t *testing.T, visit func(name string, file *ast.File)) {
 			continue
 		}
 		file, err := parser.ParseFile(fset, filepath.Clean(name), nil, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", name, err)
-		}
+		assert.Must(t, err == nil, "parsing %s: %v", name, err)
 		parsed++
 		visit(name, file)
 	}
-	if parsed == 0 {
-		t.Fatal("no source files were parsed: this package's own scan is reading nothing")
-	}
+	assert.Must(t, parsed != 0, "no source files were parsed: this package's own scan is reading nothing")
 }

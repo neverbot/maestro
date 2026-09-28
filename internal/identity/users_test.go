@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -38,23 +39,13 @@ func TestCreateUserAndAuthenticate(t *testing.T) {
 		DisplayName: "Designer",
 		Password:    "hunter2hunter2",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if user.Email != "designer@example.test" {
-		t.Fatalf("Email = %q, want it lower-cased", user.Email)
-	}
-	if user.IsAdmin {
-		t.Fatal("CreateUser must never create an admin")
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
+	assert.Must(t, user.Email == "designer@example.test", "Email = %q, want it lower-cased", user.Email)
+	assert.Must(t, !user.IsAdmin, "CreateUser must never create an admin")
 
 	got, err := svc.Authenticate(ctx, "designer@example.test", "hunter2hunter2")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
-	if got.ID != user.ID {
-		t.Fatalf("Authenticate returned a different user")
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
+	assert.Must(t, got.ID == user.ID, "Authenticate returned a different user")
 
 	if _, err := svc.Authenticate(ctx, "designer@example.test", "wrong"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
@@ -74,9 +65,7 @@ func TestCreateUserRejectsDuplicateEmail(t *testing.T) {
 		t.Fatalf("first CreateUser: %v", err)
 	}
 	_, err := svc.CreateUser(ctx, identity.CreateUserRequest{Email: "DUP@example.test", DisplayName: "Two", Password: "password12345"})
-	if !errors.Is(err, identity.ErrEmailTaken) {
-		t.Fatalf("err = %v, want ErrEmailTaken", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrEmailTaken), "err = %v, want ErrEmailTaken", err)
 }
 
 func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
@@ -89,9 +78,7 @@ func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "outsider@elsewhere.test", DisplayName: "Outsider", Password: "password12345",
 	})
-	if !errors.Is(err, identity.ErrEmailNotAllowed) {
-		t.Fatalf("err = %v, want ErrEmailNotAllowed", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrEmailNotAllowed), "err = %v, want ErrEmailNotAllowed", err)
 }
 
 func TestCreateUserRejectsShortPassword(t *testing.T) {
@@ -102,9 +89,7 @@ func TestCreateUserRejectsShortPassword(t *testing.T) {
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "short@example.test", DisplayName: "Short", Password: "tooshort",
 	})
-	if !errors.Is(err, identity.ErrPasswordInvalid) {
-		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrPasswordInvalid), "err = %v, want ErrPasswordInvalid", err)
 }
 
 func TestCreateUserCountsRunesNotBytes(t *testing.T) {
@@ -144,9 +129,7 @@ func TestCreateUserRejectsOverlongPassword(t *testing.T) {
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "huge@example.test", DisplayName: "Huge", Password: string(huge),
 	})
-	if !errors.Is(err, identity.ErrPasswordInvalid) {
-		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrPasswordInvalid), "err = %v, want ErrPasswordInvalid", err)
 }
 
 func TestCreateUserRejectsInvalidEmail(t *testing.T) {
@@ -160,9 +143,7 @@ func TestCreateUserRejectsInvalidEmail(t *testing.T) {
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "@", DisplayName: "Nobody", Password: "password12345",
 	})
-	if !errors.Is(err, identity.ErrEmailInvalid) {
-		t.Fatalf("err = %v, want ErrEmailInvalid", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrEmailInvalid), "err = %v, want ErrEmailInvalid", err)
 }
 
 func TestCreateUserRejectsEmptyDisplayName(t *testing.T) {
@@ -173,9 +154,7 @@ func TestCreateUserRejectsEmptyDisplayName(t *testing.T) {
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "noname@example.test", DisplayName: "   ", Password: "password12345",
 	})
-	if !errors.Is(err, identity.ErrDisplayNameInvalid) {
-		t.Fatalf("err = %v, want ErrDisplayNameInvalid", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrDisplayNameInvalid), "err = %v, want ErrDisplayNameInvalid", err)
 }
 
 func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
@@ -190,9 +169,7 @@ func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "hugename@example.test", DisplayName: string(huge), Password: "password12345",
 	})
-	if !errors.Is(err, identity.ErrDisplayNameInvalid) {
-		t.Fatalf("err = %v, want ErrDisplayNameInvalid", err)
-	}
+	assert.Must(t, errors.Is(err, identity.ErrDisplayNameInvalid), "err = %v, want ErrDisplayNameInvalid", err)
 }
 
 func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
@@ -208,12 +185,8 @@ func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
 		t.Fatalf("BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "boss@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
-	if !admin.IsAdmin {
-		t.Fatal("the bootstrapped user is not an admin")
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
+	assert.Must(t, admin.IsAdmin, "the bootstrapped user is not an admin")
 
 	// Running it again on a populated instance must be a no-op, not an error.
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
@@ -230,12 +203,8 @@ func TestBootstrapFirstAdminNamesTheEnvVarOnFailure(t *testing.T) {
 	svc := identity.New(pool, cfg)
 
 	err := svc.BootstrapFirstAdmin(context.Background())
-	if err == nil {
-		t.Fatal("want an error for a too-short FIRST_ADMIN_PASSWORD")
-	}
-	if !errors.Is(err, identity.ErrPasswordInvalid) {
-		t.Fatalf("err = %v, want it to wrap ErrPasswordInvalid", err)
-	}
+	assert.Must(t, err != nil, "want an error for a too-short FIRST_ADMIN_PASSWORD")
+	assert.Must(t, errors.Is(err, identity.ErrPasswordInvalid), "err = %v, want it to wrap ErrPasswordInvalid", err)
 	if got := err.Error(); !strings.Contains(got, "FIRST_ADMIN_PASSWORD") {
 		t.Fatalf("err = %q, want it to name FIRST_ADMIN_PASSWORD", got)
 	}

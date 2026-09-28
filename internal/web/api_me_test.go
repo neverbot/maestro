@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 )
 
@@ -30,26 +31,20 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 		`{"email":"designer@example.test","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "login = %d: %s", rec.Code, rec.Body.String())
 	var session *http.Cookie
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == "maestro_session" {
 			session = c
 		}
 	}
-	if session == nil {
-		t.Fatal("login set no session cookie")
-	}
+	assert.Must(t, session != nil, "login set no session cookie")
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	meReq.AddCookie(session)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("/api/me = %d: %s", meRec.Code, meRec.Body.String())
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "/api/me = %d: %s", meRec.Code, meRec.Body.String())
 
 	var me struct {
 		UserID             string `json:"user_id"`
@@ -62,18 +57,10 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil {
 		t.Fatalf("decoding /api/me: %v", err)
 	}
-	if me.Email != "designer@example.test" {
-		t.Errorf("email = %q, want the address they signed in with", me.Email)
-	}
-	if me.DisplayName != "A Designer" {
-		t.Errorf("display_name = %q, want the name they were created with", me.DisplayName)
-	}
-	if me.CreatedAt == "" {
-		t.Error("created_at is empty, so the account screen cannot say since when")
-	}
-	if me.UserID == "" {
-		t.Error("user_id disappeared, and something still reads it")
-	}
+	assert.Should(t, me.Email == "designer@example.test", "email = %q, want the address they signed in with", me.Email)
+	assert.Should(t, me.DisplayName == "A Designer", "display_name = %q, want the name they were created with", me.DisplayName)
+	assert.Should(t, me.CreatedAt != "", "created_at is empty, so the account screen cannot say since when")
+	assert.Should(t, me.UserID != "", "user_id disappeared, and something still reads it")
 	// The bundle's first instruction tells an agent to read the bundle's
 	// version from this call. The MCP tool has always answered it and
 	// this mirror did not.
@@ -102,27 +89,19 @@ func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: project.ID, UserID: owner.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/api/me with a token = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "/api/me with a token = %d: %s", rec.Code, rec.Body.String())
 
 	var me struct {
 		ProjectSlug        string `json:"project_slug"`
@@ -132,15 +111,9 @@ func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
 		t.Fatalf("decoding /api/me: %v", err)
 	}
-	if me.ProjectSlug != "azeroth" {
-		t.Errorf("project_slug = %q, want the address every other route takes", me.ProjectSlug)
-	}
-	if me.ProjectName != "Azeroth" {
-		t.Errorf("project_name = %q, want the game's own name", me.ProjectName)
-	}
-	if me.SkillBundleVersion == "" {
-		t.Error("no skill_bundle_version for a token caller either")
-	}
+	assert.Should(t, me.ProjectSlug == "azeroth", "project_slug = %q, want the address every other route takes", me.ProjectSlug)
+	assert.Should(t, me.ProjectName == "Azeroth", "project_name = %q, want the game's own name", me.ProjectName)
+	assert.Should(t, me.SkillBundleVersion != "", "no skill_bundle_version for a token caller either")
 }
 
 // A token is a key to one game. The person who minted it has an email
@@ -157,27 +130,19 @@ func TestMeTellsATokenCallerNothingAboutThePerson(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: project.ID, UserID: owner.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/api/me with a token = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "/api/me with a token = %d: %s", rec.Code, rec.Body.String())
 
 	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {

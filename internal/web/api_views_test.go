@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -75,17 +76,11 @@ func newViewsRESTFixture(t *testing.T) viewsRESTFixture {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create the second game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create the second game: %v", err)
 	f := viewsRESTFixture{
 		srv: srv, ids: ids, proj: projSvc, views: vs, meta: mm,
 		game: game.ID, gameSlug: game.Slug, other: other.ID, otherSlug: other.Slug,
@@ -130,9 +125,7 @@ func (f viewsRESTFixture) call(t *testing.T, cookie *http.Cookie, method, path s
 	var reader *bytes.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
 		reader = bytes.NewReader(raw)
 	} else {
 		reader = bytes.NewReader(nil)
@@ -161,14 +154,10 @@ func (f viewsRESTFixture) uploadAsset(t *testing.T, filename string) string {
 	req.AddCookie(f.cookie)
 	rec := httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
-		t.Fatalf("upload %s = %d: %s", filename, rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated || rec.Code == http.StatusOK, "upload %s = %d: %s", filename, rec.Code, rec.Body.String())
 	var asset web.ViewAssetOutput
 	decodeInto(t, rec, &asset)
-	if asset.ID == "" {
-		t.Fatalf("upload %s answered no id: %s", filename, rec.Body.String())
-	}
+	assert.Must(t, asset.ID != "", "upload %s answered no id: %s", filename, rec.Body.String())
 	return asset.ID
 }
 
@@ -185,45 +174,29 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 		"key": "route", "name": "The route", "renderer": "graph",
 		"query": json.RawMessage(questsQuery), "expected_version": 0,
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /views = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST /views = %d: %s", rec.Code, rec.Body.String())
 	var saved web.ViewOutput
 	decodeInto(t, rec, &saved)
-	if saved.Version != 1 || saved.Key != "route" {
-		t.Fatalf("saved = %+v, want route at version 1", saved)
-	}
+	assert.Must(t, saved.Version == 1 && saved.Key == "route", "saved = %+v, want route at version 1", saved)
 
 	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/route"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET one = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET one = %d: %s", rec.Code, rec.Body.String())
 	var got web.ViewOutput
 	decodeInto(t, rec, &got)
-	if got.ID != saved.ID {
-		t.Fatalf("read back %s, want %s", got.ID, saved.ID)
-	}
+	assert.Must(t, got.ID == saved.ID, "read back %s, want %s", got.ID, saved.ID)
 
 	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET listing = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET listing = %d: %s", rec.Code, rec.Body.String())
 	var listing web.ViewsListOutput
 	decodeInto(t, rec, &listing)
-	if len(listing.Items) != 1 || listing.Items[0].Key != "route" || listing.Items[0].Stale {
-		t.Fatalf("listing = %+v, want one row, not stale", listing.Items)
-	}
+	assert.Must(t, len(listing.Items) == 1 && listing.Items[0].Key == "route" && !listing.Items[0].Stale, "listing = %+v, want one row, not stale", listing.Items)
 
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/run"), map[string]any{"key": "route"})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST run = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST run = %d: %s", rec.Code, rec.Body.String())
 	var run map[string]any
 	decodeInto(t, rec, &run)
 	nodes, _ := run["nodes"].([]any)
-	if len(nodes) != 2 {
-		t.Fatalf("run drew %d nodes, want the two quests: %s", len(nodes), rec.Body.String())
-	}
+	assert.Must(t, len(nodes) == 2, "run drew %d nodes, want the two quests: %s", len(nodes), rec.Body.String())
 	// The envelope's empty lists are lists and never null, which is the
 	// promise the domain makes and this is where a client reads it.
 	if _, ok := run["positions"].([]any); !ok {
@@ -233,31 +206,21 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/validate"), map[string]any{
 		"query": json.RawMessage(questsQuery),
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST validate = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST validate = %d: %s", rec.Code, rec.Body.String())
 	var validated web.ViewsValidateOutput
 	decodeInto(t, rec, &validated)
-	if !validated.Valid || len(validated.Refs) != 1 || validated.Limits.MaxNodes == 0 {
-		t.Fatalf("validate = %+v", validated)
-	}
+	assert.Must(t, validated.Valid && len(validated.Refs) == 1 && validated.Limits.MaxNodes != 0, "validate = %+v", validated)
 
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/route/positions"),
 		map[string]any{"positions": []any{
 			map[string]any{"entity_type": "quest", "entity_key": "hogger", "x": 3, "y": 4},
 		}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST positions = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST positions = %d: %s", rec.Code, rec.Body.String())
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/route/positions/clear"), map[string]any{})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST positions/clear = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST positions/clear = %d: %s", rec.Code, rec.Body.String())
 	var cleared web.ViewsPositionsRemovedOutput
 	decodeInto(t, rec, &cleared)
-	if cleared.Removed != 1 {
-		t.Fatalf("cleared %d, want the one that was written", cleared.Removed)
-	}
+	assert.Must(t, cleared.Removed == 1, "cleared %d, want the one that was written", cleared.Removed)
 
 	// The background, which the doc comment above has always promised
 	// and the body did not drive. It is its own step and not a
@@ -274,58 +237,35 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 		"key": "atlas", "name": "The atlas", "renderer": "map",
 		"query": json.RawMessage(questsQuery), "expected_version": 0,
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST a map view = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST a map view = %d: %s", rec.Code, rec.Body.String())
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/atlas/background"),
 		map[string]any{"asset_id": asset, "scale": 2.0, "offset": map[string]any{"x": 5, "y": -7}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST background = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST background = %d: %s", rec.Code, rec.Body.String())
 	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/atlas"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET after background = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET after background = %d: %s", rec.Code, rec.Body.String())
 	var placed web.ViewOutput
 	decodeInto(t, rec, &placed)
-	if placed.BackgroundAssetID == nil || *placed.BackgroundAssetID != asset {
-		t.Fatalf("background asset = %v, want %s", placed.BackgroundAssetID, asset)
-	}
-	if placed.BackgroundScale != 2 || placed.BackgroundOffset.X != 5 ||
-		placed.BackgroundOffset.Y != -7 {
-		t.Fatalf("background placement = %+v, want scale 2 at (5,-7)", placed)
-	}
+	assert.Must(t, placed.BackgroundAssetID != nil && *placed.BackgroundAssetID == asset, "background asset = %v, want %s", placed.BackgroundAssetID, asset)
+	assert.Must(t, placed.BackgroundScale == 2 && placed.BackgroundOffset.X == 5 && placed.BackgroundOffset.Y == -7, "background placement = %+v, want scale 2 at (5,-7)", placed)
 	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/atlas/background"),
 		map[string]any{})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST background clear = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "POST background clear = %d: %s", rec.Code, rec.Body.String())
 	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/atlas"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET after the clear = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET after the clear = %d: %s", rec.Code, rec.Body.String())
 	var clearedBackground web.ViewOutput
 	decodeInto(t, rec, &clearedBackground)
-	if clearedBackground.BackgroundAssetID != nil {
-		t.Fatalf("background survived the clear: %v", clearedBackground.BackgroundAssetID)
-	}
+	assert.Must(t, clearedBackground.BackgroundAssetID == nil, "background survived the clear: %v", clearedBackground.BackgroundAssetID)
 
 	rec = f.call(t, f.cookie, http.MethodDelete, f.path("/views/by-key/route"), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "DELETE = %d: %s", rec.Code, rec.Body.String())
 	// The answer's one member, which is the whole of what this route
 	// says: a `removed` that was always false would leave a client
 	// unable to tell a deletion from a refusal it did not read.
 	var removed web.ViewsRemovedOutput
 	decodeInto(t, rec, &removed)
-	if !removed.Removed {
-		t.Errorf("DELETE answered %+v, want removed true", removed)
-	}
+	assert.Should(t, removed.Removed, "DELETE answered %+v, want removed true", removed)
 	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/route"), nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("GET after DELETE = %d, want 404", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "GET after DELETE = %d, want 404", rec.Code)
 }
 
 // TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode is the wire codes
@@ -338,9 +278,7 @@ func TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode(t *testing.T) {
 	rec := f.call(t, f.cookie, http.MethodPost, f.path("/views/validate"), map[string]any{
 		"query": json.RawMessage(`{"v":1,"from":[{"type":"qeust"}]}`),
 	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400: %s", rec.Code, rec.Body.String())
 	var body struct {
 		Error   string `json:"error"`
 		Details struct {
@@ -350,12 +288,8 @@ func TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)
 	}
-	if body.Error != "query_invalid" {
-		t.Errorf("error = %q, want query_invalid", body.Error)
-	}
-	if len(body.Details.Fields) != 1 || body.Details.Fields[0]["path"] != "/from/0/type" {
-		t.Fatalf("details.fields = %v, want the pointer into the document", body.Details.Fields)
-	}
+	assert.Should(t, body.Error == "query_invalid", "error = %q, want query_invalid", body.Error)
+	assert.Must(t, len(body.Details.Fields) == 1 && body.Details.Fields[0]["path"] == "/from/0/type", "details.fields = %v, want the pointer into the document", body.Details.Fields)
 }
 
 // TestAViewerRunsAViewAndCannotSaveOne is open question O3, made true
@@ -375,9 +309,7 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -398,9 +330,7 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 		"key": "another", "name": "Another", "renderer": "graph",
 		"query": json.RawMessage(questsQuery), "expected_version": 0,
 	})
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("a viewer saving a view = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "a viewer saving a view = %d, want 403: %s", rec.Code, rec.Body.String())
 	// Nothing was stored by the refused write.
 	if _, err := f.views.ViewByKey(ctx, f.game, "another"); err == nil {
 		t.Fatal("the refused write stored a view anyway")
@@ -427,18 +357,14 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	secret, _, err := f.ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: f.game, UserID: f.ownerID, Label: "view agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	viewerCookie := loginAs(t, f.srv, "viewer@example.test")
 
 	ts := httptest.NewServer(f.srv)
@@ -512,24 +438,17 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 			"the viewer": viewerStream, "the agent": agentStream,
 		} {
 			kind, _, data := readOneSSEFrame(t, reader)
-			if kind != step.kind {
-				t.Fatalf("%s got %q after %s, want %s", who, kind, step.what, step.kind)
-			}
-			if !strings.Contains(data, `"key":"route"`) {
-				t.Errorf("%s got payload %s, want the view's key in it", who, data)
-			}
+			assert.Must(t, kind == step.kind, "%s got %q after %s, want %s", who, kind, step.what, step.kind)
+			assert.Should(t, strings.Contains(data, `"key":"route"`), "%s got payload %s, want the view's key in it", who, data)
 			// A position event carries the identity and nothing else —
 			// no coordinates, because publication order is not commit
 			// order and a client rendering a payload would eventually
 			// render the older of two drags.
 			// The same holds for a background: identity only, no
 			// asset id and no version, since the write advances none.
-			if step.kind != "view.upserted" && step.kind != "view.removed" &&
-				(strings.Contains(data, `"x"`) || strings.Contains(data, `"version"`) ||
-					strings.Contains(data, `"asset`)) {
-				t.Errorf("%s got a value on a %s payload, want identity only: %s",
-					who, step.kind, data)
-			}
+			assert.Should(t, step.kind == "view.upserted" || step.kind == "view.removed" || !(strings.Contains(data, `"x"`) || strings.Contains(data, `"version"`) ||
+				strings.Contains(data, `"asset`)), "%s got a value on a %s payload, want identity only: %s",
+				who, step.kind, data)
 		}
 	}
 }
@@ -564,18 +483,14 @@ func TestTheViewListingCarriesItsRendererAndCursorOverREST(t *testing.T) {
 	list := func(query string) web.ViewsListOutput {
 		t.Helper()
 		rec := f.call(t, f.cookie, http.MethodGet, f.path("/views"+query), nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /views%s = %d: %s", query, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "GET /views%s = %d: %s", query, rec.Code, rec.Body.String())
 		var out web.ViewsListOutput
 		decodeInto(t, rec, &out)
 		return out
 	}
 
 	only := list("?renderer=map")
-	if len(only.Items) != 1 || only.Items[0].Key != "atlas" {
-		t.Fatalf("?renderer=map answered %+v, want only the map view", only.Items)
-	}
+	assert.Must(t, len(only.Items) == 1 && only.Items[0].Key == "atlas", "?renderer=map answered %+v, want only the map view", only.Items)
 	// The control: all three are really there, so the filter is doing
 	// the narrowing rather than an empty listing satisfying the check.
 	if whole := list(""); len(whole.Items) != 3 {
@@ -583,21 +498,15 @@ func TestTheViewListingCarriesItsRendererAndCursorOverREST(t *testing.T) {
 	}
 
 	page := list("?renderer=graph&limit=1")
-	if len(page.Items) != 1 || page.NextCursor == nil {
-		t.Fatalf("page one = %+v with cursor %v", page.Items, page.NextCursor)
-	}
+	assert.Must(t, len(page.Items) == 1 && page.NextCursor != nil, "page one = %+v with cursor %v", page.Items, page.NextCursor)
 	next := list("?renderer=graph&limit=1&cursor=" + url.QueryEscape(*page.NextCursor))
-	if len(next.Items) != 1 || next.Items[0].Key == page.Items[0].Key {
-		t.Fatalf("page two = %+v, want the other graph view", next.Items)
-	}
+	assert.Must(t, len(next.Items) == 1 && next.Items[0].Key != page.Items[0].Key, "page two = %+v, want the other graph view", next.Items)
 	// A cursor belongs to the filter it was issued for, on this surface
 	// too: replayed against another renderer it is refused as the
 	// caller's own argument rather than answered.
 	rec := f.call(t, f.cookie, http.MethodGet,
 		f.path("/views?renderer=map&cursor="+url.QueryEscape(*page.NextCursor)), nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("a cursor from another filter = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "a cursor from another filter = %d, want 400: %s", rec.Code, rec.Body.String())
 }
 
 // TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute
@@ -648,17 +557,13 @@ func TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute(t *t
 				body[k] = v
 			}
 			rec := f.call(t, f.cookie, http.MethodPost, f.path(route.suffix), body)
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("a game naming another game = %d, want 403: %s",
-					rec.Code, rec.Body.String())
-			}
+			assert.Must(t, rec.Code == http.StatusForbidden, "a game naming another game = %d, want 403: %s",
+				rec.Code, rec.Body.String())
 			var answer struct {
 				Error string `json:"error"`
 			}
 			decodeInto(t, rec, &answer)
-			if answer.Error != "scope_violation" {
-				t.Errorf("error = %q, want scope_violation", answer.Error)
-			}
+			assert.Should(t, answer.Error == "scope_violation", "error = %q, want scope_violation", answer.Error)
 		})
 	}
 }

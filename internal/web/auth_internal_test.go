@@ -1,6 +1,10 @@
 package web
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
+)
 
 // TestErrorCodeValuesArePinned asserts the literal wire values of the
 // error codes nothing else in the suite happens to assert.
@@ -41,8 +45,6 @@ func TestErrorCodeValuesArePinned(t *testing.T) {
 		{"errCodeEmailInvalid", errCodeEmailInvalid, "email_invalid"},
 	}
 	for _, tc := range cases {
-		if tc.got != tc.want {
-			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
-		}
+		assert.Should(t, tc.got == tc.want, "%s = %q, want %q", tc.name, tc.got, tc.want)
 	}
 }

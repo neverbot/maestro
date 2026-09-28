@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -49,21 +50,15 @@ func TestARaceOnAnEdgesParentsNamesWhichParentIsGone(t *testing.T) {
 	relType, err := svc.UpsertRelationType(ctx, project, RelationTypeInput{
 		Key: "requires", Label: "requires",
 	})
-	if err != nil {
-		t.Fatalf("UpsertRelationType: %v", err)
-	}
+	assert.Must(t, err == nil, "UpsertRelationType: %v", err)
 	source, err := svc.UpsertEntity(ctx, project, EntityInput{
 		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
 	})
-	if err != nil {
-		t.Fatalf("UpsertEntity: %v", err)
-	}
+	assert.Must(t, err == nil, "UpsertEntity: %v", err)
 	target, err := svc.UpsertEntity(ctx, project, EntityInput{
 		TypeKey: "quest", Key: "kobold-camp", Name: "Kobold Camp",
 	})
-	if err != nil {
-		t.Fatalf("UpsertEntity: %v", err)
-	}
+	assert.Must(t, err == nil, "UpsertEntity: %v", err)
 	in := RelationInput{
 		TypeKey: "requires",
 		Source:  Ref{TypeKey: "quest", Key: "hogger"},
@@ -103,22 +98,14 @@ func TestARaceOnAnEdgesParentsNamesWhichParentIsGone(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, err := pool.Begin(ctx)
-			if err != nil {
-				t.Fatalf("begin: %v", err)
-			}
+			assert.Must(t, err == nil, "begin: %v", err)
 			defer func() { _ = tx.Rollback(ctx) }()
 
 			_, err = dbq.New(tx).UpsertRelation(ctx, tc.params)
-			if err == nil {
-				t.Fatal("the insert was accepted with a parent that does not exist")
-			}
+			assert.Must(t, err != nil, "the insert was accepted with a parent that does not exist")
 			mapped := edgeParentViolation(err, in)
-			if !errors.Is(mapped, ErrNotFound) {
-				t.Fatalf("mapped = %v, want ErrNotFound", mapped)
-			}
-			if mapped.Error() != tc.want {
-				t.Fatalf("message = %q, want %q", mapped.Error(), tc.want)
-			}
+			assert.Must(t, errors.Is(mapped, ErrNotFound), "mapped = %v, want ErrNotFound", mapped)
+			assert.Must(t, mapped.Error() == tc.want, "message = %q, want %q", mapped.Error(), tc.want)
 		})
 	}
 }
@@ -178,9 +165,7 @@ func TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction(t *testing.T) {
 		})
 		return err
 	})
-	if err != nil {
-		t.Fatalf("an edge could not see the entity its own transaction wrote: %v", err)
-	}
+	assert.Must(t, err == nil, "an edge could not see the entity its own transaction wrote: %v", err)
 }
 
 // TestTheGenericNotFoundIsNotUsedWhereACallerSuppliedAKey is a reminder
@@ -224,15 +209,9 @@ func TestTheGenericNotFoundIsNotUsedWhereACallerSuppliedAKey(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.call()
-			if !errors.Is(err, ErrNotFound) {
-				t.Fatalf("err = %v, want ErrNotFound", err)
-			}
-			if err.Error() != tc.want {
-				t.Fatalf("message = %q, want %q", err.Error(), tc.want)
-			}
-			if !strings.Contains(err.Error(), "nosuch") {
-				t.Fatalf("message %q does not name the key the caller sent", err.Error())
-			}
+			assert.Must(t, errors.Is(err, ErrNotFound), "err = %v, want ErrNotFound", err)
+			assert.Must(t, err.Error() == tc.want, "message = %q, want %q", err.Error(), tc.want)
+			assert.Must(t, strings.Contains(err.Error(), "nosuch"), "message %q does not name the key the caller sent", err.Error())
 		})
 	}
 }

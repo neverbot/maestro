@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestWriteUnmappedErrorClassifiesContention pins the shared tail every
@@ -57,9 +59,7 @@ func TestWriteUnmappedErrorClassifiesContention(t *testing.T) {
 			rec := httptest.NewRecorder()
 			writeUnmappedError(rec, httptest.NewRequest(http.MethodDelete, "/api/games/azeroth", nil),
 				tc.err, "delete game failed", "could not delete the game", "project_id", "x")
-			if rec.Code != tc.status {
-				t.Errorf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
-			}
+			assert.Should(t, rec.Code == tc.status, "status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			var body struct {
 				Error   string `json:"error"`
 				Message string `json:"message"`
@@ -67,15 +67,11 @@ func TestWriteUnmappedErrorClassifiesContention(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatalf("decode %q: %v", rec.Body.String(), err)
 			}
-			if body.Error != tc.code {
-				t.Errorf("code = %q, want %q", body.Error, tc.code)
-			}
+			assert.Should(t, body.Error == tc.code, "code = %q, want %q", body.Error, tc.code)
 			// The caller-facing sentence is the surface's one sentence,
 			// not a second copy of it: writeDomainError's tail and this
 			// one answer identically because they are the same function.
-			if tc.code == errCodeRetryable && body.Message != retryableAdvice {
-				t.Errorf("message = %q, want the shared advice", body.Message)
-			}
+			assert.Should(t, tc.code != errCodeRetryable || body.Message == retryableAdvice, "message = %q, want the shared advice", body.Message)
 		})
 	}
 }
@@ -104,9 +100,7 @@ func TestNoGameAdministrationHandlerAnswersAnUnclassifiedServerFault(t *testing.
 	t.Parallel()
 	for _, name := range gameAdministrationFiles {
 		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", name, err)
 		lines := strings.Split(string(src), "\n")
 		for i, line := range lines {
 			if !strings.Contains(line, "http.StatusInternalServerError") {

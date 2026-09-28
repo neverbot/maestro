@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -77,44 +78,24 @@ func TestViewsArea(t *testing.T) {
 		in.LayoutMode = LayoutManual
 		in.Actor = Actor{UserID: &user, TokenID: &token}
 		written, err := g.views.UpsertView(ctx, g.projectID, in)
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
-		if written.Version != 1 {
-			t.Fatalf("Version = %d, want 1 on a creation", written.Version)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
+		assert.Must(t, written.Version == 1, "Version = %d, want 1 on a creation", written.Version)
 
 		got, err := g.views.ViewByKey(ctx, g.projectID, "mage_route")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.ID != written.ID || got.Key != "mage_route" || got.Name != "Mage route" {
-			t.Fatalf("identity = (%s, %q, %q), want the row that was written",
-				got.ID, got.Key, got.Name)
-		}
-		if got.Description != in.Description {
-			t.Fatalf("Description = %q, want %q", got.Description, in.Description)
-		}
-		if got.Renderer != RendererGraph {
-			t.Fatalf("Renderer = %q, want %q", got.Renderer, RendererGraph)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.ID == written.ID && got.Key == "mage_route" && got.Name == "Mage route", "identity = (%s, %q, %q), want the row that was written",
+			got.ID, got.Key, got.Name)
+		assert.Must(t, got.Description == in.Description, "Description = %q, want %q", got.Description, in.Description)
+		assert.Must(t, got.Renderer == RendererGraph, "Renderer = %q, want %q", got.Renderer, RendererGraph)
 		var params map[string]any
 		if err := json.Unmarshal(got.RendererParams, &params); err != nil {
 			t.Fatalf("decode renderer_params: %v", err)
 		}
-		if len(params) != 2 || params["arrows"] != true || params["edge_labels"] != false {
-			t.Fatalf("renderer_params = %v, want both parameters as they were saved", params)
-		}
-		if got.LayoutMode != LayoutManual {
-			t.Fatalf("LayoutMode = %q, want %q", got.LayoutMode, LayoutManual)
-		}
+		assert.Must(t, len(params) == 2 && params["arrows"] == true && params["edge_labels"] == false, "renderer_params = %v, want both parameters as they were saved", params)
+		assert.Must(t, got.LayoutMode == LayoutManual, "LayoutMode = %q, want %q", got.LayoutMode, LayoutManual)
 		// The two audit columns, which no other test in this package fills.
-		if got.UpdatedByUserID == nil || *got.UpdatedByUserID != user {
-			t.Fatalf("UpdatedByUserID = %v, want the user that wrote it (%s)", got.UpdatedByUserID, user)
-		}
-		if got.UpdatedByTokenID == nil || *got.UpdatedByTokenID != token {
-			t.Fatalf("UpdatedByTokenID = %v, want the token that wrote it (%s)", got.UpdatedByTokenID, token)
-		}
+		assert.Must(t, got.UpdatedByUserID != nil && *got.UpdatedByUserID == user, "UpdatedByUserID = %v, want the user that wrote it (%s)", got.UpdatedByUserID, user)
+		assert.Must(t, got.UpdatedByTokenID != nil && *got.UpdatedByTokenID == token, "UpdatedByTokenID = %v, want the token that wrote it (%s)", got.UpdatedByTokenID, token)
 		// The query is stored as authored, which is what makes Task 12's
 		// "a rename does not rewrite the query" checkable at all.
 		var stored, sent any
@@ -124,9 +105,7 @@ func TestViewsArea(t *testing.T) {
 		if err := json.Unmarshal([]byte(questsToZones), &sent); err != nil {
 			t.Fatalf("decode the sent query: %v", err)
 		}
-		if fmt.Sprint(stored) != fmt.Sprint(sent) {
-			t.Fatalf("stored query = %v, want the document as it was written: %v", stored, sent)
-		}
+		assert.Must(t, fmt.Sprint(stored) == fmt.Sprint(sent), "stored query = %v, want the document as it was written: %v", stored, sent)
 	})
 
 	// TestViewsArea's "the defaults a view is stored with are the columns own"
@@ -138,16 +117,10 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		row, err := g.views.UpsertView(context.Background(), g.projectID,
 			saveable("plain", questsOnly))
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
-		if row.LayoutMode != DefaultLayoutMode {
-			t.Fatalf("LayoutMode = %q, want %q", row.LayoutMode, DefaultLayoutMode)
-		}
-		if string(row.RendererParams) != "{}" {
-			t.Fatalf("renderer_params = %s, want an empty object rather than null: a reader "+
-				"must not have to handle two spellings of \"no parameters\"", row.RendererParams)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
+		assert.Must(t, row.LayoutMode == DefaultLayoutMode, "LayoutMode = %q, want %q", row.LayoutMode, DefaultLayoutMode)
+		assert.Must(t, string(row.RendererParams) == "{}", "renderer_params = %s, want an empty object rather than null: a reader "+
+			"must not have to handle two spellings of \"no parameters\"", row.RendererParams)
 	})
 
 	// TestViewsArea's "upsert round trips without a seed" case is the positive
@@ -163,20 +136,12 @@ func TestViewsArea(t *testing.T) {
 		in := saveable("no_seed", questsOnly)
 		in.LayoutMode = LayoutManual
 		row, err := g.views.UpsertView(context.Background(), g.projectID, in)
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		back, err := g.views.ViewByKey(context.Background(), g.projectID, "no_seed")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if back.ID != row.ID || back.Key != "no_seed" || back.Version != 1 {
-			t.Fatalf("read back (%s, %q, v%d), want the row the upsert returned",
-				back.ID, back.Key, back.Version)
-		}
-		if back.LayoutMode != LayoutManual {
-			t.Fatalf("LayoutMode = %q, want %q", back.LayoutMode, LayoutManual)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, back.ID == row.ID && back.Key == "no_seed" && back.Version == 1, "read back (%s, %q, v%d), want the row the upsert returned",
+			back.ID, back.Key, back.Version)
+		assert.Must(t, back.LayoutMode == LayoutManual, "LayoutMode = %q, want %q", back.LayoutMode, LayoutManual)
 	})
 
 	// TestViewsArea's "a second upsert must carry the stored version" case
@@ -195,13 +160,9 @@ func TestViewsArea(t *testing.T) {
 		silent.Name = "Overwritten"
 		_, err := g.views.UpsertView(ctx, g.projectID, silent)
 		var conflict *metamodel.VersionConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("err = %v, want a version conflict: a caller with no version is not "+
-				"creating over a view that already exists", err)
-		}
-		if conflict.Current != 1 {
-			t.Fatalf("Current = %d, want 1", conflict.Current)
-		}
+		assert.Must(t, errors.As(err, &conflict), "err = %v, want a version conflict: a caller with no version is not "+
+			"creating over a view that already exists", err)
+		assert.Must(t, conflict.Current == 1, "Current = %d, want 1", conflict.Current)
 
 		stale := saveable("route", questsOnly)
 		stale.ExpectedVersion = ptrInt32(7)
@@ -213,22 +174,14 @@ func TestViewsArea(t *testing.T) {
 		ok.Name = "Mine"
 		ok.ExpectedVersion = ptrInt32(1)
 		row, err := g.views.UpsertView(ctx, g.projectID, ok)
-		if err != nil {
-			t.Fatalf("update: %v", err)
-		}
-		if row.Version != 2 || row.Name != "Mine" {
-			t.Fatalf("row = (%d, %q), want version 2 and the new name", row.Version, row.Name)
-		}
+		assert.Must(t, err == nil, "update: %v", err)
+		assert.Must(t, row.Version == 2 && row.Name == "Mine", "row = (%d, %q), want version 2 and the new name", row.Version, row.Name)
 		// The refused writes above left nothing behind: one row, at the
 		// version this call produced.
 		got, err := g.views.ViewByKey(ctx, g.projectID, "route")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Version != 2 || got.Name != "Mine" {
-			t.Fatalf("stored = (%d, %q), want only the accepted write to have landed",
-				got.Version, got.Name)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Version == 2 && got.Name == "Mine", "stored = (%d, %q), want only the accepted write to have landed",
+			got.Version, got.Name)
 	})
 
 	// TestViewsArea's "the reported current view version is the one the write
@@ -245,14 +198,10 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		row, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 
 		rival, err := g.pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`UPDATE views SET version = version + 1, name = 'Theirs' WHERE id = $1`,
@@ -280,14 +229,10 @@ func TestViewsArea(t *testing.T) {
 		select {
 		case err := <-result:
 			var conflict *metamodel.VersionConflictError
-			if !errors.As(err, &conflict) {
-				t.Fatalf("err = %v, want a *VersionConflictError", err)
-			}
-			if conflict.Current != 2 {
-				t.Fatalf("Current = %d, want 2: the caller must be told the version its own "+
-					"write would have met, not the one visible before the rival committed",
-					conflict.Current)
-			}
+			assert.Must(t, errors.As(err, &conflict), "err = %v, want a *VersionConflictError", err)
+			assert.Must(t, conflict.Current == 2, "Current = %d, want 2: the caller must be told the version its own "+
+				"write would have met, not the one visible before the rival committed",
+				conflict.Current)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival committed")
 		}
@@ -308,9 +253,7 @@ func TestViewsArea(t *testing.T) {
 		// Another writer's creation, begun and not yet committed. Ours cannot
 		// see it, cannot lock it, and will meet it at views_key_key.
 		other, err := g.pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		if _, err := other.Exec(ctx,
 			`INSERT INTO views (project_id, key, name, query, renderer)
@@ -333,21 +276,13 @@ func TestViewsArea(t *testing.T) {
 
 		err = <-done
 		var conflict *metamodel.VersionConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a version conflict from the losing creation, got %#v", err)
-		}
-		if conflict.Current != 1 {
-			t.Fatalf("Current = %d, want 1: the key was created while this write was in flight",
-				conflict.Current)
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a version conflict from the losing creation, got %#v", err)
+		assert.Must(t, conflict.Current == 1, "Current = %d, want 1: the key was created while this write was in flight",
+			conflict.Current)
 		got, err := g.views.ViewByKey(ctx, g.projectID, "route")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Name != "Theirs" || got.Version != 1 {
-			t.Fatalf("view = (%q, %d), want the winner's row untouched at version 1",
-				got.Name, got.Version)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Name == "Theirs" && got.Version == 1, "view = (%q, %d), want the winner's row untouched at version 1",
+			got.Name, got.Version)
 	})
 
 	// TestViewsArea's "a respelt view key is refused rather than rewriting the
@@ -364,19 +299,11 @@ func TestViewsArea(t *testing.T) {
 		in := saveable("Route", questsOnly)
 		in.ExpectedVersion = ptrInt32(1)
 		_, err := g.views.UpsertView(ctx, g.projectID, in)
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input naming the stored spelling", err)
-		}
-		if !strings.Contains(err.Error(), `"route"`) {
-			t.Fatalf("err = %v, want the stored spelling in the message", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input naming the stored spelling", err)
+		assert.Must(t, strings.Contains(err.Error(), `"route"`), "err = %v, want the stored spelling in the message", err)
 		got, err := g.views.ViewByKey(ctx, g.projectID, "ROUTE")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Key != "route" || got.Version != 1 {
-			t.Fatalf("view = (%q, %d), want the first spelling at version 1", got.Key, got.Version)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Key == "route" && got.Version == 1, "view = (%q, %d), want the first spelling at version 1", got.Key, got.Version)
 	})
 
 	// TestViewsArea's "every type a query names gets a ref at its pointer"
@@ -387,26 +314,18 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		row, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsToZones))
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		refs, err := g.views.ViewRefs(ctx, g.projectID, row.ID)
-		if err != nil {
-			t.Fatalf("list refs: %v", err)
-		}
+		assert.Must(t, err == nil, "list refs: %v", err)
 		want := map[string][2]string{
 			"/from/0/type":          {KindEntityType, "quest"},
 			"/traverse/0/to_type/0": {KindEntityType, "zone"},
 			"/traverse/0/via/0":     {KindRelationType, "takes_place_in"},
 		}
-		if len(refs) != len(want) {
-			t.Fatalf("%d refs, want %d: %+v", len(refs), len(want), refs)
-		}
+		assert.Must(t, len(refs) == len(want), "%d refs, want %d: %+v", len(refs), len(want), refs)
 		for _, ref := range refs {
 			expect, ok := want[ref.Pointer]
-			if !ok {
-				t.Fatalf("unexpected ref at %s", ref.Pointer)
-			}
+			assert.Must(t, ok, "unexpected ref at %s", ref.Pointer)
 			if ref.Kind != expect[0] || ref.RefKey != expect[1] {
 				t.Fatalf("ref at %s = (%q, %q), want (%q, %q)",
 					ref.Pointer, ref.Kind, ref.RefKey, expect[0], expect[1])
@@ -415,13 +334,9 @@ func TestViewsArea(t *testing.T) {
 			// it is what the table's own CHECK is about.
 			switch ref.Kind {
 			case KindEntityType:
-				if ref.EntityTypeID == nil || ref.RelationTypeID != nil {
-					t.Fatalf("ref at %s carries the wrong id column: %+v", ref.Pointer, ref)
-				}
+				assert.Must(t, ref.EntityTypeID != nil && ref.RelationTypeID == nil, "ref at %s carries the wrong id column: %+v", ref.Pointer, ref)
 			case KindRelationType:
-				if ref.RelationTypeID == nil || ref.EntityTypeID != nil {
-					t.Fatalf("ref at %s carries the wrong id column: %+v", ref.Pointer, ref)
-				}
+				assert.Must(t, ref.RelationTypeID != nil && ref.EntityTypeID == nil, "ref at %s carries the wrong id column: %+v", ref.Pointer, ref)
 			}
 		}
 	})
@@ -434,21 +349,15 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		row, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsToZones))
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 		in := saveable("route", questsOnly)
 		in.ExpectedVersion = ptrInt32(1)
 		if _, err := g.views.UpsertView(ctx, g.projectID, in); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 		refs, err := g.views.ViewRefs(ctx, g.projectID, row.ID)
-		if err != nil {
-			t.Fatalf("list refs: %v", err)
-		}
-		if len(refs) != 1 || refs[0].Pointer != "/from/0/type" || refs[0].RefKey != "quest" {
-			t.Fatalf("refs = %+v, want only the reference the new query makes", refs)
-		}
+		assert.Must(t, err == nil, "list refs: %v", err)
+		assert.Must(t, len(refs) == 1 && refs[0].Pointer == "/from/0/type" && refs[0].RefKey == "quest", "refs = %+v, want only the reference the new query makes", refs)
 	})
 
 	// TestViewsArea's "a refused upsert leaves the refs of the query that is
@@ -462,22 +371,16 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		row, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 		stale := saveable("route", questsToZones)
 		stale.ExpectedVersion = ptrInt32(99)
 		if _, err := g.views.UpsertView(ctx, g.projectID, stale); !errors.Is(err, ErrVersionConflict) {
 			t.Fatalf("err = %v, want a version conflict", err)
 		}
 		refs, err := g.views.ViewRefs(ctx, g.projectID, row.ID)
-		if err != nil {
-			t.Fatalf("list refs: %v", err)
-		}
-		if len(refs) != 1 || refs[0].RefKey != "quest" {
-			t.Fatalf("refs = %+v, want the stored query's single reference: a refused write "+
-				"must not leave its own refs behind", refs)
-		}
+		assert.Must(t, err == nil, "list refs: %v", err)
+		assert.Must(t, len(refs) == 1 && refs[0].RefKey == "quest", "refs = %+v, want the stored query's single reference: a refused write "+
+			"must not leave its own refs behind", refs)
 	})
 
 	// TestViewsArea's "a query that does not resolve is refused and nothing is
@@ -490,13 +393,9 @@ func TestViewsArea(t *testing.T) {
 		ctx := context.Background()
 		in := saveable("route", `{"v":1,"from":[{"type":"qeust","as":"q"}]}`)
 		_, err := g.views.UpsertView(ctx, g.projectID, in)
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("err = %v, want query_invalid", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "err = %v, want query_invalid", err)
 		var qe *QueryError
-		if !errors.As(err, &qe) || len(qe.Fields) != 1 || qe.Fields[0].Path != "/from/0/type" {
-			t.Fatalf("err = %#v, want one problem at /from/0/type", err)
-		}
+		assert.Must(t, errors.As(err, &qe) && len(qe.Fields) == 1 && qe.Fields[0].Path == "/from/0/type", "err = %#v, want one problem at /from/0/type", err)
 		if _, err := g.views.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("ViewByKey = %v, want not_found: nothing may be stored for a query "+
 				"that resolves against nothing", err)
@@ -520,9 +419,7 @@ func TestViewsArea(t *testing.T) {
 		unknown := saveable("route", questsOnly)
 		unknown.Renderer = "sankey"
 		_, err := g.views.UpsertView(ctx, g.projectID, unknown)
-		if !errors.Is(err, ErrQueryInvalid) {
-			t.Fatalf("err = %v, want query_invalid for a renderer that is not in the catalogue", err)
-		}
+		assert.Must(t, errors.Is(err, ErrQueryInvalid), "err = %v, want query_invalid for a renderer that is not in the catalogue", err)
 
 		// layered ranks nodes by the edges between them, and questsOnly draws
 		// none. The renderer is real, the parameters are fine, and the query
@@ -530,9 +427,7 @@ func TestViewsArea(t *testing.T) {
 		unmeetable := saveable("route", questsOnly)
 		unmeetable.Renderer = RendererLayered
 		_, err = g.views.UpsertView(ctx, g.projectID, unmeetable)
-		if !errors.Is(err, ErrRendererRequirements) {
-			t.Fatalf("err = %v, want renderer_requirements", err)
-		}
+		assert.Must(t, errors.Is(err, ErrRendererRequirements), "err = %v, want renderer_requirements", err)
 		if _, err := g.views.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("ViewByKey = %v, want not_found: a view that cannot be drawn is not "+
 				"stored", err)
@@ -556,14 +451,9 @@ func TestViewsArea(t *testing.T) {
 		in := saveable("route", questsOnly)
 		in.RendererParams = map[string]any{"color_by": "group_by"}
 		_, err := g.views.UpsertView(ctx, g.projectID, in)
-		if !errors.Is(err, ErrRendererRequirements) {
-			t.Fatalf("err = %v, want renderer_requirements: the query declares no group_by slot", err)
-		}
+		assert.Must(t, errors.Is(err, ErrRendererRequirements), "err = %v, want renderer_requirements: the query declares no group_by slot", err)
 		var qe *QueryError
-		if !errors.As(err, &qe) || len(qe.Fields) != 1 ||
-			qe.Fields[0].Path != "/renderer_params/color_by" {
-			t.Fatalf("err = %#v, want one problem addressed at the parameter", err)
-		}
+		assert.Must(t, errors.As(err, &qe) && len(qe.Fields) == 1 && qe.Fields[0].Path == "/renderer_params/color_by", "err = %#v, want one problem addressed at the parameter", err)
 		// The control: the same parameter over a query whose projection
 		// declares the slot it names.
 		ok := saveable("route", `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -614,13 +504,9 @@ func TestViewsArea(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				key := fmt.Sprintf("route%d", i)
 				_, err := g.views.UpsertView(ctx, g.projectID, tc.in(saveable(key, questsOnly)))
-				if !errors.Is(err, ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Path != tc.path {
-					t.Fatalf("err = %#v, want one problem at %s", err, tc.path)
-				}
+				assert.Must(t, errors.As(err, &ve) && len(ve.Fields) == 1 && ve.Fields[0].Path == tc.path, "err = %#v, want one problem at %s", err, tc.path)
 			})
 		}
 		// A description *may* hold a paragraph break, which is the one
@@ -658,12 +544,8 @@ func TestViewsArea(t *testing.T) {
 			t.Fatalf("prose exactly on the cap in accented characters must save: %v", err)
 		}
 		got, err := g.views.ViewByKey(ctx, g.projectID, "acentos")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Name != in.Name || got.Description != in.Description {
-			t.Fatal("the stored prose must be what was written, character for character")
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Name == in.Name && got.Description == in.Description, "the stored prose must be what was written, character for character")
 
 		// One character past the cap is refused, and the message names the
 		// unit it counted — a message saying "bytes" over a rune count is the
@@ -671,23 +553,16 @@ func TestViewsArea(t *testing.T) {
 		over := saveable("pasado", questsOnly)
 		over.Name = strings.Repeat("á", MaxViewNameLen+1)
 		_, err = g.views.UpsertView(ctx, g.projectID, over)
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want invalid_input", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want invalid_input", err)
 		want := fmt.Sprintf("must be at most %d characters", MaxViewNameLen)
 		var ve *metamodel.ValidationError
-		if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Message != want {
-			t.Fatalf("err = %#v, want one problem reading %q", err, want)
-		}
+		assert.Must(t, errors.As(err, &ve) && len(ve.Fields) == 1 && ve.Fields[0].Message == want, "err = %#v, want one problem reading %q", err, want)
 		// The same message the metamodel gives for the same value at the same
 		// cap, which is the claim the shared judgement is there to make.
 		_, metaErr := g.meta.UpsertEntityType(ctx, g.projectID, metamodel.EntityTypeInput{
 			Key: "pasado", Label: over.Name, LabelPlural: "Pasados"})
 		var metaVE *metamodel.ValidationError
-		if !errors.As(metaErr, &metaVE) || len(metaVE.Fields) == 0 ||
-			metaVE.Fields[0].Message != want {
-			t.Fatalf("the metamodel says %v for the same value, want %q", metaErr, want)
-		}
+		assert.Must(t, errors.As(metaErr, &metaVE) && len(metaVE.Fields) != 0 && metaVE.Fields[0].Message == want, "the metamodel says %v for the same value, want %q", metaErr, want)
 	})
 
 	// TestViewsArea's "every problem with a views arguments is reported in one
@@ -701,17 +576,13 @@ func TestViewsArea(t *testing.T) {
 		in.LayoutMode = "grid"
 		_, err := g.views.UpsertView(context.Background(), g.projectID, in)
 		var ve *metamodel.ValidationError
-		if !errors.As(err, &ve) {
-			t.Fatalf("err = %v, want a *metamodel.ValidationError", err)
-		}
+		assert.Must(t, errors.As(err, &ve), "err = %v, want a *metamodel.ValidationError", err)
 		seen := map[string]bool{}
 		for _, f := range ve.Fields {
 			seen[f.Path] = true
 		}
 		for _, want := range []string{"/key", "/name", "/layout_mode"} {
-			if !seen[want] {
-				t.Fatalf("problems = %+v, want one at %s too", ve.Fields, want)
-			}
+			assert.Must(t, seen[want], "problems = %+v, want one at %s too", ve.Fields, want)
 		}
 	})
 
@@ -724,9 +595,7 @@ func TestViewsArea(t *testing.T) {
 		in := saveable("route", `{"v":1,"from":[{"type":"qeust","as":"q"}]}`)
 		in.Name = ""
 		_, err := g.views.UpsertView(context.Background(), g.projectID, in)
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want the argument problem rather than the query's", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want the argument problem rather than the query's", err)
 	})
 
 	// TestViewsArea's "reading another games view is not found" case is the
@@ -737,33 +606,21 @@ func TestViewsArea(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
 		mine, err := azeroth.views.UpsertView(ctx, azeroth.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		// The positive control: outland has quests too, and the same key, so
 		// the only thing that differs between the two reads is the game.
 		theirs, err := outland.views.UpsertView(ctx, outland.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("upsert in the other game: %v", err)
-		}
-		if theirs.ID == mine.ID {
-			t.Fatal("the same key in two games must be two rows")
-		}
+		assert.Must(t, err == nil, "upsert in the other game: %v", err)
+		assert.Must(t, theirs.ID != mine.ID, "the same key in two games must be two rows")
 		got, err := outland.views.ViewByKey(ctx, outland.projectID, "route")
-		if err != nil || got.ID != theirs.ID {
-			t.Fatalf("ViewByKey = (%v, %v), want outland's own row", got.ID, err)
-		}
+		assert.Must(t, err == nil && got.ID == theirs.ID, "ViewByKey = (%v, %v), want outland's own row", got.ID, err)
 		if _, err := outland.views.ViewByID(ctx, outland.projectID, mine.ID); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("ViewByID = %v, want not_found: a view id in a caller's hand is not "+
 				"authority to read it", err)
 		}
 		refs, err := outland.views.ViewRefs(ctx, outland.projectID, mine.ID)
-		if err != nil {
-			t.Fatalf("list refs: %v", err)
-		}
-		if len(refs) != 0 {
-			t.Fatalf("refs = %+v, want none: another game's view id reads no refs here", refs)
-		}
+		assert.Must(t, err == nil, "list refs: %v", err)
+		assert.Must(t, len(refs) == 0, "refs = %+v, want none: another game's view id reads no refs here", refs)
 	})
 
 	// TestViewsArea's "removing a view takes its refs and answers the second
@@ -772,9 +629,7 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		row, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsToZones))
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		if err := g.views.RemoveView(ctx, g.projectID, "ROUTE"); err != nil {
 			t.Fatalf("remove, matched without regard to case: %v", err)
 		}
@@ -786,9 +641,7 @@ func TestViewsArea(t *testing.T) {
 			`SELECT count(*) FROM view_refs WHERE view_id = $1`, row.ID).Scan(&refs); err != nil {
 			t.Fatalf("count refs: %v", err)
 		}
-		if refs != 0 {
-			t.Fatalf("%d refs survived the view, want 0", refs)
-		}
+		assert.Must(t, refs == 0, "%d refs survived the view, want 0", refs)
 		if err := g.views.RemoveView(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("second remove = %v, want not_found", err)
 		}
@@ -842,9 +695,7 @@ func TestViewsArea(t *testing.T) {
 		initial := saveable("route", questsOnly)
 		initial.Renderer = RendererMap
 		first, err := g.views.UpsertView(ctx, g.projectID, initial)
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 
 		// The background, written directly: there is no setter yet, and the
 		// asset row has to exist because the key to it is a real one.
@@ -875,21 +726,11 @@ func TestViewsArea(t *testing.T) {
 		}
 
 		got, err := g.views.ViewByKey(ctx, g.projectID, "route")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Name != "The long way round" {
-			t.Fatalf("Name = %q: the edit itself must have landed", got.Name)
-		}
-		if got.BackgroundAssetID == nil || *got.BackgroundAssetID != asset {
-			t.Fatalf("BackgroundAssetID = %v, want %s still standing", got.BackgroundAssetID, asset)
-		}
-		if got.BackgroundScale != 2.5 {
-			t.Fatalf("BackgroundScale = %v, want 2.5 untouched", got.BackgroundScale)
-		}
-		if string(got.BackgroundOffset) != `{"x": 10, "y": -4}` {
-			t.Fatalf("BackgroundOffset = %s, want the offset untouched", got.BackgroundOffset)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Name == "The long way round", "Name = %q: the edit itself must have landed", got.Name)
+		assert.Must(t, got.BackgroundAssetID != nil && *got.BackgroundAssetID == asset, "BackgroundAssetID = %v, want %s still standing", got.BackgroundAssetID, asset)
+		assert.Must(t, got.BackgroundScale == 2.5, "BackgroundScale = %v, want 2.5 untouched", got.BackgroundScale)
+		assert.Must(t, string(got.BackgroundOffset) == `{"x": 10, "y": -4}`, "BackgroundOffset = %s, want the offset untouched", got.BackgroundOffset)
 	})
 
 	// TestViewsArea's "views depending on a type are found by id with their
@@ -909,48 +750,30 @@ func TestViewsArea(t *testing.T) {
 			t.Fatalf("upsert in the other game: %v", err)
 		}
 		cat, err := azeroth.views.LoadCatalogue(ctx, azeroth.projectID)
-		if err != nil {
-			t.Fatalf("catalogue: %v", err)
-		}
+		assert.Must(t, err == nil, "catalogue: %v", err)
 
 		zone := cat.EntityTypes["zone"]
 		got, err := azeroth.views.ViewsDependingOn(ctx, azeroth.projectID, KindEntityType, zone.ID)
-		if err != nil {
-			t.Fatalf("depending on zone: %v", err)
-		}
-		if len(got) != 1 || got[0].ViewKey != "route" || got[0].Pointer != "/traverse/0/to_type/0" {
-			t.Fatalf("got %+v, want azeroth's view at the pointer that names zone", got)
-		}
+		assert.Must(t, err == nil, "depending on zone: %v", err)
+		assert.Must(t, len(got) == 1 && got[0].ViewKey == "route" && got[0].Pointer == "/traverse/0/to_type/0", "got %+v, want azeroth's view at the pointer that names zone", got)
 
 		via := cat.RelationTypes["takes_place_in"]
 		got, err = azeroth.views.ViewsDependingOn(ctx, azeroth.projectID, KindRelationType, via.ID)
-		if err != nil {
-			t.Fatalf("depending on takes_place_in: %v", err)
-		}
-		if len(got) != 1 || got[0].Pointer != "/traverse/0/via/0" || got[0].RefKey != "takes_place_in" {
-			t.Fatalf("got %+v, want the relation-type reference", got)
-		}
+		assert.Must(t, err == nil, "depending on takes_place_in: %v", err)
+		assert.Must(t, len(got) == 1 && got[0].Pointer == "/traverse/0/via/0" && got[0].RefKey == "takes_place_in", "got %+v, want the relation-type reference", got)
 
 		// The control: a type no view names is held up by nothing. Without it
 		// an implementation that ignored its argument and returned every ref
 		// would pass both assertions above.
 		class := cat.EntityTypes["class"]
 		got, err = azeroth.views.ViewsDependingOn(ctx, azeroth.projectID, KindEntityType, class.ID)
-		if err != nil {
-			t.Fatalf("depending on class: %v", err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("got %+v, want nothing: no view names class", got)
-		}
+		assert.Must(t, err == nil, "depending on class: %v", err)
+		assert.Must(t, len(got) == 0, "got %+v, want nothing: no view names class", got)
 		// And the relation type's own id asked as an entity type finds
 		// nothing, which is what keeps the two arms from being one.
 		got, err = azeroth.views.ViewsDependingOn(ctx, azeroth.projectID, KindEntityType, via.ID)
-		if err != nil {
-			t.Fatalf("depending on a relation type asked as an entity type: %v", err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("got %+v, want nothing: the two kinds are two columns", got)
-		}
+		assert.Must(t, err == nil, "depending on a relation type asked as an entity type: %v", err)
+		assert.Must(t, len(got) == 0, "got %+v, want nothing: the two kinds are two columns", got)
 		// A kind that is neither is refused rather than answered with an
 		// empty list, which would read as "nothing depends on it" — the
 		// silent-empty answer this sub-project refuses everywhere else.
@@ -976,39 +799,25 @@ func TestViewsArea(t *testing.T) {
 		// ViewsDependingOn takes a bare id, which makes it load-bearing for
 		// this package's own caller rather than defence in depth.
 		crossed, err := outland.views.ViewsDependingOn(ctx, outland.projectID, KindEntityType, zone.ID)
-		if err != nil {
-			t.Fatalf("outland asking about azeroth's zone: %v", err)
-		}
-		if len(crossed) != 0 {
-			t.Fatalf("got %+v, want nothing: that type id belongs to another game", crossed)
-		}
+		assert.Must(t, err == nil, "outland asking about azeroth's zone: %v", err)
+		assert.Must(t, len(crossed) == 0, "got %+v, want nothing: that type id belongs to another game", crossed)
 		// The positive control for that question, in the same test: outland's
 		// own zone is named by outland's own view, so the empty answer above
 		// is isolation and not an outland fixture that references nothing.
 		outlandCat, err := outland.views.LoadCatalogue(ctx, outland.projectID)
-		if err != nil {
-			t.Fatalf("outland catalogue: %v", err)
-		}
+		assert.Must(t, err == nil, "outland catalogue: %v", err)
 		own, err := outland.views.ViewsDependingOn(ctx, outland.projectID,
 			KindEntityType, outlandCat.EntityTypes["zone"].ID)
-		if err != nil {
-			t.Fatalf("outland asking about its own zone: %v", err)
-		}
-		if len(own) != 1 || own[0].ViewKey != "route" {
-			t.Fatalf("got %+v, want outland's own view: the empty answer above must be isolation", own)
-		}
+		assert.Must(t, err == nil, "outland asking about its own zone: %v", err)
+		assert.Must(t, len(own) == 1 && own[0].ViewKey == "route", "got %+v, want outland's own view: the empty answer above must be isolation", own)
 		// And the relation type arm, whose filter the entity-type arm does
 		// not stand in for: each arm is its own column and the two filters
 		// mask each other, so deleting either one alone leaves this package
 		// green unless both arms are asked across the games.
 		crossedVia, err := outland.views.ViewsDependingOn(ctx, outland.projectID,
 			KindRelationType, via.ID)
-		if err != nil {
-			t.Fatalf("outland asking about azeroth's takes_place_in: %v", err)
-		}
-		if len(crossedVia) != 0 {
-			t.Fatalf("got %+v, want nothing: that relation type belongs to another game", crossedVia)
-		}
+		assert.Must(t, err == nil, "outland asking about azeroth's takes_place_in: %v", err)
+		assert.Must(t, len(crossedVia) == 0, "got %+v, want nothing: that relation type belongs to another game", crossedVia)
 	})
 
 	// TestViewsArea's "a view written by another games token is refused" case
@@ -1047,12 +856,8 @@ func TestViewsArea(t *testing.T) {
 			t.Fatalf("a token writing to its own game: %v", err)
 		}
 		stored, err := outland.views.ViewByKey(ctx, outland.projectID, "route")
-		if err != nil {
-			t.Fatalf("read back the write that was allowed: %v", err)
-		}
-		if stored.UpdatedByTokenID == nil || *stored.UpdatedByTokenID != foreign {
-			t.Fatalf("UpdatedByTokenID = %v, want %s", stored.UpdatedByTokenID, foreign)
-		}
+		assert.Must(t, err == nil, "read back the write that was allowed: %v", err)
+		assert.Must(t, stored.UpdatedByTokenID != nil && *stored.UpdatedByTokenID == foreign, "UpdatedByTokenID = %v, want %s", stored.UpdatedByTokenID, foreign)
 	})
 
 	// TestViewsArea's "view events reach every member of the game including
@@ -1072,14 +877,10 @@ func TestViewsArea(t *testing.T) {
 		defer hub.Unsubscribe(agent)
 
 		row, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		for who, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "view.upserted" {
-				t.Fatalf("%s got %q, want view.upserted", who, got.Kind)
-			}
+			assert.Must(t, got.Kind == "view.upserted", "%s got %q, want view.upserted", who, got.Kind)
 			assertViewPayload(t, who, got, row.ID, "route", 1)
 		}
 
@@ -1088,9 +889,7 @@ func TestViewsArea(t *testing.T) {
 		}
 		for who, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "view.removed" {
-				t.Fatalf("%s got %q, want view.removed", who, got.Kind)
-			}
+			assert.Must(t, got.Kind == "view.removed", "%s got %q, want view.removed", who, got.Kind)
 			assertViewPayload(t, who, got, row.ID, "route", 1)
 		}
 	})
@@ -1139,9 +938,7 @@ func TestViewsArea(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()
 		mine, err := azeroth.views.UpsertView(ctx, azeroth.projectID, saveable("route", questsToZones))
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		q := dbq.New(azeroth.pool)
 
 		// Read: the other game's project id with this view's id finds nothing.
@@ -1154,12 +951,8 @@ func TestViewsArea(t *testing.T) {
 		refs, err := q.ListViewRefs(ctx, dbq.ListViewRefsParams{
 			ProjectID: outland.projectID, ViewID: mine.ID,
 		})
-		if err != nil {
-			t.Fatalf("ListViewRefs: %v", err)
-		}
-		if len(refs) != 0 {
-			t.Fatalf("ListViewRefs returned %d rows for another game, want 0", len(refs))
-		}
+		assert.Must(t, err == nil, "ListViewRefs: %v", err)
+		assert.Must(t, len(refs) == 0, "ListViewRefs returned %d rows for another game, want 0", len(refs))
 		// Refs: cleared under the wrong game, nothing is cleared. The
 		// composite FOREIGN KEY (view_id, project_id) does not defend this
 		// one — it constrains what a row may hold, not which rows a DELETE
@@ -1170,22 +963,14 @@ func TestViewsArea(t *testing.T) {
 			t.Fatalf("DeleteViewRefs: %v", err)
 		}
 		survived, err := azeroth.views.ViewRefs(ctx, azeroth.projectID, mine.ID)
-		if err != nil {
-			t.Fatalf("list refs: %v", err)
-		}
-		if len(survived) != 3 {
-			t.Fatalf("%d refs survived another game's clear, want all 3", len(survived))
-		}
+		assert.Must(t, err == nil, "list refs: %v", err)
+		assert.Must(t, len(survived) == 3, "%d refs survived another game's clear, want all 3", len(survived))
 		// Delete: the row is not this game's to remove.
 		affected, err := q.DeleteView(ctx, dbq.DeleteViewParams{
 			ProjectID: outland.projectID, ID: mine.ID,
 		})
-		if err != nil {
-			t.Fatalf("DeleteView: %v", err)
-		}
-		if affected != 0 {
-			t.Fatalf("DeleteView removed %d rows of another game, want 0", affected)
-		}
+		assert.Must(t, err == nil, "DeleteView: %v", err)
+		assert.Must(t, affected == 0, "DeleteView removed %d rows of another game, want 0", affected)
 		if _, err := azeroth.views.ViewByKey(ctx, azeroth.projectID, "route"); err != nil {
 			t.Fatalf("the view must still be there: %v", err)
 		}
@@ -1212,12 +997,8 @@ func TestViewsArea(t *testing.T) {
 		in := saveable("ROUTE", questsOnly)
 		in.ExpectedVersion = ptrInt32(9)
 		_, err := g.views.UpsertView(ctx, g.projectID, in)
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want the respelling rather than the version conflict", err)
-		}
-		if !strings.Contains(err.Error(), `"route"`) {
-			t.Fatalf("err = %v, want the stored spelling named", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want the respelling rather than the version conflict", err)
+		assert.Must(t, strings.Contains(err.Error(), `"route"`), "err = %v, want the stored spelling named", err)
 	})
 
 	// TestViewsArea's "a creation racing a creator under another spelling is
@@ -1246,9 +1027,7 @@ func TestViewsArea(t *testing.T) {
 		ctx := context.Background()
 
 		other, err := g.pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		if _, err := other.Exec(ctx,
 			`INSERT INTO views (project_id, key, name, query, renderer)
@@ -1270,21 +1049,13 @@ func TestViewsArea(t *testing.T) {
 		}
 
 		err = <-done
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %v, want the spelling refusal: the version is not this caller's "+
-				"problem and merging onto it would not help", err)
-		}
-		if !strings.Contains(err.Error(), `"route"`) {
-			t.Fatalf("err = %v, want the stored spelling named", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %v, want the spelling refusal: the version is not this caller's "+
+			"problem and merging onto it would not help", err)
+		assert.Must(t, strings.Contains(err.Error(), `"route"`), "err = %v, want the stored spelling named", err)
 		got, err := g.views.ViewByKey(ctx, g.projectID, "route")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Name != "Theirs" || got.Version != 1 {
-			t.Fatalf("view = (%q, %d), want the winner's row untouched: the refused write "+
-				"must have rolled back", got.Name, got.Version)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Name == "Theirs" && got.Version == 1, "view = (%q, %d), want the winner's row untouched: the refused write "+
+			"must have rolled back", got.Name, got.Version)
 	})
 
 	// TestViewsArea's "a view update that lost to a committed removal is told
@@ -1310,14 +1081,10 @@ func TestViewsArea(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
 		saved, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 
 		remover, err := g.pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = remover.Rollback(ctx) }()
 		if _, err := remover.Exec(ctx, `DELETE FROM views WHERE id = $1`, saved.ID); err != nil {
 			t.Fatalf("the removal: %v", err)
@@ -1345,16 +1112,10 @@ func TestViewsArea(t *testing.T) {
 		}
 
 		err = <-done
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want not_found: the view the caller claimed a version of is gone", err)
-		}
-		if errors.Is(err, metamodel.ErrVersionConflict) {
-			t.Fatalf("err = %v, want not_found and not a conflict: merging onto a version is "+
-				"the one recovery that cannot work when the row is gone", err)
-		}
-		if !strings.Contains(err.Error(), "was removed") || !strings.Contains(err.Error(), `"route"`) {
-			t.Fatalf("err = %v, want it to name the view and say it was removed", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found: the view the caller claimed a version of is gone", err)
+		assert.Must(t, !errors.Is(err, metamodel.ErrVersionConflict), "err = %v, want not_found and not a conflict: merging onto a version is "+
+			"the one recovery that cannot work when the row is gone", err)
+		assert.Must(t, strings.Contains(err.Error(), "was removed") && strings.Contains(err.Error(), `"route"`), "err = %v, want it to name the view and say it was removed", err)
 		if _, err := g.views.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("the view is back: %v — the removal must stand", err)
 		}
@@ -1377,12 +1138,8 @@ func TestViewsArea(t *testing.T) {
 		in := saveable("route", questsOnly)
 		in.ExpectedVersion = ptrInt32(0)
 		row, err := g.views.UpsertView(ctx, g.projectID, in)
-		if err != nil {
-			t.Fatalf("expected_version 0 must create: %v", err)
-		}
-		if row.Version != 1 {
-			t.Fatalf("Version = %d, want 1", row.Version)
-		}
+		assert.Must(t, err == nil, "expected_version 0 must create: %v", err)
+		assert.Must(t, row.Version == 1, "Version = %d, want 1", row.Version)
 
 		// And it keeps meaning "must not exist yet": sent again against the
 		// view it just created, it is a conflict and not a second creation.
@@ -1412,18 +1169,14 @@ func TestViewsArea(t *testing.T) {
 		hub := realtime.NewHub()
 		svc := New(g.pool, hub)
 		row, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 		// Subscribed after the creation, so the only event this subscription
 		// can ever see is the removal's.
 		sub := hub.Subscribe(g.projectID, "owner", false)
 		defer hub.Unsubscribe(sub)
 
 		rival, err := g.pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx, `DELETE FROM views WHERE id = $1`, row.ID); err != nil {
 			t.Fatalf("the rival's delete: %v", err)
@@ -1473,19 +1226,13 @@ func assertViewPayload(t *testing.T, who string, e realtime.Event,
 ) {
 	t.Helper()
 	raw, err := json.Marshal(e.Payload)
-	if err != nil {
-		t.Fatalf("%s: marshal payload: %v", who, err)
-	}
+	assert.Must(t, err == nil, "%s: marshal payload: %v", who, err)
 	var got map[string]any
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("%s: decode payload: %v", who, err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("%s: payload = %v, want identity only: id, key and version", who, got)
-	}
-	if got["id"] != wantID.String() || got["key"] != wantKey || got["version"] != wantVersion {
-		t.Fatalf("%s: payload = %v, want {%s, %q, %v}", who, got, wantID, wantKey, wantVersion)
-	}
+	assert.Must(t, len(got) == 3, "%s: payload = %v, want identity only: id, key and version", who, got)
+	assert.Must(t, got["id"] == wantID.String() && got["key"] == wantKey && got["version"] == wantVersion, "%s: payload = %v, want {%s, %q, %v}", who, got, wantID, wantKey, wantVersion)
 }
 
 func receive(t *testing.T, sub *realtime.Subscription) realtime.Event {
@@ -1543,13 +1290,9 @@ func TestNoViewEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	defer hub.Unsubscribe(sub)
 
 	_, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsToZones))
-	if err == nil {
-		t.Fatal("the commit must fail under the deferred constraint")
-	}
+	assert.Must(t, err != nil, "the commit must fail under the deferred constraint")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-		t.Fatalf("err = %v, want a deferred foreign-key violation at commit", err)
-	}
+	assert.Must(t, errors.As(err, &pgErr) && pgErr.Code == "23503", "err = %v, want a deferred foreign-key violation at commit", err)
 	requireNothing(t, sub, "the transaction never committed")
 
 	if _, err := svc.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
@@ -1563,9 +1306,7 @@ func TestNoViewEventIsPublishedWhenTheCommitFails(t *testing.T) {
 		`SELECT count(*) FROM view_refs WHERE project_id = $1`, g.projectID).Scan(&refs); err != nil {
 		t.Fatalf("count refs: %v", err)
 	}
-	if refs != 0 {
-		t.Fatalf("%d ref rows survived a transaction that never committed, want 0", refs)
-	}
+	assert.Must(t, refs == 0, "%d ref rows survived a transaction that never committed, want 0", refs)
 }
 
 // TestAViewAndItsRefsAreOneChange pins the placement of the refs rewrite
@@ -1598,13 +1339,9 @@ func TestAViewAndItsRefsAreOneChange(t *testing.T) {
 	}
 
 	_, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsToZones))
-	if err == nil {
-		t.Fatal("the commit must fail under the deferred constraint")
-	}
+	assert.Must(t, err != nil, "the commit must fail under the deferred constraint")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-		t.Fatalf("err = %v, want a deferred foreign-key violation at commit", err)
-	}
+	assert.Must(t, errors.As(err, &pgErr) && pgErr.Code == "23503", "err = %v, want a deferred foreign-key violation at commit", err)
 	if _, err := g.views.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ViewByKey = %v, want not_found: a view whose refs could not be written "+
 			"must not be stored, or its dependency index describes a query nobody wrote", err)

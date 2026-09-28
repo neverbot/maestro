@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -63,15 +64,11 @@ func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
 		"semantic_role":   "prerequisite",
 		"analysis_traits": []any{"prerequisite_of", "acyclic"},
 	}), &upserted)
-	if !slices.Equal(upserted.AnalysisTraits, []string{"prerequisite_of", "acyclic"}) {
-		t.Fatalf("relation_types.upsert answered analysis_traits = %v, want what was sent: "+
-			"a field the write accepts and the answer drops is the write-only-field defect",
-			upserted.AnalysisTraits)
-	}
-	if upserted.SemanticRole != "prerequisite" {
-		t.Fatalf("semantic_role = %q, want it unaffected by the trait declaration",
-			upserted.SemanticRole)
-	}
+	assert.Must(t, slices.Equal(upserted.AnalysisTraits, []string{"prerequisite_of", "acyclic"}), "relation_types.upsert answered analysis_traits = %v, want what was sent: "+
+		"a field the write accepts and the answer drops is the write-only-field defect",
+		upserted.AnalysisTraits)
+	assert.Must(t, upserted.SemanticRole == "prerequisite", "semantic_role = %q, want it unaffected by the trait declaration",
+		upserted.SemanticRole)
 
 	// The read path, on a second call, because the upsert's own answer
 	// could be echoing its input rather than the stored row.
@@ -82,11 +79,8 @@ func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
 	decodeStructured(t, callOK(t, session, "relation_types.get", map[string]any{
 		"key": "requires",
 	}), &fetched)
-	if fetched.Key != "requires" ||
-		!slices.Equal(fetched.AnalysisTraits, []string{"prerequisite_of", "acyclic"}) {
-		t.Fatalf("relation_types.get = %+v, want the stored traits under the documented "+
-			"spelling analysis_traits", fetched)
-	}
+	assert.Must(t, fetched.Key == "requires" && slices.Equal(fetched.AnalysisTraits, []string{"prerequisite_of", "acyclic"}), "relation_types.get = %+v, want the stored traits under the documented "+
+		"spelling analysis_traits", fetched)
 
 	// A type that declared nothing answers with the key absent rather
 	// than with `[]`: undeclared is not the same statement as
@@ -97,9 +91,7 @@ func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
 	raw := structuredJSON(t, callOK(t, session, "relation_types.get", map[string]any{
 		"key": "mentions",
 	}))
-	if strings.Contains(raw, "analysis_traits") {
-		t.Fatalf("an undeclared type answered %s, want no analysis_traits key at all", raw)
-	}
+	assert.Must(t, !strings.Contains(raw, "analysis_traits"), "an undeclared type answered %s, want no analysis_traits key at all", raw)
 
 	// And an incoherent combination is refused over the wire with the
 	// code and the path a caller can act on, rather than as a server
@@ -108,15 +100,10 @@ func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
 		"key": "connects_to", "label": "connects to",
 		"analysis_traits": []any{"symmetric", "prerequisite_of"},
 	})
-	if res.Error != "invalid_schema" {
-		t.Fatalf("error code = %q, want invalid_schema: an incoherent trait combination "+
-			"is a type declaration that cannot stand", res.Error)
-	}
-	if !strings.Contains(res.Message, "symmetric") ||
-		!strings.Contains(res.Message, "prerequisite_of") {
-		t.Fatalf("message = %q, want it to name both traits it refused together",
-			res.Message)
-	}
+	assert.Must(t, res.Error == "invalid_schema", "error code = %q, want invalid_schema: an incoherent trait combination "+
+		"is a type declaration that cannot stand", res.Error)
+	assert.Must(t, strings.Contains(res.Message, "symmetric") && strings.Contains(res.Message, "prerequisite_of"), "message = %q, want it to name both traits it refused together",
+		res.Message)
 }
 
 // TestATraitDeclaredOverTheRESTMirrorComesBackOverIt is the second
@@ -139,31 +126,22 @@ func TestATraitDeclaredOverTheRESTMirrorComesBackOverIt(t *testing.T) {
 		"semantic_role":   "prerequisite",
 		"analysis_traits": []any{"prerequisite_of", "acyclic"},
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("upsert = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "upsert = %d: %s", rec.Code, rec.Body.String())
 	var written struct {
 		AnalysisTraits []string `json:"analysis_traits"`
 	}
 	decodeBody(t, rec, &written)
-	if !slices.Equal(written.AnalysisTraits, []string{"prerequisite_of", "acyclic"}) {
-		t.Fatalf("POST answered analysis_traits = %v, want what was sent",
-			written.AnalysisTraits)
-	}
+	assert.Must(t, slices.Equal(written.AnalysisTraits, []string{"prerequisite_of", "acyclic"}), "POST answered analysis_traits = %v, want what was sent",
+		written.AnalysisTraits)
 
 	got := f.as(t, http.MethodGet, "/relation-types/by-key/requires", nil)
-	if got.Code != http.StatusOK {
-		t.Fatalf("get = %d: %s", got.Code, got.Body.String())
-	}
+	assert.Must(t, got.Code == http.StatusOK, "get = %d: %s", got.Code, got.Body.String())
 	var read struct {
 		Key            string   `json:"key"`
 		AnalysisTraits []string `json:"analysis_traits"`
 	}
 	decodeBody(t, got, &read)
-	if read.Key != "requires" ||
-		!slices.Equal(read.AnalysisTraits, []string{"prerequisite_of", "acyclic"}) {
-		t.Fatalf("GET = %+v, want the stored traits back", read)
-	}
+	assert.Must(t, read.Key == "requires" && slices.Equal(read.AnalysisTraits, []string{"prerequisite_of", "acyclic"}), "GET = %+v, want the stored traits back", read)
 
 	// The refusal, on this surface too, with the same code and the same
 	// path: closing one path and leaving the hole one step along is the
@@ -173,11 +151,8 @@ func TestATraitDeclaredOverTheRESTMirrorComesBackOverIt(t *testing.T) {
 		"analysis_traits": []any{"annotation", "containment"},
 	})
 	body := assertError(t, bad, http.StatusUnprocessableEntity, "invalid_schema", "analysis_traits")
-	if !strings.Contains(body.Message, "annotation") ||
-		!strings.Contains(body.Message, "containment") {
-		t.Fatalf("message = %q, want it to name both traits it refused together",
-			body.Message)
-	}
+	assert.Must(t, strings.Contains(body.Message, "annotation") && strings.Contains(body.Message, "containment"), "message = %q, want it to name both traits it refused together",
+		body.Message)
 }
 
 // TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed
@@ -195,12 +170,9 @@ func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t 
 	description := servedToolDescription(t, "relation_types.upsert")
 
 	for _, trait := range metamodel.AnalysisTraits {
-		if !strings.Contains(description, "`"+trait+"`") &&
-			!strings.Contains(description, `"`+trait+`"`) {
-			t.Fatalf("relation_types.upsert's description does not offer %q, so an agent "+
-				"cannot know the trait exists: a vocabulary an agent is not told is a "+
-				"vocabulary nobody declares", trait)
-		}
+		assert.Must(t, strings.Contains(description, "`"+trait+"`") || strings.Contains(description, `"`+trait+`"`), "relation_types.upsert's description does not offer %q, so an agent "+
+			"cannot know the trait exists: a vocabulary an agent is not told is a "+
+			"vocabulary nobody declares", trait)
 	}
 
 	// Backwards. The description quotes plenty of things that are not
@@ -208,11 +180,9 @@ func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t 
 	// over the segment that lists the vocabulary, which is what
 	// metamodel.QuotedList renders and what the description splices in.
 	offered := metamodel.QuotedList(metamodel.AnalysisTraits)
-	if !strings.Contains(description, offered) {
-		t.Fatalf("the description does not carry the vocabulary as one generated list "+
-			"(%q): if it stopped being generated, a trait added to "+
-			"metamodel.AnalysisTraits will not reach an agent", offered)
-	}
+	assert.Must(t, strings.Contains(description, offered), "the description does not carry the vocabulary as one generated list "+
+		"(%q): if it stopped being generated, a trait added to "+
+		"metamodel.AnalysisTraits will not reach an agent", offered)
 }
 
 // TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination is
@@ -227,23 +197,17 @@ func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t 
 func TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination(t *testing.T) {
 	t.Parallel()
 	description := servedToolDescription(t, "relation_types.upsert")
-	if len(metamodel.AnalysisTraitConflicts) == 0 {
-		t.Fatal("the conflict table is empty, so every assertion below is vacuous")
-	}
+	assert.Must(t, len(metamodel.AnalysisTraitConflicts) != 0, "the conflict table is empty, so every assertion below is vacuous")
 	for _, line := range metamodel.TraitConflictLines() {
-		if !strings.Contains(description, line) {
-			t.Fatalf("the description does not name the refused combination %q: it is "+
-				"generated from metamodel.AnalysisTraitConflicts, so a rule that is not "+
-				"here means the generation stopped", line)
-		}
+		assert.Must(t, strings.Contains(description, line), "the description does not name the refused combination %q: it is "+
+			"generated from metamodel.AnalysisTraitConflicts, so a rule that is not "+
+			"here means the generation stopped", line)
 	}
 	// And the distinction the whole column carries, which an agent gets
 	// wrong by default: a role is not a behaviour, and an omitted list is
 	// not an inert type.
 	for _, phrase := range []string{"semantic_role", "undeclared", "annotation"} {
-		if !strings.Contains(description, phrase) {
-			t.Fatalf("the description never mentions %q", phrase)
-		}
+		assert.Must(t, strings.Contains(description, phrase), "the description never mentions %q", phrase)
 	}
 }
 
@@ -258,14 +222,10 @@ func servedToolDescription(t *testing.T, name string) string {
 	session := connectMCP(t, httpSrv.URL, f.token)
 
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	for _, tool := range tools.Tools {
 		if tool.Name == name {
-			if tool.Description == "" {
-				t.Fatalf("%s is served with an empty description", name)
-			}
+			assert.Must(t, tool.Description != "", "%s is served with an empty description", name)
 			return tool.Description
 		}
 	}
@@ -281,12 +241,8 @@ func callErr(t *testing.T, session *mcp.ClientSession, name string, args map[str
 	t.Helper()
 	result, err := session.CallTool(context.Background(),
 		&mcp.CallToolParams{Name: name, Arguments: args})
-	if err != nil {
-		t.Fatalf("CallTool(%s): %v", name, err)
-	}
-	if !result.IsError {
-		t.Fatalf("CallTool(%s) was expected to be refused and succeeded", name)
-	}
+	assert.Must(t, err == nil, "CallTool(%s): %v", name, err)
+	assert.Must(t, result.IsError, "CallTool(%s) was expected to be refused and succeeded", name)
 	text, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("CallTool(%s) refusal is not text: %#v", name, result.Content[0])
@@ -295,9 +251,7 @@ func callErr(t *testing.T, session *mcp.ClientSession, name string, args map[str
 	if err := json.Unmarshal([]byte(text.Text), &body); err != nil {
 		t.Fatalf("decode the refusal %s: %v", text.Text, err)
 	}
-	if body.Error == "" || body.Message == "" {
-		t.Fatalf("a refusal with no code or no message: %s", text.Text)
-	}
+	assert.Must(t, body.Error != "" && body.Message != "", "a refusal with no code or no message: %s", text.Text)
 	return body
 }
 
@@ -306,12 +260,8 @@ func callErr(t *testing.T, session *mcp.ClientSession, name string, args map[str
 // into a Go struct cannot see.
 func structuredJSON(t *testing.T, result *mcp.CallToolResult) string {
 	t.Helper()
-	if result.StructuredContent == nil {
-		t.Fatal("tool result has no StructuredContent")
-	}
+	assert.Must(t, result.StructuredContent != nil, "tool result has no StructuredContent")
 	raw, err := json.Marshal(result.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshal StructuredContent: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal StructuredContent: %v", err)
 	return string(raw)
 }

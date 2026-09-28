@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/graph"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -83,9 +84,7 @@ func run(t *testing.T, ctx context.Context, pool *pgxpool.Pool, w graph.Walk) []
 	body, args := graph.WalkCTE(w)
 	stmt := "WITH RECURSIVE " + body + "\nSELECT id, depth, via_relation, from_id, closed FROM " + graph.ReadFrom(w)
 	rows, err := pool.Query(ctx, stmt, args...)
-	if err != nil {
-		t.Fatalf("the walk must run: %v\n%s", err, stmt)
-	}
+	assert.Must(t, err == nil, "the walk must run: %v\n%s", err, stmt)
 	defer rows.Close()
 	var out []reached
 	for rows.Next() {
@@ -160,13 +159,9 @@ func TestTheProjectFilterIsInBothTermsOfTheRecursion(t *testing.T) {
 		RelationTypeIDs: []uuid.UUID{uuid.New()}, Direction: graph.Out, MinDepth: 1, MaxDepth: 3,
 	})
 	anchor, recursive, ok := strings.Cut(sql, "UNION ALL")
-	if !ok {
-		t.Fatalf("a bounded walk must be recursive:\n%s", sql)
-	}
+	assert.Must(t, ok, "a bounded walk must be recursive:\n%s", sql)
 	for name, half := range map[string]string{"anchor": anchor, "recursive term": recursive} {
-		if !strings.Contains(half, "project_id = $1") {
-			t.Errorf("the %s does not filter on the project:\n%s", name, half)
-		}
+		assert.Should(t, strings.Contains(half, "project_id = $1"), "the %s does not filter on the project:\n%s", name, half)
 	}
 	// The recursive term carries two of them, on the edge and on the
 	// entity at its far end, and they stop different things: the first a
@@ -225,21 +220,15 @@ func TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt(t *testing.T)
 	// seed is one of the three nodes and dropping depth 0 would make this
 	// test read as an assertion that the cycle was cut.
 	for name, id := range map[string]uuid.UUID{"a": f.ids[0], "b": f.ids[1], "c": f.ids[2]} {
-		if !got[id] {
-			t.Errorf("the walk must reach %s: a cycle is legal content, not a reason to stop early", name)
-		}
+		assert.Should(t, got[id], "the walk must reach %s: a cycle is legal content, not a reason to stop early", name)
 	}
-	if len(got) != 3 {
-		t.Fatalf("the walk visited %d nodes and the graph has 3", len(got))
-	}
+	assert.Must(t, len(got) == 3, "the walk visited %d nodes and the graph has 3", len(got))
 	// a at depth 0, b at 1, c at 2, and a again at depth 3 over the edge
 	// that closes the loop.
-	if len(rows) != 4 {
-		t.Fatalf("the walk returned %d rows for a three-node cycle, want 4 (the three nodes "+
-			"plus the hop that closes the loop): without the visited-path guard a cycle is "+
-			"re-walked once per level until the depth bound stops it, and the node set alone "+
-			"cannot see that; with the closing row suppressed there would be 3", len(rows))
-	}
+	assert.Must(t, len(rows) == 4, "the walk returned %d rows for a three-node cycle, want 4 (the three nodes "+
+		"plus the hop that closes the loop): without the visited-path guard a cycle is "+
+		"re-walked once per level until the depth bound stops it, and the node set alone "+
+		"cannot see that; with the closing row suppressed there would be 3", len(rows))
 	if e := edgeSet(rows); len(e) != 3 || !e[rels[0]] || !e[rels[1]] || !e[rels[2]] {
 		t.Fatalf("the walk handed back %d of the cycle's 3 edges: c -> a is the edge that "+
 			"closes the loop, and a renderer cannot draw an edge it was never handed", len(e))
@@ -250,9 +239,7 @@ func TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt(t *testing.T)
 			closing = append(closing, r)
 		}
 	}
-	if len(closing) != 1 {
-		t.Fatalf("exactly one hop closes a three-node cycle, %d rows say they did", len(closing))
-	}
+	assert.Must(t, len(closing) == 1, "exactly one hop closes a three-node cycle, %d rows say they did", len(closing))
 	if closing[0].id != f.ids[0] || closing[0].depth != 3 || *closing[0].via != rels[2] {
 		t.Errorf("the closing hop must be a at depth 3 over c -> a, got %+v", closing[0])
 	}
@@ -277,9 +264,7 @@ func TestATwoCycleReturnsItsReturnEdge(t *testing.T) {
 		RelationTypeIDs: []uuid.UUID{f.relTypeID},
 		Direction:       graph.Out, MinDepth: 1, MaxDepth: 10, MaxRows: 1000,
 	})
-	if len(rows) != 2 {
-		t.Fatalf("a two-cycle walked out from a is b then a again, got %d rows: %+v", len(rows), rows)
-	}
+	assert.Must(t, len(rows) == 2, "a two-cycle walked out from a is b then a again, got %d rows: %+v", len(rows), rows)
 	if rows[0].id != f.ids[1] || rows[0].depth != 1 || rows[0].closed || *rows[0].via != rels[0] {
 		t.Errorf("the first hop is b at depth 1 over a -> b, open, got %+v", rows[0])
 	}
@@ -312,14 +297,10 @@ func TestACycleThatExcludesTheSeedIsGuardedByTheWholePath(t *testing.T) {
 	})
 	// a, b, c, d, and b again over the edge that closes a loop the seed
 	// is not part of.
-	if len(rows) != 5 {
-		t.Fatalf("the walk returned %d rows, want 5: a guard that only remembers the seed "+
-			"lets b -> c -> d -> b run until the depth bound and returns 11: %+v", len(rows), rows)
-	}
+	assert.Must(t, len(rows) == 5, "the walk returned %d rows, want 5: a guard that only remembers the seed "+
+		"lets b -> c -> d -> b run until the depth bound and returns 11: %+v", len(rows), rows)
 	last := rows[len(rows)-1]
-	if !last.closed || last.id != f.ids[1] || last.depth != 4 || *last.via != rels[3] {
-		t.Errorf("the loop closes at b, depth 4, over d -> b, got %+v", last)
-	}
+	assert.Should(t, last.closed && last.id == f.ids[1] && last.depth == 4 && *last.via == rels[3], "the loop closes at b, depth 4, over d -> b, got %+v", last)
 	if e := edgeSet(rows); len(e) != 4 {
 		t.Errorf("all four edges must be handed back, got %d", len(e))
 	}
@@ -338,9 +319,7 @@ func TestDepthBoundsTheWalk(t *testing.T) {
 			RelationTypeIDs: []uuid.UUID{f.relTypeID},
 			Direction:       graph.Out, MinDepth: 1, MaxDepth: tc.maxDepth, MaxRows: 1000,
 		}))
-		if len(got) != tc.want {
-			t.Errorf("max_depth %d reached %d entities, want %d", tc.maxDepth, len(got), tc.want)
-		}
+		assert.Should(t, len(got) == tc.want, "max_depth %d reached %d entities, want %d", tc.maxDepth, len(got), tc.want)
 	}
 }
 
@@ -375,15 +354,11 @@ func TestDirectionAnyTraversesEachEdgeOnceFromEachNode(t *testing.T) {
 
 	// Two open hops onto b, one per edge, and two closing hops back onto
 	// a -- one from each of those, over the edge it did not arrive by.
-	if len(rows) != 4 {
-		t.Fatalf("a symmetric pair reached under any is two hops out and two that close, "+
-			"got %d rows: %+v", len(rows), rows)
-	}
+	assert.Must(t, len(rows) == 4, "a symmetric pair reached under any is two hops out and two that close, "+
+		"got %d rows: %+v", len(rows), rows)
 	byDepth := map[int][]reached{}
 	for _, r := range rows {
-		if r.via == nil {
-			t.Fatalf("a reached row must name the relation it walked: %+v", r)
-		}
+		assert.Must(t, r.via != nil, "a reached row must name the relation it walked: %+v", r)
 		byDepth[r.depth] = append(byDepth[r.depth], r)
 	}
 	for _, tc := range []struct {
@@ -396,24 +371,16 @@ func TestDirectionAnyTraversesEachEdgeOnceFromEachNode(t *testing.T) {
 		{2, f.ids[0], true, "the seed again, once per way b was reached"},
 	} {
 		got := byDepth[tc.depth]
-		if len(got) != 2 {
-			t.Fatalf("depth %d must carry 2 rows (%s), got %d: %+v", tc.depth, tc.what, len(got), got)
-		}
+		assert.Must(t, len(got) == 2, "depth %d must carry 2 rows (%s), got %d: %+v", tc.depth, tc.what, len(got), got)
 		seen := map[uuid.UUID]int{}
 		for _, r := range got {
-			if r.id != tc.node || r.closed != tc.closed {
-				t.Errorf("at depth %d, want %s with closed = %v, got %+v", tc.depth, tc.what, tc.closed, r)
-			}
+			assert.Should(t, r.id == tc.node && r.closed == tc.closed, "at depth %d, want %s with closed = %v, got %+v", tc.depth, tc.what, tc.closed, r)
 			seen[*r.via]++
 		}
-		if len(seen) != 2 || seen[rels[0]] != 1 || seen[rels[1]] != 1 {
-			t.Fatalf("at depth %d the two edges must be traversed once each, got %v: the walk "+
-				"is counting one edge under both arms", tc.depth, seen)
-		}
+		assert.Must(t, len(seen) == 2 && seen[rels[0]] == 1 && seen[rels[1]] == 1, "at depth %d the two edges must be traversed once each, got %v: the walk "+
+			"is counting one edge under both arms", tc.depth, seen)
 	}
-	if len(byDepth) != 2 {
-		t.Fatalf("the walk must stop after the hop that closes, got depths %v", byDepth)
-	}
+	assert.Must(t, len(byDepth) == 2, "the walk must stop after the hop that closes, got depths %v", byDepth)
 }
 
 // TestASelfLoopIsReturnedOnceAndNotExpanded pins the one shape that can
@@ -454,24 +421,16 @@ func TestASelfLoopIsReturnedOnceAndNotExpanded(t *testing.T) {
 	// relation rather than by position.
 	byRelation := map[uuid.UUID][]reached{}
 	for _, r := range rows {
-		if r.via == nil {
-			t.Fatalf("a reached row must name the relation it walked: %+v", r)
-		}
+		assert.Must(t, r.via != nil, "a reached row must name the relation it walked: %+v", r)
 		byRelation[*r.via] = append(byRelation[*r.via], r)
 	}
-	if len(rows) != 2 || len(byRelation) != 2 {
-		t.Fatalf("the walk must return the loop once and the ordinary edge once, got %d rows "+
-			"over %d relations -- two rows over the loop's relation is the two-armed emitter, "+
-			"which matches a self-loop from both ends: %+v", len(rows), len(byRelation), rows)
-	}
+	assert.Must(t, len(rows) == 2 && len(byRelation) == 2, "the walk must return the loop once and the ordinary edge once, got %d rows "+
+		"over %d relations -- two rows over the loop's relation is the two-armed emitter, "+
+		"which matches a self-loop from both ends: %+v", len(rows), len(byRelation), rows)
 	loop := byRelation[rels[0]]
-	if len(loop) != 1 || loop[0].id != f.ids[0] || loop[0].depth != 1 || !loop[0].closed {
-		t.Fatalf("the self-loop must come back once, as the seed at depth 1, closed, got %+v", loop)
-	}
+	assert.Must(t, len(loop) == 1 && loop[0].id == f.ids[0] && loop[0].depth == 1 && loop[0].closed, "the self-loop must come back once, as the seed at depth 1, closed, got %+v", loop)
 	ordinary := byRelation[rels[1]]
-	if len(ordinary) != 1 || ordinary[0].id != f.ids[1] || ordinary[0].closed {
-		t.Fatalf("the ordinary edge must be walked to its far end, open, got %+v", ordinary)
-	}
+	assert.Must(t, len(ordinary) == 1 && ordinary[0].id == f.ids[1] && !ordinary[0].closed, "the ordinary edge must be walked to its far end, open, got %+v", ordinary)
 }
 
 // TestAWalkCannotLeaveItsProjectThroughARogueEdge is the behavioural
@@ -524,9 +483,7 @@ func TestAWalkCannotLeaveItsProjectThroughARogueEdge(t *testing.T) {
 	// must still be walked, so an empty answer cannot pass this test.
 	want := map[uuid.UUID]string{mine.ids[0]: "the anchor", mine.ids[1]: "the entity one legitimate edge away"}
 	for id, what := range want {
-		if !got[id] {
-			t.Errorf("the walk must reach %s", what)
-		}
+		assert.Should(t, got[id], "the walk must reach %s", what)
 	}
 	if got[theirs.ids[0]] {
 		t.Error("the walk left the game through an edge whose far end lives elsewhere: " +
@@ -536,9 +493,7 @@ func TestAWalkCannotLeaveItsProjectThroughARogueEdge(t *testing.T) {
 		t.Error("the walk followed another game's edge between two of this game's entities: " +
 			"the relation join in the recursive term must filter on the project")
 	}
-	if len(got) != len(want) {
-		t.Fatalf("the walk reached %d entities, want %d", len(got), len(want))
-	}
+	assert.Must(t, len(got) == len(want), "the walk reached %d entities, want %d", len(got), len(want))
 }
 
 // TestMinDepthDropsTheNearHopsAfterWalkingThem pins both halves of the
@@ -568,9 +523,7 @@ func TestMinDepthDropsTheNearHopsAfterWalkingThem(t *testing.T) {
 	// dropped, so the assertion above is about the bound and not about an
 	// unreachable node.
 	walk.MinDepth = 1
-	if !nodeSet(run(t, ctx, pool, walk))[f.ids[1]] {
-		t.Error("with min depth 1 the first hop must come back")
-	}
+	assert.Should(t, nodeSet(run(t, ctx, pool, walk))[f.ids[1]], "with min depth 1 the first hop must come back")
 }
 
 // TestMaxRowsReturnsOneRowPastTheCapSoTruncationIsDetectable pins the
@@ -638,14 +591,10 @@ func TestATruncatedWalkIsOrderedByDepth(t *testing.T) {
 		RelationTypeIDs: []uuid.UUID{f.relTypeID},
 		Direction:       graph.Out, MinDepth: 0, MaxDepth: 4, MaxRows: 2,
 	})
-	if len(rows) != 3 {
-		t.Fatalf("the cap of 2 over a five-node chain must return 3 rows, got %d", len(rows))
-	}
+	assert.Must(t, len(rows) == 3, "the cap of 2 over a five-node chain must return 3 rows, got %d", len(rows))
 	for i, r := range rows {
-		if r.depth != i || r.id != f.ids[i] {
-			t.Errorf("row %d is %+v; a truncated walk is the nearest hops in order, so it "+
-				"must be e%d at depth %d", i, r, i, i)
-		}
+		assert.Should(t, r.depth == i && r.id == f.ids[i], "row %d is %+v; a truncated walk is the nearest hops in order, so it "+
+			"must be e%d at depth %d", i, r, i, i)
 	}
 
 	sql, _ := graph.WalkCTE(graph.Walk{
@@ -653,15 +602,11 @@ func TestATruncatedWalkIsOrderedByDepth(t *testing.T) {
 		RelationTypeIDs: []uuid.UUID{uuid.New()}, Direction: graph.Out, MaxDepth: 3, MaxRows: 2,
 	})
 	_, wrapper, ok := strings.Cut(sql, graph.ReadFrom(graph.Walk{Name: "w"})+" AS ")
-	if !ok {
-		t.Fatalf("the walk must emit a wrapper CTE:\n%s", sql)
-	}
+	assert.Must(t, ok, "the walk must emit a wrapper CTE:\n%s", sql)
 	order, limit := strings.Index(wrapper, "ORDER BY depth"), strings.Index(wrapper, "LIMIT ")
-	if order < 0 || limit < 0 || order > limit {
-		t.Errorf("the wrapper must order by depth before it limits, so that what survives the "+
-			"cap is the near hops rather than whatever the executor happened to emit first:\n%s",
-			wrapper)
-	}
+	assert.Should(t, order >= 0 && limit >= 0 && order <= limit, "the wrapper must order by depth before it limits, so that what survives the "+
+		"cap is the near hops rather than whatever the executor happened to emit first:\n%s",
+		wrapper)
 }
 
 // TestTheAnchorFiltersOnTheProjectEvenWhenTheSeedDoesNot is the third
@@ -690,22 +635,16 @@ func TestTheAnchorFiltersOnTheProjectEvenWhenTheSeedDoesNot(t *testing.T) {
 	for id, what := range map[uuid.UUID]string{
 		mine.ids[0]: "its own seed", mine.ids[1]: "the entity one hop from it",
 	} {
-		if !got[id] {
-			t.Errorf("the walk must reach %s", what)
-		}
+		assert.Should(t, got[id], "the walk must reach %s", what)
 	}
 	for id, what := range map[uuid.UUID]string{
 		theirs.ids[0]: "another game's entity of the same key",
 		theirs.ids[1]: "the entity one hop beyond it",
 	} {
-		if got[id] {
-			t.Errorf("the walk seeded on %s: the anchor join is the only project filter a "+
-				"project-blind seed passes through, and it must not be droppable", what)
-		}
+		assert.Should(t, !(got[id]), "the walk seeded on %s: the anchor join is the only project filter a "+
+			"project-blind seed passes through, and it must not be droppable", what)
 	}
-	if len(got) != 2 {
-		t.Fatalf("the walk reached %d entities, want 2", len(got))
-	}
+	assert.Must(t, len(got) == 2, "the walk reached %d entities, want 2", len(got))
 }
 
 // TestAWalkWithNoRelationTypesReachesOnlyItsSeed pins what an empty type
@@ -724,9 +663,7 @@ func TestAWalkWithNoRelationTypesReachesOnlyItsSeed(t *testing.T) {
 		RelationTypeIDs: nil,
 		Direction:       graph.Out, MinDepth: 0, MaxDepth: 3, MaxRows: 1000,
 	}))
-	if len(got) != 1 || !got[f.ids[0]] {
-		t.Fatalf("a walk along no relation type reaches its seed and nothing else, got %v", got)
-	}
+	assert.Must(t, len(got) == 1 && got[f.ids[0]], "a walk along no relation type reaches its seed and nothing else, got %v", got)
 }
 
 // TestDirectionInWalksTheOtherWay is the arm the chain tests never
@@ -765,14 +702,10 @@ func TestASeedsOwnBindsAreRenumbered(t *testing.T) {
 		SeedArgs:        []any{uuid.New(), uuid.New()},
 		RelationTypeIDs: []uuid.UUID{uuid.New()}, Direction: graph.Out, MaxDepth: 2,
 	})
-	if !strings.Contains(sql, "SELECT id FROM entities WHERE project_id = $2 AND id = $3") {
-		t.Errorf("the seed's own binds were not shifted past the walk's own:\n%s", sql)
-	}
+	assert.Should(t, strings.Contains(sql, "SELECT id FROM entities WHERE project_id = $2 AND id = $3"), "the seed's own binds were not shifted past the walk's own:\n%s", sql)
 	// One argument per placeholder: the project id, the seed's two, the
 	// relation type list, the depth bound and the minimum depth.
-	if len(args) != 6 {
-		t.Errorf("the walk bound %d arguments, want 6: %v", len(args), args)
-	}
+	assert.Should(t, len(args) == 6, "the walk bound %d arguments, want 6: %v", len(args), args)
 }
 
 // TestAnUnknownDirectionPanics covers the zero value too, which is the
@@ -783,9 +716,7 @@ func TestAnUnknownDirectionPanics(t *testing.T) {
 	for _, d := range []graph.Direction{"", "outgoing", "OUT", "both"} {
 		func() {
 			defer func() {
-				if recover() == nil {
-					t.Errorf("a direction of %q must panic rather than be walked as %q", d, graph.Out)
-				}
+				assert.Should(t, recover() != nil, "a direction of %q must panic rather than be walked as %q", d, graph.Out)
 			}()
 			graph.WalkCTE(graph.Walk{
 				Name: "w", ProjectID: uuid.New(), SeedSQL: "SELECT id FROM entities", Direction: d,
@@ -805,10 +736,8 @@ func TestACTENameThatIsNotAnIdentifierPanics(t *testing.T) {
 	for _, name := range []string{"", "w; DROP TABLE relations", "W", "1w", "a-b"} {
 		func() {
 			defer func() {
-				if recover() == nil {
-					t.Errorf("a CTE name of %q must panic: a name this package splices "+
-						"into a statement is never a caller's text", name)
-				}
+				assert.Should(t, recover() != nil, "a CTE name of %q must panic: a name this package splices "+
+					"into a statement is never a caller's text", name)
 			}()
 			// Direction is set: without it this test would panic on the
 			// direction instead and stay green with the name guard gone,
@@ -836,10 +765,8 @@ func TestANegativeOrInvertedBoundPanics(t *testing.T) {
 	} {
 		func() {
 			defer func() {
-				if recover() == nil {
-					t.Errorf("%s must panic rather than answer an empty or seed-only walk "+
-						"with no error", what)
-				}
+				assert.Should(t, recover() != nil, "%s must panic rather than answer an empty or seed-only walk "+
+					"with no error", what)
 			}()
 			graph.WalkCTE(w)
 		}()
@@ -895,17 +822,11 @@ func TestAnEdgePredicateIsAppliedInsideTheRecursion(t *testing.T) {
 	filtered.EdgePredicate = "r.id <> $1"
 	filtered.EdgeArgs = []any{rels[0]}
 	got := nodeSet(run(t, ctx, pool, filtered))
-	if got[f.ids[1]] {
-		t.Errorf("b was reached over the relation the predicate excluded")
-	}
-	if got[f.ids[2]] {
-		t.Errorf("c came back, so the predicate filtered the walk's output rather than its " +
-			"recursion: c is reachable only through the excluded edge")
-	}
-	if len(got) != 0 {
-		t.Errorf("the excluded edge is the only way out of the seed, so the walk reaches "+
-			"nothing; got %d nodes", len(got))
-	}
+	assert.Should(t, !(got[f.ids[1]]), "b was reached over the relation the predicate excluded")
+	assert.Should(t, !(got[f.ids[2]]), "c came back, so the predicate filtered the walk's output rather than its "+
+		"recursion: c is reachable only through the excluded edge")
+	assert.Should(t, len(got) == 0, "the excluded edge is the only way out of the seed, so the walk reaches "+
+		"nothing; got %d nodes", len(got))
 }
 
 // TestAnEdgePredicateIsParenthesisedSoItCannotSwallowTheTypeFilter: the
@@ -921,9 +842,7 @@ func TestAnEdgePredicateIsParenthesisedSoItCannotSwallowTheTypeFilter(t *testing
 		RelationTypeIDs: []uuid.UUID{uuid.New()}, Direction: graph.Out, MaxDepth: 2,
 		EdgePredicate: "r.id <> $1 OR true", EdgeArgs: []any{uuid.New()},
 	})
-	if !strings.Contains(sql, "AND (r.id <> $2 OR true)") {
-		t.Errorf("the edge predicate must be parenthesised and renumbered:\n%s", sql)
-	}
+	assert.Should(t, strings.Contains(sql, "AND (r.id <> $2 OR true)"), "the edge predicate must be parenthesised and renumbered:\n%s", sql)
 }
 
 // TestRenumberLeavesTheProjectPlaceholderAlone pins the one thing
@@ -936,9 +855,7 @@ func TestRenumberLeavesTheProjectPlaceholderAlone(t *testing.T) {
 	t.Parallel()
 	got := graph.Renumber("a.project_id = $1 AND b = $2 AND c = ANY($10::uuid[]) AND d = '$'", 4)
 	want := "a.project_id = $1 AND b = $6 AND c = ANY($14::uuid[]) AND d = '$'"
-	if got != want {
-		t.Errorf("Renumber:\n got %s\nwant %s", got, want)
-	}
+	assert.Should(t, got == want, "Renumber:\n got %s\nwant %s", got, want)
 	if same := graph.Renumber("$1 $2", 0); same != "$1 $2" {
 		t.Errorf("an offset of zero must change nothing, got %q", same)
 	}

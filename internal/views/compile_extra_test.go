@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -13,9 +14,7 @@ import (
 func problemsOf(t *testing.T, err error) []metamodel.FieldError {
 	t.Helper()
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("expected a *QueryError, got %T: %v", err, err)
-	}
+	assert.Must(t, errors.As(err, &qe), "expected a *QueryError, got %T: %v", err, err)
 	return qe.Fields
 }
 
@@ -25,13 +24,9 @@ func problemsOf(t *testing.T, err error) []metamodel.FieldError {
 // merely that an error happened.
 func oneProblem(t *testing.T, err error, path, contains string) {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("expected a refusal at %s", path)
-	}
+	assert.Must(t, err != nil, "expected a refusal at %s", path)
 	fields := problemsOf(t, err)
-	if len(fields) != 1 {
-		t.Fatalf("expected one problem, got %d: %v", len(fields), fields)
-	}
+	assert.Must(t, len(fields) == 1, "expected one problem, got %d: %v", len(fields), fields)
 	if fields[0].Path != path {
 		t.Fatalf("expected the problem at %s, got %s (%s)", path, fields[0].Path,
 			fields[0].Message)
@@ -112,21 +107,15 @@ func TestCompileExtraArea(t *testing.T) {
 		r, err := g.views.Resolve(t.Context(), g.projectID,
 			mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
 				"edges":[{"via":"requires","between":["q","q"]}]}`))
-		if err != nil {
-			t.Fatalf("the control must resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "the control must resolve: %v", err)
 		var listed bool
 		for _, ref := range r.Refs {
 			if ref.Pointer == "/edges/0/via/0" && ref.Key == "requires" && ref.ID != nil {
 				listed = true
 			}
 		}
-		if !listed {
-			t.Fatalf("the relation type an edges entry draws must be a listed reference: %+v", r.Refs)
-		}
-		if len(r.Edges) != 1 || len(r.Edges[0].RelationTypeIDs) != 1 {
-			t.Fatalf("the entry must carry its resolved type id: %+v", r.Edges)
-		}
+		assert.Must(t, listed, "the relation type an edges entry draws must be a listed reference: %+v", r.Refs)
+		assert.Must(t, len(r.Edges) == 1 && len(r.Edges[0].RelationTypeIDs) == 1, "the entry must carry its resolved type id: %+v", r.Edges)
 	})
 
 	// TestCompileExtraArea's "a misspelled type name is refused rather than
@@ -157,9 +146,7 @@ func TestCompileExtraArea(t *testing.T) {
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 			"traverse":[{"from":"q","via":"available_to","as":"c",
 			  "where":{"field":"@type","op":"eq","value":"class"}}]}`)
-		if !strings.Contains(sql, "far.entity_type_id =") {
-			t.Fatalf("@type must compare against the column the row holds:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "far.entity_type_id ="), "@type must compare against the column the row holds:\n%s", sql)
 	})
 
 	// TestCompileExtraArea's "a multi hop step emits a recursion rather than a
@@ -192,19 +179,15 @@ func TestCompileExtraArea(t *testing.T) {
 			"SELECT 'walk_truncated' AS kind",
 			"WHERE EXISTS (SELECT 1 FROM w0_out OFFSET ",
 		} {
-			if !strings.Contains(sql, want) {
-				t.Errorf("a multi-hop step is walked by internal/graph, and %q is missing:\n%s",
-					want, sql)
-			}
+			assert.Should(t, strings.Contains(sql, want), "a multi-hop step is walked by internal/graph, and %q is missing:\n%s",
+				want, sql)
 		}
 		// The control: one hop is still a plain join, with no recursion at
 		// all. Routing a neighbour query through a recursive CTE would be a
 		// cost nothing asked for.
 		one, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 			"traverse":[{"from":"q","via":"requires","depth":1,"as":"chain"}]}`)
-		if strings.Contains(one, "w0") {
-			t.Errorf("a one-hop step is a join, not a walk:\n%s", one)
-		}
+		assert.Should(t, !strings.Contains(one, "w0"), "a one-hop step is a join, not a walk:\n%s", one)
 	})
 
 	// TestCompileExtraArea's "an edge entry naming a selector is refused"
@@ -214,9 +197,7 @@ func TestCompileExtraArea(t *testing.T) {
 		g, _ := a.games(t)
 		r, err := g.views.Resolve(t.Context(), g.projectID,
 			mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],"edges":[{"from_step":"q"}]}`))
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		_, _, err = Compile(r, g.projectID)
 		oneProblem(t, err, "/edges/0/from_step", "walks no relations")
 	})
@@ -264,9 +245,7 @@ func TestCompileExtraArea(t *testing.T) {
 			t.Fatalf("an edge entry's direction defaults to %q, got %q", DirectionOut, got)
 		}
 		resolved, err := g.views.Resolve(t.Context(), g.projectID, parsed)
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		// The control: the filled default compiles.
 		if _, _, err := Compile(resolved, g.projectID); err != nil {
 			t.Fatalf("the defaulted direction must compile: %v", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -73,19 +74,13 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "convention@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: project.ID, UserID: user.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
@@ -96,31 +91,21 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 		HTTPClient:           &http.Client{Transport: tokenRoundTripper{token: token}},
 		DisableStandaloneSSE: true,
 	}, nil)
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+	assert.Must(t, err == nil, "Connect: %v", err)
 	defer func() { _ = session.Close() }()
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	if len(tools.Tools) == 0 {
-		t.Fatal("the server served no tools at all; this test would pass vacuously")
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
+	assert.Must(t, len(tools.Tools) != 0, "the server served no tools at all; this test would pass vacuously")
 	for _, tool := range tools.Tools {
-		if !srv.mcpScopedTools[tool.Name] {
-			t.Fatalf("tool %q is served but was not registered through addScopedTool, "+
-				"so nothing checks the caller's game binding before it runs", tool.Name)
-		}
+		assert.Must(t, srv.mcpScopedTools[tool.Name], "tool %q is served but was not registered through addScopedTool, "+
+			"so nothing checks the caller's game binding before it runs", tool.Name)
 	}
 	// And the recorded set is not larger than what is served: a name in
 	// the map that no client can see would mean the map had drifted into
 	// a wish list rather than a record.
-	if len(srv.mcpScopedTools) != len(tools.Tools) {
-		t.Fatalf("addScopedTool recorded %d tools but %d are served",
-			len(srv.mcpScopedTools), len(tools.Tools))
-	}
+	assert.Must(t, len(srv.mcpScopedTools) == len(tools.Tools), "addScopedTool recorded %d tools but %d are served",
+		len(srv.mcpScopedTools), len(tools.Tools))
 }
 
 // tokenRoundTripper authenticates every request with a bearer token, the

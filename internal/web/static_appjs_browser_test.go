@@ -3,6 +3,8 @@ package web_test
 import (
 	"os/exec"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // nodeOrSkip returns the "node" binary's presence, skipping t rather than
@@ -25,9 +27,7 @@ func runJSTest(t *testing.T, script string) {
 	t.Helper()
 	cmd := exec.Command("node", script)
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s failed: %v\n%s", script, err, out)
-	}
+	assert.Must(t, err == nil, "%s failed: %v\n%s", script, err, out)
 	t.Log(string(out))
 }
 

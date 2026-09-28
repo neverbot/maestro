@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The source-shape guards over internal/web/static/client.js — the one
@@ -52,10 +54,8 @@ const maxClientLiteral = 48
 func TestTheDataClientComposesNoSentence(t *testing.T) {
 	t.Parallel()
 	literals := clientStringLiterals(t)
-	if len(literals) < 20 {
-		t.Fatalf("found only %d string literal(s) in %s: the scanner below is not reading the module, "+
-			"so this test would pass whatever the module said", len(literals), clientModule)
-	}
+	assert.Must(t, len(literals) >= 20, "found only %d string literal(s) in %s: the scanner below is not reading the module, "+
+		"so this test would pass whatever the module said", len(literals), clientModule)
 	var offences []string
 	for _, lit := range literals {
 		if strings.ContainsFunc(lit.text, unicode.IsSpace) || len(lit.text) > maxClientLiteral {
@@ -93,9 +93,7 @@ func TestTheSentenceGuardReadsWhatItClaimsTo(t *testing.T) {
 		"view.positions", "view.upserted", "view.removed", "resync",
 		"content-type", "text/event-stream", "/api/games/", "reread", "band", "gone", "ignore",
 	} {
-		if !seen[want] {
-			t.Errorf("the scanner never saw the literal %q, which %s certainly contains", want, clientModule)
-		}
+		assert.Should(t, seen[want], "the scanner never saw the literal %q, which %s certainly contains", want, clientModule)
 	}
 
 	fixture := "" +
@@ -112,10 +110,8 @@ func TestTheSentenceGuardReadsWhatItClaimsTo(t *testing.T) {
 	}
 	sort.Strings(spaced)
 	want := []string{"could not run the view", "the game moved under this query"}
-	if strings.Join(spaced, "|") != strings.Join(want, "|") {
-		t.Errorf("the scanner found %q in the fixture, want %q: it must catch a sentence in code and "+
-			"must not read one out of a comment", spaced, want)
-	}
+	assert.Should(t, strings.Join(spaced, "|") == strings.Join(want, "|"), "the scanner found %q in the fixture, want %q: it must catch a sentence in code and "+
+		"must not read one out of a comment", spaced, want)
 }
 
 // networkPrimitives are the spellings of "reach the server" a browser
@@ -202,12 +198,8 @@ func TestOnlyTheDataClientAndTheShippedBundleFetch(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if scanned == 0 {
-		t.Fatal("scanned no module under internal/web/static: this test would pass on an empty tree")
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Must(t, scanned != 0, "scanned no module under internal/web/static: this test would pass on an empty tree")
 
 	for path, hits := range found {
 		if _, ok := modulesAllowedToFetch[path]; !ok {
@@ -222,10 +214,8 @@ func TestOnlyTheDataClientAndTheShippedBundleFetch(t *testing.T) {
 			t.Errorf("%s is allowed to fetch (%s) and does not exist", path, reason)
 			continue
 		}
-		if len(found[path]) == 0 {
-			t.Errorf("%s is allowed to fetch (%s) and names no network primitive: "+
-				"an allowance nothing uses is a permission waiting for the next module", path, reason)
-		}
+		assert.Should(t, len(found[path]) != 0, "%s is allowed to fetch (%s) and names no network primitive: "+
+			"an allowance nothing uses is a permission waiting for the next module", path, reason)
 	}
 	t.Logf("scanned %d own module(s); %d of them reach the server", scanned, len(found))
 }
@@ -243,23 +233,17 @@ var navigationSinks = regexp.MustCompile(
 func TestTheDataClientNavigatesNothing(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(clientModule)
-	if err != nil {
-		t.Fatalf("read %s: %v", clientModule, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", clientModule, err)
 	lines := codeLines(string(raw))
-	if len(lines) == 0 {
-		t.Fatalf("%s has no code lines: this test would pass on an empty file", clientModule)
-	}
+	assert.Must(t, len(lines) != 0, "%s has no code lines: this test would pass on an empty file", clientModule)
 	var offences []string
 	for _, line := range lines {
 		if navigationSinks.MatchString(line.code) {
 			offences = append(offences, strconv.Itoa(line.number)+": "+line.text)
 		}
 	}
-	if len(offences) > 0 {
-		t.Fatalf("%s can navigate:\n%s\na removed view is a sentence and a link back; the designer chooses",
-			clientModule, strings.Join(offences, "\n"))
-	}
+	assert.Must(t, len(offences) <= 0, "%s can navigate:\n%s\na removed view is a sentence and a link back; the designer chooses",
+		clientModule, strings.Join(offences, "\n"))
 }
 
 // clientLiteral is one string literal found in a module.
@@ -271,9 +255,7 @@ type clientLiteral struct {
 func clientStringLiterals(t *testing.T) []clientLiteral {
 	t.Helper()
 	raw, err := os.ReadFile(clientModule)
-	if err != nil {
-		t.Fatalf("read %s: %v", clientModule, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", clientModule, err)
 	return stringLiteralsIn(string(raw))
 }
 

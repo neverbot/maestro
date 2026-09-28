@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -31,9 +32,7 @@ func TestBounds(t *testing.T) {
 	t.Run("every bound is exported", func(t *testing.T) {
 		fset := token.NewFileSet()
 		parsed, err := parser.ParseFile(fset, "bounds.go", nil, parser.ParseComments)
-		if err != nil {
-			t.Fatalf("parse bounds.go: %v", err)
-		}
+		assert.Must(t, err == nil, "parse bounds.go: %v", err)
 		found := 0
 		for _, decl := range parsed.Decls {
 			gen, ok := decl.(*ast.GenDecl)
@@ -47,22 +46,18 @@ func TestBounds(t *testing.T) {
 				}
 				for _, name := range value.Names {
 					found++
-					if !name.IsExported() {
-						t.Fatalf("bounds.go declares the unexported const %q at %s: every "+
-							"bound in this file is part of the contract, because a caller "+
-							"that cannot read a cap discovers it by tripping over it",
-							name.Name, fset.Position(name.Pos()))
-					}
+					assert.Must(t, name.IsExported(), "bounds.go declares the unexported const %q at %s: every "+
+						"bound in this file is part of the contract, because a caller "+
+						"that cannot read a cap discovers it by tripping over it",
+						name.Name, fset.Position(name.Pos()))
 				}
 			}
 		}
 		// The positive control. A test that walked no declarations at all —
 		// a renamed file, a parser that returned an empty tree — would pass
 		// silently, and this is a file whose whole subject is a list.
-		if found < 10 {
-			t.Fatalf("only %d consts found in bounds.go; this test is not reading the file "+
-				"it thinks it is", found)
-		}
+		assert.Must(t, found >= 10, "only %d consts found in bounds.go; this test is not reading the file "+
+			"it thinks it is", found)
 	})
 
 	// TestTheCapsRefuseRatherThanClamp is the behavioural half of the rule
@@ -90,10 +85,8 @@ func TestBounds(t *testing.T) {
 			t.Fatal("a list above the cap must be refused; a run that silently trimmed it " +
 				"would answer a narrower question in the same shape")
 		}
-		if !errors.Is(err, ErrLimitExceeded) {
-			t.Fatalf("err = %T %v, want limit_exceeded and not, say, the duplicate refusal: "+
-				"the bound is judged before the list's contents are", err, err)
-		}
+		assert.Must(t, errors.Is(err, ErrLimitExceeded), "err = %T %v, want limit_exceeded and not, say, the duplicate refusal: "+
+			"the bound is judged before the list's contents are", err, err)
 	})
 
 	// TestBoundsArea's "the statement budget is clamped to its hard cap" case
@@ -146,9 +139,7 @@ func TestBounds(t *testing.T) {
 			}); err != nil {
 			t.Fatalf("a read must go through: %v", err)
 		}
-		if read != 1 {
-			t.Fatalf("the control must have read its row, got %d", read)
-		}
+		assert.Must(t, read == 1, "the control must have read its row, got %d", read)
 
 		err := g.analysis.runInTx(t.Context(), time.Second,
 			`INSERT INTO projects (slug, name) VALUES ('written-by-an-analysis', 'no')`, nil,
@@ -159,12 +150,8 @@ func TestBounds(t *testing.T) {
 				"true for the statements later tasks add")
 		}
 		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) {
-			t.Fatalf("must be refused by the database, got %T: %v", err, err)
-		}
-		if pgErr.Code != "25006" {
-			t.Fatalf("must be read_only_sql_transaction (25006), got %s: %v", pgErr.Code, err)
-		}
+		assert.Must(t, errors.As(err, &pgErr), "must be refused by the database, got %T: %v", err, err)
+		assert.Must(t, pgErr.Code == "25006", "must be read_only_sql_transaction (25006), got %s: %v", pgErr.Code, err)
 	})
 
 	// TestBoundsArea's "the budget postgres holds is the one this package
@@ -189,20 +176,14 @@ func TestBounds(t *testing.T) {
 			}); err != nil {
 			t.Fatalf("run: %v", err)
 		}
-		if readOnly != "on" {
-			t.Fatalf("transaction_read_only = %q, want \"on\"", readOnly)
-		}
+		assert.Must(t, readOnly == "on", "transaction_read_only = %q, want \"on\"", readOnly)
 		// Postgres renders the setting in whatever unit reads best, so the
 		// assertion is on the duration and not on the spelling.
 		got, err := parsePostgresInterval(timeout)
-		if err != nil {
-			t.Fatalf("statement_timeout came back as %q: %v", timeout, err)
-		}
-		if got != DefaultStatementTimeout {
-			t.Fatalf("statement_timeout = %s, want %s: a budget that arrived as anything "+
-				"else is a bound the documentation promises and the database is not holding",
-				got, DefaultStatementTimeout)
-		}
+		assert.Must(t, err == nil, "statement_timeout came back as %q: %v", timeout, err)
+		assert.Must(t, got == DefaultStatementTimeout, "statement_timeout = %s, want %s: a budget that arrived as anything "+
+			"else is a bound the documentation promises and the database is not holding",
+			got, DefaultStatementTimeout)
 	})
 
 	// TestBoundsArea's "the bounds do not leak onto the next caller" case.
@@ -246,24 +227,14 @@ func TestBounds(t *testing.T) {
 		if err := DecodeArgs([]byte(`{"seed_entities":["a"]}`), &good); err != nil {
 			t.Fatalf("the control must decode: %v", err)
 		}
-		if len(good.SeedEntities) != 1 {
-			t.Fatalf("decoded %+v, want the one seed", good)
-		}
+		assert.Must(t, len(good.SeedEntities) == 1, "decoded %+v, want the one seed", good)
 
 		var bad seedArgs
 		err := DecodeArgs([]byte(`{"seed_entites":["a"]}`), &bad)
-		if err == nil {
-			t.Fatal("an unknown argument must be refused, not ignored")
-		}
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %T %v, want invalid_input", err, err)
-		}
-		if !strings.Contains(err.Error(), "seed_entites") {
-			t.Fatalf("err = %v, want it to name the member it did not recognise", err)
-		}
-		if len(bad.SeedEntities) != 0 {
-			t.Fatalf("the refused call left %+v decoded, which a caller could act on", bad)
-		}
+		assert.Must(t, err != nil, "an unknown argument must be refused, not ignored")
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %T %v, want invalid_input", err, err)
+		assert.Must(t, strings.Contains(err.Error(), "seed_entites"), "err = %v, want it to name the member it did not recognise", err)
+		assert.Must(t, len(bad.SeedEntities) == 0, "the refused call left %+v decoded, which a caller could act on", bad)
 	})
 }
 

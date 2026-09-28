@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // The guards that keep the design pass from decaying one screen at a
@@ -24,20 +26,14 @@ import (
 func shellSources(t *testing.T) map[string]string {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join("static", "*.html"))
-	if err != nil {
-		t.Fatalf("glob shells: %v", err)
-	}
+	assert.Must(t, err == nil, "glob shells: %v", err)
 	out := map[string]string{}
 	for _, path := range paths {
 		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		out[filepath.Base(path)] = string(body)
 	}
-	if len(out) == 0 {
-		t.Fatal("no shells found under static/")
-	}
+	assert.Must(t, len(out) != 0, "no shells found under static/")
 	return out
 }
 
@@ -112,25 +108,17 @@ var holeID = regexp.MustCompile(`\bid="([\w-]*(?:-empty|-miss))"`)
 func TestEveryNegativeStateHoleIsFilledBySomething(t *testing.T) {
 	t.Parallel()
 	modules, err := filepath.Glob("static/**/*.js")
-	if err != nil {
-		t.Fatalf("glob modules: %v", err)
-	}
+	assert.Must(t, err == nil, "glob modules: %v", err)
 	top, err := filepath.Glob("static/*.js")
-	if err != nil {
-		t.Fatalf("glob modules: %v", err)
-	}
+	assert.Must(t, err == nil, "glob modules: %v", err)
 	modules = append(modules, top...)
 	var source strings.Builder
 	for _, path := range modules {
 		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		source.Write(body)
 	}
-	if source.Len() == 0 {
-		t.Fatal("no front-end modules found under static/")
-	}
+	assert.Must(t, source.Len() != 0, "no front-end modules found under static/")
 	filled := source.String()
 
 	var orphans []string
@@ -187,18 +175,12 @@ func TestTheStylesheetDressesEveryLightDomControl(t *testing.T) {
 	// because "the page dresses its controls" is now true of the two
 	// files together and of neither alone.
 	body, err := os.ReadFile(filepath.Join("static", "styles.css"))
-	if err != nil {
-		t.Fatalf("read styles.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read styles.css: %v", err)
 	shared, err := os.ReadFile(filepath.Join("static", "controls.css"))
-	if err != nil {
-		t.Fatalf("read controls.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read controls.css: %v", err)
 	// And the import is what makes the page read it at all: without that
 	// line the vocabulary exists and reaches nothing.
-	if !strings.Contains(string(body), `@import url("/static/controls.css")`) {
-		t.Fatal("styles.css does not import the control vocabulary, so the page is dressed by nothing")
-	}
+	assert.Must(t, strings.Contains(string(body), `@import url("/static/controls.css")`), "styles.css does not import the control vocabulary, so the page is dressed by nothing")
 	sheet := string(body) + "\n" + string(shared)
 
 	var missing []string
@@ -213,11 +195,9 @@ func TestTheStylesheetDressesEveryLightDomControl(t *testing.T) {
 			missing = append(missing, control)
 		}
 	}
-	if len(missing) > 0 {
-		t.Fatalf("styles.css writes no rule for %s.\n\n"+
-			"A control the stylesheet does not dress is a control the platform dresses, and the "+
-			"platform's is a bevelled grey box that exists nowhere in this palette. The shadow-root "+
-			"half of this is TestEveryShadowRootAdoptsTheSharedControls; this is the page's half.",
-			strings.Join(missing, ", "))
-	}
+	assert.Must(t, len(missing) <= 0, "styles.css writes no rule for %s.\n\n"+
+		"A control the stylesheet does not dress is a control the platform dresses, and the "+
+		"platform's is a bevelled grey box that exists nowhere in this palette. The shadow-root "+
+		"half of this is TestEveryShadowRootAdoptsTheSharedControls; this is the page's half.",
+		strings.Join(missing, ", "))
 }

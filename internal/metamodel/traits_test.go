@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -58,26 +59,16 @@ type dbqRelationTypeTraits struct {
 // leaves a designer guessing which of two traits they meant.
 func requireSchemaProblem(t *testing.T, err error) string {
 	t.Helper()
-	if err == nil {
-		t.Fatal("an incoherent trait declaration must be refused, and it was accepted")
-	}
-	if !errors.Is(err, metamodel.ErrInvalidSchema) {
-		t.Fatalf("must be invalid_schema (a type declaration that cannot stand), got %T: %v",
-			err, err)
-	}
+	assert.Must(t, err != nil, "an incoherent trait declaration must be refused, and it was accepted")
+	assert.Must(t, errors.Is(err, metamodel.ErrInvalidSchema), "must be invalid_schema (a type declaration that cannot stand), got %T: %v",
+		err, err)
 	var schemaErr *metamodel.SchemaError
-	if !errors.As(err, &schemaErr) {
-		t.Fatalf("must carry field paths, got %T: %v", err, err)
-	}
-	if len(schemaErr.Fields) == 0 {
-		t.Fatal("a refusal with no field path is a refusal a caller cannot act on")
-	}
+	assert.Must(t, errors.As(err, &schemaErr), "must carry field paths, got %T: %v", err, err)
+	assert.Must(t, len(schemaErr.Fields) != 0, "a refusal with no field path is a refusal a caller cannot act on")
 	var messages []string
 	for _, field := range schemaErr.Fields {
-		if field.Path != "analysis_traits" {
-			t.Fatalf("path = %q, want %q: the fault is in the trait list the caller sent",
-				field.Path, "analysis_traits")
-		}
+		assert.Must(t, field.Path == "analysis_traits", "path = %q, want %q: the fault is in the trait list the caller sent",
+			field.Path, "analysis_traits")
 		messages = append(messages, field.Message)
 	}
 	return strings.Join(messages, "; ")
@@ -104,23 +95,15 @@ func TestTraitsArea(t *testing.T) {
 		// accepted and read back, so a check that refused everything — a
 		// vocabulary with a typo in it, a rule inverted — cannot pass this.
 		row, err := upsertRelationTypeWithTraits(t, svc, project, "contains", []string{"containment"})
-		if err != nil {
-			t.Fatalf("a trait in the vocabulary must be accepted: %v", err)
-		}
-		if !slices.Equal(row.Traits, []string{"containment"}) {
-			t.Fatalf("stored traits = %v, want [containment]", row.Traits)
-		}
+		assert.Must(t, err == nil, "a trait in the vocabulary must be accepted: %v", err)
+		assert.Must(t, slices.Equal(row.Traits, []string{"containment"}), "stored traits = %v, want [containment]", row.Traits)
 
 		_, err = upsertRelationTypeWithTraits(t, svc, project, "teleports", []string{"teleports"})
 		message := requireSchemaProblem(t, err)
-		if !strings.Contains(message, `"teleports"`) {
-			t.Fatalf("the refusal must name the word that was refused, got %q", message)
-		}
+		assert.Must(t, strings.Contains(message, `"teleports"`), "the refusal must name the word that was refused, got %q", message)
 		for _, trait := range metamodel.AnalysisTraits {
-			if !strings.Contains(message, `"`+trait+`"`) {
-				t.Fatalf("the refusal must list every trait that would have been accepted; "+
-					"%q is missing from %q", trait, message)
-			}
+			assert.Must(t, strings.Contains(message, `"`+trait+`"`), "the refusal must list every trait that would have been accepted; "+
+				"%q is missing from %q", trait, message)
 		}
 		// And it is not the database's untyped refusal wearing a Go type: a
 		// 23514 reaching here would mean the Go check never ran.
@@ -148,12 +131,8 @@ func TestTraitsArea(t *testing.T) {
 			_, err := upsertRelationTypeWithTraits(t, svc, project,
 				"borders_"+gate, []string{"symmetric", gate})
 			message := requireSchemaProblem(t, err)
-			if !strings.Contains(message, `"symmetric"`) || !strings.Contains(message, `"`+gate+`"`) {
-				t.Fatalf("the refusal must name both traits it refuses together, got %q", message)
-			}
-			if !strings.Contains(message, "both directions") {
-				t.Fatalf("the refusal must say why, got %q", message)
-			}
+			assert.Must(t, strings.Contains(message, `"symmetric"`) && strings.Contains(message, `"`+gate+`"`), "the refusal must name both traits it refuses together, got %q", message)
+			assert.Must(t, strings.Contains(message, "both directions"), "the refusal must say why, got %q", message)
 		}
 	})
 
@@ -178,12 +157,8 @@ func TestTraitsArea(t *testing.T) {
 			_, err := upsertRelationTypeWithTraits(t, svc, project,
 				"notes_"+other, []string{"annotation", other})
 			message := requireSchemaProblem(t, err)
-			if !strings.Contains(message, `"annotation"`) || !strings.Contains(message, `"`+other+`"`) {
-				t.Fatalf("the refusal must name both, got %q", message)
-			}
-			if !strings.Contains(message, "inert") {
-				t.Fatalf("the refusal must say why, got %q", message)
-			}
+			assert.Must(t, strings.Contains(message, `"annotation"`) && strings.Contains(message, `"`+other+`"`), "the refusal must name both, got %q", message)
+			assert.Must(t, strings.Contains(message, "inert"), "the refusal must say why, got %q", message)
 		}
 	})
 
@@ -204,12 +179,8 @@ func TestTraitsArea(t *testing.T) {
 		_, err := upsertRelationTypeWithTraits(t, svc, project,
 			"gates", []string{"prerequisite_of", "unlocks"})
 		message := requireSchemaProblem(t, err)
-		if !strings.Contains(message, `"prerequisite_of"`) || !strings.Contains(message, `"unlocks"`) {
-			t.Fatalf("the refusal must name both, got %q", message)
-		}
-		if !strings.Contains(message, "two relation types") {
-			t.Fatalf("the refusal must name the recovery, got %q", message)
-		}
+		assert.Must(t, strings.Contains(message, `"prerequisite_of"`) && strings.Contains(message, `"unlocks"`), "the refusal must name both, got %q", message)
+		assert.Must(t, strings.Contains(message, "two relation types"), "the refusal must name the recovery, got %q", message)
 	})
 
 	// TestTraitsArea's "a trait declared twice is refused as a typo" case. A
@@ -226,9 +197,7 @@ func TestTraitsArea(t *testing.T) {
 		_, err := upsertRelationTypeWithTraits(t, svc, project,
 			"follows", []string{"ordering", "ordering"})
 		message := requireSchemaProblem(t, err)
-		if !strings.Contains(message, `"ordering"`) || !strings.Contains(message, "twice") {
-			t.Fatalf("the refusal must name the repeated word, got %q", message)
-		}
+		assert.Must(t, strings.Contains(message, `"ordering"`) && strings.Contains(message, "twice"), "the refusal must name the repeated word, got %q", message)
 	})
 
 	// TestTraitsArea's "a redundant acyclic is accepted and read back
@@ -243,19 +212,11 @@ func TestTraitsArea(t *testing.T) {
 
 		row, err := upsertRelationTypeWithTraits(t, svc, project,
 			"requires", []string{"prerequisite_of", "acyclic"})
-		if err != nil {
-			t.Fatalf("a redundant acyclic must be accepted: %v", err)
-		}
-		if !slices.Equal(row.Traits, []string{"prerequisite_of", "acyclic"}) {
-			t.Fatalf("stored traits = %v, want both words in the order they were sent", row.Traits)
-		}
+		assert.Must(t, err == nil, "a redundant acyclic must be accepted: %v", err)
+		assert.Must(t, slices.Equal(row.Traits, []string{"prerequisite_of", "acyclic"}), "stored traits = %v, want both words in the order they were sent", row.Traits)
 		read, err := svc.RelationTypeByKey(context.Background(), project, "requires")
-		if err != nil {
-			t.Fatalf("read the type back: %v", err)
-		}
-		if !slices.Equal(read.AnalysisTraits, []string{"prerequisite_of", "acyclic"}) {
-			t.Fatalf("read back = %v, want [prerequisite_of acyclic]", read.AnalysisTraits)
-		}
+		assert.Must(t, err == nil, "read the type back: %v", err)
+		assert.Must(t, slices.Equal(read.AnalysisTraits, []string{"prerequisite_of", "acyclic"}), "read back = %v, want [prerequisite_of acyclic]", read.AnalysisTraits)
 	})
 
 	// TestTraitsArea's "traits survive a rename of their type" case.
@@ -270,34 +231,20 @@ func TestTraitsArea(t *testing.T) {
 
 		before, err := upsertRelationTypeWithTraits(t, svc, project,
 			"available_to", []string{"unlocks"})
-		if err != nil {
-			t.Fatalf("declare the type: %v", err)
-		}
+		assert.Must(t, err == nil, "declare the type: %v", err)
 		current, err := svc.RelationTypeByKey(ctx, project, "available_to")
-		if err != nil {
-			t.Fatalf("read before renaming: %v", err)
-		}
+		assert.Must(t, err == nil, "read before renaming: %v", err)
 		version := current.Version
 		renamed, err := svc.RenameRelationType(ctx, project, metamodel.RenameInput{
 			From: "available_to", To: "usable_by", ExpectedVersion: &version,
 		})
-		if err != nil {
-			t.Fatalf("rename: %v", err)
-		}
-		if renamed.ID != before.ID {
-			t.Fatalf("a rename must move the key on the same row, got %s want %s",
-				renamed.ID, before.ID)
-		}
-		if !slices.Equal(renamed.AnalysisTraits, []string{"unlocks"}) {
-			t.Fatalf("the rename's answer = %v, want [unlocks]", renamed.AnalysisTraits)
-		}
+		assert.Must(t, err == nil, "rename: %v", err)
+		assert.Must(t, renamed.ID == before.ID, "a rename must move the key on the same row, got %s want %s",
+			renamed.ID, before.ID)
+		assert.Must(t, slices.Equal(renamed.AnalysisTraits, []string{"unlocks"}), "the rename's answer = %v, want [unlocks]", renamed.AnalysisTraits)
 		read, err := svc.RelationTypeByKey(ctx, project, "usable_by")
-		if err != nil {
-			t.Fatalf("read by the new key: %v", err)
-		}
-		if !slices.Equal(read.AnalysisTraits, []string{"unlocks"}) {
-			t.Fatalf("read back under the new key = %v, want [unlocks]", read.AnalysisTraits)
-		}
+		assert.Must(t, err == nil, "read by the new key: %v", err)
+		assert.Must(t, slices.Equal(read.AnalysisTraits, []string{"unlocks"}), "read back under the new key = %v, want [unlocks]", read.AnalysisTraits)
 	})
 
 	// TestTraitsArea's "clearing traits makes a type undeclared and not inert"
@@ -330,12 +277,8 @@ func TestTraitsArea(t *testing.T) {
 				"undeclared, and an empty array is refused by the column outright", got)
 		}
 		read, err := svc.RelationTypeByKey(ctx, project, "opens")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if read.AnalysisTraits != nil {
-			t.Fatalf("read back = %v, want nil (undeclared)", read.AnalysisTraits)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, read.AnalysisTraits == nil, "read back = %v, want nil (undeclared)", read.AnalysisTraits)
 		// And it is emphatically not the inert declaration, which is the
 		// confusion the column's shape exists to make impossible.
 		if slices.Contains(read.AnalysisTraits, "annotation") {
@@ -370,13 +313,9 @@ func TestTraitsArea(t *testing.T) {
 		// not the combinations.
 		for _, trait := range metamodel.AnalysisTraits {
 			row, err := upsertRelationTypeWithTraits(t, svc, project, "edge_"+trait, []string{trait})
-			if err != nil {
-				t.Fatalf("the database refused %q, which metamodel.AnalysisTraits offers: %v",
-					trait, err)
-			}
-			if !slices.Equal(row.Traits, []string{trait}) {
-				t.Fatalf("stored %v for %q", row.Traits, trait)
-			}
+			assert.Must(t, err == nil, "the database refused %q, which metamodel.AnalysisTraits offers: %v",
+				trait, err)
+			assert.Must(t, slices.Equal(row.Traits, []string{trait}), "stored %v for %q", row.Traits, trait)
 		}
 
 		// database → Go. The constraint's own text, not a second literal.
@@ -384,30 +323,22 @@ func TestTraitsArea(t *testing.T) {
 		err := pool.QueryRow(context.Background(),
 			`SELECT pg_get_constraintdef(oid) FROM pg_constraint
 			  WHERE conname = 'relation_types_traits_vocab'`).Scan(&definition)
-		if err != nil {
-			t.Fatalf("read the constraint definition: %v", err)
-		}
+		assert.Must(t, err == nil, "read the constraint definition: %v", err)
 		matches := traitLiteral.FindAllStringSubmatch(definition, -1)
-		if len(matches) == 0 {
-			t.Fatalf("no trait literals found in %q: this test's own reading of the "+
-				"constraint is broken, which would make it pass against anything", definition)
-		}
+		assert.Must(t, len(matches) != 0, "no trait literals found in %q: this test's own reading of the "+
+			"constraint is broken, which would make it pass against anything", definition)
 		inDatabase := make([]string, 0, len(matches))
 		for _, match := range matches {
 			inDatabase = append(inDatabase, match[1])
 		}
 		for _, trait := range inDatabase {
-			if !slices.Contains(metamodel.AnalysisTraits, trait) {
-				t.Fatalf("the column admits %q and metamodel.AnalysisTraits does not offer it: "+
-					"a trait the database accepts that no Go reader knows about is a gate no "+
-					"analysis will ever read. Constraint: %s", trait, definition)
-			}
+			assert.Must(t, slices.Contains(metamodel.AnalysisTraits, trait), "the column admits %q and metamodel.AnalysisTraits does not offer it: "+
+				"a trait the database accepts that no Go reader knows about is a gate no "+
+				"analysis will ever read. Constraint: %s", trait, definition)
 		}
-		if len(inDatabase) != len(metamodel.AnalysisTraits) {
-			t.Fatalf("the constraint lists %d traits and metamodel.AnalysisTraits carries %d: "+
-				"%v against %v", len(inDatabase), len(metamodel.AnalysisTraits),
-				inDatabase, metamodel.AnalysisTraits)
-		}
+		assert.Must(t, len(inDatabase) == len(metamodel.AnalysisTraits), "the constraint lists %d traits and metamodel.AnalysisTraits carries %d: "+
+			"%v against %v", len(inDatabase), len(metamodel.AnalysisTraits),
+			inDatabase, metamodel.AnalysisTraits)
 	})
 
 	// TestTraitsArea's "every refused combination is refused and every refusal
@@ -423,9 +354,7 @@ func TestTraitsArea(t *testing.T) {
 	// mechanism nothing reads.
 	t.Run("every refused combination is refused and every refusal is in the table", func(t *testing.T) {
 		_, svc, project := traitsFixture(t)
-		if len(metamodel.AnalysisTraitConflicts) == 0 {
-			t.Fatal("the conflict table is empty, so every assertion below is vacuous")
-		}
+		assert.Must(t, len(metamodel.AnalysisTraitConflicts) != 0, "the conflict table is empty, so every assertion below is vacuous")
 
 		tabled := func(a, b string) bool {
 			for _, conflict := range metamodel.AnalysisTraitConflicts {
@@ -446,10 +375,8 @@ func TestTraitsArea(t *testing.T) {
 				_, err := upsertRelationTypeWithTraits(t, svc, project,
 					"pair_"+a+"_"+b, []string{a, b})
 				refused := err != nil
-				if refused && !errors.Is(err, metamodel.ErrInvalidSchema) {
-					t.Fatalf("{%s,%s} failed for a reason that is not a coherence refusal: %v",
-						a, b, err)
-				}
+				assert.Must(t, !refused || errors.Is(err, metamodel.ErrInvalidSchema), "{%s,%s} failed for a reason that is not a coherence refusal: %v",
+					a, b, err)
 				if refused != tabled(a, b) {
 					t.Fatalf("{%s,%s}: the check %s it and AnalysisTraitConflicts %s it",
 						a, b,
@@ -458,10 +385,8 @@ func TestTraitsArea(t *testing.T) {
 				}
 			}
 		}
-		if n != len(metamodel.AnalysisTraits)*(len(metamodel.AnalysisTraits)-1)/2 {
-			t.Fatalf("checked %d pairs, which is not every pair of %d traits",
-				n, len(metamodel.AnalysisTraits))
-		}
+		assert.Must(t, n == len(metamodel.AnalysisTraits)*(len(metamodel.AnalysisTraits)-1)/2, "checked %d pairs, which is not every pair of %d traits",
+			n, len(metamodel.AnalysisTraits))
 	})
 }
 
@@ -475,9 +400,7 @@ func storedTraits(t *testing.T, pool *pgxpool.Pool, project uuid.UUID, key strin
 	err := pool.QueryRow(context.Background(),
 		`SELECT analysis_traits FROM relation_types WHERE project_id = $1 AND lower(key) = lower($2)`,
 		project, key).Scan(&traits)
-	if err != nil {
-		t.Fatalf("read stored traits for %q: %v", key, err)
-	}
+	assert.Must(t, err == nil, "read stored traits for %q: %v", key, err)
 	return traits
 }
 

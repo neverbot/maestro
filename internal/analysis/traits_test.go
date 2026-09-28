@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -22,19 +23,11 @@ func TestTraits(t *testing.T) {
 		id := g.declareRelationType(t, "requires", "", []string{"prerequisite_of"})
 
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		entry, ok := resolved.ByType[id]
-		if !ok {
-			t.Fatalf("the declared type is not in the reading: %+v", resolved.Types())
-		}
-		if entry.Source != SourceDeclared {
-			t.Fatalf("source = %q, want %q", entry.Source, SourceDeclared)
-		}
-		if !slices.Equal(entry.Traits, []string{"prerequisite_of"}) {
-			t.Fatalf("traits = %v, want [prerequisite_of]", entry.Traits)
-		}
+		assert.Must(t, ok, "the declared type is not in the reading: %+v", resolved.Types())
+		assert.Must(t, entry.Source == SourceDeclared, "source = %q, want %q", entry.Source, SourceDeclared)
+		assert.Must(t, slices.Equal(entry.Traits, []string{"prerequisite_of"}), "traits = %v, want [prerequisite_of]", entry.Traits)
 		if got := resolved.WithTrait("prerequisite_of"); len(got) != 1 || got[0] != id {
 			t.Fatalf("WithTrait = %v, want the one declared type", got)
 		}
@@ -52,9 +45,7 @@ func TestTraits(t *testing.T) {
 		derived := g.declareRelationType(t, "available_to", "availability", nil)
 
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		// The control, in the same test: the declared type is still declared,
 		// so a resolver that labelled everything `derived_from_role` cannot
 		// pass this.
@@ -63,16 +54,10 @@ func TestTraits(t *testing.T) {
 				resolved.ByType[declared].Source, SourceDeclared)
 		}
 		entry, ok := resolved.ByType[derived]
-		if !ok {
-			t.Fatalf("a type with a role and no traits must still be read: %+v", resolved.Types())
-		}
-		if entry.Source != SourceDerivedFromRole {
-			t.Fatalf("source = %q, want %q: a translation of a role is not a declaration",
-				entry.Source, SourceDerivedFromRole)
-		}
-		if !slices.Equal(entry.Traits, []string{"unlocks"}) {
-			t.Fatalf("traits = %v, want the availability translation [unlocks]", entry.Traits)
-		}
+		assert.Must(t, ok, "a type with a role and no traits must still be read: %+v", resolved.Types())
+		assert.Must(t, entry.Source == SourceDerivedFromRole, "source = %q, want %q: a translation of a role is not a declaration",
+			entry.Source, SourceDerivedFromRole)
+		assert.Must(t, slices.Equal(entry.Traits, []string{"unlocks"}), "traits = %v, want the availability translation [unlocks]", entry.Traits)
 	})
 
 	// TestADeclarationBeatsTheRoleItContradicts. A type carrying both is not
@@ -83,13 +68,9 @@ func TestTraits(t *testing.T) {
 		id := g.declareRelationType(t, "connects_to", "spatial", []string{"containment"})
 
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		entry := resolved.ByType[id]
-		if entry.Source != SourceDeclared || !slices.Equal(entry.Traits, []string{"containment"}) {
-			t.Fatalf("entry = %+v, want the declared traits and not spatial's [symmetric]", entry)
-		}
+		assert.Must(t, entry.Source == SourceDeclared && slices.Equal(entry.Traits, []string{"containment"}), "entry = %+v, want the declared traits and not spatial's [symmetric]", entry)
 	})
 
 	// TestATypeWithNeitherTraitsNorARoleIsNotWalked. It is an edge this
@@ -101,9 +82,7 @@ func TestTraits(t *testing.T) {
 		silent := g.declareRelationType(t, "mentions", "", nil)
 
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		if _, ok := resolved.ByType[silent]; ok {
 			t.Fatal("a type that declares nothing must not be read as anything")
 		}
@@ -128,33 +107,19 @@ func TestTraits(t *testing.T) {
 		g.declareRelationType(t, "see_also", "", nil)
 
 		_, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err == nil {
-			t.Fatal("a game that declared nothing must be refused, not reported healthy")
-		}
-		if !errors.Is(err, ErrSemanticsUndeclared) {
-			t.Fatalf("err = %T %v, want ErrSemanticsUndeclared", err, err)
-		}
+		assert.Must(t, err != nil, "a game that declared nothing must be refused, not reported healthy")
+		assert.Must(t, errors.Is(err, ErrSemanticsUndeclared), "err = %T %v, want ErrSemanticsUndeclared", err, err)
 		var undeclared *UndeclaredError
-		if !errors.As(err, &undeclared) {
-			t.Fatalf("err = %T, want it to carry the catalogue", err)
-		}
-		if len(undeclared.Types) != 2 {
-			t.Fatalf("catalogue = %+v, want both relation types of the game", undeclared.Types)
-		}
+		assert.Must(t, errors.As(err, &undeclared), "err = %T, want it to carry the catalogue", err)
+		assert.Must(t, len(undeclared.Types) == 2, "catalogue = %+v, want both relation types of the game", undeclared.Types)
 		for _, want := range []string{"mentions", "see_also"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("the refusal does not name %q: %v", want, err)
-			}
+			assert.Must(t, strings.Contains(err.Error(), want), "the refusal does not name %q: %v", want, err)
 		}
-		if undeclared.Advice == "" {
-			t.Fatal("a refusal whose recovery is 'declare something' must say what to declare")
-		}
+		assert.Must(t, undeclared.Advice != "", "a refusal whose recovery is 'declare something' must say what to declare")
 		// The advice is generated, so it can only ever offer words the column
 		// accepts.
 		for _, trait := range Traits {
-			if !strings.Contains(undeclared.Advice, trait) {
-				t.Fatalf("the advice does not offer %q: %s", trait, undeclared.Advice)
-			}
+			assert.Must(t, strings.Contains(undeclared.Advice, trait), "the advice does not offer %q: %s", trait, undeclared.Advice)
 		}
 		details := undeclared.Details()
 		if _, ok := details["relation_types"]; !ok {
@@ -168,12 +133,8 @@ func TestTraits(t *testing.T) {
 	t.Run("a game with no relation types at all is refused too", func(t *testing.T) {
 		g := a.game(t)
 		_, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if !errors.Is(err, ErrSemanticsUndeclared) {
-			t.Fatalf("err = %v, want ErrSemanticsUndeclared", err)
-		}
-		if !strings.Contains(err.Error(), "no relation types at all") {
-			t.Fatalf("err = %v, want it to say the game has no relation types", err)
-		}
+		assert.Must(t, errors.Is(err, ErrSemanticsUndeclared), "err = %v, want ErrSemanticsUndeclared", err)
+		assert.Must(t, strings.Contains(err.Error(), "no relation types at all"), "err = %v, want it to say the game has no relation types", err)
 	})
 
 	// TestACallerSuppliedTypeShadowsTheSelectionAndSaysSo is the first
@@ -186,28 +147,18 @@ func TestTraits(t *testing.T) {
 
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID,
 			ResolveInput{RelationTypeKeys: []string{"CONTAINS"}})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		if len(resolved.ByType) != 1 {
-			t.Fatalf("reading = %+v, want only the type the caller named", resolved.Types())
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
+		assert.Must(t, len(resolved.ByType) == 1, "reading = %+v, want only the type the caller named", resolved.Types())
 		if _, ok := resolved.ByType[declared]; ok {
 			t.Fatal("a caller's list must shadow the declared selection, not extend it")
 		}
 		entry := resolved.ByType[other]
-		if entry.Source != SourceCallerSupplied {
-			t.Fatalf("source = %q, want %q", entry.Source, SourceCallerSupplied)
-		}
+		assert.Must(t, entry.Source == SourceCallerSupplied, "source = %q, want %q", entry.Source, SourceCallerSupplied)
 		// Matched without regard to case, as every key in this domain is, and
 		// the answer quotes the stored spelling.
-		if entry.Key != "contains" {
-			t.Fatalf("key = %q, want the stored spelling", entry.Key)
-		}
-		if !slices.Equal(entry.Traits, []string{"containment"}) {
-			t.Fatalf("traits = %v: naming a type says which edges the question is about, "+
-				"not how they behave", entry.Traits)
-		}
+		assert.Must(t, entry.Key == "contains", "key = %q, want the stored spelling", entry.Key)
+		assert.Must(t, slices.Equal(entry.Traits, []string{"containment"}), "traits = %v: naming a type says which edges the question is about, "+
+			"not how they behave", entry.Traits)
 	})
 
 	// TestACallerSuppliedTypeFromAnotherGameIsNotFoundAndNamesTheKey.
@@ -228,13 +179,8 @@ func TestTraits(t *testing.T) {
 
 		_, err := g.analysis.Resolve(t.Context(), g.projectID,
 			ResolveInput{RelationTypeKeys: []string{"requires", "leads_to"}})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("err = %T %v, want not_found", err, err)
-		}
-		if !strings.Contains(err.Error(), "leads_to") ||
-			!strings.Contains(err.Error(), "relation_types[1]") {
-			t.Fatalf("err = %v, want it to name the key and the element at fault", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "err = %T %v, want not_found", err, err)
+		assert.Must(t, strings.Contains(err.Error(), "leads_to") && strings.Contains(err.Error(), "relation_types[1]"), "err = %v, want it to name the key and the element at fault", err)
 	})
 
 	// TestACallerSuppliedListIsASetAndARepeatIsRefused, for the reason an
@@ -247,12 +193,8 @@ func TestTraits(t *testing.T) {
 
 		_, err := g.analysis.Resolve(t.Context(), g.projectID,
 			ResolveInput{RelationTypeKeys: []string{"requires", "REQUIRES"}})
-		if !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("err = %T %v, want invalid_input", err, err)
-		}
-		if !strings.Contains(err.Error(), "relation_types[1]") {
-			t.Fatalf("err = %v, want the repeated element named", err)
-		}
+		assert.Must(t, errors.Is(err, ErrInvalidInput), "err = %T %v, want invalid_input", err, err)
+		assert.Must(t, strings.Contains(err.Error(), "relation_types[1]"), "err = %v, want the repeated element named", err)
 	})
 
 	// TestACallerSuppliedSetWithNoBehaviourIsStillRefused. A run with a set
@@ -272,9 +214,7 @@ func TestTraits(t *testing.T) {
 
 		_, err := g.analysis.Resolve(t.Context(), g.projectID,
 			ResolveInput{RelationTypeKeys: []string{"mentions"}})
-		if !errors.Is(err, ErrSemanticsUndeclared) {
-			t.Fatalf("err = %T %v, want ErrSemanticsUndeclared", err, err)
-		}
+		assert.Must(t, errors.Is(err, ErrSemanticsUndeclared), "err = %T %v, want ErrSemanticsUndeclared", err, err)
 	})
 
 	// TestARelationTypeListAboveItsCapIsRefusedAndNotTrimmed. Refused, not
@@ -301,15 +241,9 @@ func TestTraits(t *testing.T) {
 		overCap := append(slices.Clone(atCap), "one_too_many")
 		_, err := g.analysis.Resolve(t.Context(), g.projectID,
 			ResolveInput{RelationTypeKeys: overCap})
-		if !errors.Is(err, ErrLimitExceeded) {
-			t.Fatalf("err = %T %v, want limit_exceeded", err, err)
-		}
-		if !strings.Contains(err.Error(), fmt.Sprint(MaxTypeKeys)) {
-			t.Fatalf("err = %v, want it to name the cap so the caller can lower to it", err)
-		}
-		if !strings.Contains(err.Error(), "relation_types") {
-			t.Fatalf("err = %v, want it to name the caller's own argument", err)
-		}
+		assert.Must(t, errors.Is(err, ErrLimitExceeded), "err = %T %v, want limit_exceeded", err, err)
+		assert.Must(t, strings.Contains(err.Error(), fmt.Sprint(MaxTypeKeys)), "err = %v, want it to name the cap so the caller can lower to it", err)
+		assert.Must(t, strings.Contains(err.Error(), "relation_types"), "err = %v, want it to name the caller's own argument", err)
 	})
 
 	// TestEverySemanticRoleHasADerivedTraitSet is the forward half of the
@@ -319,14 +253,10 @@ func TestTraits(t *testing.T) {
 	t.Run("every semantic role has a derived trait set", func(t *testing.T) {
 		for _, role := range metamodel.SemanticRoles {
 			traits, ok := derivedTraits[role]
-			if !ok {
-				t.Fatalf("semantic_role %q has no derived trait set, so a game that declares "+
-					"it and nothing else analyses as though it had declared nothing", role)
-			}
-			if len(traits) == 0 {
-				t.Fatalf("semantic_role %q derives an empty trait set, which is the same "+
-					"silence with more steps", role)
-			}
+			assert.Must(t, ok, "semantic_role %q has no derived trait set, so a game that declares "+
+				"it and nothing else analyses as though it had declared nothing", role)
+			assert.Must(t, len(traits) != 0, "semantic_role %q derives an empty trait set, which is the same "+
+				"silence with more steps", role)
 		}
 	})
 
@@ -336,38 +266,26 @@ func TestTraits(t *testing.T) {
 	// either would otherwise sit in this map producing a reading no game can
 	// ever match.
 	t.Run("every derived trait set names a real role", func(t *testing.T) {
-		if len(derivedTraits) == 0 {
-			t.Fatal("the derivation mapping is empty, so every assertion here is vacuous")
-		}
+		assert.Must(t, len(derivedTraits) != 0, "the derivation mapping is empty, so every assertion here is vacuous")
 		for role, traits := range derivedTraits {
-			if !slices.Contains(metamodel.SemanticRoles, role) {
-				t.Fatalf("%q is not a semantic_role the metamodel offers, so nothing can ever "+
-					"be read through this entry", role)
-			}
+			assert.Must(t, slices.Contains(metamodel.SemanticRoles, role), "%q is not a semantic_role the metamodel offers, so nothing can ever "+
+				"be read through this entry", role)
 			for _, trait := range traits {
-				if !slices.Contains(Traits, trait) {
-					t.Fatalf("role %q derives %q, which is not in the trait vocabulary: the "+
-						"reading it produces could never have been declared by hand", role, trait)
-				}
+				assert.Must(t, slices.Contains(Traits, trait), "role %q derives %q, which is not in the trait vocabulary: the "+
+					"reading it produces could never have been declared by hand", role, trait)
 			}
 		}
-		if len(derivedTraits) != len(metamodel.SemanticRoles) {
-			t.Fatalf("the mapping carries %d roles and the metamodel offers %d",
-				len(derivedTraits), len(metamodel.SemanticRoles))
-		}
+		assert.Must(t, len(derivedTraits) == len(metamodel.SemanticRoles), "the mapping carries %d roles and the metamodel offers %d",
+			len(derivedTraits), len(metamodel.SemanticRoles))
 	})
 
 	// TestTheTraitVocabularyIsTheMetamodelsAndNotACopy. The alias is the
 	// whole mechanism that keeps six places in step; a redeclaration here
 	// would compile and drift.
 	t.Run("the trait vocabulary is the metamodels and not a copy", func(t *testing.T) {
-		if !slices.Equal(Traits, metamodel.AnalysisTraits) {
-			t.Fatalf("analysis.Traits = %v, metamodel.AnalysisTraits = %v: two lists",
-				Traits, metamodel.AnalysisTraits)
-		}
-		if len(TraitConflicts) != len(metamodel.AnalysisTraitConflicts) {
-			t.Fatal("analysis.TraitConflicts is not the metamodel's table")
-		}
+		assert.Must(t, slices.Equal(Traits, metamodel.AnalysisTraits), "analysis.Traits = %v, metamodel.AnalysisTraits = %v: two lists",
+			Traits, metamodel.AnalysisTraits)
+		assert.Must(t, len(TraitConflicts) == len(metamodel.AnalysisTraitConflicts), "analysis.TraitConflicts is not the metamodel's table")
 	})
 
 	// TestTheTraitDescriptionNamesEveryTraitAndEveryTraitIsNamed is the
@@ -380,23 +298,15 @@ func TestTraits(t *testing.T) {
 	t.Run("the trait description names every trait and every trait is named", func(t *testing.T) {
 		description := TraitDescription()
 		for _, trait := range Traits {
-			if !strings.Contains(description, `"`+trait+`"`) {
-				t.Fatalf("the description does not name %q", trait)
-			}
+			assert.Must(t, strings.Contains(description, `"`+trait+`"`), "the description does not name %q", trait)
 			meaning, ok := traitMeanings[trait]
-			if !ok || meaning == "" {
-				t.Fatalf("%q has no meaning in traitMeanings, so it reaches an agent as a "+
-					"bare name with nothing to act on", trait)
-			}
-			if !strings.Contains(description, meaning) {
-				t.Fatalf("the description does not carry %q's meaning", trait)
-			}
+			assert.Must(t, ok && meaning != "", "%q has no meaning in traitMeanings, so it reaches an agent as a "+
+				"bare name with nothing to act on", trait)
+			assert.Must(t, strings.Contains(description, meaning), "the description does not carry %q's meaning", trait)
 		}
 		for trait := range traitMeanings {
-			if !slices.Contains(Traits, trait) {
-				t.Fatalf("traitMeanings explains %q, which is not in the vocabulary: an agent "+
-					"is being offered a word the column would refuse", trait)
-			}
+			assert.Must(t, slices.Contains(Traits, trait), "traitMeanings explains %q, which is not in the vocabulary: an agent "+
+				"is being offered a word the column would refuse", trait)
 		}
 	})
 
@@ -404,13 +314,9 @@ func TestTraits(t *testing.T) {
 	// agent is never told about is a refusal it discovers by failing a call.
 	t.Run("every refused combination is named in the trait description", func(t *testing.T) {
 		description := TraitDescription()
-		if len(TraitConflicts) == 0 {
-			t.Fatal("the conflict table is empty, so this assertion is vacuous")
-		}
+		assert.Must(t, len(TraitConflicts) != 0, "the conflict table is empty, so this assertion is vacuous")
 		for _, line := range metamodel.TraitConflictLines() {
-			if !strings.Contains(description, line) {
-				t.Fatalf("the description does not name the refused combination %q", line)
-			}
+			assert.Must(t, strings.Contains(description, line), "the description does not name the refused combination %q", line)
 		}
 	})
 
@@ -421,10 +327,8 @@ func TestTraits(t *testing.T) {
 		description := TraitDescription()
 		for role, traits := range derivedTraits {
 			line := fmt.Sprintf("semantic_role %q is read as %s", role, metamodel.QuotedList(traits))
-			if !strings.Contains(description, line) {
-				t.Fatalf("the description does not carry the translation %q: an agent cannot "+
-					"know why this engine treats its edges as gates", line)
-			}
+			assert.Must(t, strings.Contains(description, line), "the description does not carry the translation %q: an agent cannot "+
+				"know why this engine treats its edges as gates", line)
 		}
 	})
 
@@ -439,29 +343,21 @@ func TestTraits(t *testing.T) {
 
 		seen := map[Source]bool{}
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		for _, entry := range resolved.Types() {
 			seen[entry.Source] = true
 		}
 		supplied, err := g.analysis.Resolve(t.Context(), g.projectID,
 			ResolveInput{RelationTypeKeys: []string{"requires"}})
-		if err != nil {
-			t.Fatalf("resolve with a caller list: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve with a caller list: %v", err)
 		for _, entry := range supplied.Types() {
 			seen[entry.Source] = true
 		}
 		for _, source := range Sources {
-			if !seen[source] {
-				t.Fatalf("no reading this package produces ever carries source %q", source)
-			}
+			assert.Must(t, seen[source], "no reading this package produces ever carries source %q", source)
 		}
-		if len(seen) != len(Sources) {
-			t.Fatalf("the resolver produced %d sources and Sources lists %d: %v",
-				len(seen), len(Sources), seen)
-		}
+		assert.Must(t, len(seen) == len(Sources), "the resolver produced %d sources and Sources lists %d: %v",
+			len(seen), len(Sources), seen)
 	})
 
 	// TestTheReadingIsOrderedSoTwoRunsAgree. A result document that reorders
@@ -473,15 +369,11 @@ func TestTraits(t *testing.T) {
 			g.declareRelationType(t, key, "", []string{"prerequisite_of"})
 		}
 		resolved, err := g.analysis.Resolve(t.Context(), g.projectID, ResolveInput{})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		assert.Must(t, err == nil, "resolve: %v", err)
 		keys := make([]string, 0, 3)
 		for _, entry := range resolved.Types() {
 			keys = append(keys, entry.Key)
 		}
-		if !slices.Equal(keys, []string{"alpha", "mu", "zeta"}) {
-			t.Fatalf("Types() = %v, want key order", keys)
-		}
+		assert.Must(t, slices.Equal(keys, []string{"alpha", "mu", "zeta"}), "Types() = %v, want key order", keys)
 	})
 }

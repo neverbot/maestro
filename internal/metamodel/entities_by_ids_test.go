@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -26,24 +27,16 @@ func TestEntitiesByIDsArea(t *testing.T) {
 		seedWorld(t, svc, project)
 
 		hogger, err := svc.EntityByKey(ctx, project, "quest", "hogger")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 		elwynn, err := svc.EntityByKey(ctx, project, "zone", "elwynn")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 
 		// The same id twice: a page of edges routinely names one dense node
 		// on both sides of many rows, and the caller must not have to
 		// deduplicate before asking.
 		rows, err := svc.EntitiesByIDs(ctx, project, []uuid.UUID{hogger.ID, elwynn.ID, hogger.ID})
-		if err != nil {
-			t.Fatalf("EntitiesByIDs: %v", err)
-		}
-		if len(rows) != 2 {
-			t.Fatalf("rows = %d, want 2", len(rows))
-		}
+		assert.Must(t, err == nil, "EntitiesByIDs: %v", err)
+		assert.Must(t, len(rows) == 2, "rows = %d, want 2", len(rows))
 		if got := rows[hogger.ID].Key; got != "hogger" {
 			t.Fatalf("hogger key = %q, want %q", got, "hogger")
 		}
@@ -67,17 +60,11 @@ func TestEntitiesByIDsArea(t *testing.T) {
 		seedWorld(t, svc, theirs)
 
 		foreign, err := svc.EntityByKey(ctx, theirs, "quest", "hogger")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 
 		rows, err := svc.EntitiesByIDs(ctx, mine, []uuid.UUID{foreign.ID, uuid.New()})
-		if err != nil {
-			t.Fatalf("EntitiesByIDs: %v", err)
-		}
-		if len(rows) != 0 {
-			t.Fatalf("rows = %+v, want none of another game's entities", rows)
-		}
+		assert.Must(t, err == nil, "EntitiesByIDs: %v", err)
+		assert.Must(t, len(rows) == 0, "rows = %+v, want none of another game's entities", rows)
 	})
 
 	// TestEntitiesByIDsArea's "entities by i ds with no i ds asks the database
@@ -91,14 +78,8 @@ func TestEntitiesByIDsArea(t *testing.T) {
 		// test passes only while the empty case short-circuits.
 		svc := metamodel.New(nil, nil)
 		rows, err := svc.EntitiesByIDs(context.Background(), uuid.New(), nil)
-		if err != nil {
-			t.Fatalf("EntitiesByIDs: %v", err)
-		}
-		if rows == nil {
-			t.Fatal("rows = nil, want an empty map a caller can index into")
-		}
-		if len(rows) != 0 {
-			t.Fatalf("rows = %+v, want empty", rows)
-		}
+		assert.Must(t, err == nil, "EntitiesByIDs: %v", err)
+		assert.Must(t, rows != nil, "rows = nil, want an empty map a caller can index into")
+		assert.Must(t, len(rows) == 0, "rows = %+v, want empty", rows)
 	})
 }

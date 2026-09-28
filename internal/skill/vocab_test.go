@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/skill"
 	"github.com/neverbot/maestro/internal/views"
@@ -50,9 +51,7 @@ var knownVocabularies = map[string]string{
 // (a value an agent would be told to send and the server would refuse).
 func TestBundleVocabulariesMatchCode(t *testing.T) {
 	fences, err := skill.VocabFences(skill.Files())
-	if err != nil {
-		t.Fatalf("reading the bundle's vocab fences: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the bundle's vocab fences: %v", err)
 
 	for _, tc := range []struct {
 		name string
@@ -64,16 +63,12 @@ func TestBundleVocabulariesMatchCode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle, err := skill.VocabWords(fences, tc.name)
-			if err != nil {
-				t.Fatalf("%v", err)
-			}
+			assert.Must(t, err == nil, "%v", err)
 			// Neither side may be empty. Two empty sets compare equal, and a
 			// comparison that runs over nothing is the failure this
 			// repository has now shipped under three different names.
-			if len(bundle) == 0 || len(tc.code) == 0 {
-				t.Fatalf("the bundle lists %d words and the code declares %d: a comparison "+
-					"over an empty set passes against anything", len(bundle), len(tc.code))
-			}
+			assert.Must(t, len(bundle) != 0 && len(tc.code) != 0, "the bundle lists %d words and the code declares %d: a comparison "+
+				"over an empty set passes against anything", len(bundle), len(tc.code))
 			assertSameSet(t, tc.name, bundle, tc.code)
 		})
 	}
@@ -90,9 +85,7 @@ func TestBundleVocabulariesMatchCode(t *testing.T) {
 // new directory.
 func TestEveryVocabFenceIsKnownAndEveryKnownVocabIsFenced(t *testing.T) {
 	fences, err := skill.VocabFences(skill.Files())
-	if err != nil {
-		t.Fatalf("reading the bundle's vocab fences: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the bundle's vocab fences: %v", err)
 	if len(fences) == 0 {
 		t.Fatal("the bundle carries no vocab fences at all: every comparison this file " +
 			"makes would be over an empty set")
@@ -108,10 +101,8 @@ func TestEveryVocabFenceIsKnownAndEveryKnownVocabIsFenced(t *testing.T) {
 		}
 	}
 	for name, where := range knownVocabularies {
-		if !found[name] {
-			t.Errorf("%s checks vocab:%s and the bundle carries no such fence: the "+
-				"comparison runs over an empty set and passes", where, name)
-		}
+		assert.Should(t, found[name], "%s checks vocab:%s and the bundle carries no such fence: the "+
+			"comparison runs over an empty set and passes", where, name)
 	}
 }
 
@@ -123,18 +114,12 @@ func TestTheFenceReaderIsPrecise(t *testing.T) {
 	t.Run("a fence is read, wrapped across lines", func(t *testing.T) {
 		fences := mustFences(t, page("```vocab:field_types\ntext longtext\nnumber\n```\n"))
 		words, err := skill.VocabWords(fences, "field_types")
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		if strings.Join(words, " ") != "text longtext number" {
-			t.Fatalf("words = %q", words)
-		}
+		assert.Must(t, err == nil, "%v", err)
+		assert.Must(t, strings.Join(words, " ") == "text longtext number", "words = %q", words)
 	})
 	t.Run("an ordinary code fence is not a vocabulary", func(t *testing.T) {
 		fences := mustFences(t, page("```json\n{\"a\": 1}\n```\n"))
-		if len(fences) != 0 {
-			t.Fatalf("a json fence was read as a vocabulary: %+v", fences)
-		}
+		assert.Must(t, len(fences) == 0, "a json fence was read as a vocabulary: %+v", fences)
 	})
 	t.Run("an unnamed fence is an error", func(t *testing.T) {
 		if _, err := skill.VocabFences(page("```vocab\ntext\n```\n")); err == nil {
@@ -175,9 +160,7 @@ func TestTheFenceReaderIsPrecise(t *testing.T) {
 				Data: []byte("```vocab:field_types\ntext\n```\n"),
 			},
 		})
-		if len(fences) != 1 || fences[0].Path != "reference/fields.md" {
-			t.Fatalf("the walk did not reach a page in a subdirectory: %+v", fences)
-		}
+		assert.Must(t, len(fences) == 1 && fences[0].Path == "reference/fields.md", "the walk did not reach a page in a subdirectory: %+v", fences)
 	})
 }
 
@@ -208,12 +191,8 @@ func TestTheSetComparisonCatchesBothDirections(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			missing, extra := skill.DiffVocabularies(tc.bundle, tc.code)
-			if strings.Join(missing, ",") != strings.Join(tc.missing, ",") {
-				t.Errorf("missing = %v, want %v", missing, tc.missing)
-			}
-			if strings.Join(extra, ",") != strings.Join(tc.extra, ",") {
-				t.Errorf("extra = %v, want %v", extra, tc.extra)
-			}
+			assert.Should(t, strings.Join(missing, ",") == strings.Join(tc.missing, ","), "missing = %v, want %v", missing, tc.missing)
+			assert.Should(t, strings.Join(extra, ",") == strings.Join(tc.extra, ","), "extra = %v, want %v", extra, tc.extra)
 		})
 	}
 }
@@ -223,14 +202,10 @@ func TestTheSetComparisonCatchesBothDirections(t *testing.T) {
 func assertSameSet(t *testing.T, name string, bundle, code []string) {
 	t.Helper()
 	missing, extra := skill.DiffVocabularies(bundle, code)
-	if len(missing) > 0 {
-		t.Errorf("vocab:%s — the code declares %v and the bundle's fence does not list them: "+
-			"an agent reading this page would never know the value exists", name, missing)
-	}
-	if len(extra) > 0 {
-		t.Errorf("vocab:%s — the bundle lists %v and no such value is declared in Go: an "+
-			"agent would send a word the server refuses", name, extra)
-	}
+	assert.Should(t, len(missing) <= 0, "vocab:%s — the code declares %v and the bundle's fence does not list them: "+
+		"an agent reading this page would never know the value exists", name, missing)
+	assert.Should(t, len(extra) <= 0, "vocab:%s — the bundle lists %v and no such value is declared in Go: an "+
+		"agent would send a word the server refuses", name, extra)
 }
 
 func fieldTypeStrings() []string {
@@ -248,9 +223,7 @@ func page(body string) fstest.MapFS {
 func mustFences(t *testing.T, fsys fstest.MapFS) []skill.VocabFence {
 	t.Helper()
 	fences, err := skill.VocabFences(fsys)
-	if err != nil {
-		t.Fatalf("reading fences: %v", err)
-	}
+	assert.Must(t, err == nil, "reading fences: %v", err)
 	return fences
 }
 
@@ -283,9 +256,7 @@ func modellingPages(t *testing.T, fsys fs.FS) map[string]string {
 		pages[p] = string(body)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walking the modelling pages: %v", err)
-	}
+	assert.Must(t, err == nil, "walking the modelling pages: %v", err)
 	if len(pages) == 0 {
 		t.Fatal("no modelling page was found: every assertion below would pass over an " +
 			"empty set, which is how a guard of this shape goes quiet")
@@ -316,11 +287,9 @@ func statesACost(body string) bool {
 // away.
 func TestEveryModellingPageStatesACost(t *testing.T) {
 	for name, body := range modellingPages(t, skill.Files()) {
-		if !statesACost(body) {
-			t.Errorf("%s states no cost: a modelling page that names no consequence is a "+
-				"style guide, and the pages here exist to say what the wrong shape is paid "+
-				"for in", name)
-		}
+		assert.Should(t, statesACost(body), "%s states no cost: a modelling page that names no consequence is a "+
+			"style guide, and the pages here exist to say what the wrong shape is paid "+
+			"for in", name)
 	}
 
 	// The precision fixture. Every assertion above is "the check found
@@ -402,11 +371,9 @@ func TestTheRenameRuleIsTaughtBothWays(t *testing.T) {
 			"the page this guard reads")
 	}
 	for _, tool := range []string{"types.rename", "relation_types.rename"} {
-		if !strings.Contains(naming, "`"+tool+"`") {
-			t.Errorf("modelling/naming.md does not name %s: half the rename rule is "+
-				"missing, and an agent that does not know the call exists is left with the "+
-				"delete-and-recreate workaround, which loses every edge", tool)
-		}
+		assert.Should(t, strings.Contains(naming, "`"+tool+"`"), "modelling/naming.md does not name %s: half the rename rule is "+
+			"missing, and an agent that does not know the call exists is left with the "+
+			"delete-and-recreate workaround, which loses every edge", tool)
 	}
 	if !strings.Contains(strings.ToLower(naming), "permanent") {
 		t.Error("modelling/naming.md never says an entity's own key is permanent: the other " +
@@ -464,9 +431,7 @@ func TestTheAnalyticalAxisIsTaughtAsShippedNotAsComing(t *testing.T) {
 
 	// Precision, both ways: the sentence the plan would have written must
 	// be caught, and the shipped page's own wording must not be.
-	if len(unshippedAxis("A second, analytical axis is coming and will be read off this.")) != 1 {
-		t.Error("the guard did not catch an axis described as coming")
-	}
+	assert.Should(t, len(unshippedAxis("A second, analytical axis is coming and will be read off this.")) == 1, "the guard did not catch an axis described as coming")
 	if got := unshippedAxis("A relation type declares analysis_traits, which a walk reads."); len(got) != 0 {
 		t.Errorf("the guard reported the shipped wording as a defect: %v", got)
 	}

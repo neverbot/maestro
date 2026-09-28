@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/views"
 )
@@ -20,21 +21,17 @@ import (
 // step along — and this is what makes adding one cost a deliberate edit
 // to a test that says why.
 func TestExactlyOneNewWireCodeShips(t *testing.T) {
-	if len(Sentinels()) != 1 {
-		t.Fatalf("Sentinels() = %v, want exactly one. This sub-project adds one wire "+
-			"code, semantics_undeclared, because its recovery — declare something about "+
-			"your game's relation types — is named by no existing code. A second one "+
-			"needs the same argument made in errors.go before this number moves",
-			Sentinels())
-	}
+	assert.Must(t, len(Sentinels()) == 1, "Sentinels() = %v, want exactly one. This sub-project adds one wire "+
+		"code, semantics_undeclared, because its recovery — declare something about "+
+		"your game's relation types — is named by no existing code. A second one "+
+		"needs the same argument made in errors.go before this number moves",
+		Sentinels())
 	if !errors.Is(Sentinels()[0], ErrSemanticsUndeclared) {
 		t.Fatalf("Sentinels()[0] = %v, want ErrSemanticsUndeclared", Sentinels()[0])
 	}
-	if ErrSemanticsUndeclared.Error() != CodeSemanticsUndeclared {
-		t.Fatalf("the sentinel spells %q and the code is %q: a sentinel whose name is "+
-			"not its wire code is two strings to keep in step",
-			ErrSemanticsUndeclared.Error(), CodeSemanticsUndeclared)
-	}
+	assert.Must(t, ErrSemanticsUndeclared.Error() == CodeSemanticsUndeclared, "the sentinel spells %q and the code is %q: a sentinel whose name is "+
+		"not its wire code is two strings to keep in step",
+		ErrSemanticsUndeclared.Error(), CodeSemanticsUndeclared)
 }
 
 // TestNoTimeoutCodeShips pins the refusal by name.
@@ -48,18 +45,14 @@ func TestExactlyOneNewWireCodeShips(t *testing.T) {
 // that the argument is *there*, as well as that the code is not.
 func TestNoTimeoutCodeShips(t *testing.T) {
 	for _, sentinel := range Sentinels() {
-		if strings.Contains(sentinel.Error(), "timeout") {
-			t.Fatalf("this package answers with %q: a timed-out analysis is `retryable`, "+
-				"whose message names the budget and the bounds to lower", sentinel)
-		}
+		assert.Must(t, !strings.Contains(sentinel.Error(), "timeout"), "this package answers with %q: a timed-out analysis is `retryable`, "+
+			"whose message names the budget and the bounds to lower", sentinel)
 	}
 	source := readSourceFile(t, "errors.go")
 	for _, refused := range []string{"analysis_timeout", "invalid_argument", "query_invalid"} {
-		if !strings.Contains(source, refused) {
-			t.Fatalf("errors.go does not record why %q was refused. The count of codes "+
-				"is the decision this package made; a decision with no argument beside "+
-				"it is one the next task will make differently", refused)
-		}
+		assert.Must(t, strings.Contains(source, refused), "errors.go does not record why %q was refused. The count of codes "+
+			"is the decision this package made; a decision with no argument beside "+
+			"it is one the next task will make differently", refused)
 	}
 }
 
@@ -77,9 +70,7 @@ func TestLimitExceededIsOneValueAcrossBothDomains(t *testing.T) {
 		t.Fatal("analysis.ErrLimitExceeded and views.ErrLimitExceeded are two values; " +
 			"internal/web has one arm for the code and it would miss one of them")
 	}
-	if !errors.Is(views.ErrLimitExceeded, metamodel.ErrLimitExceeded) {
-		t.Fatal("views.ErrLimitExceeded is no longer the metamodel's")
-	}
+	assert.Must(t, errors.Is(views.ErrLimitExceeded, metamodel.ErrLimitExceeded), "views.ErrLimitExceeded is no longer the metamodel's")
 	// Through variables, because the three are constants a compiler folds
 	// and `go vet` rightly calls a comparison of them suspect. The
 	// question is not whether they are equal today — an alias makes that
@@ -88,10 +79,8 @@ func TestLimitExceededIsOneValueAcrossBothDomains(t *testing.T) {
 	// else.
 	spellings := []string{CodeLimitExceeded, views.CodeLimitExceeded, metamodel.CodeLimitExceeded}
 	for _, spelling := range spellings {
-		if spelling != spellings[0] {
-			t.Fatalf("the code is spelled more than one way across the three packages: %v",
-				spellings)
-		}
+		assert.Must(t, spelling == spellings[0], "the code is spelled more than one way across the three packages: %v",
+			spellings)
 	}
 
 	// And the error this package actually builds matches, which is the
@@ -99,9 +88,7 @@ func TestLimitExceededIsOneValueAcrossBothDomains(t *testing.T) {
 	// only matches the sentinel because ValidationError.Is answers for
 	// it, and it did not until this task.
 	err := limitExceeded("relation_types", 65, MaxTypeKeys)
-	if !errors.Is(err, ErrLimitExceeded) || !errors.Is(err, views.ErrLimitExceeded) {
-		t.Fatalf("the refusal this package builds does not match the sentinel: %#v", err)
-	}
+	assert.Must(t, errors.Is(err, ErrLimitExceeded) && errors.Is(err, views.ErrLimitExceeded), "the refusal this package builds does not match the sentinel: %#v", err)
 	if errors.Is(err, ErrInvalidInput) {
 		t.Fatal("a limit refusal must not also read as invalid_input: they are two " +
 			"recoveries — lower the number, and change the argument")
@@ -133,28 +120,22 @@ func TestEverySentinelThisPackageAnswersWithIsInSentinels(t *testing.T) {
 		// The constant's own value, resolved through the one place it is
 		// declared rather than re-spelled here.
 		code := codeValues[constant]
-		if code == "" {
-			t.Fatalf("errors.go builds a sentinel from %q, which this test cannot "+
-				"resolve; add it to codeValues so the scan keeps seeing every one",
-				constant)
-		}
+		assert.Must(t, code != "", "errors.go builds a sentinel from %q, which this test cannot "+
+			"resolve; add it to codeValues so the scan keeps seeing every one",
+			constant)
 		found := false
 		for _, sentinel := range Sentinels() {
 			if sentinel.Error() == code {
 				found = true
 			}
 		}
-		if !found {
-			t.Fatalf("%s (%q) is declared in errors.go and is not in Sentinels(), so "+
-				"internal/web's mapping test will not see it and it will reach an agent "+
-				"as internal_error", constant, code)
-		}
+		assert.Must(t, found, "%s (%q) is declared in errors.go and is not in Sentinels(), so "+
+			"internal/web's mapping test will not see it and it will reach an agent "+
+			"as internal_error", constant, code)
 	}
-	if declared != len(Sentinels()) {
-		t.Fatalf("errors.go declares %d sentinels and Sentinels() lists %d: the list is "+
-			"what internal/web iterates, so the two are one decision",
-			declared, len(Sentinels()))
-	}
+	assert.Must(t, declared == len(Sentinels()), "errors.go declares %d sentinels and Sentinels() lists %d: the list is "+
+		"what internal/web iterates, so the two are one decision",
+		declared, len(Sentinels()))
 }
 
 // codeValues resolves the code constants errors.go builds its sentinels
@@ -181,13 +162,9 @@ func TestTheUndeclaredRefusalCarriesTheCatalogueAsDataAndAsProse(t *testing.T) {
 		},
 		Advice: undeclaredAdvice(),
 	}
-	if !errors.Is(err, ErrSemanticsUndeclared) {
-		t.Fatal("the refusal does not match its own sentinel")
-	}
+	assert.Must(t, errors.Is(err, ErrSemanticsUndeclared), "the refusal does not match its own sentinel")
 	for _, key := range []string{"requires", "available_to", "mentions"} {
-		if !strings.Contains(err.Error(), key) {
-			t.Fatalf("the message does not name %q: %v", key, err)
-		}
+		assert.Must(t, strings.Contains(err.Error(), key), "the message does not name %q: %v", key, err)
 	}
 	details := err.Details()
 	types, ok := details["relation_types"].([]map[string]any)
@@ -201,9 +178,7 @@ func TestTheUndeclaredRefusalCarriesTheCatalogueAsDataAndAsProse(t *testing.T) {
 		t.Fatalf("entry = %#v, want no role key for a type that has none: an empty "+
 			"string reads as a role nobody declared", types[0])
 	}
-	if details["advice"] == "" {
-		t.Fatal("the payload carries no advice")
-	}
+	assert.Must(t, details["advice"] != "", "the payload carries no advice")
 }
 
 // TestTheUndeclaredAdviceOffersOnlyWordsTheColumnAccepts, in both
@@ -213,17 +188,13 @@ func TestTheUndeclaredRefusalCarriesTheCatalogueAsDataAndAsProse(t *testing.T) {
 func TestTheUndeclaredAdviceOffersOnlyWordsTheColumnAccepts(t *testing.T) {
 	advice := undeclaredAdvice()
 	for _, trait := range Traits {
-		if !strings.Contains(advice, trait) {
-			t.Fatalf("the advice does not offer %q", trait)
-		}
+		assert.Must(t, strings.Contains(advice, trait), "the advice does not offer %q", trait)
 	}
 	for _, role := range metamodel.SemanticRoles {
 		if _, derivable := derivedTraits[role]; !derivable {
 			continue
 		}
-		if !strings.Contains(advice, role) {
-			t.Fatalf("the advice does not name the derivable role %q", role)
-		}
+		assert.Must(t, strings.Contains(advice, role), "the advice does not name the derivable role %q", role)
 	}
 	// Backwards: nothing quoted in the advice is outside the two
 	// vocabularies it is generated from.

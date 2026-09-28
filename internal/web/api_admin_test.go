@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 )
 
@@ -27,9 +28,7 @@ func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 
 	// The promotion is real, not just a 200: the new admin can now reach
 	// the admin-only invite surface.
@@ -39,9 +38,7 @@ func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
 	inviteReq.Header.Set("Content-Type", "application/json")
 	inviteRec := httptest.NewRecorder()
 	srv.ServeHTTP(inviteRec, inviteReq)
-	if inviteRec.Code != http.StatusCreated {
-		t.Fatalf("newly promoted admin POST /api/invites = %d, want 201: %s", inviteRec.Code, inviteRec.Body.String())
-	}
+	assert.Must(t, inviteRec.Code == http.StatusCreated, "newly promoted admin POST /api/invites = %d, want 201: %s", inviteRec.Code, inviteRec.Body.String())
 }
 
 // TestNonAdminCannotPromoteAnyone mirrors TestNonAdminCannotCreateAccountOnlyInvite.
@@ -63,9 +60,7 @@ func TestNonAdminCannotPromoteAnyone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403: %s", rec.Code, rec.Body.String())
 }
 
 // TestTokenCallerCannotSetAdmin mirrors TestTokenCallerCannotManageInstanceInvites.
@@ -75,13 +70,9 @@ func TestTokenCallerCannotSetAdmin(t *testing.T) {
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"owner@example.test","is_admin":true}`))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -89,9 +80,7 @@ func TestTokenCallerCannotSetAdmin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusForbidden, "status = %d, want 403: %s", rec.Code, rec.Body.String())
 }
 
 // TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse pins the guard
@@ -106,9 +95,7 @@ func TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusConflict, "status = %d, want 409: %s", rec.Code, rec.Body.String())
 }
 
 // TestLastAdminCannotDemoteThemselves is the HTTP-level pin for the case
@@ -124,9 +111,7 @@ func TestLastAdminCannotDemoteThemselves(t *testing.T) {
 	meReq.AddCookie(adminCookie)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("/api/me = %d, want 200", meRec.Code)
-	}
+	assert.Must(t, meRec.Code == http.StatusOK, "/api/me = %d, want 200", meRec.Code)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@example.test","is_admin":false}`))
 	req.AddCookie(adminCookie)
@@ -134,18 +119,14 @@ func TestLastAdminCannotDemoteThemselves(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusConflict, "status = %d, want 409: %s", rec.Code, rec.Body.String())
 
 	// Still an admin afterwards.
 	stillMeReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	stillMeReq.AddCookie(adminCookie)
 	stillMeRec := httptest.NewRecorder()
 	srv.ServeHTTP(stillMeRec, stillMeReq)
-	if !strings.Contains(stillMeRec.Body.String(), `"is_admin":true`) {
-		t.Fatalf("admin should still be an admin after a refused self-demotion, /api/me body = %s", stillMeRec.Body.String())
-	}
+	assert.Must(t, strings.Contains(stillMeRec.Body.String(), `"is_admin":true`), "admin should still be an admin after a refused self-demotion, /api/me body = %s", stillMeRec.Body.String())
 }
 
 // TestAdminCanDemoteAnotherAdminWhenOneRemains confirms the guard only
@@ -155,9 +136,7 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
 	colleague, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@example.test", DisplayName: "Colleague", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if err := ids.SetAdmin(ctx, colleague.ID, true); err != nil {
 		t.Fatalf("SetAdmin: %v", err)
 	}
@@ -168,9 +147,7 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200: %s", rec.Code, rec.Body.String())
 
 	// And the demoted colleague can no longer reach the admin surface.
 	colleagueCookie := loginAs(t, srv, "colleague@example.test")
@@ -179,9 +156,7 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 	inviteReq.Header.Set("Content-Type", "application/json")
 	inviteRec := httptest.NewRecorder()
 	srv.ServeHTTP(inviteRec, inviteReq)
-	if inviteRec.Code != http.StatusForbidden {
-		t.Fatalf("demoted colleague's POST /api/invites = %d, want 403", inviteRec.Code)
-	}
+	assert.Must(t, inviteRec.Code == http.StatusForbidden, "demoted colleague's POST /api/invites = %d, want 403", inviteRec.Code)
 }
 
 func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
@@ -194,9 +169,7 @@ func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404: %s", rec.Code, rec.Body.String())
 }
 
 // TestSetAdminMissingIsAdminIsBadRequest pins the bare-bool fix: an
@@ -217,9 +190,7 @@ func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400: %s", rec.Code, rec.Body.String())
 
 	// And the target's admin status is untouched — still not an admin,
 	// not silently demoted (it never had the flag to begin with, but the
@@ -229,9 +200,7 @@ func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
 	meReq.AddCookie(targetCookie)
 	meRec := httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
-	if !strings.Contains(meRec.Body.String(), `"is_admin":false`) {
-		t.Fatalf("target's /api/me body = %s, want is_admin:false unchanged", meRec.Body.String())
-	}
+	assert.Must(t, strings.Contains(meRec.Body.String(), `"is_admin":false`), "target's /api/me body = %s, want is_admin:false unchanged", meRec.Body.String())
 }
 
 func TestSetAdminEmptyBodyIsBadRequest(t *testing.T) {
@@ -244,7 +213,5 @@ func TestSetAdminEmptyBodyIsBadRequest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "status = %d, want 400: %s", rec.Code, rec.Body.String())
 }

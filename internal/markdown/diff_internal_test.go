@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // BenchmarkUnifiedDiff is what lcsLimit's comment cites. It is a
@@ -86,10 +88,8 @@ func TestTheCoarseFallbackIsCheaperThanTheTableItReplaces(t *testing.T) {
 func TestTheBoundKeepsTheTableWithinItsMemoryBudget(t *testing.T) {
 	const budget = 8 << 20
 	table := (int64(lcsLimit) + 1) * (int64(lcsLimit) + 1) * 4
-	if table > budget {
-		t.Fatalf("lcsLimit = %d builds a %d-byte table, over the %d-byte budget; "+
-			"the bound is quadratic, so re-measure BenchmarkUnifiedDiff and "+
-			"re-justify the number in lcsLimit's comment before raising it",
-			lcsLimit, table, budget)
-	}
+	assert.Must(t, table <= budget, "lcsLimit = %d builds a %d-byte table, over the %d-byte budget; "+
+		"the bound is quadratic, so re-measure BenchmarkUnifiedDiff and "+
+		"re-justify the number in lcsLimit's comment before raising it",
+		lcsLimit, table, budget)
 }

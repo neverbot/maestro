@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/graph"
 )
 
@@ -81,13 +82,9 @@ func TestAWalkWithoutTheRelationPathEmitsTheSameStatementItAlwaysDid(t *testing.
 		return
 	}
 	want, err := os.ReadFile(path) //nolint:gosec // a fixed testdata path
-	if err != nil {
-		t.Fatalf("read golden: %v", err)
-	}
-	if got != string(want) {
-		t.Errorf("the emitted statement moved without CarryRelationPath being asked for.\n"+
-			"got:\n%s\nwant:\n%s", got, want)
-	}
+	assert.Must(t, err == nil, "read golden: %v", err)
+	assert.Should(t, got == string(want), "the emitted statement moved without CarryRelationPath being asked for.\n"+
+		"got:\n%s\nwant:\n%s", got, want)
 }
 
 // TestAWalkWithTheRelationPathAddsExactlyOneColumn is the other half: the
@@ -101,14 +98,10 @@ func TestAWalkWithTheRelationPathAddsExactlyOneColumn(t *testing.T) {
 	w.CarryRelationPath = true
 	carried, _ := graph.WalkCTE(w)
 
-	if plain == carried {
-		t.Fatalf("CarryRelationPath changed nothing in the emitted statement:\n%s", plain)
-	}
+	assert.Must(t, plain != carried, "CarryRelationPath changed nothing in the emitted statement:\n%s", plain)
 	for _, frag := range []string{"(id, depth, path, rel_path, via_relation",
 		"ARRAY[seed.id], ARRAY[]::uuid[]", "w.rel_path || r.id"} {
-		if !strings.Contains(carried, frag) {
-			t.Errorf("the carried statement does not contain %q:\n%s", frag, carried)
-		}
+		assert.Should(t, strings.Contains(carried, frag), "the carried statement does not contain %q:\n%s", frag, carried)
 	}
 	// Removing the three fragments must give back the plain statement
 	// exactly: anything else is a second change riding along with this
@@ -117,8 +110,6 @@ func TestAWalkWithTheRelationPathAddsExactlyOneColumn(t *testing.T) {
 	for _, frag := range []string{", rel_path", ", ARRAY[]::uuid[]", ", w.rel_path || r.id"} {
 		back = strings.Replace(back, frag, "", 1)
 	}
-	if back != plain {
-		t.Errorf("the relation path changed more than its own three fragments.\ngot:\n%s\nwant:\n%s",
-			back, plain)
-	}
+	assert.Should(t, back == plain, "the relation path changed more than its own three fragments.\ngot:\n%s\nwant:\n%s",
+		back, plain)
 }

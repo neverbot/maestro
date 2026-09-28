@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 )
 
@@ -55,48 +56,30 @@ func TestMCPEndToEndOverHTTP(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "agent-owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	mine, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create mine: %v", err)
-	}
+	assert.Must(t, err == nil, "Create mine: %v", err)
 	theirs, err := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
-	if err != nil {
-		t.Fatalf("Create theirs: %v", err)
-	}
+	assert.Must(t, err == nil, "Create theirs: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	session := connectMCP(t, httpSrv.URL, token)
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	names := map[string]bool{}
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
 	}
 	for _, want := range []string{"whoami", "games.list", "games.get"} {
-		if !names[want] {
-			t.Fatalf("tool list %v is missing %q", names, want)
-		}
+		assert.Must(t, names[want], "tool list %v is missing %q", names, want)
 	}
 
 	whoami, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "whoami"})
-	if err != nil {
-		t.Fatalf("CallTool(whoami): %v", err)
-	}
-	if whoami.IsError {
-		t.Fatalf("whoami reported an error: %+v", whoami.Content)
-	}
-	if whoami.StructuredContent == nil {
-		t.Fatal("a successful whoami call must carry StructuredContent")
-	}
+	assert.Must(t, err == nil, "CallTool(whoami): %v", err)
+	assert.Must(t, !whoami.IsError, "whoami reported an error: %+v", whoami.Content)
+	assert.Must(t, whoami.StructuredContent != nil, "a successful whoami call must carry StructuredContent")
 	var whoamiOut struct {
 		UserID      string `json:"user_id"`
 		ProjectID   string `json:"project_id"`
@@ -109,37 +92,23 @@ func TestMCPEndToEndOverHTTP(t *testing.T) {
 	// reads Content[0] instead, which every result — success or error —
 	// still carries.
 	decodeStructured(t, whoami, &whoamiOut)
-	if whoamiOut.UserID != user.ID.String() {
-		t.Fatalf("whoami user_id = %q, want %q", whoamiOut.UserID, user.ID.String())
-	}
-	if whoamiOut.ProjectID != mine.ID.String() {
-		t.Fatalf("whoami project_id = %q, want %q", whoamiOut.ProjectID, mine.ID.String())
-	}
-	if whoamiOut.ProjectSlug != "azeroth" {
-		t.Fatalf("whoami project_slug = %q, want azeroth", whoamiOut.ProjectSlug)
-	}
+	assert.Must(t, whoamiOut.UserID == user.ID.String(), "whoami user_id = %q, want %q", whoamiOut.UserID, user.ID.String())
+	assert.Must(t, whoamiOut.ProjectID == mine.ID.String(), "whoami project_id = %q, want %q", whoamiOut.ProjectID, mine.ID.String())
+	assert.Must(t, whoamiOut.ProjectSlug == "azeroth", "whoami project_slug = %q, want azeroth", whoamiOut.ProjectSlug)
 
 	foreign, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "games.get",
 		Arguments: map[string]any{"game": theirs.Slug},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(games.get): %v", err)
-	}
-	if !foreign.IsError {
-		t.Fatal("games.get on a foreign project must report an error")
-	}
-	if foreign.StructuredContent != nil {
-		t.Fatalf("an error result must carry no StructuredContent at all, got %#v", foreign.StructuredContent)
-	}
+	assert.Must(t, err == nil, "CallTool(games.get): %v", err)
+	assert.Must(t, foreign.IsError, "games.get on a foreign project must report an error")
+	assert.Must(t, foreign.StructuredContent == nil, "an error result must carry no StructuredContent at all, got %#v", foreign.StructuredContent)
 	var wireErr struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
 	}
 	decodeToolText(t, foreign, &wireErr)
-	if wireErr.Error != "scope_violation" {
-		t.Fatalf("error code = %q, want scope_violation", wireErr.Error)
-	}
+	assert.Must(t, wireErr.Error == "scope_violation", "error code = %q, want scope_violation", wireErr.Error)
 }
 
 // TestMCPGamesGetAcceptsAMatchingGameConfirmation pins the
@@ -154,17 +123,11 @@ func TestMCPGamesGetAcceptsAMatchingGameConfirmation(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "confirm-owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	mine, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create mine: %v", err)
-	}
+	assert.Must(t, err == nil, "Create mine: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: mine.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	session := connectMCP(t, httpSrv.URL, token)
 
@@ -172,12 +135,8 @@ func TestMCPGamesGetAcceptsAMatchingGameConfirmation(t *testing.T) {
 		Name:      "games.get",
 		Arguments: map[string]any{"game": mine.Slug},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(games.get): %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("games.get refused a game matching the token's own binding: %+v", result.Content)
-	}
+	assert.Must(t, err == nil, "CallTool(games.get): %v", err)
+	assert.Must(t, !result.IsError, "games.get refused a game matching the token's own binding: %+v", result.Content)
 }
 
 // TestMCPInputValidationFailuresAreProseNotACode pins the one documented
@@ -195,17 +154,11 @@ func TestMCPInputValidationFailuresAreProseNotACode(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "malformed-owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	session := connectMCP(t, httpSrv.URL, token)
 
@@ -216,15 +169,9 @@ func TestMCPInputValidationFailuresAreProseNotACode(t *testing.T) {
 		Name:      "games.get",
 		Arguments: map[string]any{"game": 12345},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(games.get): %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("a malformed game must be refused")
-	}
-	if len(result.Content) == 0 {
-		t.Fatal("no content on the validation failure")
-	}
+	assert.Must(t, err == nil, "CallTool(games.get): %v", err)
+	assert.Must(t, result.IsError, "a malformed game must be refused")
+	assert.Must(t, len(result.Content) != 0, "no content on the validation failure")
 	text, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("content[0] = %T, want *mcp.TextContent", result.Content[0])
@@ -248,9 +195,7 @@ func connectMCP(t *testing.T, baseURL, token string) *mcp.ClientSession {
 		DisableStandaloneSSE: true,
 	}
 	session, err := client.Connect(context.Background(), transport, nil)
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+	assert.Must(t, err == nil, "Connect: %v", err)
 	t.Cleanup(func() { _ = session.Close() })
 	return session
 }
@@ -260,9 +205,7 @@ func connectMCP(t *testing.T, baseURL, token string) *mcp.ClientSession {
 // decodeStructured for the field that is only present on success.
 func decodeToolText(t *testing.T, result *mcp.CallToolResult, v any) {
 	t.Helper()
-	if len(result.Content) == 0 {
-		t.Fatal("tool result has no content")
-	}
+	assert.Must(t, len(result.Content) != 0, "tool result has no content")
 	text, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("content[0] = %T, want *mcp.TextContent", result.Content[0])
@@ -278,13 +221,9 @@ func decodeToolText(t *testing.T, result *mcp.CallToolResult, v any) {
 // marshal/unmarshal any real client-side consumer would do.
 func decodeStructured(t *testing.T, result *mcp.CallToolResult, v any) {
 	t.Helper()
-	if result.StructuredContent == nil {
-		t.Fatal("tool result has no StructuredContent")
-	}
+	assert.Must(t, result.StructuredContent != nil, "tool result has no StructuredContent")
 	raw, err := json.Marshal(result.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshal StructuredContent: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal StructuredContent: %v", err)
 	if err := json.Unmarshal(raw, v); err != nil {
 		t.Fatalf("decode StructuredContent %s: %v", raw, err)
 	}
@@ -303,14 +242,10 @@ func TestMCPRejectsAnUnauthenticatedRequestOverHTTP(t *testing.T) {
 	defer httpSrv.Close()
 
 	resp, err := http.Post(httpSrv.URL+"/mcp", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("POST /mcp: %v", err)
-	}
+	assert.Must(t, err == nil, "POST /mcp: %v", err)
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusUnauthorized, "status = %d, want 401", resp.StatusCode)
 	var body map[string]string
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
@@ -334,34 +269,22 @@ func TestMCPRejectsARevokedTokenOverHTTP(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "revoked-owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, summary, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: summary.ID}); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, httpSrv.URL+"/mcp", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST /mcp: %v", err)
-	}
+	assert.Must(t, err == nil, "POST /mcp: %v", err)
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 for a revoked token", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusUnauthorized, "status = %d, want 401 for a revoked token", resp.StatusCode)
 }

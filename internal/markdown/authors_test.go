@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 )
 
@@ -41,16 +42,12 @@ func TestAuthorsArea(t *testing.T) {
 		}
 
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "lore/duskwood"})
-		if err != nil {
-			t.Fatalf("History: %v", err)
-		}
+		assert.Must(t, err == nil, "History: %v", err)
 		if got := page.Versions[0].Author; got.Kind != "token" || got.Label != "the lore agent" {
 			t.Fatalf("author = %+v, want the revoked token still named", got)
 		}
 		listing, err := svc.List(ctx, game, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
 		if got := listing.Documents[0].UpdatedBy; got.Label != "the lore agent" {
 			t.Fatalf("updated_by = %+v, want the revoked token still named", got)
 		}
@@ -78,25 +75,17 @@ func TestAuthorsArea(t *testing.T) {
 		}
 
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "lore/duskwood"})
-		if err != nil {
-			t.Fatalf("History: %v", err)
-		}
+		assert.Must(t, err == nil, "History: %v", err)
 		if got := page.Versions[0].Author; got != (markdown.Author{}) {
 			t.Fatalf("author = %+v, want no author at all", got)
 		}
 		listing, err := svc.List(ctx, game, markdown.ListFilter{})
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
+		assert.Must(t, err == nil, "List: %v", err)
 		row := listing.Documents[0]
-		if row.CreatedBy != (markdown.Author{}) || row.UpdatedBy != (markdown.Author{}) {
-			t.Fatalf("listing row = %+v, want both authors gone", row)
-		}
+		assert.Must(t, row.CreatedBy == (markdown.Author{}) && row.UpdatedBy == (markdown.Author{}), "listing row = %+v, want both authors gone", row)
 		// The timestamps outlive the author: *when* it changed is still
 		// answerable when *who* changed it is not.
-		if row.UpdatedAt.IsZero() {
-			t.Fatal("a document whose author is gone still knows when it changed")
-		}
+		assert.Must(t, !row.UpdatedAt.IsZero(), "a document whose author is gone still knows when it changed")
 	})
 
 	// TestAuthorsArea's "a token is resolved inside its own game only" case
@@ -117,9 +106,7 @@ func TestAuthorsArea(t *testing.T) {
 		foreign := newToken(t, pool, outland, user, "outland's agent")
 
 		authors, err := svc.Authors(ctx, azeroth, []markdown.Actor{{TokenID: &foreign}})
-		if err != nil {
-			t.Fatalf("Authors: %v", err)
-		}
+		assert.Must(t, err == nil, "Authors: %v", err)
 		if authors[0].Kind != "token" || authors[0].ID == nil || *authors[0].ID != foreign {
 			t.Fatalf("author = %+v, want the id echoed back unresolved", authors[0])
 		}
@@ -130,9 +117,7 @@ func TestAuthorsArea(t *testing.T) {
 		// And inside its own game it resolves, so the empty answer above is
 		// the filter and not a resolver that never finds anything.
 		authors, err = svc.Authors(ctx, outland, []markdown.Actor{{TokenID: &foreign}})
-		if err != nil {
-			t.Fatalf("Authors: %v", err)
-		}
+		assert.Must(t, err == nil, "Authors: %v", err)
 		if authors[0].Label != "outland's agent" {
 			t.Fatalf("label = %q, want the token's own inside its own game", authors[0].Label)
 		}
@@ -166,26 +151,15 @@ func TestAuthorsArea(t *testing.T) {
 			Path: "lore/duskwood", Content: "stale\n", ExpectedVersion: ptrInt32(1),
 		})
 		conflict := requireConflict(t, err)
-		if conflict.Current != 2 {
-			t.Fatalf("current = %d, want 2", conflict.Current)
-		}
+		assert.Must(t, conflict.Current == 2, "current = %d, want 2", conflict.Current)
 		// The *last* writer, not the first: the version being merged onto is
 		// the one that is there, and it was the designer's.
-		if conflict.Author.Kind != "user" || conflict.Author.ID == nil ||
-			*conflict.Author.ID != user {
-			t.Fatalf("author = %+v, want the designer %v", conflict.Author, user)
-		}
-		if conflict.Author.Label != "ana@example.test" {
-			t.Fatalf("author label = %q, want the designer's display name", conflict.Author.Label)
-		}
-		if conflict.UpdatedAt.IsZero() {
-			t.Fatal("a conflict says when the version it names was written")
-		}
+		assert.Must(t, conflict.Author.Kind == "user" && conflict.Author.ID != nil && *conflict.Author.ID == user, "author = %+v, want the designer %v", conflict.Author, user)
+		assert.Must(t, conflict.Author.Label == "ana@example.test", "author label = %q, want the designer's display name", conflict.Author.Label)
+		assert.Must(t, !conflict.UpdatedAt.IsZero(), "a conflict says when the version it names was written")
 		// And it is on the wire, not merely in the Go value.
 		details := conflict.Details()
-		if details["current_author_label"] != "ana@example.test" {
-			t.Fatalf("details = %#v, want the author's label published", details)
-		}
+		assert.Must(t, details["current_author_label"] == "ana@example.test", "details = %#v, want the author's label published", details)
 
 		// A conflict raised on a delete carries it too — deleteRefusal is a
 		// second call site and this is the rule that was not carried one step
@@ -193,9 +167,7 @@ func TestAuthorsArea(t *testing.T) {
 		_, err = svc.Delete(ctx, game, markdown.DeleteInput{
 			Path: "lore/duskwood", ExpectedVersion: ptrInt32(1),
 		})
-		if err == nil {
-			t.Fatal("deleting with a stale version must be refused")
-		}
+		assert.Must(t, err != nil, "deleting with a stale version must be refused")
 		if got := requireConflict(t, err).Author.Label; got != "ana@example.test" {
 			t.Fatalf("a refused delete names its author %q, want the designer's", got)
 		}

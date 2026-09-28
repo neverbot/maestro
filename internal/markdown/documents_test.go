@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -38,51 +39,29 @@ func TestDocumentsArea(t *testing.T) {
 			Message:         "first draft",
 			ExpectedVersion: ptrInt32(0),
 		})
-		if err != nil {
-			t.Fatalf("Write: %v", err)
-		}
-		if doc.CurrentVersion != 1 {
-			t.Fatalf("CurrentVersion = %d, want 1", doc.CurrentVersion)
-		}
+		assert.Must(t, err == nil, "Write: %v", err)
+		assert.Must(t, doc.CurrentVersion == 1, "CurrentVersion = %d, want 1", doc.CurrentVersion)
 
 		// The read-back. This is the step the metamodel skipped for nine
 		// review rounds, which is how an edge's field values shipped
 		// write-only. Everything this write accepted must come back out.
 		got, err := svc.Read(ctx, game, "scripts/wanted-hogger")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
 		wantBody := "# Ignored\n\nHOGGER: *snarls*\n\n  Indented line kept as written.\n"
-		if got.BodyMd != wantBody {
-			t.Fatalf("BodyMd = %q, want the body exactly as written (%q)", got.BodyMd, wantBody)
-		}
-		if got.Path != "scripts/wanted-hogger" {
-			t.Fatalf("Path = %q, want the stored spelling", got.Path)
-		}
-		if got.Title != "Wanted: Hogger" {
-			t.Fatalf("Title = %q, want the frontmatter title", got.Title)
-		}
+		assert.Must(t, got.BodyMd == wantBody, "BodyMd = %q, want the body exactly as written (%q)", got.BodyMd, wantBody)
+		assert.Must(t, got.Path == "scripts/wanted-hogger", "Path = %q, want the stored spelling", got.Path)
+		assert.Must(t, got.Title == "Wanted: Hogger", "Title = %q, want the frontmatter title", got.Title)
 		// The summary is derived too, and is stored on the row; nothing but
 		// a read-back would notice it going missing.
-		if got.Summary != "HOGGER: *snarls*" {
-			t.Fatalf("Summary = %q, want the first prose line under the heading", got.Summary)
-		}
-		if got.Kind != "script" {
-			t.Fatalf("Kind = %q, want %q", got.Kind, "script")
-		}
-		if got.CurrentVersion != 1 {
-			t.Fatalf("read-back CurrentVersion = %d, want 1", got.CurrentVersion)
-		}
+		assert.Must(t, got.Summary == "HOGGER: *snarls*", "Summary = %q, want the first prose line under the heading", got.Summary)
+		assert.Must(t, got.Kind == "script", "Kind = %q, want %q", got.Kind, "script")
+		assert.Must(t, got.CurrentVersion == 1, "read-back CurrentVersion = %d, want 1", got.CurrentVersion)
 		var frontmatter map[string]any
 		if err := json.Unmarshal(got.Frontmatter, &frontmatter); err != nil {
 			t.Fatalf("decode frontmatter: %v", err)
 		}
-		if frontmatter["era"] != "first" {
-			t.Fatalf("frontmatter = %v, want it to echo era back untouched", frontmatter)
-		}
-		if frontmatter["title"] != "Wanted: Hogger" {
-			t.Fatalf("frontmatter = %v, want the title key stored as written too", frontmatter)
-		}
+		assert.Must(t, frontmatter["era"] == "first", "frontmatter = %v, want it to echo era back untouched", frontmatter)
+		assert.Must(t, frontmatter["title"] == "Wanted: Hogger", "frontmatter = %v, want the title key stored as written too", frontmatter)
 	})
 
 	// The audit columns are the other half of the read-back: a write records
@@ -102,25 +81,17 @@ func TestDocumentsArea(t *testing.T) {
 		}
 
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
 		for name, id := range map[string]*uuid.UUID{
 			"created_by_user_id":  got.CreatedByUserID,
 			"updated_by_user_id":  got.UpdatedByUserID,
 			"created_by_token_id": got.CreatedByTokenID,
 			"updated_by_token_id": got.UpdatedByTokenID,
 		} {
-			if id == nil {
-				t.Fatalf("%s is null, want the actor of the write", name)
-			}
+			assert.Must(t, id != nil, "%s is null, want the actor of the write", name)
 		}
-		if *got.CreatedByUserID != user || *got.UpdatedByUserID != user {
-			t.Fatalf("user columns = %v/%v, want %v", got.CreatedByUserID, got.UpdatedByUserID, user)
-		}
-		if *got.CreatedByTokenID != token || *got.UpdatedByTokenID != token {
-			t.Fatalf("token columns = %v/%v, want %v", got.CreatedByTokenID, got.UpdatedByTokenID, token)
-		}
+		assert.Must(t, *got.CreatedByUserID == user && *got.UpdatedByUserID == user, "user columns = %v/%v, want %v", got.CreatedByUserID, got.UpdatedByUserID, user)
+		assert.Must(t, *got.CreatedByTokenID == token && *got.UpdatedByTokenID == token, "token columns = %v/%v, want %v", got.CreatedByTokenID, got.UpdatedByTokenID, token)
 
 		// A second write by nobody moves the updated_by columns and leaves
 		// the created_by columns where they were: the creator of a document
@@ -131,16 +102,10 @@ func TestDocumentsArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		got, err = svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read after the second write: %v", err)
-		}
-		if got.CreatedByUserID == nil || *got.CreatedByUserID != user {
-			t.Fatalf("created_by_user_id = %v, want it unchanged at %v", got.CreatedByUserID, user)
-		}
-		if got.UpdatedByUserID != nil || got.UpdatedByTokenID != nil {
-			t.Fatalf("updated_by = %v/%v, want both null: the second write named no actor",
-				got.UpdatedByUserID, got.UpdatedByTokenID)
-		}
+		assert.Must(t, err == nil, "Read after the second write: %v", err)
+		assert.Must(t, got.CreatedByUserID != nil && *got.CreatedByUserID == user, "created_by_user_id = %v, want it unchanged at %v", got.CreatedByUserID, user)
+		assert.Must(t, got.UpdatedByUserID == nil && got.UpdatedByTokenID == nil, "updated_by = %v/%v, want both null: the second write named no actor",
+			got.UpdatedByUserID, got.UpdatedByTokenID)
 	})
 
 	t.Run("the first write also writes version one with its author and message", func(t *testing.T) {
@@ -166,39 +131,23 @@ func TestDocumentsArea(t *testing.T) {
 		// Task 6 pays that debt: every assertion below is now made through
 		// the two readers a real caller uses, and the SQL is gone.
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "bible"})
-		if err != nil {
-			t.Fatalf("History: %v", err)
-		}
-		if len(page.Versions) != 1 {
-			t.Fatalf("%d versions, want 1", len(page.Versions))
-		}
+		assert.Must(t, err == nil, "History: %v", err)
+		assert.Must(t, len(page.Versions) == 1, "%d versions, want 1", len(page.Versions))
 		meta := page.Versions[0]
-		if meta.Version != 1 || meta.Message != "the first note" {
-			t.Fatalf("version row = (%d, %q), want (1, %q)",
-				meta.Version, meta.Message, "the first note")
-		}
-		if meta.Title != "bible" || meta.Summary != "The world is called Azeroth." {
-			t.Fatalf("version row derived values = (%q, %q), want the document's own",
-				meta.Title, meta.Summary)
-		}
+		assert.Must(t, meta.Version == 1 && meta.Message == "the first note", "version row = (%d, %q), want (1, %q)",
+			meta.Version, meta.Message, "the first note")
+		assert.Must(t, meta.Title == "bible" && meta.Summary == "The world is called Azeroth.", "version row derived values = (%q, %q), want the document's own",
+			meta.Title, meta.Summary)
 		// A history row names its author rather than carrying two raw
 		// columns: an actor holding both is a token acting on a user's
 		// behalf, and a token is what the version was written by. The label
 		// is the token's own, resolved by the domain — the read path that did
 		// not exist until this run, and the reason the reading view called
 		// every agent "an agent".
-		if meta.Author.Kind != "token" || meta.Author.ID == nil || *meta.Author.ID != token {
-			t.Fatalf("author = %+v, want the token %v", meta.Author, token)
-		}
-		if meta.Author.Label != "seeding agent" {
-			t.Fatalf("author label = %q, want the token's own label", meta.Author.Label)
-		}
-		if meta.Deleted {
-			t.Fatal("deleted = true on an ordinary write: only a tombstone carries it")
-		}
-		if meta.CreatedAt.IsZero() {
-			t.Fatal("a version records when it was written")
-		}
+		assert.Must(t, meta.Author.Kind == "token" && meta.Author.ID != nil && *meta.Author.ID == token, "author = %+v, want the token %v", meta.Author, token)
+		assert.Must(t, meta.Author.Label == "seeding agent", "author label = %q, want the token's own label", meta.Author.Label)
+		assert.Must(t, !meta.Deleted, "deleted = true on an ordinary write: only a tombstone carries it")
+		assert.Must(t, !meta.CreatedAt.IsZero(), "a version records when it was written")
 		// document_versions.project_id is no longer on this listing's own type —
 		// a history page has no use for it and VersionSummary says so — and it is
 		// pinned where it can actually be violated: TestVersionsArea's "a version
@@ -210,18 +159,10 @@ func TestDocumentsArea(t *testing.T) {
 		// The body and the frontmatter are the half a history row
 		// deliberately does not carry, so they come back through ReadVersion.
 		full, err := svc.ReadVersion(ctx, game, "bible", 1)
-		if err != nil {
-			t.Fatalf("ReadVersion: %v", err)
-		}
-		if full.BodyMd != "The world is called Azeroth.\n" {
-			t.Fatalf("BodyMd = %q, want the body as written", full.BodyMd)
-		}
-		if string(full.Frontmatter) != `{"era": "first"}` {
-			t.Fatalf("version frontmatter = %s, want the frontmatter of the write", full.Frontmatter)
-		}
-		if full.ProjectID != game {
-			t.Fatalf("ProjectID = %v, want %v", full.ProjectID, game)
-		}
+		assert.Must(t, err == nil, "ReadVersion: %v", err)
+		assert.Must(t, full.BodyMd == "The world is called Azeroth.\n", "BodyMd = %q, want the body as written", full.BodyMd)
+		assert.Must(t, string(full.Frontmatter) == `{"era": "first"}`, "version frontmatter = %s, want the frontmatter of the write", full.Frontmatter)
+		assert.Must(t, full.ProjectID == game, "ProjectID = %v, want %v", full.ProjectID, game)
 	})
 
 	t.Run("a second write needs the current version and advances it", func(t *testing.T) {
@@ -237,19 +178,11 @@ func TestDocumentsArea(t *testing.T) {
 		doc, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "bible", Content: "two\n", ExpectedVersion: ptrInt32(1),
 		})
-		if err != nil {
-			t.Fatalf("second write: %v", err)
-		}
-		if doc.CurrentVersion != 2 {
-			t.Fatalf("CurrentVersion = %d, want 2", doc.CurrentVersion)
-		}
+		assert.Must(t, err == nil, "second write: %v", err)
+		assert.Must(t, doc.CurrentVersion == 2, "CurrentVersion = %d, want 2", doc.CurrentVersion)
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.BodyMd != "two\n" {
-			t.Fatalf("BodyMd = %q, want the second write's body", got.BodyMd)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.BodyMd == "two\n", "BodyMd = %q, want the second write's body", got.BodyMd)
 
 		var count int
 		if err := pool.QueryRow(ctx,
@@ -257,9 +190,7 @@ func TestDocumentsArea(t *testing.T) {
 			  WHERE d.project_id = $1 AND d.path = 'bible'`, game).Scan(&count); err != nil {
 			t.Fatalf("count versions: %v", err)
 		}
-		if count != 2 {
-			t.Fatalf("%d version rows, want 2: every save is a snapshot", count)
-		}
+		assert.Must(t, count == 2, "%d version rows, want 2: every save is a snapshot", count)
 	})
 
 	t.Run("a stale version is a conflict that carries the current body", func(t *testing.T) {
@@ -282,22 +213,14 @@ func TestDocumentsArea(t *testing.T) {
 			Path: "bible", Content: "three\n", ExpectedVersion: ptrInt32(1),
 			IncludeCurrent: true,
 		})
-		if !errors.Is(err, markdown.ErrVersionConflict) {
-			t.Fatalf("want version_conflict, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrVersionConflict), "want version_conflict, got %v", err)
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError, got %#v", err)
-		}
-		if conflict.Current != 2 {
-			t.Fatalf("Current = %d, want 2", conflict.Current)
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError, got %#v", err)
+		assert.Must(t, conflict.Current == 2, "Current = %d, want 2", conflict.Current)
 		// The whole point of the shape: an agent merging prose needs the
 		// text, and a second round trip for it costs a turn and a context
 		// window.
-		if conflict.BodyMD != "two\n" {
-			t.Fatalf("BodyMD = %q, want the current body %q", conflict.BodyMD, "two\n")
-		}
+		assert.Must(t, conflict.BodyMD == "two\n", "BodyMD = %q, want the current body %q", conflict.BodyMD, "two\n")
 		details := conflict.Details()
 		if got := details["current_body"]; got != "two\n" {
 			t.Fatalf("Details()[current_body] = %v, want the current body", got)
@@ -311,13 +234,9 @@ func TestDocumentsArea(t *testing.T) {
 		}
 		// The refused write left nothing behind.
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.CurrentVersion != 2 || got.BodyMd != "two\n" {
-			t.Fatalf("after the refusal the document is at version %d with body %q, want 2 and %q",
-				got.CurrentVersion, got.BodyMd, "two\n")
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.CurrentVersion == 2 && got.BodyMd == "two\n", "after the refusal the document is at version %d with body %q, want 2 and %q",
+			got.CurrentVersion, got.BodyMd, "two\n")
 	})
 
 	t.Run("include current false withholds the body and keeps the version", func(t *testing.T) {
@@ -335,9 +254,7 @@ func TestDocumentsArea(t *testing.T) {
 			IncludeCurrent: false,
 		})
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError, got %#v", err)
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError, got %#v", err)
 		details := conflict.Details()
 		if details["current_version"] != int32(1) {
 			t.Fatalf("current_version = %v, want 1", details["current_version"])
@@ -373,19 +290,11 @@ func TestDocumentsArea(t *testing.T) {
 		// not_found and not version_conflict: there is no version to merge
 		// onto, so telling a caller to merge would send it round a loop that
 		// cannot terminate.
-		if !errors.Is(err, markdown.ErrNotFound) {
-			t.Fatalf("want not_found, got %v", err)
-		}
-		if errors.Is(err, markdown.ErrVersionConflict) {
-			t.Fatalf("want not_found and not version_conflict, got %v", err)
-		}
-		if !strings.Contains(err.Error(), `"bible"`) {
-			t.Fatalf("the message must name the path, got %q", err.Error())
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrNotFound), "want not_found, got %v", err)
+		assert.Must(t, !errors.Is(err, markdown.ErrVersionConflict), "want not_found and not version_conflict, got %v", err)
+		assert.Must(t, strings.Contains(err.Error(), `"bible"`), "the message must name the path, got %q", err.Error())
 		var missing *markdown.MissingError
-		if !errors.As(err, &missing) || missing.Path != "path" {
-			t.Fatalf("want a *markdown.MissingError at path `path`, got %#v", err)
-		}
+		assert.Must(t, errors.As(err, &missing) && missing.Path == "path", "want a *markdown.MissingError at path `path`, got %#v", err)
 	})
 
 	t.Run("a respelled path is refused naming both spellings", func(t *testing.T) {
@@ -405,13 +314,9 @@ func TestDocumentsArea(t *testing.T) {
 
 		// The document is untouched, under its own spelling.
 		got, err := svc.Read(ctx, game, "lore/duskwood")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.CurrentVersion != 1 || got.BodyMd != "one\n" {
-			t.Fatalf("the refused respelling changed the document: version %d, body %q",
-				got.CurrentVersion, got.BodyMd)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.CurrentVersion == 1 && got.BodyMd == "one\n", "the refused respelling changed the document: version %d, body %q",
+			got.CurrentVersion, got.BodyMd)
 	})
 
 	// A path that differs only by case addresses the document that is there,
@@ -427,12 +332,8 @@ func TestDocumentsArea(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		got, err := svc.Read(ctx, game, "LORE/Duskwood")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.Path != "lore/duskwood" {
-			t.Fatalf("Path = %q, want the stored spelling back", got.Path)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.Path == "lore/duskwood", "Path = %q, want the stored spelling back", got.Path)
 	})
 
 	t.Run("read refuses a bad path before it reaches the database", func(t *testing.T) {
@@ -479,9 +380,7 @@ func TestDocumentsArea(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		}
-		if won != 1 || conflicted != 1 {
-			t.Fatalf("got %d winners and %d conflicts, want exactly one of each", won, conflicted)
-		}
+		assert.Must(t, won == 1 && conflicted == 1, "got %d winners and %d conflicts, want exactly one of each", won, conflicted)
 
 		var current int32
 		var versions int
@@ -491,10 +390,8 @@ func TestDocumentsArea(t *testing.T) {
 			game).Scan(&current, &versions); err != nil {
 			t.Fatalf("read the document: %v", err)
 		}
-		if current != 2 || versions != 2 {
-			t.Fatalf("current_version = %d with %d version rows, want 2 and 2: "+
-				"no gap and no duplicate in the sequence", current, versions)
-		}
+		assert.Must(t, current == 2 && versions == 2, "current_version = %d with %d version rows, want 2 and 2: "+
+			"no gap and no duplicate in the sequence", current, versions)
 	})
 
 	// Two creations of the same path race with nothing to lock, so the
@@ -519,9 +416,7 @@ func TestDocumentsArea(t *testing.T) {
 		// cannot see it, cannot lock it, and will meet it at the unique
 		// index.
 		other, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		if _, err := other.Exec(ctx,
 			`INSERT INTO documents (project_id, path, body_md) VALUES ($1, 'bible', 'theirs' || chr(10))`,
@@ -545,33 +440,21 @@ func TestDocumentsArea(t *testing.T) {
 
 		err = <-done
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError from the losing creation, got %#v", err)
-		}
-		if conflict.Current != 1 {
-			t.Fatalf("Current = %d, want 1: the path was created while this write was in flight",
-				conflict.Current)
-		}
-		if conflict.BodyMD != "theirs\n" {
-			t.Fatalf("BodyMD = %q, want the winner's body", conflict.BodyMD)
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError from the losing creation, got %#v", err)
+		assert.Must(t, conflict.Current == 1, "Current = %d, want 1: the path was created while this write was in flight",
+			conflict.Current)
+		assert.Must(t, conflict.BodyMD == "theirs\n", "BodyMD = %q, want the winner's body", conflict.BodyMD)
 
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.CurrentVersion != 1 || got.BodyMd != "theirs\n" {
-			t.Fatalf("document = (%d, %q), want the winner's row untouched at version 1",
-				got.CurrentVersion, got.BodyMd)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.CurrentVersion == 1 && got.BodyMd == "theirs\n", "document = (%d, %q), want the winner's row untouched at version 1",
+			got.CurrentVersion, got.BodyMd)
 		var versions int
 		if err := pool.QueryRow(ctx,
 			`SELECT count(*) FROM document_versions WHERE project_id = $1`, game).Scan(&versions); err != nil {
 			t.Fatalf("count versions: %v", err)
 		}
-		if versions != 0 {
-			t.Fatalf("%d version rows, want 0: the refused write must leave no snapshot", versions)
-		}
+		assert.Must(t, versions == 0, "%d version rows, want 0: the refused write must leave no snapshot", versions)
 	})
 
 	// A creation that loses to a racing creation *under a different
@@ -588,9 +471,7 @@ func TestDocumentsArea(t *testing.T) {
 		game := newGame(t, pool, "azeroth")
 
 		other, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		if _, err := other.Exec(ctx,
 			`INSERT INTO documents (project_id, path, body_md) VALUES ($1, 'lore/duskwood', 'theirs')`,
@@ -637,9 +518,7 @@ func TestDocumentsArea(t *testing.T) {
 		game := newGame(t, pool, "azeroth")
 
 		other, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		var docID string
 		if err := other.QueryRow(ctx,
@@ -678,16 +557,10 @@ func TestDocumentsArea(t *testing.T) {
 
 		err = <-done
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError from the losing creation, got %#v", err)
-		}
-		if conflict.Current != 2 {
-			t.Fatalf("Current = %d, want 2: the tombstone left by the create-and-delete",
-				conflict.Current)
-		}
-		if !conflict.Deleted {
-			t.Fatal("Deleted = false, want true: the path this write raced onto was deleted, not merely edited")
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError from the losing creation, got %#v", err)
+		assert.Must(t, conflict.Current == 2, "Current = %d, want 2: the tombstone left by the create-and-delete",
+			conflict.Current)
+		assert.Must(t, conflict.Deleted, "Deleted = false, want true: the path this write raced onto was deleted, not merely edited")
 	})
 
 	// The number a conflicted caller is told to merge onto is the one its own
@@ -711,9 +584,7 @@ func TestDocumentsArea(t *testing.T) {
 
 		// Another writer holds the row and is about to advance it.
 		other, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		if _, err := other.Exec(ctx,
 			`UPDATE documents SET current_version = 2, body_md = 'theirs' || chr(10)
@@ -737,16 +608,10 @@ func TestDocumentsArea(t *testing.T) {
 
 		err = <-done
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError, got %#v", err)
-		}
-		if conflict.Current != 2 {
-			t.Fatalf("Current = %d, want 2: told 1, this caller would merge onto the version "+
-				"it already holds and retry into the same refusal forever", conflict.Current)
-		}
-		if conflict.BodyMD != "theirs\n" {
-			t.Fatalf("BodyMD = %q, want the body the retry has to merge onto", conflict.BodyMD)
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError, got %#v", err)
+		assert.Must(t, conflict.Current == 2, "Current = %d, want 2: told 1, this caller would merge onto the version "+
+			"it already holds and retry into the same refusal forever", conflict.Current)
+		assert.Must(t, conflict.BodyMD == "theirs\n", "BodyMD = %q, want the body the retry has to merge onto", conflict.BodyMD)
 	})
 
 	t.Run("reading another games document is not found", func(t *testing.T) {
@@ -784,13 +649,9 @@ func TestDocumentsArea(t *testing.T) {
 			t.Fatalf("write to outland: %v", err)
 		}
 		first, err := svc.Read(ctx, azeroth, "bible")
-		if err != nil {
-			t.Fatalf("read azeroth: %v", err)
-		}
-		if first.BodyMd != "azeroth\n" || first.CurrentVersion != 1 {
-			t.Fatalf("azeroth's document = (%q, %d), want (%q, 1): the second game's write "+
-				"reached it", first.BodyMd, first.CurrentVersion, "azeroth\n")
-		}
+		assert.Must(t, err == nil, "read azeroth: %v", err)
+		assert.Must(t, first.BodyMd == "azeroth\n" && first.CurrentVersion == 1, "azeroth's document = (%q, %d), want (%q, 1): the second game's write "+
+			"reached it", first.BodyMd, first.CurrentVersion, "azeroth\n")
 	})
 
 	t.Run("a write is announced only after it commits", func(t *testing.T) {
@@ -824,19 +685,11 @@ func TestDocumentsArea(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("the committed write announced nothing within 5s")
 		}
-		if ev.Kind != "document.written" {
-			t.Fatalf("Kind = %q, want %q", ev.Kind, "document.written")
-		}
+		assert.Must(t, ev.Kind == "document.written", "Kind = %q, want %q", ev.Kind, "document.written")
 		payload, ok := ev.Payload.(markdown.DocumentEvent)
-		if !ok {
-			t.Fatalf("Payload = %#v, want a markdown.DocumentEvent", ev.Payload)
-		}
-		if payload.Path != "bible" || payload.Version != 1 {
-			t.Fatalf("payload = %+v, want path bible at version 1", payload)
-		}
-		if payload.ID == uuid.Nil {
-			t.Fatalf("payload = %+v, want the document's id", payload)
-		}
+		assert.Must(t, ok, "Payload = %#v, want a markdown.DocumentEvent", ev.Payload)
+		assert.Must(t, payload.Path == "bible" && payload.Version == 1, "payload = %+v, want path bible at version 1", payload)
+		assert.Must(t, payload.ID != uuid.Nil, "payload = %+v, want the document's id", payload)
 	})
 
 	// The gating decided in events.go, asserted rather than described: a
@@ -864,9 +717,7 @@ func TestDocumentsArea(t *testing.T) {
 		} {
 			select {
 			case ev := <-events:
-				if ev.Kind != "document.written" {
-					t.Fatalf("%s got %q, want document.written", name, ev.Kind)
-				}
+				assert.Must(t, ev.Kind == "document.written", "%s got %q, want document.written", name, ev.Kind)
 			default:
 				t.Fatalf("%s heard nothing: the gating decided in events.go says both hear this", name)
 			}
@@ -919,12 +770,8 @@ func TestDocumentsArea(t *testing.T) {
 			t.Fatalf("a kind of exactly %d bytes must be accepted: %v", markdown.MaxKindLen, err)
 		}
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.Kind != atTheBound {
-			t.Fatalf("Kind = %q, want the %d-byte kind back whole", got.Kind, markdown.MaxKindLen)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.Kind == atTheBound, "Kind = %q, want the %d-byte kind back whole", got.Kind, markdown.MaxKindLen)
 	})
 
 	// TestDocumentsArea's "an edit that omits kind leaves it unchanged" case
@@ -941,28 +788,18 @@ func TestDocumentsArea(t *testing.T) {
 			Path: "lore/bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
 			Kind: ptrString("lore"),
 		})
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 
 		// A body-only edit, Kind omitted (nil): the label survives.
 		doc, err = svc.Write(ctx, game, markdown.WriteInput{
 			Path: "lore/bible", Content: "two\n", ExpectedVersion: ptrInt32(doc.CurrentVersion),
 		})
-		if err != nil {
-			t.Fatalf("edit without kind: %v", err)
-		}
-		if doc.Kind != "lore" {
-			t.Fatalf("Kind = %q after an edit that did not mention it, want it preserved as %q",
-				doc.Kind, "lore")
-		}
+		assert.Must(t, err == nil, "edit without kind: %v", err)
+		assert.Must(t, doc.Kind == "lore", "Kind = %q after an edit that did not mention it, want it preserved as %q",
+			doc.Kind, "lore")
 		got, err := svc.Read(ctx, game, "lore/bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.Kind != "lore" {
-			t.Fatalf("Read Kind = %q, want the kind preserved across a body-only edit", got.Kind)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.Kind == "lore", "Read Kind = %q, want the kind preserved across a body-only edit", got.Kind)
 
 		// An edit that explicitly clears it, Kind pointing at "": that takes
 		// effect, distinguishing "did not say" from "said empty".
@@ -970,12 +807,8 @@ func TestDocumentsArea(t *testing.T) {
 			Path: "lore/bible", Content: "three\n", ExpectedVersion: ptrInt32(doc.CurrentVersion),
 			Kind: ptrString(""),
 		})
-		if err != nil {
-			t.Fatalf("edit clearing kind: %v", err)
-		}
-		if doc.Kind != "" {
-			t.Fatalf("Kind = %q after explicitly clearing it, want empty", doc.Kind)
-		}
+		assert.Must(t, err == nil, "edit clearing kind: %v", err)
+		assert.Must(t, doc.Kind == "", "Kind = %q after explicitly clearing it, want empty", doc.Kind)
 	})
 
 	t.Run("every problem with one write is reported in one pass", func(t *testing.T) {
@@ -991,9 +824,7 @@ func TestDocumentsArea(t *testing.T) {
 		requireFieldError(t, err, "kind", "must be at most")
 
 		var v *metamodel.ValidationError
-		if !errors.As(err, &v) || len(v.Fields) != 2 {
-			t.Fatalf("want both problems in one answer, got %#v", err)
-		}
+		assert.Must(t, errors.As(err, &v) && len(v.Fields) == 2, "want both problems in one answer, got %#v", err)
 	})
 
 	// TestDocumentsArea's "a document written with another games token is
@@ -1026,9 +857,7 @@ func TestDocumentsArea(t *testing.T) {
 			Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
 			Actor: markdown.Actor{TokenID: &foreign},
 		})
-		if !errors.Is(err, markdown.ErrActorNotInGame) {
-			t.Fatalf("a foreign token must be refused as such, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrActorNotInGame), "a foreign token must be refused as such, got %v", err)
 
 		// The positive control: a token of this game writes the same
 		// document, so the refusal above is about the token's scope and not
@@ -1109,12 +938,8 @@ func TestNoEventIsPublishedWhenTheWriteCannotCommit(t *testing.T) {
 	_, err := svc.Write(ctx, game, markdown.WriteInput{
 		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
 	})
-	if err == nil {
-		t.Fatal("want the commit to fail")
-	}
-	if !strings.Contains(err.Error(), "commit") {
-		t.Fatalf("err = %v, want the commit to be what failed", err)
-	}
+	assert.Must(t, err != nil, "want the commit to fail")
+	assert.Must(t, strings.Contains(err.Error(), "commit"), "err = %v, want the commit to be what failed", err)
 	select {
 	case ev := <-sub.C:
 		t.Fatalf("a write whose commit failed announced %v", ev)
@@ -1129,9 +954,7 @@ func newUser(t *testing.T, pool *pgxpool.Pool, email string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	local, domain, found := strings.Cut(email, "@")
-	if !found {
-		t.Fatalf("newUser wants an address, got %q", email)
-	}
+	assert.Must(t, found, "newUser wants an address, got %q", email)
 	unique := local + "+" + uuid.NewString()[:8] + "@" + domain
 	// The display name stays the address the caller wrote: it is what the
 	// tests read back as the author label, and only the email column is

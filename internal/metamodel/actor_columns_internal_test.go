@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -43,9 +44,7 @@ func TestEveryCompositeTokenKeyIsNamedInActorColumns(t *testing.T) {
 		FROM pg_constraint
 		WHERE contype = 'f' AND confrelid = 'api_tokens'::regclass
 		ORDER BY conname`)
-	if err != nil {
-		t.Fatalf("read the foreign keys into api_tokens: %v", err)
-	}
+	assert.Must(t, err == nil, "read the foreign keys into api_tokens: %v", err)
 	defer rows.Close()
 	var names []string
 	for rows.Next() {
@@ -62,22 +61,18 @@ func TestEveryCompositeTokenKeyIsNamedInActorColumns(t *testing.T) {
 	// below without asserting anything, which is how a sweep test dies
 	// quietly. There are nine such keys today across three migrations,
 	// under three distinct column prefixes.
-	if len(names) < 9 {
-		t.Fatalf("found %d foreign keys into api_tokens (%v), want at least the nine "+
-			"the migrations declare: this query has stopped finding them",
-			len(names), names)
-	}
+	assert.Must(t, len(names) >= 9, "found %d foreign keys into api_tokens (%v), want at least the nine "+
+		"the migrations declare: this query has stopped finding them",
+		len(names), names)
 
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			err := ActorConstraintViolation(&pgconn.PgError{
 				Code: "23503", ConstraintName: name,
 			})
-			if !errors.Is(err, ErrActorNotInGame) {
-				t.Fatalf("a 23503 over %q maps to %v, want ErrActorNotInGame: no prefix "+
-					"in actorColumns (%v) matches it, so this refusal reaches a log as a "+
-					"generated constraint name", name, err, actorColumns)
-			}
+			assert.Must(t, errors.Is(err, ErrActorNotInGame), "a 23503 over %q maps to %v, want ErrActorNotInGame: no prefix "+
+				"in actorColumns (%v) matches it, so this refusal reaches a log as a "+
+				"generated constraint name", name, err, actorColumns)
 		})
 	}
 

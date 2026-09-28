@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestAnEntityPageAsksForTooMuchAndGetsTheCap pins the shared page rule
@@ -45,16 +47,10 @@ func TestAnEntityPageAsksForTooMuchAndGetsTheCap(t *testing.T) {
 // cursor issued for one pages the other and the check this whole
 // mechanism exists for passes over exactly the case it was added for.
 func TestAFingerprintTellsFiltersApartWhereverTheirPartsDivide(t *testing.T) {
-	if fingerprintOf("ab", "c") == fingerprintOf("a", "bc") {
-		t.Fatal("two filters dividing differently share a fingerprint")
-	}
-	if fingerprintOf("a", "") == fingerprintOf("", "a") {
-		t.Fatal("an empty part is not distinguished from a missing one")
-	}
+	assert.Must(t, fingerprintOf("ab", "c") != fingerprintOf("a", "bc"), "two filters dividing differently share a fingerprint")
+	assert.Must(t, fingerprintOf("a", "") != fingerprintOf("", "a"), "an empty part is not distinguished from a missing one")
 	first, second := fingerprintOf("a", "b"), fingerprintOf("a", "b")
-	if first != second {
-		t.Fatalf("a fingerprint is not stable across two calls: %q then %q", first, second)
-	}
+	assert.Must(t, first == second, "a fingerprint is not stable across two calls: %q then %q", first, second)
 }
 
 // TestTheInvalidFilterKeepsItsThreeStatesApart pins that "no opinion" is
@@ -88,9 +84,7 @@ func TestACursorCarriesNothingButAPositionAndAFingerprint(t *testing.T) {
 		Fingerprint: "abc",
 	})
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	assert.Must(t, err == nil, "decode: %v", err)
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -100,9 +94,7 @@ func TestACursorCarriesNothingButAPositionAndAFingerprint(t *testing.T) {
 			t.Fatalf("cursor is missing %q: %s", want, raw)
 		}
 	}
-	if len(fields) != 3 {
-		t.Fatalf("cursor carries %d fields, want 3: %s", len(fields), raw)
-	}
+	assert.Must(t, len(fields) == 3, "cursor carries %d fields, want 3: %s", len(fields), raw)
 }
 
 // TestAMalformedCursorIsRefusedBeforeItsFingerprintIsJudged pins the
@@ -111,10 +103,6 @@ func TestACursorCarriesNothingButAPositionAndAFingerprint(t *testing.T) {
 // which is not where the problem is.
 func TestAMalformedCursorIsRefusedBeforeItsFingerprintIsJudged(t *testing.T) {
 	_, err := decodeCursor("!!not base64!!", "some-fingerprint")
-	if err == nil {
-		t.Fatal("a malformed cursor was accepted")
-	}
-	if !strings.Contains(err.Error(), "is malformed") {
-		t.Fatalf("err = %v, want it reported as malformed", err)
-	}
+	assert.Must(t, err != nil, "a malformed cursor was accepted")
+	assert.Must(t, strings.Contains(err.Error(), "is malformed"), "err = %v, want it reported as malformed", err)
 }

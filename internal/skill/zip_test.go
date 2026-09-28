@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"testing"
 	"testing/fstest"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestTheZipIsByteIdenticalAcrossCalls pins the property bundle_version
@@ -19,19 +21,11 @@ import (
 // exactly that) and this test fails on the second call.
 func TestTheZipIsByteIdenticalAcrossCalls(t *testing.T) {
 	first, err := Zip()
-	if err != nil {
-		t.Fatalf("Zip: %v", err)
-	}
+	assert.Must(t, err == nil, "Zip: %v", err)
 	second, err := Zip()
-	if err != nil {
-		t.Fatalf("Zip: %v", err)
-	}
-	if !bytes.Equal(first, second) {
-		t.Fatalf("two calls to Zip produced different bytes: %d and %d bytes", len(first), len(second))
-	}
-	if len(first) == 0 {
-		t.Fatal("Zip returned no bytes: two empty archives are byte-identical for the wrong reason")
-	}
+	assert.Must(t, err == nil, "Zip: %v", err)
+	assert.Must(t, bytes.Equal(first, second), "two calls to Zip produced different bytes: %d and %d bytes", len(first), len(second))
+	assert.Must(t, len(first) != 0, "Zip returned no bytes: two empty archives are byte-identical for the wrong reason")
 }
 
 // TestTheZipCarriesNoBuildTimestamp is the other half of determinism,
@@ -48,16 +42,10 @@ func TestTheZipIsByteIdenticalAcrossCalls(t *testing.T) {
 // byte-equality test stays green.
 func TestTheZipCarriesNoBuildTimestamp(t *testing.T) {
 	archive, err := Zip()
-	if err != nil {
-		t.Fatalf("Zip: %v", err)
-	}
+	assert.Must(t, err == nil, "Zip: %v", err)
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
-	if err != nil {
-		t.Fatalf("reading the archive back: %v", err)
-	}
-	if len(reader.File) == 0 {
-		t.Fatal("the archive holds no entries: there are no timestamps here to be wrong")
-	}
+	assert.Must(t, err == nil, "reading the archive back: %v", err)
+	assert.Must(t, len(reader.File) != 0, "the archive holds no entries: there are no timestamps here to be wrong")
 	for _, entry := range reader.File {
 		// A zeroed FileHeader.Modified is written as the zip format's
 		// own zero stamp, which decodes to 1979-11-30. Any real build
@@ -75,26 +63,18 @@ func TestTheZipCarriesNoBuildTimestamp(t *testing.T) {
 // with the same bytes, so a hash that moves is a download that moved.
 func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 	archive, err := Zip()
-	if err != nil {
-		t.Fatalf("Zip: %v", err)
-	}
+	assert.Must(t, err == nil, "Zip: %v", err)
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
-	if err != nil {
-		t.Fatalf("reading the archive back: %v", err)
-	}
+	assert.Must(t, err == nil, "reading the archive back: %v", err)
 	packed := map[string][]byte{}
 	for _, entry := range reader.File {
 		rc, err := entry.Open()
-		if err != nil {
-			t.Fatalf("opening %s: %v", entry.Name, err)
-		}
+		assert.Must(t, err == nil, "opening %s: %v", entry.Name, err)
 		body, err := io.ReadAll(rc)
 		if closeErr := rc.Close(); closeErr != nil {
 			t.Fatalf("closing %s: %v", entry.Name, closeErr)
 		}
-		if err != nil {
-			t.Fatalf("reading %s: %v", entry.Name, err)
-		}
+		assert.Must(t, err == nil, "reading %s: %v", entry.Name, err)
 		if _, seen := packed[entry.Name]; seen {
 			t.Fatalf("%s appears twice in the archive", entry.Name)
 		}
@@ -102,18 +82,14 @@ func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 	}
 
 	tree := treeOf(t, Files())
-	if len(tree) == 0 {
-		t.Fatal("the bundle tree is empty: this test would pass by comparing two empty sets")
-	}
+	assert.Must(t, len(tree) != 0, "the bundle tree is empty: this test would pass by comparing two empty sets")
 	for path, body := range tree {
 		got, ok := packed[path]
 		if !ok {
 			t.Errorf("%s is in the tree and not in the archive", path)
 			continue
 		}
-		if !bytes.Equal(got, body) {
-			t.Errorf("%s differs between the tree and the archive", path)
-		}
+		assert.Should(t, bytes.Equal(got, body), "%s differs between the tree and the archive", path)
 		delete(packed, path)
 	}
 	for path := range packed {
@@ -130,16 +106,10 @@ func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 // trees below hash identically.
 func TestTheVersionHashIsLengthPrefixed(t *testing.T) {
 	left, err := hashTree(fstest.MapFS{"ab": &fstest.MapFile{Data: []byte("c")}})
-	if err != nil {
-		t.Fatalf("hashTree: %v", err)
-	}
+	assert.Must(t, err == nil, "hashTree: %v", err)
 	right, err := hashTree(fstest.MapFS{"a": &fstest.MapFile{Data: []byte("bc")}})
-	if err != nil {
-		t.Fatalf("hashTree: %v", err)
-	}
-	if left == right {
-		t.Fatalf("{\"ab\": \"c\"} and {\"a\": \"bc\"} hash the same (%s): the hash concatenates without length prefixes", left)
-	}
+	assert.Must(t, err == nil, "hashTree: %v", err)
+	assert.Must(t, left != right, "{\"ab\": \"c\"} and {\"a\": \"bc\"} hash the same (%s): the hash concatenates without length prefixes", left)
 }
 
 // TestTheVersionMovesWhenOneByteMoves drives the real tree, not a
@@ -147,19 +117,11 @@ func TestTheVersionHashIsLengthPrefixed(t *testing.T) {
 // would be caught here.
 func TestTheVersionMovesWhenOneByteMoves(t *testing.T) {
 	before, err := hashTree(Files())
-	if err != nil {
-		t.Fatalf("hashTree: %v", err)
-	}
-	if before != Version() {
-		t.Fatalf("Version() is %s and hashing the tree gives %s: Version does not hash what ships", Version(), before)
-	}
+	assert.Must(t, err == nil, "hashTree: %v", err)
+	assert.Must(t, before == Version(), "Version() is %s and hashing the tree gives %s: Version does not hash what ships", Version(), before)
 	after, err := hashTree(mutated(t, "skill.md", func(body []byte) []byte { return append(body, '.') }))
-	if err != nil {
-		t.Fatalf("hashTree: %v", err)
-	}
-	if before == after {
-		t.Fatalf("appending one byte to skill.md left the version at %s", before)
-	}
+	assert.Must(t, err == nil, "hashTree: %v", err)
+	assert.Must(t, before != after, "appending one byte to skill.md left the version at %s", before)
 }
 
 // TestTheVersionMovesWheneverTheZipDoes is the guard on the decision to
@@ -184,13 +146,9 @@ func TestTheVersionMovesWheneverTheZipDoes(t *testing.T) {
 	shapes := map[string]shape{}
 	for name, tree := range trees {
 		archive, err := zipTree(tree)
-		if err != nil {
-			t.Fatalf("zipTree(%s): %v", name, err)
-		}
+		assert.Must(t, err == nil, "zipTree(%s): %v", name, err)
 		sum, err := hashTree(tree)
-		if err != nil {
-			t.Fatalf("hashTree(%s): %v", name, err)
-		}
+		assert.Must(t, err == nil, "hashTree(%s): %v", name, err)
 		shapes[name] = shape{zip: string(archive), version: sum}
 	}
 	for leftName, left := range shapes {
@@ -200,10 +158,8 @@ func TestTheVersionMovesWheneverTheZipDoes(t *testing.T) {
 			}
 			sameZip := left.zip == right.zip
 			sameVersion := left.version == right.version
-			if sameZip != sameVersion {
-				t.Errorf("%q and %q: same archive = %v but same version = %v — the version does not cover what is served",
-					leftName, rightName, sameZip, sameVersion)
-			}
+			assert.Should(t, sameZip == sameVersion, "%q and %q: same archive = %v but same version = %v — the version does not cover what is served",
+				leftName, rightName, sameZip, sameVersion)
 		}
 	}
 }
@@ -226,9 +182,7 @@ func treeOf(t *testing.T, fsys fs.FS) map[string][]byte {
 		out[path] = body
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walking the bundle: %v", err)
-	}
+	assert.Must(t, err == nil, "walking the bundle: %v", err)
 	return out
 }
 
@@ -242,9 +196,7 @@ func overlay(t *testing.T) fstest.MapFS {
 	for path, body := range treeOf(t, Files()) {
 		out[path] = &fstest.MapFile{Data: body}
 	}
-	if len(out) == 0 {
-		t.Fatal("the bundle is empty: every overlay built from it would be empty too")
-	}
+	assert.Must(t, len(out) != 0, "the bundle is empty: every overlay built from it would be empty too")
 	return out
 }
 
@@ -254,9 +206,7 @@ func mutated(t *testing.T, path string, change func([]byte) []byte) fstest.MapFS
 	t.Helper()
 	out := overlay(t)
 	file, ok := out[path]
-	if !ok {
-		t.Fatalf("%s is not in the bundle: this mutation would be a no-op", path)
-	}
+	assert.Must(t, ok, "%s is not in the bundle: this mutation would be a no-op", path)
 	if change == nil {
 		delete(out, path)
 		return out
@@ -282,9 +232,7 @@ func renamed(t *testing.T, from, to string) fstest.MapFS {
 	t.Helper()
 	out := overlay(t)
 	file, ok := out[from]
-	if !ok {
-		t.Fatalf("%s is not in the bundle: this rename would be a no-op", from)
-	}
+	assert.Must(t, ok, "%s is not in the bundle: this rename would be a no-op", from)
 	delete(out, from)
 	out[to] = &fstest.MapFile{Data: file.Data}
 	return out

@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // B1: no genre vocabulary in the server's own code.
@@ -180,15 +182,11 @@ func TestNoGenreVocabularyInServerCode(t *testing.T) {
 	}
 
 	hits, files, err := scanGoTreeForGenreWords(repoRoot)
-	if err != nil {
-		t.Fatalf("scanning the repository: %v", err)
-	}
+	assert.Must(t, err == nil, "scanning the repository: %v", err)
 	// The walk's own count, because every assertion below is "nothing
 	// was found" and a walk that read no files finds nothing.
-	if files < 50 {
-		t.Fatalf("the scan read %d non-test Go files: it is not walking the repository, so "+
-			"the assertion below passes by measuring nothing", files)
-	}
+	assert.Must(t, files >= 50, "the scan read %d non-test Go files: it is not walking the repository, so "+
+		"the assertion below passes by measuring nothing", files)
 	sort.Slice(hits, func(i, j int) bool { return hits[i].Path < hits[j].Path })
 	for _, hit := range hits {
 		t.Errorf("%s:%d declares or uses %q, which carries the genre word %q: Maestro ships "+
@@ -225,20 +223,14 @@ func TestTheGenreScannerReadsAWholeFile(t *testing.T) {
 	}
 
 	hits, files, err := scanGoTreeForGenreWords(dir)
-	if err != nil {
-		t.Fatalf("scanning the fixture tree: %v", err)
-	}
-	if files != 1 {
-		t.Fatalf("the scan read %d files of the fixture tree, want 1: the _test.go exemption "+
-			"is not doing what it says", files)
-	}
+	assert.Must(t, err == nil, "scanning the fixture tree: %v", err)
+	assert.Must(t, files == 1, "the scan read %d files of the fixture tree, want 1: the _test.go exemption "+
+		"is not doing what it says", files)
 	found := map[string]string{}
 	for _, hit := range hits {
 		found[hit.Name] = hit.Word
 	}
-	if found["questCount"] != "quest" || found["Zone"] != "zone" {
-		t.Fatalf("the scan missed a declaration it was pointed at: %v", found)
-	}
+	assert.Must(t, found["questCount"] == "quest" && found["Zone"] == "zone", "the scan missed a declaration it was pointed at: %v", found)
 	for name := range found {
 		if name == "questCount" || name == "Zone" {
 			continue

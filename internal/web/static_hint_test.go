@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestTheHint drives internal/web/jstest/hint_test.mjs, which holds the
@@ -31,9 +33,7 @@ func TestTheHint(t *testing.T) {
 func TestTheHintPanelIsASurfaceAndNotABox(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("static/components/mst-hint.js")
-	if err != nil {
-		t.Fatalf("read mst-hint.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read mst-hint.js: %v", err)
 	source := string(raw)
 
 	panel := regexp.MustCompile(`(?s)\.panel \{.*?\n\}`).FindString(source)
@@ -47,14 +47,10 @@ func TestTheHintPanelIsASurfaceAndNotABox(t *testing.T) {
 	for _, token := range []string{
 		"var(--paper)", "var(--ink)", "var(--line)", "var(--radius)", "var(--shadow-2)", "var(--sans)",
 	} {
-		if !strings.Contains(panel, token) {
-			t.Errorf("the panel does not draw itself with %s:\n%s", token, panel)
-		}
+		assert.Should(t, strings.Contains(panel, token), "the panel does not draw itself with %s:\n%s", token, panel)
 	}
 	transition := regexp.MustCompile(`transition: ([^;]+);`).FindStringSubmatch(panel)
-	if transition == nil {
-		t.Fatalf("the panel states no transition at all:\n%s", panel)
-	}
+	assert.Must(t, transition != nil, "the panel states no transition at all:\n%s", panel)
 	for _, property := range []string{"top", "left", "right", "width", "height", "padding", "margin", "transform"} {
 		if strings.Contains(transition[1], property) {
 			t.Errorf("the panel animates %s, which is layout: %s", property, transition[1])
@@ -64,9 +60,7 @@ func TestTheHintPanelIsASurfaceAndNotABox(t *testing.T) {
 	// The focus ring, which is what makes the keyboard path visible. The
 	// behaviour test proves the trigger is in the tab order; nothing but
 	// this says a reader can see where they are.
-	if !strings.Contains(source, ".trigger:focus-visible") {
-		t.Error("the trigger draws no focus ring, so a keyboard reader cannot see what they have focused")
-	}
+	assert.Should(t, strings.Contains(source, ".trigger:focus-visible"), "the trigger draws no focus ring, so a keyboard reader cannot see what they have focused")
 }
 
 // TestEveryControlAnswersThePointerAndThePress is the guard for a defect
@@ -92,9 +86,7 @@ func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 	// for having stopped carrying a second copy.
 	for _, path := range []string{"static/controls.css"} {
 		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		source := string(raw)
 
 		hover := regexp.MustCompile(`(?s)\.ghost:hover:not\(:disabled\)[^{]*\{([^}]*)\}`).FindStringSubmatch(source)
@@ -108,9 +100,7 @@ func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 			t.Errorf("%s: the ghost hover paints --ground, which is the page's own background:\n%s",
 				path, hover[1])
 		}
-		if !strings.Contains(source, ":active:not(:disabled)") {
-			t.Errorf("%s: no control has a pressed state", path)
-		}
+		assert.Should(t, strings.Contains(source, ":active:not(:disabled)"), "%s: no control has a pressed state", path)
 	}
 
 	// The second copy must stay gone. control-styles.js may say what a
@@ -118,14 +108,10 @@ func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 	// shadow root — and nothing else: a `button` rule there is the
 	// divergence this consolidation removed, growing back.
 	raw, err := os.ReadFile("static/components/control-styles.js")
-	if err != nil {
-		t.Fatalf("read control-styles.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read control-styles.js: %v", err)
 	for _, selector := range []string{"button {", "button.ghost", "input,", ".chip {"} {
-		if strings.Contains(string(raw), selector) {
-			t.Errorf("control-styles.js writes `%s` again: the control vocabulary is "+
-				"static/controls.css, which every shadow root adopts", selector)
-		}
+		assert.Should(t, !strings.Contains(string(raw), selector), "control-styles.js writes `%s` again: the control vocabulary is "+
+			"static/controls.css, which every shadow root adopts", selector)
 	}
 }
 
@@ -150,12 +136,8 @@ func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 func TestNoStyleSheetIsCutInHalfByABacktick(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob("static/components/*.js")
-	if err != nil {
-		t.Fatalf("glob components: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no component modules found")
-	}
+	assert.Must(t, err == nil, "glob components: %v", err)
+	assert.Must(t, len(files) != 0, "no component modules found")
 	// The opening of a CSS constant: `const NAME_CSS = ` followed by the
 	// backtick that opens the literal, and the line that closes it.
 	opens := regexp.MustCompile("^(?:export )?const [A-Z_]*CSS = `$")
@@ -165,9 +147,7 @@ func TestNoStyleSheetIsCutInHalfByABacktick(t *testing.T) {
 	bareBacktick := regexp.MustCompile("(^|[^\\\\])`")
 	for _, path := range files {
 		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", path, err)
 		inside := false
 		for n, line := range strings.Split(string(raw), "\n") {
 			if !inside {
@@ -182,14 +162,10 @@ func TestNoStyleSheetIsCutInHalfByABacktick(t *testing.T) {
 			// what ends the literal is a bare one. `${` is the same hole
 			// from the other side — it interpolates rather than closing,
 			// and a sheet is not a place for a value.
-			if bareBacktick.MatchString(line) || strings.Contains(line, "${") {
-				t.Errorf("%s:%d: a backtick or an interpolation inside a CSS literal ends it, and the "+
-					"rest of the sheet is then read as JavaScript:\n\t%s", path, n+1, line)
-			}
+			assert.Should(t, !bareBacktick.MatchString(line) && !strings.Contains(line, "${"), "%s:%d: a backtick or an interpolation inside a CSS literal ends it, and the "+
+				"rest of the sheet is then read as JavaScript:\n\t%s", path, n+1, line)
 		}
-		if inside {
-			t.Errorf("%s: a CSS literal is never closed", path)
-		}
+		assert.Should(t, !inside, "%s: a CSS literal is never closed", path)
 	}
 }
 
@@ -248,13 +224,9 @@ func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 	// a button is dressed by static/controls.css and a tab by the
 	// stylesheet, and both are things a person points at.
 	raw, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatalf("read styles.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read styles.css: %v", err)
 	shared, err := os.ReadFile("static/controls.css")
-	if err != nil {
-		t.Fatalf("read controls.css: %v", err)
-	}
+	assert.Must(t, err == nil, "read controls.css: %v", err)
 	styles := string(raw) + "\n" + string(shared)
 
 	for _, control := range interactiveControls {
@@ -270,19 +242,13 @@ func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 		// page) and --paper (a panel); a hover that paints either is
 		// only legible when it happens to stand on the other, which is
 		// not a property a stylesheet can promise.
-		if strings.Contains(body, "background: var(--ground)") && !standsOnPaper[control.name] {
-			t.Errorf("%s paints --ground on hover, which is the page's own background:\n%s",
-				control.name, body)
-		}
+		assert.Should(t, !strings.Contains(body, "background: var(--ground)") || standsOnPaper[control.name], "%s paints --ground on hover, which is the page's own background:\n%s",
+			control.name, body)
 		// Declaring nothing is the second. A rule whose whole content is
 		// `background: none` on a control that has no background is a
 		// rule that reads as an answer and is not one.
-		if declarationsIn(body) == 1 && strings.Contains(body, "background: none") {
-			t.Errorf("%s answers the pointer with a rule that changes nothing:\n%s", control.name, body)
-		}
-		if declarationsIn(body) == 0 {
-			t.Errorf("%s has an empty hover rule", control.name)
-		}
+		assert.Should(t, declarationsIn(body) != 1 || !strings.Contains(body, "background: none"), "%s answers the pointer with a rule that changes nothing:\n%s", control.name, body)
+		assert.Should(t, declarationsIn(body) != 0, "%s has an empty hover rule", control.name)
 	}
 
 	// **A control that opts out of the fill must opt out in every
@@ -304,21 +270,17 @@ func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 			if rule == "" {
 				continue
 			}
-			if !strings.Contains(rule, "background") {
-				t.Errorf("%s says `background: none` at rest and %s does not say it again, so that "+
-					"state takes the primary button's ink fill:\n%s", selector, state, rule)
-			}
+			assert.Should(t, strings.Contains(rule, "background"), "%s says `background: none` at rest and %s does not say it again, so that "+
+				"state takes the primary button's ink fill:\n%s", selector, state, rule)
 		}
 	}
 
 	// The primary carries two channels, because one of them is a change
 	// of 1.18:1 that a person reported as no change at all.
 	primary := ruleFor(styles, "button:hover:not(:disabled)")
-	if !strings.Contains(primary, "box-shadow: 0 0 0") {
-		t.Errorf("the primary button's hover has no halo, so it is a 1.18:1 fill change and "+
-			"nothing else — which is what a drop shadow under a dark button on a warm ground "+
-			"amounted to:\n%s", primary)
-	}
+	assert.Should(t, strings.Contains(primary, "box-shadow: 0 0 0"), "the primary button's hover has no halo, so it is a 1.18:1 fill change and "+
+		"nothing else — which is what a drop shadow under a dark button on a warm ground "+
+		"amounted to:\n%s", primary)
 }
 
 // ruleFor returns the body of the first rule whose selector list

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -28,15 +29,9 @@ func TestSearchArea(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		hits, err := svc.SearchDocuments(ctx, game, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 1 || hits[0].Path != "scripts/hogger" {
-			t.Fatalf("hits = %+v, want the script", hits)
-		}
-		if hits[0].NameMatch {
-			t.Fatal("a word found only in the body must not report a title match")
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 1 && hits[0].Path == "scripts/hogger", "hits = %+v, want the script", hits)
+		assert.Must(t, !hits[0].NameMatch, "a word found only in the body must not report a title match")
 	})
 
 	// TestSearchArea's "every field of a search hit reads back" case is the
@@ -67,9 +62,7 @@ func TestSearchArea(t *testing.T) {
 				{EntityType: "quest", EntityKey: "wanted-hogger", Role: "script"},
 			},
 		})
-		if err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		assert.Must(t, err == nil, "write: %v", err)
 		// A second version, so Version is read back as something other than
 		// the 1 a create would give it whatever the projection did.
 		if _, err := svc.Write(ctx, game, markdown.WriteInput{
@@ -83,44 +76,22 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		hits, err := svc.SearchDocuments(ctx, game, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 1 {
-			t.Fatalf("%d hits, want 1", len(hits))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 1, "%d hits, want 1", len(hits))
 		got := hits[0]
-		if got.ID != written.ID {
-			t.Errorf("ID = %s, want %s", got.ID, written.ID)
-		}
-		if got.Path != "scripts/hogger" {
-			t.Errorf("Path = %q", got.Path)
-		}
-		if got.Title != "The Confrontation" {
-			t.Errorf("Title = %q", got.Title)
-		}
-		if got.Summary != "Hogger says his line." {
-			t.Errorf("Summary = %q", got.Summary)
-		}
-		if got.Kind != "script" {
-			t.Errorf("Kind = %q", got.Kind)
-		}
-		if got.Version != 2 {
-			t.Errorf("Version = %d, want 2", got.Version)
-		}
-		if got.NameMatch {
-			t.Errorf("NameMatch = true for a body-only match")
-		}
-		if got.Rank <= 0 {
-			t.Errorf("Rank = %v, want a score the query actually produced", got.Rank)
-		}
+		assert.Should(t, got.ID == written.ID, "ID = %s, want %s", got.ID, written.ID)
+		assert.Should(t, got.Path == "scripts/hogger", "Path = %q", got.Path)
+		assert.Should(t, got.Title == "The Confrontation", "Title = %q", got.Title)
+		assert.Should(t, got.Summary == "Hogger says his line.", "Summary = %q", got.Summary)
+		assert.Should(t, got.Kind == "script", "Kind = %q", got.Kind)
+		assert.Should(t, got.Version == 2, "Version = %d, want 2", got.Version)
+		assert.Should(t, !got.NameMatch, "NameMatch = true for a body-only match")
+		assert.Should(t, got.Rank > 0, "Rank = %v, want a score the query actually produced", got.Rank)
 		want := markdown.EntityLink{
 			EntityID: got.LinkedEntities[0].EntityID, EntityTypeKey: "quest",
 			EntityKey: "wanted-hogger", EntityName: "Wanted: Hogger", Role: "script",
 		}
-		if len(got.LinkedEntities) != 1 || got.LinkedEntities[0] != want {
-			t.Errorf("LinkedEntities = %+v, want one %+v", got.LinkedEntities, want)
-		}
+		assert.Should(t, len(got.LinkedEntities) == 1 && got.LinkedEntities[0] == want, "LinkedEntities = %+v, want one %+v", got.LinkedEntities, want)
 	})
 
 	// TestSearchArea's "a search hit carries no body at all" case pins the
@@ -157,12 +128,8 @@ func TestSearchArea(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		hits, err := svc.SearchDocuments(ctx, game, "carry", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 1 {
-			t.Fatalf("%d hits, want 1", len(hits))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 1, "%d hits, want 1", len(hits))
 		hit := reflect.ValueOf(hits[0])
 		for i := 0; i < hit.NumField(); i++ {
 			field := hit.Type().Field(i)
@@ -199,15 +166,9 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		hits, err := svc.SearchDocuments(ctx, game, "gnoll pack", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 2 {
-			t.Fatalf("%d hits, want 2", len(hits))
-		}
-		if hits[0].Path != "lore/the-pack" || !hits[0].NameMatch {
-			t.Fatalf("hits = %+v, want the document the query names first, flagged", hits)
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 2, "%d hits, want 2", len(hits))
+		assert.Must(t, hits[0].Path == "lore/the-pack" && hits[0].NameMatch, "hits = %+v, want the document the query names first, flagged", hits)
 		// The half a title-first assertion alone cannot see: the mentioner
 		// carries the *higher* ts_rank here, so the order is not explained by
 		// rank and a merge that sorted on rank alone would invert it.
@@ -240,22 +201,14 @@ func TestSearchArea(t *testing.T) {
 			t.Fatalf("write the unattached document: %v", err)
 		}
 		hits, err := svc.SearchDocuments(ctx, game, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 2 {
-			t.Fatalf("%d hits, want 2", len(hits))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 2, "%d hits, want 2", len(hits))
 		byPath := map[string][]markdown.EntityLink{}
 		for _, hit := range hits {
 			byPath[hit.Path] = hit.LinkedEntities
 		}
 		attached := byPath["scripts/hogger"]
-		if len(attached) != 1 || attached[0].EntityKey != "wanted-hogger" ||
-			attached[0].EntityTypeKey != "quest" || attached[0].EntityName != "Wanted: Hogger" ||
-			attached[0].Role != "script" {
-			t.Fatalf("scripts/hogger linked to %+v, want the quest it is a script for", attached)
-		}
+		assert.Must(t, len(attached) == 1 && attached[0].EntityKey == "wanted-hogger" && attached[0].EntityTypeKey == "quest" && attached[0].EntityName == "Wanted: Hogger" && attached[0].Role == "script", "scripts/hogger linked to %+v, want the quest it is a script for", attached)
 		// Never nil, so a hit with no attachments marshals as [] rather than
 		// null: "attached to nothing" and "the server said nothing about
 		// attachments" are different statements.
@@ -279,12 +232,8 @@ func TestSearchArea(t *testing.T) {
 			t.Fatalf("Delete: %v", err)
 		}
 		hits, err := svc.SearchDocuments(ctx, game, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 0 {
-			t.Fatalf("hits = %+v, want none: a result nobody can open is worse than no result", hits)
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 0, "hits = %+v, want none: a result nobody can open is worse than no result", hits)
 	})
 
 	t.Run("only the current version is searchable", func(t *testing.T) {
@@ -302,19 +251,11 @@ func TestSearchArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		gone, err := svc.SearchDocuments(ctx, game, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(gone) != 0 {
-			t.Fatalf("hits = %+v, want none: history is not indexed", gone)
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(gone) == 0, "hits = %+v, want none: history is not indexed", gone)
 		current, err := svc.SearchDocuments(ctx, game, "lantern", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(current) != 1 {
-			t.Fatalf("the current version must be findable, got %+v", current)
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(current) == 1, "the current version must be findable, got %+v", current)
 	})
 
 	t.Run("a search never crosses games", func(t *testing.T) {
@@ -328,12 +269,8 @@ func TestSearchArea(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		hits, err := svc.SearchDocuments(ctx, outland, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(hits) != 0 {
-			t.Fatalf("outland found %d of azeroth's documents", len(hits))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(hits) == 0, "outland found %d of azeroth's documents", len(hits))
 	})
 
 	// TestSearchArea's "a search narrows to one kind" case pins the kind
@@ -361,21 +298,13 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		both, err := svc.SearchDocuments(ctx, game, "candle", "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(both) != 2 {
-			t.Fatalf("%d hits with no kind filter, want 2", len(both))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(both) == 2, "%d hits with no kind filter, want 2", len(both))
 		for _, kind := range []string{"script", "SCRIPT"} {
 			t.Run(kind, func(t *testing.T) {
 				hits, err := svc.SearchDocuments(ctx, game, "candle", kind, 0)
-				if err != nil {
-					t.Fatalf("SearchDocuments: %v", err)
-				}
-				if len(hits) != 1 || hits[0].Path != "scripts/hogger" {
-					t.Fatalf("hits = %+v, want only the script", hits)
-				}
+				assert.Must(t, err == nil, "SearchDocuments: %v", err)
+				assert.Must(t, len(hits) == 1 && hits[0].Path == "scripts/hogger", "hits = %+v, want only the script", hits)
 			})
 		}
 	})
@@ -398,9 +327,7 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.SearchDocuments(ctx, game, "candle", tc.kind, 0)
-				if !errors.Is(err, markdown.ErrInvalidInput) {
-					t.Fatalf("want invalid_input, got %v", err)
-				}
+				assert.Must(t, errors.Is(err, markdown.ErrInvalidInput), "want invalid_input, got %v", err)
 				requireFieldError(t, err, "kind", tc.message)
 			})
 		}
@@ -419,9 +346,7 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.SearchDocuments(ctx, game, tc.query, "", 0)
-				if !errors.Is(err, markdown.ErrInvalidInput) {
-					t.Fatalf("want invalid_input, got %v", err)
-				}
+				assert.Must(t, errors.Is(err, markdown.ErrInvalidInput), "want invalid_input, got %v", err)
 				requireFieldError(t, err, "query", tc.message)
 			})
 		}
@@ -456,12 +381,8 @@ func TestSearchArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				hits, err := svc.SearchDocuments(ctx, game, "body", "", tc.limit)
-				if err != nil {
-					t.Fatalf("SearchDocuments: %v", err)
-				}
-				if len(hits) != tc.want {
-					t.Fatalf("%d hits, want %d", len(hits), tc.want)
-				}
+				assert.Must(t, err == nil, "SearchDocuments: %v", err)
+				assert.Must(t, len(hits) == tc.want, "%d hits, want %d", len(hits), tc.want)
 			})
 		}
 	})
@@ -508,13 +429,9 @@ func TestSearchArea(t *testing.T) {
 		// character, so the tsvector never contains the exact token this
 		// test searches for.
 		fillerLen := markdown.MaxIndexedChars - len(prefix) - len(boundary) - 1
-		if fillerLen < 0 {
-			t.Fatalf("the fixture's prefix and boundary word together exceed MaxIndexedChars")
-		}
+		assert.Must(t, fillerLen >= 0, "the fixture's prefix and boundary word together exceed MaxIndexedChars")
 		body := prefix + filler[:fillerLen] + " " + boundary + " " + late + "\n"
-		if len(body) <= markdown.MaxIndexedChars {
-			t.Fatalf("the fixture is %d characters, which does not reach the bound", len(body))
-		}
+		assert.Must(t, len(body) > markdown.MaxIndexedChars, "the fixture is %d characters, which does not reach the bound", len(body))
 		if _, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "lore/atlas", Content: body, ExpectedVersion: ptrInt32(0),
 		}); err != nil {
@@ -522,36 +439,20 @@ func TestSearchArea(t *testing.T) {
 		}
 
 		found, err := svc.SearchDocuments(ctx, game, early, "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(found) != 1 {
-			t.Fatalf("%d hits for a word inside the bound, want 1", len(found))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(found) == 1, "%d hits for a word inside the bound, want 1", len(found))
 		edge, err := svc.SearchDocuments(ctx, game, boundary, "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(edge) != 1 {
-			t.Fatalf("%d hits for a word ending exactly at MaxIndexedChars-1, want 1: the constant "+
-				"and the migration's own left(…, N) claim more headroom than the database gives",
-				len(edge))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(edge) == 1, "%d hits for a word ending exactly at MaxIndexedChars-1, want 1: the constant "+
+			"and the migration's own left(…, N) claim more headroom than the database gives",
+			len(edge))
 		missed, err := svc.SearchDocuments(ctx, game, late, "", 0)
-		if err != nil {
-			t.Fatalf("SearchDocuments: %v", err)
-		}
-		if len(missed) != 0 {
-			t.Fatalf("%d hits for a word past MaxIndexedChars: the constant and the migration's "+
-				"own left(…, N) no longer agree, and the search tool's description says they do",
-				len(missed))
-		}
+		assert.Must(t, err == nil, "SearchDocuments: %v", err)
+		assert.Must(t, len(missed) == 0, "%d hits for a word past MaxIndexedChars: the constant and the migration's "+
+			"own left(…, N) no longer agree, and the search tool's description says they do",
+			len(missed))
 		doc, err := svc.Read(ctx, game, "lore/atlas")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if !strings.Contains(doc.BodyMd, late) {
-			t.Fatal("the tail past the index bound must be stored and re-read intact")
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, strings.Contains(doc.BodyMd, late), "the tail past the index bound must be stored and re-read intact")
 	})
 }

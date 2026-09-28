@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -66,17 +67,11 @@ func newAssetFixture(t *testing.T) assetFixture {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create the second game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create the second game: %v", err)
 	return assetFixture{
 		srv: srv, ids: ids, proj: projSvc,
 		game: game.ID, gameSlug: game.Slug, other: other.ID, otherSlug: other.Slug,
@@ -110,9 +105,7 @@ func (f assetFixture) upload(t *testing.T, gameSlug, filename, contentType strin
 	t.Helper()
 	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(gameSlug, filename),
 		contentType, raw)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("upload %s = %d: %s", filename, rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "upload %s = %d: %s", filename, rec.Code, rec.Body.String())
 	var out web.ViewAssetOutput
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode upload answer: %v", err)
@@ -160,17 +153,11 @@ func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 		{"map.png", testJPEG(t, 48, 21), "image/jpeg"},
 	} {
 		asset := f.upload(t, f.gameSlug, tc.filename, "application/octet-stream", tc.raw)
-		if asset.Mime != tc.wantMime {
-			t.Fatalf("%s stored as %q, want %q", tc.filename, asset.Mime, tc.wantMime)
-		}
-		if asset.URL == "" {
-			t.Fatalf("%s came back with no url to fetch it from", tc.filename)
-		}
+		assert.Must(t, asset.Mime == tc.wantMime, "%s stored as %q, want %q", tc.filename, asset.Mime, tc.wantMime)
+		assert.Must(t, asset.URL != "", "%s came back with no url to fetch it from", tc.filename)
 
 		rec := f.send(t, f.cookie, http.MethodGet, asset.URL, "", nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("serve %s = %d: %s", tc.filename, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "serve %s = %d: %s", tc.filename, rec.Code, rec.Body.String())
 		if got := rec.Header().Get("Content-Type"); got != tc.wantMime {
 			t.Errorf("Content-Type = %q, want %q: the served type is the stored one, "+
 				"which is the one a decoder agreed with", got, tc.wantMime)
@@ -185,10 +172,8 @@ func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 			t.Errorf("Cache-Control = %q, want a private immutable cache: an asset's "+
 				"bytes never change, and they are a game's own content", got)
 		}
-		if !bytes.Equal(rec.Body.Bytes(), tc.raw) {
-			t.Errorf("%s came back as %d bytes, want the %d that were uploaded",
-				tc.filename, rec.Body.Len(), len(tc.raw))
-		}
+		assert.Should(t, bytes.Equal(rec.Body.Bytes(), tc.raw), "%s came back as %d bytes, want the %d that were uploaded",
+			tc.filename, rec.Body.Len(), len(tc.raw))
 		// The rest of the policy every response carries is not lost on
 		// the one route that writes bytes rather than JSON.
 		if got := rec.Header().Get("Content-Security-Policy"); got == "" {
@@ -211,25 +196,19 @@ func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.gameSlug, "world-map.png"),
 		"image/png", svg)
 	assertError(t, rec, http.StatusBadRequest, "invalid_input", "/bytes")
-	if !strings.Contains(rec.Body.String(), "SVG") {
-		t.Errorf("the refusal said %q, want it to name the format a designer actually "+
-			"tried to upload", rec.Body.String())
-	}
+	assert.Should(t, strings.Contains(rec.Body.String(), "SVG"), "the refusal said %q, want it to name the format a designer actually "+
+		"tried to upload", rec.Body.String())
 	// Nothing was stored, so a second request cannot serve it.
 	rec = f.send(t, f.cookie, http.MethodGet,
 		"/api/games/"+f.gameSlug+"/view-assets", "", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "list = %d: %s", rec.Code, rec.Body.String())
 	var listing struct {
 		Assets []web.ViewAssetOutput `json:"assets"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
 		t.Fatalf("decode listing: %v", err)
 	}
-	if len(listing.Assets) != 0 {
-		t.Fatalf("a refused upload left %d assets behind", len(listing.Assets))
-	}
+	assert.Must(t, len(listing.Assets) == 0, "a refused upload left %d assets behind", len(listing.Assets))
 }
 
 // TestAnOversizeUploadIsRefusedOverTheWire asserts that the domain's
@@ -254,9 +233,7 @@ func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 	// The advice, not merely the status: a designer whose world map is
 	// too big needs to be told what to do about it, and this is the
 	// sentence a transport-level limiter would have replaced.
-	if !strings.Contains(rec.Body.String(), "scale the image down") {
-		t.Fatalf("the refusal was %q, want the domain's own advice", rec.Body.String())
-	}
+	assert.Must(t, strings.Contains(rec.Body.String(), "scale the image down"), "the refusal was %q, want the domain's own advice", rec.Body.String())
 	// The control, and it is not a formality: a transport bound set one
 	// byte too tight would refuse every legitimate image and this test
 	// would still pass without it.
@@ -306,9 +283,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
 		t.Fatalf("decode listing: %v", err)
 	}
-	if len(listing.Assets) != 0 {
-		t.Fatalf("azeroth listed the other game's assets: %v", listing.Assets)
-	}
+	assert.Must(t, len(listing.Assets) == 0, "azeroth listed the other game's assets: %v", listing.Assets)
 }
 
 // TestAViewerMaySeeABackgroundAndMayNotUploadOne is the read/write split
@@ -325,9 +300,7 @@ func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -371,9 +344,7 @@ func TestTheAssetRoutesAreVisibleToTheConventionTests(t *testing.T) {
 		writes[pattern] = true
 	}
 	for _, pattern := range want {
-		if !content[pattern] {
-			t.Errorf("%s is not registered as a content route", pattern)
-		}
+		assert.Should(t, content[pattern], "%s is not registered as a content route", pattern)
 		isWrite := !strings.HasPrefix(pattern, http.MethodGet)
 		if writes[pattern] != isWrite {
 			t.Errorf("%s: registered as a write = %v, want %v", pattern,
@@ -400,10 +371,8 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	bare.ServeHTTP(rec, req)
 	assertError(t, rec, http.StatusNotFound, "not_found", "")
-	if !strings.Contains(rec.Body.String(), "no views") {
-		t.Errorf("body = %q, want it to say the instance serves no views",
-			rec.Body.String())
-	}
+	assert.Should(t, strings.Contains(rec.Body.String(), "no views"), "body = %q, want it to say the instance serves no views",
+		rec.Body.String())
 }
 
 // TestTheAssetListingPagesOverTheWire is the transport half of the
@@ -427,9 +396,7 @@ func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 		t.Helper()
 		rec := f.send(t, f.cookie, http.MethodGet,
 			"/api/games/"+f.gameSlug+"/view-assets"+query, "", nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("list%s = %d: %s", query, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "list%s = %d: %s", query, rec.Code, rec.Body.String())
 		var listing struct {
 			Assets     []web.ViewAssetOutput `json:"assets"`
 			NextCursor string                `json:"next_cursor"`
@@ -446,13 +413,9 @@ func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 	var walked []string
 	query := "?limit=2"
 	for pages := 0; ; pages++ {
-		if pages > 4 {
-			t.Fatal("the listing did not terminate: the cursor is not advancing")
-		}
+		assert.Must(t, pages <= 4, "the listing did not terminate: the cursor is not advancing")
 		ids, next := list(query)
-		if len(ids) > 2 {
-			t.Fatalf("page %d carried %d assets, want the limit of 2 honoured", pages, len(ids))
-		}
+		assert.Must(t, len(ids) <= 2, "page %d carried %d assets, want the limit of 2 honoured", pages, len(ids))
 		walked = append(walked, ids...)
 		if next == "" {
 			break
@@ -460,12 +423,8 @@ func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 		query = "?limit=2&cursor=" + url.QueryEscape(next)
 	}
 	whole, next := list("")
-	if next != "" {
-		t.Fatalf("five assets under the default page size returned a cursor %q", next)
-	}
-	if len(walked) != len(whole) {
-		t.Fatalf("the paged walk saw %d assets, the unpaged listing %d", len(walked), len(whole))
-	}
+	assert.Must(t, next == "", "five assets under the default page size returned a cursor %q", next)
+	assert.Must(t, len(walked) == len(whole), "the paged walk saw %d assets, the unpaged listing %d", len(walked), len(whole))
 	for i := range whole {
 		if walked[i] != whole[i] {
 			t.Fatalf("asset %d: paged walk saw %s, unpaged listing %s", i, walked[i], whole[i])

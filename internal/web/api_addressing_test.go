@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -30,34 +31,22 @@ func TestAGameIsAddressedByItsSlugAndNotByItsID(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	rec := sessionGet(t, srv, cookie, "/api/games/"+game.Slug+"/members")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("the slug address = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "the slug address = %d: %s", rec.Code, rec.Body.String())
 
 	// The id is not an address, and the refusal says so rather than
 	// leaving a caller holding the right game and the wrong name for it
 	// to conclude the game does not exist.
 	rec = sessionGet(t, srv, cookie, "/api/games/"+game.ID.String()+"/members")
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("the id address = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "the id address = %d, want 404: %s", rec.Code, rec.Body.String())
 	body := rec.Body.String()
-	if !strings.Contains(body, game.ID.String()) {
-		t.Fatalf("the refusal does not say what was tried: %s", body)
-	}
-	if !strings.Contains(body, "addressed by its slug") || !strings.Contains(body, "not by its id") {
-		t.Fatalf("the refusal does not say the identifier is the wrong kind: %s", body)
-	}
+	assert.Must(t, strings.Contains(body, game.ID.String()), "the refusal does not say what was tried: %s", body)
+	assert.Must(t, strings.Contains(body, "addressed by its slug") && strings.Contains(body, "not by its id"), "the refusal does not say the identifier is the wrong kind: %s", body)
 }
 
 // TestTheSlugAddressFoldsCase. projects_slug_key is UNIQUE (lower(slug))
@@ -72,9 +61,7 @@ func TestTheSlugAddressFoldsCase(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -82,9 +69,7 @@ func TestTheSlugAddressFoldsCase(t *testing.T) {
 
 	for _, ref := range []string{"azeroth", "Azeroth", "AZEROTH"} {
 		rec := sessionGet(t, srv, cookie, "/api/games/"+ref+"/members")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%q = %d: %s", ref, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "%q = %d: %s", ref, rec.Code, rec.Body.String())
 	}
 }
 
@@ -106,9 +91,7 @@ func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -122,16 +105,12 @@ func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
 	answers := map[string]string{}
 	for _, ref := range []string{"azeroth", "there-is-no-such-game"} {
 		rec := sessionGet(t, srv, cookie, "/api/games/"+ref+"/members")
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%q = %d, want 404: %s", ref, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusNotFound, "%q = %d, want 404: %s", ref, rec.Code, rec.Body.String())
 		var payload struct{ Error, Message string }
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("decode %q: %v", ref, err)
 		}
-		if payload.Error != "not_found" {
-			t.Fatalf("%q error = %q, want not_found", ref, payload.Error)
-		}
+		assert.Must(t, payload.Error == "not_found", "%q error = %q, want not_found", ref, payload.Error)
 		// The message names the caller's own input and nothing else, so
 		// what is compared is the sentence with that input removed.
 		answers[ref] = strings.Replace(payload.Message, ref, "<ref>", 1)
@@ -159,21 +138,15 @@ func TestAnAgentReachesRESTWithNothingButItsTokenAndItsGamesSlug(t *testing.T) {
 	ctx := context.Background()
 
 	whoami, err := web.MCPWhoami(ctx, f.deps, f.caller)
-	if err != nil {
-		t.Fatalf("whoami: %v", err)
-	}
-	if whoami.ProjectSlug == "" {
-		t.Fatal("whoami carries no project_slug, and the slug is the address")
-	}
+	assert.Must(t, err == nil, "whoami: %v", err)
+	assert.Must(t, whoami.ProjectSlug != "", "whoami carries no project_slug, and the slug is the address")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+whoami.ProjectSlug+"/types", nil)
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	rec := httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("an agent addressing its own game by the slug whoami gave it = %d: %s",
-			rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "an agent addressing its own game by the slug whoami gave it = %d: %s",
+		rec.Code, rec.Body.String())
 }
 
 // TestATokenNamingAnotherGamesSlugIsToldWhichGameItIsBoundTo. A token
@@ -195,17 +168,11 @@ func TestATokenNamingAnotherGamesSlugIsToldWhichGameItIsBoundTo(t *testing.T) {
 		// A scope violation for both, and not a not_found for the second:
 		// a token caller resolves nothing, so it can learn nothing about
 		// what exists, and both refusals are about its own binding.
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("%q = %d, want 403: %s", ref, rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusForbidden, "%q = %d, want 403: %s", ref, rec.Code, rec.Body.String())
 		body := rec.Body.String()
-		if !strings.Contains(body, "scope_violation") {
-			t.Fatalf("%q answered %s, want scope_violation", ref, body)
-		}
-		if !strings.Contains(body, f.gameSlug) || !strings.Contains(body, ref) {
-			t.Fatalf("%q answered %s, want it to name both the binding and what was asked for",
-				ref, body)
-		}
+		assert.Must(t, strings.Contains(body, "scope_violation"), "%q answered %s, want scope_violation", ref, body)
+		assert.Must(t, strings.Contains(body, f.gameSlug) && strings.Contains(body, ref), "%q answered %s, want it to name both the binding and what was asked for",
+			ref, body)
 	}
 }
 
@@ -230,17 +197,13 @@ func TestAGameCreatedByNameIsImmediatelyReachableByThatName(t *testing.T) {
 	create.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, create)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated, "create = %d: %s", rec.Code, rec.Body.String())
 
 	mint := jsonRequest(http.MethodPost, "/api/games/le-mans/tokens", `{"label":"agent"}`)
 	mint.AddCookie(cookie)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, mint)
-	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
-		t.Fatalf("minting a token at the game's own name = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusCreated || rec.Code == http.StatusOK, "minting a token at the game's own name = %d: %s", rec.Code, rec.Body.String())
 }
 
 // sessionGet is a GET as a logged-in designer. Every addressing

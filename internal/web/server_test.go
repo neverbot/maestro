@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -33,9 +34,7 @@ func TestHealthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if got := rec.Body.String(); got != "ok" {
 		t.Fatalf("body = %q, want %q", got, "ok")
 	}
@@ -55,9 +54,7 @@ func TestVersionRequiresAuthentication(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 func TestNotFound(t *testing.T) {
@@ -67,9 +64,7 @@ func TestNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
 }
 
 func TestHealthzMethodNotAllowed(t *testing.T) {
@@ -79,9 +74,7 @@ func TestHealthzMethodNotAllowed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want 405", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusMethodNotAllowed, "status = %d, want 405", rec.Code)
 }
 
 // TestNewServerPanicsWithoutIdentity pins the construction guard directly:
@@ -91,9 +84,7 @@ func TestHealthzMethodNotAllowed(t *testing.T) {
 func TestNewServerPanicsWithoutIdentity(t *testing.T) {
 	t.Parallel()
 	defer func() {
-		if recover() == nil {
-			t.Fatal("NewServer did not panic with a nil Identity service")
-		}
+		assert.Must(t, recover() != nil, "NewServer did not panic with a nil Identity service")
 	}()
 	NewServer(Options{Projects: projects.New(nil)})
 }
@@ -101,9 +92,7 @@ func TestNewServerPanicsWithoutIdentity(t *testing.T) {
 func TestNewServerPanicsWithoutProjects(t *testing.T) {
 	t.Parallel()
 	defer func() {
-		if recover() == nil {
-			t.Fatal("NewServer did not panic with a nil Projects service")
-		}
+		assert.Must(t, recover() != nil, "NewServer did not panic with a nil Projects service")
 	}()
 	NewServer(Options{Identity: identity.New(nil, config.Config{})})
 }
@@ -122,13 +111,9 @@ func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
 	t.Parallel()
 	s := NewServer(stubOptions("test"))
 
-	if len(s.projectScopedPatterns) == 0 {
-		t.Fatal("no project-scoped patterns were recorded — this test would pass vacuously")
-	}
+	assert.Must(t, len(s.projectScopedPatterns) != 0, "no project-scoped patterns were recorded — this test would pass vacuously")
 	for _, pattern := range s.registeredPatterns {
-		if strings.Contains(pattern, "{game}") && !s.projectScopedPatterns[pattern] {
-			t.Errorf("pattern %q contains {game} but was not registered through registerProjectRoute", pattern)
-		}
+		assert.Should(t, !strings.Contains(pattern, "{game}") || s.projectScopedPatterns[pattern], "pattern %q contains {game} but was not registered through registerProjectRoute", pattern)
 	}
 }
 
@@ -166,9 +151,7 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 	for _, pattern := range s.contentPatterns {
 		content[pattern] = true
 	}
-	if len(content) == 0 {
-		t.Fatal("no content patterns were recorded — this test would pass vacuously")
-	}
+	assert.Must(t, len(content) != 0, "no content patterns were recorded — this test would pass vacuously")
 
 	notContent := map[string]bool{
 		"members": true, "tokens": true, "invites": true, "events": true,
@@ -188,14 +171,10 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 			continue
 		}
 		checked++
-		if !content[pattern] {
-			t.Errorf("pattern %q sits under /api/games/{game}/ and names none of this instance's standing sub-resources, "+
-				"so it is game content and must be registered through registerContentRoute", pattern)
-		}
+		assert.Should(t, content[pattern], "pattern %q sits under /api/games/{game}/ and names none of this instance's standing sub-resources, "+
+			"so it is game content and must be registered through registerContentRoute", pattern)
 	}
-	if checked == 0 {
-		t.Fatal("matched no game-content pattern — every route under /api/games/{game}/ was read as a standing sub-resource")
-	}
+	assert.Must(t, checked != 0, "matched no game-content pattern — every route under /api/games/{game}/ was read as a standing sub-resource")
 }
 
 // TestOnlyRouteTouchesTheMux closes the last way a route can reach this
@@ -220,9 +199,7 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 func TestOnlyRouteTouchesTheMux(t *testing.T) {
 	t.Parallel()
 	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package directory: %v", err)
-	}
+	assert.Must(t, err == nil, "read package directory: %v", err)
 	found := 0
 	for _, entry := range entries {
 		name := entry.Name()
@@ -230,26 +207,20 @@ func TestOnlyRouteTouchesTheMux(t *testing.T) {
 			continue
 		}
 		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", name, err)
 		for i, line := range strings.Split(string(source), "\n") {
 			code, _, _ := strings.Cut(line, "//")
 			if !strings.Contains(code, "s.mux.Handle") {
 				continue
 			}
 			found++
-			if name != "server.go" || !strings.Contains(code, "s.mux.Handle(pattern, h)") {
-				t.Errorf("%s:%d registers on the mux directly: %s\n"+
-					"every route goes through route(), which is what records it for the two convention tests above; "+
-					"a route registered here is invisible to both", name, i+1, strings.TrimSpace(line))
-			}
+			assert.Should(t, name == "server.go" && strings.Contains(code, "s.mux.Handle(pattern, h)"), "%s:%d registers on the mux directly: %s\n"+
+				"every route goes through route(), which is what records it for the two convention tests above; "+
+				"a route registered here is invisible to both", name, i+1, strings.TrimSpace(line))
 		}
 	}
-	if found != 1 {
-		t.Errorf("found %d direct mux registrations, want exactly the one inside route() — "+
-			"if route() was renamed or restructured, this test has to be taught the new shape", found)
-	}
+	assert.Should(t, found == 1, "found %d direct mux registrations, want exactly the one inside route() — "+
+		"if route() was renamed or restructured, this test has to be taught the new shape", found)
 }
 
 // TestStatusForCodeDefaultsToUnprocessable pins the choice

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -17,9 +18,7 @@ import (
 func (g game) check(t *testing.T, key string) RouteCheck {
 	t.Helper()
 	got, err := g.analysis.CheckRoute(context.Background(), g.projectID, key)
-	if err != nil {
-		t.Fatalf("check route %q: %v", key, err)
-	}
+	assert.Must(t, err == nil, "check route %q: %v", key, err)
 	return got
 }
 
@@ -61,37 +60,23 @@ func TestCheck(t *testing.T) {
 		})
 
 		got := g.check(t, "levelling")
-		if !got.Holds {
-			t.Fatalf("a route whose every step is reachable does not hold: %v", verdicts(got))
-		}
+		assert.Must(t, got.Holds, "a route whose every step is reachable does not hold: %v", verdicts(got))
 		for _, step := range got.Steps {
-			if step.Verdict != VerdictOK {
-				t.Errorf("step %d (%s) = %q, want ok", step.Position, step.Key, step.Verdict)
-			}
+			assert.Should(t, step.Verdict == VerdictOK, "step %d (%s) = %q, want ok", step.Position, step.Key, step.Verdict)
 		}
-		if got.StepsChecked != len(chain) || got.StepsOK != len(chain) || got.StepsBroken != 0 {
-			t.Errorf("counts = checked %d / ok %d / broken %d, want %d / %d / 0",
-				got.StepsChecked, got.StepsOK, got.StepsBroken, len(chain), len(chain))
-		}
+		assert.Should(t, got.StepsChecked == len(chain) && got.StepsOK == len(chain) && got.StepsBroken == 0, "counts = checked %d / ok %d / broken %d, want %d / %d / 0",
+			got.StepsChecked, got.StepsOK, got.StepsBroken, len(chain), len(chain))
 		// The seed set as the engine understood it: `tutorial` is the one
 		// entity with no incoming gate, so include_ungated made it the start
 		// and the total is one. A run that started nowhere would report zero
 		// here and five `ok`s above.
-		if !got.Seeds.IncludeUngated || got.Seeds.Total != 1 {
-			t.Errorf("seeds = %+v, want include_ungated with exactly one entity", got.Seeds)
-		}
-		if got.EdgesWalked != len(chain)-1 {
-			t.Errorf("edges_walked = %d, want %d: a check that walked nothing answers ok too",
-				got.EdgesWalked, len(chain)-1)
-		}
+		assert.Should(t, got.Seeds.IncludeUngated && got.Seeds.Total == 1, "seeds = %+v, want include_ungated with exactly one entity", got.Seeds)
+		assert.Should(t, got.EdgesWalked == len(chain)-1, "edges_walked = %d, want %d: a check that walked nothing answers ok too",
+			got.EdgesWalked, len(chain)-1)
 		// One walk for a route that holds, which is the incremental claim
 		// check.go's header makes, asserted rather than believed.
-		if got.Walks != 1 {
-			t.Errorf("walks = %d, want 1: a route that holds resumes the closure never", got.Walks)
-		}
-		if len(got.SemanticsSource) == 0 {
-			t.Error("the verdict carries no semantics_source, so it does not say what reading it rests on")
-		}
+		assert.Should(t, got.Walks == 1, "walks = %d, want 1: a route that holds resumes the closure never", got.Walks)
+		assert.Should(t, len(got.SemanticsSource) != 0, "the verdict carries no semantics_source, so it does not say what reading it rests on")
 	})
 
 	// TestTheZeroVerdictIsNotOk pins that the verdict type has no meaningful
@@ -103,21 +88,15 @@ func TestCheck(t *testing.T) {
 	// can. A step left unfilled must not reach a caller as a proof.
 	t.Run("the zero verdict is not ok", func(t *testing.T) {
 		var zero Verdict
-		if zero == VerdictOK {
-			t.Fatal("the zero verdict is ok, so a step nothing filled in reads as proved")
-		}
+		assert.Must(t, zero != VerdictOK, "the zero verdict is ok, so a step nothing filled in reads as proved")
 		if _, err := json.Marshal(StepCheck{Position: 0, Key: "hogger"}); err == nil {
 			t.Fatal("a step with the zero verdict encoded without complaint")
 		}
 		// The control: a real verdict encodes, so this test cannot pass over
 		// an encoder that refuses everything.
 		raw, err := json.Marshal(StepCheck{Position: 0, Key: "hogger", Verdict: VerdictOK})
-		if err != nil {
-			t.Fatalf("a filled-in step did not encode: %v", err)
-		}
-		if !strings.Contains(string(raw), `"verdict":"ok"`) {
-			t.Fatalf("an ok step encoded as %s", raw)
-		}
+		assert.Must(t, err == nil, "a filled-in step did not encode: %v", err)
+		assert.Must(t, strings.Contains(string(raw), `"verdict":"ok"`), "an ok step encoded as %s", raw)
 		// Every verdict this package declares encodes, in both directions:
 		// a word added to the enum and not to Verdicts would be refused by
 		// its own encoder.
@@ -153,23 +132,13 @@ func TestCheck(t *testing.T) {
 			t.Fatalf("remove the step's entity: %v", err)
 		}
 		got := g.check(t, "levelling")
-		if got.Holds {
-			t.Fatal("a route whose second step's entity was deleted still holds")
-		}
-		if len(got.Steps) != 2 {
-			t.Fatalf("the route came back with %d steps, want 2: the step went with its entity",
-				len(got.Steps))
-		}
+		assert.Must(t, !got.Holds, "a route whose second step's entity was deleted still holds")
+		assert.Must(t, len(got.Steps) == 2, "the route came back with %d steps, want 2: the step went with its entity",
+			len(got.Steps))
 		step := got.Steps[1]
-		if step.Verdict != VerdictMissingEntity {
-			t.Errorf("verdict = %q, want missing_entity", step.Verdict)
-		}
-		if step.Position != 1 {
-			t.Errorf("position = %d, want 1", step.Position)
-		}
-		if step.EntityType != "quest" || step.Key != "hogger" {
-			t.Errorf("the tombstone reads %s/%s, want quest/hogger", step.EntityType, step.Key)
-		}
+		assert.Should(t, step.Verdict == VerdictMissingEntity, "verdict = %q, want missing_entity", step.Verdict)
+		assert.Should(t, step.Position == 1, "position = %d, want 1", step.Position)
+		assert.Should(t, step.EntityType == "quest" && step.Key == "hogger", "the tombstone reads %s/%s, want quest/hogger", step.EntityType, step.Key)
 	})
 
 	// TestAStepThatIsNotReachableYetIsUnmetPrerequisiteAndNamesItsBlockers.
@@ -182,9 +151,7 @@ func TestCheck(t *testing.T) {
 		g.upsert(t, blockedRoute(steps("tutorial", "hogger", "deadmines")))
 
 		got := g.check(t, "levelling")
-		if got.Holds {
-			t.Fatal("a route whose last step is gated by an unreachable quest still holds")
-		}
+		assert.Must(t, !got.Holds, "a route whose last step is gated by an unreachable quest still holds")
 		if verdict := got.Steps[0].Verdict; verdict != VerdictOK {
 			t.Errorf("step 0 = %q, want ok: the seed itself must hold", verdict)
 		}
@@ -193,15 +160,9 @@ func TestCheck(t *testing.T) {
 				"thing on step 2 and this control is what tells them apart", verdict)
 		}
 		last := got.Steps[2]
-		if last.Verdict != VerdictUnmetPrerequisite {
-			t.Fatalf("step 2 = %q, want unmet_prerequisite", last.Verdict)
-		}
-		if len(last.Blockers) != 1 || last.Blockers[0].Key != "defias" {
-			t.Errorf("blockers = %v, want the one gate nobody reached, `defias`", last.Blockers)
-		}
-		if got.StepsOK != 2 || got.StepsBroken != 1 {
-			t.Errorf("counts = ok %d / broken %d, want 2 / 1", got.StepsOK, got.StepsBroken)
-		}
+		assert.Must(t, last.Verdict == VerdictUnmetPrerequisite, "step 2 = %q, want unmet_prerequisite", last.Verdict)
+		assert.Should(t, len(last.Blockers) == 1 && last.Blockers[0].Key == "defias", "blockers = %v, want the one gate nobody reached, `defias`", last.Blockers)
+		assert.Should(t, got.StepsOK == 2 && got.StepsBroken == 1, "counts = ok %d / broken %d, want 2 / 1", got.StepsOK, got.StepsBroken)
 	})
 
 	// TestABrokenStepIsStillASeedForTheStepsAfterIt.
@@ -221,10 +182,8 @@ func TestCheck(t *testing.T) {
 		}
 		// The closure was resumed exactly once, for the one step it did not
 		// already reach. A step that came back ok costs no walk.
-		if got.Walks != 2 {
-			t.Errorf("walks = %d, want 2: one initial closure plus one resume for the one gap",
-				got.Walks)
-		}
+		assert.Should(t, got.Walks == 2, "walks = %d, want 2: one initial closure plus one resume for the one gap",
+			got.Walks)
 	})
 
 	// TestAStepThatViolatesAnOrderingRelationIsOutOfOrder, with the control
@@ -248,16 +207,10 @@ func TestCheck(t *testing.T) {
 			Steps: steps("epilogue", "prologue"),
 		})
 		got := g.check(t, "backwards")
-		if got.Holds {
-			t.Fatal("a route that walks an ordering relation backwards still holds")
-		}
+		assert.Must(t, !got.Holds, "a route that walks an ordering relation backwards still holds")
 		step := got.Steps[1]
-		if step.Verdict != VerdictOutOfOrder {
-			t.Fatalf("step 1 = %q, want out_of_order", step.Verdict)
-		}
-		if len(step.MustPrecede) != 1 || step.MustPrecede[0].Key != "epilogue" {
-			t.Errorf("must_precede = %v, want the step it should have come before", step.MustPrecede)
-		}
+		assert.Must(t, step.Verdict == VerdictOutOfOrder, "step 1 = %q, want out_of_order", step.Verdict)
+		assert.Should(t, len(step.MustPrecede) == 1 && step.MustPrecede[0].Key == "epilogue", "must_precede = %v, want the step it should have come before", step.MustPrecede)
 
 		// The control: the same game, the same edge, the two steps swapped.
 		g.upsert(t, RouteInput{
@@ -304,15 +257,11 @@ func TestCheck(t *testing.T) {
 				got.Steps[0].Verdict)
 		}
 		step := got.Steps[1]
-		if step.Verdict != VerdictOutOfOrder {
-			t.Fatalf("a step that is both unreachable and out of order = %q; Verdicts puts "+
-				"out_of_order first, because it is the fault in the artefact the caller owns",
-				step.Verdict)
-		}
-		if len(step.Blockers) != 0 {
-			t.Errorf("blockers = %v on an out_of_order step: the field belongs to "+
-				"unmet_prerequisite alone", step.Blockers)
-		}
+		assert.Must(t, step.Verdict == VerdictOutOfOrder, "a step that is both unreachable and out of order = %q; Verdicts puts "+
+			"out_of_order first, because it is the fault in the artefact the caller owns",
+			step.Verdict)
+		assert.Should(t, len(step.Blockers) == 0, "blockers = %v on an out_of_order step: the field belongs to "+
+			"unmet_prerequisite alone", step.Blockers)
 	})
 
 	// TestARouteWhoseTypeWasRenamedIsStillOkAndSaysTheKeyMoved is the other
@@ -344,9 +293,7 @@ func TestCheck(t *testing.T) {
 		}
 
 		current, err := g.meta.EntityTypeByKey(context.Background(), g.projectID, "quest")
-		if err != nil {
-			t.Fatalf("read the entity type back: %v", err)
-		}
+		assert.Must(t, err == nil, "read the entity type back: %v", err)
 		expected := current.Version
 		if _, err := g.meta.RenameEntityType(context.Background(), g.projectID, metamodel.RenameInput{
 			From: "quest", To: "mission", ExpectedVersion: &expected,
@@ -355,24 +302,16 @@ func TestCheck(t *testing.T) {
 		}
 
 		got := g.check(t, "levelling")
-		if !got.Holds {
-			t.Fatalf("a renamed type broke a healthy route: %v", verdicts(got))
-		}
+		assert.Must(t, got.Holds, "a renamed type broke a healthy route: %v", verdicts(got))
 		for _, step := range got.Steps {
-			if step.Verdict != VerdictOK {
-				t.Errorf("step %d = %q, want ok", step.Position, step.Verdict)
-			}
-			if step.EntityType != "quest" {
-				t.Errorf("step %d spells its type %q; a rename does not rewrite a stored step",
-					step.Position, step.EntityType)
-			}
+			assert.Should(t, step.Verdict == VerdictOK, "step %d = %q, want ok", step.Position, step.Verdict)
+			assert.Should(t, step.EntityType == "quest", "step %d spells its type %q; a rename does not rewrite a stored step",
+				step.Position, step.EntityType)
 			if step.TypeRenamed == nil {
 				t.Errorf("step %d says nothing about the key having moved", step.Position)
 				continue
 			}
-			if step.TypeRenamed.Was != "quest" || step.TypeRenamed.Now != "mission" {
-				t.Errorf("step %d reports %+v, want quest → mission", step.Position, step.TypeRenamed)
-			}
+			assert.Should(t, step.TypeRenamed.Was == "quest" && step.TypeRenamed.Now == "mission", "step %d reports %+v, want quest → mission", step.Position, step.TypeRenamed)
 		}
 	})
 
@@ -417,13 +356,9 @@ func TestCheck(t *testing.T) {
 			Steps: steps("keep"),
 		})
 		strict := g.check(t, "strict")
-		if strict.Holds {
-			t.Fatal("a route stored with gate `all` was checked under the caller's default `any`")
-		}
-		if strict.Gating != GatingAll {
-			t.Errorf("the answer reports gating %q, want %q: a verdict arrives with the "+
-				"reading it rests on", strict.Gating, GatingAll)
-		}
+		assert.Must(t, !strict.Holds, "a route stored with gate `all` was checked under the caller's default `any`")
+		assert.Should(t, strict.Gating == GatingAll, "the answer reports gating %q, want %q: a verdict arrives with the "+
+			"reading it rests on", strict.Gating, GatingAll)
 	})
 
 	// TestCheckingARouteBumpsNothingAndLeavesTheDesignVersionAlone.
@@ -449,9 +384,7 @@ func TestCheck(t *testing.T) {
 			t.Fatalf("design_version moved from %d to %d over a check: a check that invalidates "+
 				"its own verdict is a mechanism that can never report a fresh one", before, after)
 		}
-		if got.Status != RouteChecked {
-			t.Fatalf("status = %q immediately after a check, want %q", got.Status, RouteChecked)
-		}
+		assert.Must(t, got.Status == RouteChecked, "status = %q immediately after a check, want %q", got.Status, RouteChecked)
 		// The control: a write to a table the triggers *do* watch moves it,
 		// so this test cannot pass over a counter that never moves at all.
 		g.entity(t, "quest", "hogger")
@@ -500,17 +433,11 @@ func TestCheck(t *testing.T) {
 		t.Cleanup(func() { g.analysis.beforeWalk = nil })
 
 		got := g.check(t, "levelling")
-		if !landed {
-			t.Fatal("the mid-check write never ran, so this test asserted nothing")
-		}
-		if got.CheckedDesignVersion >= got.DesignVersion {
-			t.Fatalf("the verdict was stored against design version %d and the game is at %d: "+
-				"a write that landed mid-check was counted as a design this check had seen",
-				got.CheckedDesignVersion, got.DesignVersion)
-		}
-		if got.Status != RouteStale {
-			t.Errorf("status = %q, want %q", got.Status, RouteStale)
-		}
+		assert.Must(t, landed, "the mid-check write never ran, so this test asserted nothing")
+		assert.Must(t, got.CheckedDesignVersion < got.DesignVersion, "the verdict was stored against design version %d and the game is at %d: "+
+			"a write that landed mid-check was counted as a design this check had seen",
+			got.CheckedDesignVersion, got.DesignVersion)
+		assert.Should(t, got.Status == RouteStale, "status = %q, want %q", got.Status, RouteStale)
 		if reread := g.route_(t, "levelling"); reread.Status != RouteStale {
 			t.Errorf("the route reads back as %q, want %q", reread.Status, RouteStale)
 		}
@@ -552,18 +479,12 @@ func TestCheck(t *testing.T) {
 		got := g.check(t, "the-long-haul")
 		elapsed := time.Since(started)
 
-		if !got.Holds || got.StepsChecked != MaxRouteSteps {
-			t.Fatalf("a %d-step route of ungated entities did not hold: checked %d, broken %d",
-				MaxRouteSteps, got.StepsChecked, got.StepsBroken)
-		}
-		if got.Walks != 1 {
-			t.Errorf("walks = %d, want 1: %d steps that all hold must resume the closure never",
-				got.Walks, MaxRouteSteps)
-		}
-		if elapsed > HardStatementTimeout {
-			t.Errorf("the check took %s, past the %s ceiling one analysis is allowed",
-				elapsed, HardStatementTimeout)
-		}
+		assert.Must(t, got.Holds && got.StepsChecked == MaxRouteSteps, "a %d-step route of ungated entities did not hold: checked %d, broken %d",
+			MaxRouteSteps, got.StepsChecked, got.StepsBroken)
+		assert.Should(t, got.Walks == 1, "walks = %d, want 1: %d steps that all hold must resume the closure never",
+			got.Walks, MaxRouteSteps)
+		assert.Should(t, elapsed <= HardStatementTimeout, "the check took %s, past the %s ceiling one analysis is allowed",
+			elapsed, HardStatementTimeout)
 	})
 
 	// TestCheckingARouteInAGameThatDeclaredNothingRefusesRatherThanProvingIt.
@@ -583,9 +504,7 @@ func TestCheck(t *testing.T) {
 		})
 
 		_, err := g.analysis.CheckRoute(context.Background(), g.projectID, "levelling")
-		if !errors.Is(err, ErrSemanticsUndeclared) {
-			t.Fatalf("a check over an undeclared game answered %v, want semantics_undeclared", err)
-		}
+		assert.Must(t, errors.Is(err, ErrSemanticsUndeclared), "a check over an undeclared game answered %v, want semantics_undeclared", err)
 		// The control: declaring one trait makes the same route checkable,
 		// so this test cannot pass over a check that refuses everything.
 		g.declareRelationType(t, "mentions", "", []string{"unlocks"})
@@ -608,9 +527,7 @@ func TestCheck(t *testing.T) {
 		theirs := mine.sibling(t)
 		_, err := theirs.analysis.CheckRoute(
 			context.Background(), theirs.projectID, "levelling")
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("checking another game's route key answered %v, want not_found", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "checking another game's route key answered %v, want not_found", err)
 		// The control: the owning game still checks it.
 		if got := mine.check(t, "levelling"); !got.Holds {
 			t.Fatalf("the owning game can no longer check its own route: %v", verdicts(got))
@@ -629,26 +546,16 @@ func TestCheck(t *testing.T) {
 		got := g.check(t, "levelling")
 
 		route := g.route_(t, "levelling")
-		if len(route.LastCheck) == 0 {
-			t.Fatal("the route has no stored verdict after a check")
-		}
+		assert.Must(t, len(route.LastCheck) != 0, "the route has no stored verdict after a check")
 		var stored RouteVerdict
 		if err := json.Unmarshal(route.LastCheck, &stored); err != nil {
 			t.Fatalf("decode the stored verdict: %v", err)
 		}
-		if stored.Holds != got.Holds || stored.StepsChecked != got.StepsChecked ||
-			stored.StepsBroken != got.StepsBroken {
-			t.Fatalf("stored %+v does not match the answer %+v", stored, got.RouteVerdict)
-		}
-		if !sameVerdicts(verdictsOf(stored.Steps), verdicts(got)) {
-			t.Errorf("stored verdicts %v, answered %v",
-				verdictsOf(stored.Steps), verdicts(got))
-		}
-		if route.LastCheckedDesignVersion == nil ||
-			*route.LastCheckedDesignVersion != got.CheckedDesignVersion {
-			t.Errorf("the row records design version %v and the answer says %d",
-				route.LastCheckedDesignVersion, got.CheckedDesignVersion)
-		}
+		assert.Must(t, stored.Holds == got.Holds && stored.StepsChecked == got.StepsChecked && stored.StepsBroken == got.StepsBroken, "stored %+v does not match the answer %+v", stored, got.RouteVerdict)
+		assert.Should(t, sameVerdicts(verdictsOf(stored.Steps), verdicts(got)), "stored verdicts %v, answered %v",
+			verdictsOf(stored.Steps), verdicts(got))
+		assert.Should(t, route.LastCheckedDesignVersion != nil && *route.LastCheckedDesignVersion == got.CheckedDesignVersion, "the row records design version %v and the answer says %d",
+			route.LastCheckedDesignVersion, got.CheckedDesignVersion)
 	})
 
 	// TestCheckingARoutePublishesItsVerdictSummary, with the gating and the
@@ -673,35 +580,20 @@ func TestCheck(t *testing.T) {
 		defer hub.Unsubscribe(sub)
 
 		got, err := svc.CheckRoute(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("check: %v", err)
-		}
+		assert.Must(t, err == nil, "check: %v", err)
 		event := requireEvent(t, sub)
-		if event.Kind != eventRouteChecked {
-			t.Fatalf("kind = %q, want %q", event.Kind, eventRouteChecked)
-		}
-		if event.MinRole != string(routeEventMinRole) || event.HumanOnly != routeEventHumanOnly {
-			t.Errorf("gating = min_role %q / human_only %v, want %q / %v",
-				event.MinRole, event.HumanOnly, routeEventMinRole, routeEventHumanOnly)
-		}
+		assert.Must(t, event.Kind == eventRouteChecked, "kind = %q, want %q", event.Kind, eventRouteChecked)
+		assert.Should(t, event.MinRole == string(routeEventMinRole) && event.HumanOnly == routeEventHumanOnly, "gating = min_role %q / human_only %v, want %q / %v",
+			event.MinRole, event.HumanOnly, routeEventMinRole, routeEventHumanOnly)
 		payload, ok := event.Payload.(routeCheckedEvent)
-		if !ok {
-			t.Fatalf("payload = %#v, want a routeCheckedEvent", event.Payload)
-		}
-		if payload.Key != "levelling" || payload.Holds != got.Holds ||
-			payload.StepsChecked != got.StepsChecked || payload.StepsBroken != got.StepsBroken {
-			t.Errorf("payload = %+v, want the verdict summary of %+v", payload, got.RouteVerdict)
-		}
+		assert.Must(t, ok, "payload = %#v, want a routeCheckedEvent", event.Payload)
+		assert.Should(t, payload.Key == "levelling" && payload.Holds == got.Holds && payload.StepsChecked == got.StepsChecked && payload.StepsBroken == got.StepsBroken, "payload = %+v, want the verdict summary of %+v", payload, got.RouteVerdict)
 		// The shape assertion that matters: whatever a routeCheckedEvent
 		// grows, it must not grow the steps. A client that rendered them
 		// would eventually render the older of two checks.
 		raw, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatalf("encode the payload: %v", err)
-		}
-		if strings.Contains(string(raw), `"steps"`) {
-			t.Errorf("the payload carries a step list: %s", raw)
-		}
+		assert.Must(t, err == nil, "encode the payload: %v", err)
+		assert.Should(t, !strings.Contains(string(raw), `"steps"`), "the payload carries a step list: %s", raw)
 	})
 }
 
@@ -729,9 +621,7 @@ func blockedRoute(steps []RouteStepInput) RouteInput {
 func (g game) route_(t *testing.T, key string) Route {
 	t.Helper()
 	got, err := g.analysis.RouteByKey(context.Background(), g.projectID, key)
-	if err != nil {
-		t.Fatalf("read route %q: %v", key, err)
-	}
+	assert.Must(t, err == nil, "read route %q: %v", key, err)
 	return got
 }
 

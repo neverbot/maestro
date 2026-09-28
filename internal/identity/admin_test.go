@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -26,24 +27,16 @@ func TestSetAdminPromotesANonAdmin(t *testing.T) {
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "promote-me@example.test", DisplayName: "Promote Me", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if user.IsAdmin {
-		t.Fatal("a user created through CreateUser must start as non-admin")
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
+	assert.Must(t, !user.IsAdmin, "a user created through CreateUser must start as non-admin")
 
 	if err := svc.SetAdmin(ctx, user.ID, true); err != nil {
 		t.Fatalf("SetAdmin(true): %v", err)
 	}
 
 	got, err := svc.UserByID(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if !got.IsAdmin {
-		t.Fatal("user should be admin after SetAdmin(true)")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, got.IsAdmin, "user should be admin after SetAdmin(true)")
 }
 
 func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
@@ -55,18 +48,14 @@ func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
 	admin1, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "admin1@example.test", DisplayName: "Admin One", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser admin1: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser admin1: %v", err)
 	if err := svc.SetAdmin(ctx, admin1.ID, true); err != nil {
 		t.Fatalf("SetAdmin admin1: %v", err)
 	}
 	admin2, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "admin2@example.test", DisplayName: "Admin Two", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser admin2: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser admin2: %v", err)
 	if err := svc.SetAdmin(ctx, admin2.ID, true); err != nil {
 		t.Fatalf("SetAdmin admin2: %v", err)
 	}
@@ -77,12 +66,8 @@ func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
 	}
 
 	got, err := svc.UserByID(ctx, admin1.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if got.IsAdmin {
-		t.Fatal("admin1 should no longer be admin")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, !got.IsAdmin, "admin1 should no longer be admin")
 }
 
 // TestSetAdminRefusesToDemoteTheLastAdmin pins the invariant ErrLastAdmin
@@ -100,9 +85,7 @@ func TestSetAdminRefusesToDemoteTheLastAdmin(t *testing.T) {
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "only-admin@example.test", DisplayName: "Only Admin", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if err := svc.SetAdmin(ctx, user.ID, true); err != nil {
 		t.Fatalf("SetAdmin(true): %v", err)
 	}
@@ -112,12 +95,8 @@ func TestSetAdminRefusesToDemoteTheLastAdmin(t *testing.T) {
 	}
 
 	got, err := svc.UserByID(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if !got.IsAdmin {
-		t.Fatal("a rejected demotion must leave the admin flag untouched")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, got.IsAdmin, "a rejected demotion must leave the admin flag untouched")
 }
 
 // TestSetAdminDemotingANonAdminIsANoOp mirrors SetRole's own "the guard
@@ -133,9 +112,7 @@ func TestSetAdminDemotingANonAdminIsANoOp(t *testing.T) {
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "never-admin@example.test", DisplayName: "Never Admin", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	if err := svc.SetAdmin(ctx, user.ID, false); err != nil {
 		t.Fatalf("SetAdmin(false) on a non-admin must succeed as a no-op: %v", err)
@@ -191,9 +168,7 @@ func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 	firstAdmin, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "race-seed@example.test", DisplayName: "Race Seed", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser seed admin: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser seed admin: %v", err)
 	if err := svc.SetAdmin(ctx, firstAdmin.ID, true); err != nil {
 		t.Fatalf("SetAdmin seed admin: %v", err)
 	}
@@ -205,9 +180,7 @@ func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 			Email:       fmt.Sprintf("race-challenger-%d@example.test", round),
 			DisplayName: "Race Challenger", Password: "password12345",
 		})
-		if err != nil {
-			t.Fatalf("round %d: CreateUser challenger: %v", round, err)
-		}
+		assert.Must(t, err == nil, "round %d: CreateUser challenger: %v", round, err)
 		if err := svc.SetAdmin(ctx, challenger.ID, true); err != nil {
 			t.Fatalf("round %d: SetAdmin challenger: %v", round, err)
 		}
@@ -240,16 +213,12 @@ func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 		rows := 0
 		for _, id := range []uuid.UUID{survivor, challenger.ID} {
 			u, err := svc.UserByID(ctx, id)
-			if err != nil {
-				t.Fatalf("round %d: UserByID: %v", round, err)
-			}
+			assert.Must(t, err == nil, "round %d: UserByID: %v", round, err)
 			if u.IsAdmin {
 				rows++
 			}
 		}
-		if rows != 1 {
-			t.Fatalf("round %d: remaining admins among the two = %d, want exactly 1", round, rows)
-		}
+		assert.Must(t, rows == 1, "round %d: remaining admins among the two = %d, want exactly 1", round, rows)
 		survivor = nextSurvivor
 	}
 }
@@ -263,9 +232,7 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "byemail@example.test", DisplayName: "By Email", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	// Mixed case and surrounding whitespace, to pin the same
 	// normalization every other email-keyed lookup in this package
@@ -274,19 +241,13 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 		t.Fatalf("SetAdminByEmail(true): %v", err)
 	}
 	got, err := svc.UserByID(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if !got.IsAdmin {
-		t.Fatal("user should be admin after SetAdminByEmail(true)")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, got.IsAdmin, "user should be admin after SetAdminByEmail(true)")
 
 	second, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "second-admin@example.test", DisplayName: "Second", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser second: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser second: %v", err)
 	if err := svc.SetAdmin(ctx, second.ID, true); err != nil {
 		t.Fatalf("SetAdmin second: %v", err)
 	}
@@ -295,12 +256,8 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 		t.Fatalf("SetAdminByEmail(false): %v", err)
 	}
 	got, err = svc.UserByID(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if got.IsAdmin {
-		t.Fatal("user should no longer be admin after SetAdminByEmail(false)")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, !got.IsAdmin, "user should no longer be admin after SetAdminByEmail(false)")
 }
 
 func TestSetAdminByEmailUnknownEmailReturnsErrUserNotFound(t *testing.T) {
@@ -323,9 +280,7 @@ func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "only-by-email@example.test", DisplayName: "Only", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	if err := svc.SetAdmin(ctx, user.ID, true); err != nil {
 		t.Fatalf("SetAdmin(true): %v", err)
 	}
@@ -354,12 +309,8 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
-	if !admin.IsAdmin {
-		t.Fatal("bootstrap admin should be an admin immediately after bootstrapping")
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
+	assert.Must(t, admin.IsAdmin, "bootstrap admin should be an admin immediately after bootstrapping")
 
 	// A second admin exists so demoting the first is not itself refused
 	// by ErrLastAdmin — this test is about the boot-time recovery path,
@@ -367,9 +318,7 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "other@example.test", DisplayName: "Other", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser other: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser other: %v", err)
 	if err := svc.SetAdmin(ctx, other.ID, true); err != nil {
 		t.Fatalf("SetAdmin other: %v", err)
 	}
@@ -377,12 +326,8 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 		t.Fatalf("demote configured admin: %v", err)
 	}
 	demoted, err := svc.UserByID(ctx, admin.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if demoted.IsAdmin {
-		t.Fatal("precondition failed: configured admin should be demoted before the recovery boot")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, !demoted.IsAdmin, "precondition failed: configured admin should be demoted before the recovery boot")
 
 	// Simulate a restart: BootstrapFirstAdmin runs again against a
 	// non-empty instance whose configured admin has lost the flag.
@@ -391,12 +336,8 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	}
 
 	recovered, err := svc.UserByID(ctx, admin.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if !recovered.IsAdmin {
-		t.Fatal("BootstrapFirstAdmin should re-promote the configured admin email on a later boot")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, recovered.IsAdmin, "BootstrapFirstAdmin should re-promote the configured admin email on a later boot")
 	// The password must be untouched — re-promotion only ever sets the
 	// flag.
 	if _, err := svc.Authenticate(ctx, "admin@example.test", "password12345"); err != nil {
@@ -427,9 +368,7 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
 
 	// The admin rotates their own password away from the configured
 	// value — the exact scenario the plan's critical review verified
@@ -438,9 +377,7 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 		t.Fatalf("ChangeOwnPassword: %v", err)
 	}
 	token, _, err := svc.IssueSession(ctx, admin.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	// Simulate a restart with the same, now-stale, configuration, plus
 	// the FIRST_ADMIN_PASSWORD_RESET opt-in an operator sets for exactly
@@ -481,13 +418,9 @@ func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testin
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
 	token, _, err := svc.IssueSession(ctx, admin.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	// Restart with the exact same, already-correct configuration — and
 	// with the opt-in set, since the verify-then-reset check lives
@@ -552,12 +485,8 @@ func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *tes
 	}
 
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
-	if !admin.IsAdmin {
-		t.Fatal("configured admin should still be an admin")
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
+	assert.Must(t, admin.IsAdmin, "configured admin should still be an admin")
 }
 
 // TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn pins
@@ -580,16 +509,12 @@ func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testin
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
 	if err := svc.ChangeOwnPassword(ctx, admin.ID, "password12345", "a-rotated-password"); err != nil {
 		t.Fatalf("ChangeOwnPassword: %v", err)
 	}
 	token, _, err := svc.IssueSession(ctx, admin.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	// An ordinary restart: same configuration, no opt-in.
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
@@ -624,15 +549,11 @@ func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
 	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "other@example.test", DisplayName: "Other", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser other: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser other: %v", err)
 	if err := svc.SetAdmin(ctx, other.ID, true); err != nil {
 		t.Fatalf("SetAdmin other: %v", err)
 	}
@@ -645,12 +566,8 @@ func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
 	}
 
 	recovered, err := svc.UserByID(ctx, admin.ID)
-	if err != nil {
-		t.Fatalf("UserByID: %v", err)
-	}
-	if !recovered.IsAdmin {
-		t.Fatal("flag restoration must stay unconditional, opt-in or not")
-	}
+	assert.Must(t, err == nil, "UserByID: %v", err)
+	assert.Must(t, recovered.IsAdmin, "flag restoration must stay unconditional, opt-in or not")
 }
 
 // TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn pins the
@@ -704,12 +621,8 @@ func TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn(t *testing.T) {
 	shortCfg.FirstAdminPassword = "short"
 	shortCfg.FirstAdminPasswordReset = true
 	err := identity.New(pool, shortCfg).BootstrapFirstAdmin(ctx)
-	if err == nil {
-		t.Fatal("expected an error for a too-short FIRST_ADMIN_PASSWORD with the opt-in set")
-	}
-	if !strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD") {
-		t.Fatalf("error = %q, want it to mention FIRST_ADMIN_PASSWORD", err)
-	}
+	assert.Must(t, err != nil, "expected an error for a too-short FIRST_ADMIN_PASSWORD with the opt-in set")
+	assert.Must(t, strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD"), "error = %q, want it to mention FIRST_ADMIN_PASSWORD", err)
 }
 
 // TestBootstrapFirstAdminLogsTheRecoveryReset pins the audit trail. The
@@ -732,9 +645,7 @@ func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
 	if err := svc.ChangeOwnPassword(ctx, admin.ID, "password12345", "a-rotated-password"); err != nil {
 		t.Fatalf("ChangeOwnPassword: %v", err)
 	}
@@ -742,9 +653,7 @@ func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
 	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "other@example.test", DisplayName: "Other", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser other: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser other: %v", err)
 	if err := svc.SetAdmin(ctx, other.ID, true); err != nil {
 		t.Fatalf("SetAdmin other: %v", err)
 	}
@@ -771,12 +680,8 @@ func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
 		"sessions_revoked=true",
 		admin.ID.String(),
 	} {
-		if !strings.Contains(logged, want) {
-			t.Fatalf("recovery boot logged %q, want it to contain %q", logged, want)
-		}
+		assert.Must(t, strings.Contains(logged, want), "recovery boot logged %q, want it to contain %q", logged, want)
 	}
 	// The password itself must never reach a log line.
-	if strings.Contains(logged, "password12345") {
-		t.Fatalf("recovery boot logged the configured password: %q", logged)
-	}
+	assert.Must(t, !strings.Contains(logged, "password12345"), "recovery boot logged the configured password: %q", logged)
 }

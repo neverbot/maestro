@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/roles"
@@ -126,9 +127,7 @@ func (w proseWorld) rest(t *testing.T, method, suffix string, body any) *httptes
 	var reader *strings.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal body: %v", err)
 		reader = strings.NewReader(string(raw))
 	} else {
 		reader = strings.NewReader("")
@@ -154,9 +153,7 @@ func newProseWorld(t *testing.T) *proseWorld {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "lead@example.test", DisplayName: "Lead", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	// The designer is a *different* user with the editor role, not the
 	// owner: "a human writes through REST as a session caller with the
 	// editor role" is the case the spec's definition of done names, and
@@ -165,17 +162,11 @@ func newProseWorld(t *testing.T) *proseWorld {
 	designer, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "ana@example.test", DisplayName: "Ana", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser designer: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser designer: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create other game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create other game: %v", err)
 	if _, err := projSvc.SetRole(ctx, designer.ID, game.ID, string(roles.Editor)); err != nil {
 		t.Fatalf("SetRole editor: %v", err)
 	}
@@ -185,13 +176,9 @@ func newProseWorld(t *testing.T) *proseWorld {
 		secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 			ProjectID: project, UserID: owner.ID, Label: label,
 		})
-		if err != nil {
-			t.Fatalf("CreateAPIToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CreateAPIToken %s: %v", label, err)
 		caller, err := web.CallerForToken(ctx, ids, secret)
-		if err != nil {
-			t.Fatalf("CallerForToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CallerForToken %s: %v", label, err)
 		return caller, secret
 	}
 	agent, agentSecret := mint(game.ID, "lore agent")
@@ -227,9 +214,7 @@ func (w *proseWorld) seedEntities(t *testing.T) {
 		{Key: "faction", Label: "Faction", LabelPlural: "Factions"},
 	} {
 		out, err := web.MCPTypesUpsert(ctx, w.deps, w.agent, w.game, spec)
-		if err != nil {
-			t.Fatalf("declare %s: %v", spec.Key, err)
-		}
+		assert.Must(t, err == nil, "declare %s: %v", spec.Key, err)
 		w.typeID[spec.Key] = out.ID
 	}
 
@@ -253,15 +238,9 @@ func (w *proseWorld) seedEntities(t *testing.T) {
 		})
 	}
 	out, err := web.MCPEntitiesUpsert(ctx, w.deps, w.agent, w.game, web.EntitiesUpsertInput{Items: items})
-	if err != nil {
-		t.Fatalf("seed entities: %v", err)
-	}
-	if out.Count != len(items) {
-		t.Fatalf("seeded %d entities, want %d", out.Count, len(items))
-	}
-	if len(items) != 15 {
-		t.Fatalf("the fixture seeded %d entities; the shape this test is written against is 15", len(items))
-	}
+	assert.Must(t, err == nil, "seed entities: %v", err)
+	assert.Must(t, out.Count == len(items), "seeded %d entities, want %d", out.Count, len(items))
+	assert.Must(t, len(items) == 15, "the fixture seeded %d entities; the shape this test is written against is 15", len(items))
 }
 
 // write is docs.write as the given agent, failing on anything but a
@@ -270,18 +249,14 @@ func (w *proseWorld) seedEntities(t *testing.T) {
 func (w *proseWorld) write(t *testing.T, caller web.Caller, in web.DocsWriteInput) web.DocumentOutput {
 	t.Helper()
 	out, err := web.MCPDocsWrite(context.Background(), w.deps, caller, w.game, in)
-	if err != nil {
-		t.Fatalf("docs.write %s: %v", in.Path, err)
-	}
+	assert.Must(t, err == nil, "docs.write %s: %v", in.Path, err)
 	return out
 }
 
 func (w *proseWorld) read(t *testing.T, path string) web.DocumentOutput {
 	t.Helper()
 	out, err := web.MCPDocsRead(context.Background(), w.deps, w.agent, w.game, web.DocsReadInput{Path: path})
-	if err != nil {
-		t.Fatalf("docs.read %s: %v", path, err)
-	}
+	assert.Must(t, err == nil, "docs.read %s: %v", path, err)
 	return out
 }
 
@@ -289,18 +264,14 @@ func (w *proseWorld) history(t *testing.T, path string) web.DocsHistoryOutput {
 	t.Helper()
 	out, err := web.MCPDocsHistory(context.Background(), w.deps, w.agent, w.game,
 		web.DocsHistoryInput{Path: path, Limit: 50})
-	if err != nil {
-		t.Fatalf("docs.history %s: %v", path, err)
-	}
+	assert.Must(t, err == nil, "docs.history %s: %v", path, err)
 	return out
 }
 
 func (w *proseWorld) search(t *testing.T, in web.SearchInput) web.SearchOutput {
 	t.Helper()
 	out, err := web.MCPSearch(context.Background(), w.deps, w.agent, w.game, in)
-	if err != nil {
-		t.Fatalf("search %q: %v", in.Query, err)
-	}
+	assert.Must(t, err == nil, "search %q: %v", in.Query, err)
 	return out
 }
 
@@ -323,15 +294,9 @@ func TestDocumentsEndToEnd(t *testing.T) {
 			{EntityType: "quest", EntityKey: e2eLeadQuest, Role: "script"},
 		},
 	})
-	if first.Version != 1 {
-		t.Fatalf("the first write landed at version %d, want 1", first.Version)
-	}
-	if len(first.Links) != 1 || first.Links[0].EntityKey != e2eLeadQuest || first.Links[0].Role != "script" {
-		t.Fatalf("links = %+v, want the quest in the script role", first.Links)
-	}
-	if first.Title != "The Defias Brotherhood" {
-		t.Fatalf("title = %q, want the frontmatter's own", first.Title)
-	}
+	assert.Must(t, first.Version == 1, "the first write landed at version %d, want 1", first.Version)
+	assert.Must(t, len(first.Links) == 1 && first.Links[0].EntityKey == e2eLeadQuest && first.Links[0].Role == "script", "links = %+v, want the quest in the script role", first.Links)
+	assert.Must(t, first.Title == "The Defias Brotherhood", "title = %q, want the frontmatter's own", first.Title)
 
 	// --- Step 2: a second agent, still holding version 1, rewrites it
 	// after the first agent has already written version 2.
@@ -340,17 +305,13 @@ func TestDocumentsEndToEnd(t *testing.T) {
 		Path: e2eLeadScript, Content: e2eLeadV2,
 		Message: "act two", ExpectedVersion: int32Ptr(1),
 	})
-	if second.Version != 2 {
-		t.Fatalf("the second write landed at version %d, want 2", second.Version)
-	}
+	assert.Must(t, second.Version == 2, "the second write landed at version %d, want 2", second.Version)
 
 	_, err := web.MCPDocsWrite(ctx, w.deps, w.rival, w.game, web.DocsWriteInput{
 		Path: e2eLeadScript, Content: e2eLeadV1 + "\nStormwind answers.\n",
 		Message: "act three", ExpectedVersion: int32Ptr(1),
 	})
-	if err == nil {
-		t.Fatal("a write at a stale version succeeded; the compare-and-set did not happen")
-	}
+	assert.Must(t, err != nil, "a write at a stale version succeeded; the compare-and-set did not happen")
 	details := conflictDetails(t, err)
 	if got := details["current_version"]; got != int32(2) {
 		t.Fatalf("details.current_version = %#v, want 2", got)
@@ -371,9 +332,7 @@ func TestDocumentsEndToEnd(t *testing.T) {
 		Path: e2eLeadScript, Content: e2eLeadMerged,
 		Message: "act three, merged", ExpectedVersion: int32Ptr(2),
 	})
-	if merged.Version != 3 {
-		t.Fatalf("the merge landed at version %d, want 3", merged.Version)
-	}
+	assert.Must(t, merged.Version == 3, "the merge landed at version %d, want 3", merged.Version)
 	wantBody := strings.SplitN(e2eLeadMerged, "---\n", 3)[2]
 	if back := w.read(t, e2eLeadScript); back.Body != wantBody {
 		t.Fatalf("the merged body did not read back byte for byte:\n got %q\nwant %q", back.Body, wantBody)
@@ -388,12 +347,8 @@ func TestDocumentsEndToEnd(t *testing.T) {
 		Path: e2eLeadScript, Content: e2eLeadMerged + "\nThe city gates close.\n",
 		Message: "a closing line", ExpectedVersion: int32Ptr(3),
 	})
-	if edited.Version != 4 {
-		t.Fatalf("the edit landed at version %d, want 4", edited.Version)
-	}
-	if len(edited.Links) != 1 || edited.Links[0].EntityKey != e2eLeadQuest {
-		t.Fatalf("an edit with no links array changed the attachment: %+v", edited.Links)
-	}
+	assert.Must(t, edited.Version == 4, "the edit landed at version %d, want 4", edited.Version)
+	assert.Must(t, len(edited.Links) == 1 && edited.Links[0].EntityKey == e2eLeadQuest, "an edit with no links array changed the attachment: %+v", edited.Links)
 
 	// --- Step 5: a human writes through REST, so the document has a
 	// version by a user beside its versions by tokens.
@@ -404,38 +359,26 @@ func TestDocumentsEndToEnd(t *testing.T) {
 		"message":          "tightened the closing line",
 		"expected_version": 4,
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("the designer's write = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "the designer's write = %d: %s", rec.Code, rec.Body.String())
 	var humanWrite struct {
 		Version int32 `json:"version"`
 	}
 	decodeBody(t, rec, &humanWrite)
-	if humanWrite.Version != 5 {
-		t.Fatalf("the designer's write landed at version %d, want 5", humanWrite.Version)
-	}
+	assert.Must(t, humanWrite.Version == 5, "the designer's write landed at version %d, want 5", humanWrite.Version)
 
 	// --- Step 6: docs.history shows both kinds of author.
 
 	hist := w.history(t, e2eLeadScript)
-	if len(hist.Items) != 5 {
-		t.Fatalf("history has %d versions, want 5", len(hist.Items))
-	}
-	if hist.Items[0].Version != 5 || hist.Items[4].Version != 1 {
-		t.Fatalf("history is not newest first: %+v", hist.Items)
-	}
+	assert.Must(t, len(hist.Items) == 5, "history has %d versions, want 5", len(hist.Items))
+	assert.Must(t, hist.Items[0].Version == 5 && hist.Items[4].Version == 1, "history is not newest first: %+v", hist.Items)
 	if hist.Items[0].AuthorKind != "user" {
 		t.Fatalf("version 5's author_kind = %q, want user", hist.Items[0].AuthorKind)
 	}
 	if hist.Items[4].AuthorKind != "token" {
 		t.Fatalf("version 1's author_kind = %q, want token", hist.Items[4].AuthorKind)
 	}
-	if hist.Items[0].AuthorID == nil || hist.Items[4].AuthorID == nil {
-		t.Fatalf("a history row named an author kind and no author id: %+v", hist.Items)
-	}
-	if *hist.Items[0].AuthorID == *hist.Items[4].AuthorID {
-		t.Fatal("the human and the token report the same author id; the two columns are not distinguished")
-	}
+	assert.Must(t, hist.Items[0].AuthorID != nil && hist.Items[4].AuthorID != nil, "a history row named an author kind and no author id: %+v", hist.Items)
+	assert.Must(t, *hist.Items[0].AuthorID != *hist.Items[4].AuthorID, "the human and the token report the same author id; the two columns are not distinguished")
 	if hist.Items[0].Message != "tightened the closing line" {
 		t.Fatalf("version 5's message = %q", hist.Items[0].Message)
 	}
@@ -446,44 +389,25 @@ func TestDocumentsEndToEnd(t *testing.T) {
 	diff, err := web.MCPDocsDiff(ctx, w.deps, w.agent, w.game, web.DocsDiffInput{
 		Path: e2eLeadScript, FromVersion: 4, ToVersion: 5,
 	})
-	if err != nil {
-		t.Fatalf("docs.diff: %v", err)
-	}
-	if diff.Coarse {
-		t.Fatalf("a one-line change came back coarse: %s", diff.Unified)
-	}
-	if !strings.Contains(diff.Unified, "-The city gates close.") ||
-		!strings.Contains(diff.Unified, "+The city gates close behind him.") {
-		t.Fatalf("the diff does not name the line that changed:\n%s", diff.Unified)
-	}
-	if diff.FromDeleted || diff.ToDeleted {
-		t.Fatalf("a diff between two live versions claims a deletion: %+v", diff)
-	}
+	assert.Must(t, err == nil, "docs.diff: %v", err)
+	assert.Must(t, !diff.Coarse, "a one-line change came back coarse: %s", diff.Unified)
+	assert.Must(t, strings.Contains(diff.Unified, "-The city gates close.") && strings.Contains(diff.Unified, "+The city gates close behind him."), "the diff does not name the line that changed:\n%s", diff.Unified)
+	assert.Must(t, !diff.FromDeleted && !diff.ToDeleted, "a diff between two live versions claims a deletion: %+v", diff)
 
 	// --- Step 8: a revert writes forward.
 
 	v1, err := web.MCPDocsReadVersion(ctx, w.deps, w.agent, w.game,
 		web.DocsReadVersionInput{Path: e2eLeadScript, Version: 1})
-	if err != nil {
-		t.Fatalf("docs.read_version 1: %v", err)
-	}
+	assert.Must(t, err == nil, "docs.read_version 1: %v", err)
 	reverted, err := web.MCPDocsRevert(ctx, w.deps, w.agent, w.game, web.DocsRevertInput{
 		Path: e2eLeadScript, ToVersion: 1, ExpectedVersion: int32Ptr(5),
 	})
-	if err != nil {
-		t.Fatalf("docs.revert: %v", err)
-	}
-	if reverted.Version != 6 {
-		t.Fatalf("the revert landed at version %d, want 6 — a revert writes forward", reverted.Version)
-	}
-	if reverted.Body != v1.Body || reverted.Title != v1.Title || reverted.Summary != v1.Summary {
-		t.Fatalf("the revert did not restore version 1's stored fields:\n got %q / %q / %q\nwant %q / %q / %q",
-			reverted.Body, reverted.Title, reverted.Summary, v1.Body, v1.Title, v1.Summary)
-	}
+	assert.Must(t, err == nil, "docs.revert: %v", err)
+	assert.Must(t, reverted.Version == 6, "the revert landed at version %d, want 6 — a revert writes forward", reverted.Version)
+	assert.Must(t, reverted.Body == v1.Body && reverted.Title == v1.Title && reverted.Summary == v1.Summary, "the revert did not restore version 1's stored fields:\n got %q / %q / %q\nwant %q / %q / %q",
+		reverted.Body, reverted.Title, reverted.Summary, v1.Body, v1.Title, v1.Summary)
 	hist = w.history(t, e2eLeadScript)
-	if len(hist.Items) != 6 {
-		t.Fatalf("history has %d versions after the revert, want 6", len(hist.Items))
-	}
+	assert.Must(t, len(hist.Items) == 6, "history has %d versions after the revert, want 6", len(hist.Items))
 	for i, item := range hist.Items {
 		if want := int32(6 - i); item.Version != want {
 			t.Fatalf("history has a gap: item %d is version %d, want %d", i, item.Version, want)
@@ -523,10 +447,8 @@ func TestDocumentsEndToEnd(t *testing.T) {
 	if err := json.Unmarshal(final.Frontmatter, &front); err != nil {
 		t.Fatalf("decode frontmatter %s: %v", final.Frontmatter, err)
 	}
-	if front["era"] != "third" {
-		t.Fatalf("frontmatter = %s; the key Maestro does not know did not survive "+
-			"a conflict, a merge, an edit, a human's write and a revert", final.Frontmatter)
-	}
+	assert.Must(t, front["era"] == "third", "frontmatter = %s; the key Maestro does not know did not survive "+
+		"a conflict, a merge, an edit, a human's write and a revert", final.Frontmatter)
 }
 
 // seedTheRestOfTheProse writes the fifteen documents that are not the
@@ -544,15 +466,9 @@ func (w *proseWorld) seedTheRestOfTheProse(t *testing.T) {
 		Message:         "the bible",
 		ExpectedVersion: int32Ptr(0),
 	})
-	if len(bible.Links) != 0 {
-		t.Fatalf("the bible is attached to %+v; it is the zero-entity case", bible.Links)
-	}
-	if bible.Title != "The Shape of Azeroth" {
-		t.Fatalf("a document with no frontmatter took its title from %q", bible.Title)
-	}
-	if string(bible.Frontmatter) != "{}" {
-		t.Fatalf("frontmatter = %s, want an empty object for a document that declared none", bible.Frontmatter)
-	}
+	assert.Must(t, len(bible.Links) == 0, "the bible is attached to %+v; it is the zero-entity case", bible.Links)
+	assert.Must(t, bible.Title == "The Shape of Azeroth", "a document with no frontmatter took its title from %q", bible.Title)
+	assert.Must(t, string(bible.Frontmatter) == "{}", "frontmatter = %s, want an empty object for a document that declared none", bible.Frontmatter)
 
 	// The lore of the grudge: attached to two entities at once.
 	lore := w.write(t, w.agent, web.DocsWriteInput{
@@ -565,9 +481,7 @@ func (w *proseWorld) seedTheRestOfTheProse(t *testing.T) {
 			{EntityType: "zone", EntityKey: "stormwind-city", Role: "setting"},
 		},
 	})
-	if len(lore.Links) != 2 {
-		t.Fatalf("the lore is attached to %d entities, want 2", len(lore.Links))
-	}
+	assert.Must(t, len(lore.Links) == 2, "the lore is attached to %d entities, want 2", len(lore.Links))
 
 	// Eleven more scripts, one per remaining quest. Written in reverse
 	// key order so a listing that came back in insertion order rather
@@ -608,27 +522,17 @@ func (w *proseWorld) seedTheRestOfTheProse(t *testing.T) {
 	}
 	tomb, err := web.MCPDocsReadVersion(ctx, w.deps, w.agent, w.game,
 		web.DocsReadVersionInput{Path: "notes/scrapped.md", Version: 3})
-	if err != nil {
-		t.Fatalf("read the tombstone: %v", err)
-	}
-	if !tomb.Deleted {
-		t.Fatal("version 3 of a deleted document does not read as deleted; the tombstone is not a readable version")
-	}
+	assert.Must(t, err == nil, "read the tombstone: %v", err)
+	assert.Must(t, tomb.Deleted, "version 3 of a deleted document does not read as deleted; the tombstone is not a readable version")
 	resurrected := w.write(t, w.agent, web.DocsWriteInput{
 		Path: "notes/scrapped.md", Content: "# Scrapped\n\nBack, with gnolls.\n",
 		Message: "back", ExpectedVersion: int32Ptr(3),
 	})
-	if resurrected.Version != 4 {
-		t.Fatalf("the resurrection landed at version %d, want 4 — the numbering continues across a tombstone",
-			resurrected.Version)
-	}
+	assert.Must(t, resurrected.Version == 4, "the resurrection landed at version %d, want 4 — the numbering continues across a tombstone",
+		resurrected.Version)
 	scrappedHistory := w.history(t, "notes/scrapped.md")
-	if len(scrappedHistory.Items) != 4 {
-		t.Fatalf("the resurrected note has %d versions, want 4", len(scrappedHistory.Items))
-	}
-	if !scrappedHistory.Items[1].Deleted || scrappedHistory.Items[0].Deleted {
-		t.Fatalf("the tombstone is not where the history says it is: %+v", scrappedHistory.Items)
-	}
+	assert.Must(t, len(scrappedHistory.Items) == 4, "the resurrected note has %d versions, want 4", len(scrappedHistory.Items))
+	assert.Must(t, scrappedHistory.Items[1].Deleted && !scrappedHistory.Items[0].Deleted, "the tombstone is not where the history says it is: %+v", scrappedHistory.Items)
 	// A comparison that spans the deletion. The tombstone carries the
 	// body the document had when it went, so the unified diff is empty
 	// and the two flags are the only thing that says a deletion is what
@@ -638,27 +542,19 @@ func (w *proseWorld) seedTheRestOfTheProse(t *testing.T) {
 	acrossTomb, err := web.MCPDocsDiff(ctx, w.deps, w.agent, w.game, web.DocsDiffInput{
 		Path: "notes/scrapped.md", FromVersion: 2, ToVersion: 3,
 	})
-	if err != nil {
-		t.Fatalf("docs.diff across the tombstone: %v", err)
-	}
-	if acrossTomb.FromDeleted || !acrossTomb.ToDeleted {
-		t.Fatalf("docs.diff across a tombstone = (%v, %v), want (false, true)",
-			acrossTomb.FromDeleted, acrossTomb.ToDeleted)
-	}
+	assert.Must(t, err == nil, "docs.diff across the tombstone: %v", err)
+	assert.Must(t, !acrossTomb.FromDeleted && acrossTomb.ToDeleted, "docs.diff across a tombstone = (%v, %v), want (false, true)",
+		acrossTomb.FromDeleted, acrossTomb.ToDeleted)
 	rec := w.rest(t, http.MethodGet, docsPath("/docs/comparison", map[string]string{
 		"path": "notes/scrapped.md", "from_version": "2", "to_version": "3",
 	}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /docs/comparison across the tombstone = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET /docs/comparison across the tombstone = %d: %s", rec.Code, rec.Body.String())
 	var spanning struct {
 		FromDeleted bool `json:"from_deleted"`
 		ToDeleted   bool `json:"to_deleted"`
 	}
 	decodeBody(t, rec, &spanning)
-	if spanning.FromDeleted || !spanning.ToDeleted {
-		t.Fatalf("the comparison view across a tombstone = %+v, want to_deleted alone", spanning)
-	}
+	assert.Must(t, !spanning.FromDeleted && spanning.ToDeleted, "the comparison view across a tombstone = %+v, want to_deleted alone", spanning)
 
 	// The chronicle: long enough that a word past the search index bound
 	// is stored and readable and not findable, and long enough that a
@@ -674,12 +570,8 @@ func (w *proseWorld) seedTheRestOfTheProse(t *testing.T) {
 	coarse, err := web.MCPDocsDiff(ctx, w.deps, w.agent, w.game, web.DocsDiffInput{
 		Path: "lore/chronicle.md", FromVersion: 1, ToVersion: 2,
 	})
-	if err != nil {
-		t.Fatalf("docs.diff on the chronicle: %v", err)
-	}
-	if !coarse.Coarse {
-		t.Fatal("a body rewritten line by line past the diff bound did not come back coarse")
-	}
+	assert.Must(t, err == nil, "docs.diff on the chronicle: %v", err)
+	assert.Must(t, coarse.Coarse, "a body rewritten line by line past the diff bound did not come back coarse")
 }
 
 // e2eChronicle builds a body far past markdown.MaxIndexedChars: `early`
@@ -703,9 +595,7 @@ func (w *proseWorld) assertTheReadingViewRendersAndRefuses(t *testing.T) {
 	t.Helper()
 
 	rec := w.rest(t, http.MethodGet, docsPath("/docs/rendered", map[string]string{"path": e2eLeadScript}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /docs/rendered = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET /docs/rendered = %d: %s", rec.Code, rec.Body.String())
 	var rendered struct {
 		Title string `json:"title"`
 		HTML  string `json:"html"`
@@ -715,35 +605,21 @@ func (w *proseWorld) assertTheReadingViewRendersAndRefuses(t *testing.T) {
 		} `json:"links"`
 	}
 	decodeBody(t, rec, &rendered)
-	if !strings.Contains(rendered.HTML, "<h1") || !strings.Contains(rendered.HTML, e2eDialogueWord) {
-		t.Fatalf("the rendered view is not HTML carrying the dialogue: %q", rendered.HTML)
-	}
-	if rendered.Body != "" {
-		t.Fatalf("the rendered view also returned the raw body (%d bytes); that is the payload it exists not to send twice",
-			len(rendered.Body))
-	}
-	if len(rendered.Links) != 1 || rendered.Links[0].EntityKey != e2eLeadQuest {
-		t.Fatalf("the reading view does not name the entities: %+v", rendered.Links)
-	}
+	assert.Must(t, strings.Contains(rendered.HTML, "<h1") && strings.Contains(rendered.HTML, e2eDialogueWord), "the rendered view is not HTML carrying the dialogue: %q", rendered.HTML)
+	assert.Must(t, rendered.Body == "", "the rendered view also returned the raw body (%d bytes); that is the payload it exists not to send twice",
+		len(rendered.Body))
+	assert.Must(t, len(rendered.Links) == 1 && rendered.Links[0].EntityKey == e2eLeadQuest, "the reading view does not name the entities: %+v", rendered.Links)
 
 	rec = w.rest(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": e2eLeadScript}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /docs/one = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET /docs/one = %d: %s", rec.Code, rec.Body.String())
 	var raw struct {
 		Body string `json:"body"`
 		HTML string `json:"html"`
 	}
 	decodeBody(t, rec, &raw)
-	if raw.HTML != "" {
-		t.Fatalf("GET /docs/one returned HTML as well as markdown: %q", raw.HTML)
-	}
-	if !strings.Contains(raw.Body, "# Act one") {
-		t.Fatalf("GET /docs/one did not return the raw markdown: %q", raw.Body)
-	}
-	if raw.Body == rendered.HTML {
-		t.Fatal("the raw and the rendered views answered identically")
-	}
+	assert.Must(t, raw.HTML == "", "GET /docs/one returned HTML as well as markdown: %q", raw.HTML)
+	assert.Must(t, strings.Contains(raw.Body, "# Act one"), "GET /docs/one did not return the raw markdown: %q", raw.Body)
+	assert.Must(t, raw.Body != rendered.HTML, "the raw and the rendered views answered identically")
 	if got := w.read(t, e2eLeadScript).Body; got != raw.Body {
 		t.Fatalf("REST and MCP disagree about the same document's body:\n rest %q\n mcp  %q", raw.Body, got)
 	}
@@ -765,24 +641,16 @@ func (w *proseWorld) assertTheReadingViewRendersAndRefuses(t *testing.T) {
 	rec = w.rest(t, http.MethodGet, docsPath("/docs/comparison", map[string]string{
 		"path": e2eLeadScript, "from_version": "1", "to_version": "3",
 	}), nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /docs/comparison = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "GET /docs/comparison = %d: %s", rec.Code, rec.Body.String())
 	var comparison struct {
 		Unified string `json:"unified"`
 		Coarse  bool   `json:"coarse"`
 		HTML    string `json:"html"`
 	}
 	decodeBody(t, rec, &comparison)
-	if comparison.Coarse {
-		t.Fatalf("comparing two small versions came back coarse: %s", comparison.Unified)
-	}
-	if !strings.Contains(comparison.Unified, "+# Act three") {
-		t.Fatalf("the comparison does not name the added act:\n%s", comparison.Unified)
-	}
-	if !strings.Contains(comparison.HTML, "class=") {
-		t.Fatalf("the comparison's html is not classed lines: %q", comparison.HTML)
-	}
+	assert.Must(t, !comparison.Coarse, "comparing two small versions came back coarse: %s", comparison.Unified)
+	assert.Must(t, strings.Contains(comparison.Unified, "+# Act three"), "the comparison does not name the added act:\n%s", comparison.Unified)
+	assert.Must(t, strings.Contains(comparison.HTML, "class="), "the comparison's html is not classed lines: %q", comparison.HTML)
 }
 
 // assertSearchSpansBothIndexes is step 10.
@@ -793,40 +661,26 @@ func (w *proseWorld) assertSearchSpansBothIndexes(t *testing.T) {
 	// attached to, and no entity hit at all — entity search does not
 	// reach into attached prose, and that is a guarantee.
 	hits := w.search(t, web.SearchInput{Query: e2eDialogueWord, Limit: 20})
-	if len(hits.Items) == 0 {
-		t.Fatalf("searching a line of the dialogue found nothing")
-	}
+	assert.Must(t, len(hits.Items) != 0, "searching a line of the dialogue found nothing")
 	foundDoc := false
 	for _, hit := range hits.Items {
-		if hit.Kind == "entity" {
-			t.Fatalf("searching a word that lives only in prose produced an entity hit: %+v", hit.Entity)
-		}
-		if hit.Kind != "document" || hit.Document == nil {
-			t.Fatalf("a hit labelled %q carried no document: %+v", hit.Kind, hit)
-		}
+		assert.Must(t, hit.Kind != "entity", "searching a word that lives only in prose produced an entity hit: %+v", hit.Entity)
+		assert.Must(t, hit.Kind == "document" && hit.Document != nil, "a hit labelled %q carried no document: %+v", hit.Kind, hit)
 		if hit.Document.Path != e2eLeadScript {
 			continue
 		}
 		foundDoc = true
-		if len(hit.Document.LinkedTo) != 1 || hit.Document.LinkedTo[0].EntityKey != e2eLeadQuest {
-			t.Fatalf("the document hit does not name its quest: %+v", hit.Document.LinkedTo)
-		}
-		if hit.Document.Summary == "" {
-			t.Fatal("the document hit carries no summary; a search result a caller cannot read is a round trip")
-		}
+		assert.Must(t, len(hit.Document.LinkedTo) == 1 && hit.Document.LinkedTo[0].EntityKey == e2eLeadQuest, "the document hit does not name its quest: %+v", hit.Document.LinkedTo)
+		assert.Must(t, hit.Document.Summary != "", "the document hit carries no summary; a search result a caller cannot read is a round trip")
 	}
-	if !foundDoc {
-		t.Fatalf("the lead script was not among the hits for %q: %+v", e2eDialogueWord, hits.Items)
-	}
+	assert.Must(t, foundDoc, "the lead script was not among the hits for %q: %+v", e2eDialogueWord, hits.Items)
 
 	// The quest's name: an entity hit, and first. Both indexes carry
 	// "Defias" — the faction and the quest by name, the lore document by
 	// mention — so this is the cross-index ranking claim, not a
 	// single-index one.
 	named := w.search(t, web.SearchInput{Query: "Defias", Limit: 20})
-	if len(named.Items) < 2 {
-		t.Fatalf("searching the quest's name returned %d hits; the fixture has both kinds", len(named.Items))
-	}
+	assert.Must(t, len(named.Items) >= 2, "searching the quest's name returned %d hits; the fixture has both kinds", len(named.Items))
 	if named.Items[0].Kind != "entity" || !named.Items[0].NameMatch {
 		t.Fatalf("a name match did not come first: %+v", named.Items[0])
 	}
@@ -836,32 +690,22 @@ func (w *proseWorld) assertSearchSpansBothIndexes(t *testing.T) {
 			sawDocument = true
 		}
 	}
-	if !sawDocument {
-		t.Fatalf("searching %q returned no document hit at all: %+v", "Defias", named.Items)
-	}
+	assert.Must(t, sawDocument, "searching %q returned no document hit at all: %+v", "Defias", named.Items)
 
 	// A document by its title, which is the other half of the document
 	// index's own weighting.
 	byTitle := w.search(t, web.SearchInput{Query: "Shape", Kind: "document", Limit: 20})
-	if len(byTitle.Items) != 1 || byTitle.Items[0].Document.Path != "bible.md" {
-		t.Fatalf("searching a document's title found %+v", byTitle.Items)
-	}
-	if !byTitle.Items[0].NameMatch {
-		t.Fatal("a hit on a document's own title is not reported as a name match")
-	}
+	assert.Must(t, len(byTitle.Items) == 1 && byTitle.Items[0].Document.Path == "bible.md", "searching a document's title found %+v", byTitle.Items)
+	assert.Must(t, byTitle.Items[0].NameMatch, "a hit on a document's own title is not reported as a name match")
 
 	// The index bound, stated as a fact rather than as a comment: a word
 	// in the first line of the chronicle is findable, a word past
 	// markdown.MaxIndexedChars is stored, readable, and not.
-	if len(w.search(t, web.SearchInput{Query: "stormcrow", Limit: 5}).Items) == 0 {
-		t.Fatal("a word at the head of a long document is not findable")
-	}
+	assert.Must(t, len(w.search(t, web.SearchInput{Query: "stormcrow", Limit: 5}).Items) != 0, "a word at the head of a long document is not findable")
 	if hits := w.search(t, web.SearchInput{Query: "sternbound", Limit: 5}).Items; len(hits) != 0 {
 		t.Fatalf("a word past markdown.MaxIndexedChars was found: %+v", hits)
 	}
-	if !strings.Contains(w.read(t, "lore/chronicle.md").Body, "sternbound") {
-		t.Fatal("the word past the index bound is not in the stored body either; the fixture proves nothing")
-	}
+	assert.Must(t, strings.Contains(w.read(t, "lore/chronicle.md").Body, "sternbound"), "the word past the index bound is not in the stored body either; the fixture proves nothing")
 }
 
 // assertTheListingPagesAndFilters is step 11.
@@ -877,46 +721,30 @@ func (w *proseWorld) assertTheListingPagesAndFilters(t *testing.T) {
 	pages := 0
 	for {
 		page, err := web.MCPDocsList(ctx, w.deps, w.agent, w.game, web.DocsListInput{Limit: 5, Cursor: cursor})
-		if err != nil {
-			t.Fatalf("docs.list page %d: %v", pages, err)
-		}
+		assert.Must(t, err == nil, "docs.list page %d: %v", pages, err)
 		pages++
 		for _, item := range page.Items {
-			if seen[item.Path] {
-				t.Fatalf("%s came back on two pages", item.Path)
-			}
+			assert.Must(t, !(seen[item.Path]), "%s came back on two pages", item.Path)
 			seen[item.Path] = true
 		}
 		if page.NextCursor == nil {
 			break
 		}
-		if pages > 10 {
-			t.Fatal("the listing never reported an end")
-		}
+		assert.Must(t, pages <= 10, "the listing never reported an end")
 		cursor = *page.NextCursor
 	}
-	if pages < 2 {
-		t.Fatalf("the listing came back in %d page(s); a keyset cursor that never issues is not paging", pages)
-	}
+	assert.Must(t, pages >= 2, "the listing came back in %d page(s); a keyset cursor that never issues is not paging", pages)
 	// Sixteen live documents: the lead script, eleven more scripts, the
 	// bible, the lore, the chronicle and the resurrected note.
-	if len(seen) != 16 {
-		t.Fatalf("the listing returned %d documents, want 16: %v", len(seen), seen)
-	}
+	assert.Must(t, len(seen) == 16, "the listing returned %d documents, want 16: %v", len(seen), seen)
 
 	prefixed, err := web.MCPDocsList(ctx, w.deps, w.agent, w.game, web.DocsListInput{
 		PathPrefix: "scripts/", Limit: 50,
 	})
-	if err != nil {
-		t.Fatalf("docs.list by prefix: %v", err)
-	}
-	if len(prefixed.Items) != e2eScripts {
-		t.Fatalf("path_prefix scripts/ selected %d documents, want %d", len(prefixed.Items), e2eScripts)
-	}
+	assert.Must(t, err == nil, "docs.list by prefix: %v", err)
+	assert.Must(t, len(prefixed.Items) == e2eScripts, "path_prefix scripts/ selected %d documents, want %d", len(prefixed.Items), e2eScripts)
 	for i, item := range prefixed.Items {
-		if !strings.HasPrefix(item.Path, "scripts/") {
-			t.Fatalf("path_prefix let %q through", item.Path)
-		}
+		assert.Must(t, strings.HasPrefix(item.Path, "scripts/"), "path_prefix let %q through", item.Path)
 		if i > 0 && prefixed.Items[i-1].Path >= item.Path {
 			t.Fatalf("the listing is not in path order: %q then %q", prefixed.Items[i-1].Path, item.Path)
 		}
@@ -925,30 +753,18 @@ func (w *proseWorld) assertTheListingPagesAndFilters(t *testing.T) {
 	byEntity, err := web.MCPDocsList(ctx, w.deps, w.agent, w.game, web.DocsListInput{
 		EntityType: "quest", EntityKey: e2eLeadQuest, Limit: 50,
 	})
-	if err != nil {
-		t.Fatalf("docs.list by entity: %v", err)
-	}
-	if len(byEntity.Items) != 1 || byEntity.Items[0].Path != e2eLeadScript {
-		t.Fatalf("filtering by the quest returned %+v, want only its script", byEntity.Items)
-	}
+	assert.Must(t, err == nil, "docs.list by entity: %v", err)
+	assert.Must(t, len(byEntity.Items) == 1 && byEntity.Items[0].Path == e2eLeadScript, "filtering by the quest returned %+v, want only its script", byEntity.Items)
 
 	// The join answers from both sides, and the same link is on both.
 	fromDoc, err := web.MCPDocsLinksList(ctx, w.deps, w.agent, w.game,
 		web.DocsLinksListInput{Path: "lore/defias-and-stormwind.md"})
-	if err != nil {
-		t.Fatalf("docs.links.list by path: %v", err)
-	}
-	if len(fromDoc.Entities) != 2 || len(fromDoc.Documents) != 0 {
-		t.Fatalf("the document side answered %+v", fromDoc)
-	}
+	assert.Must(t, err == nil, "docs.links.list by path: %v", err)
+	assert.Must(t, len(fromDoc.Entities) == 2 && len(fromDoc.Documents) == 0, "the document side answered %+v", fromDoc)
 	fromEntity, err := web.MCPDocsLinksList(ctx, w.deps, w.agent, w.game,
 		web.DocsLinksListInput{EntityType: "faction", EntityKey: "defias-brotherhood"})
-	if err != nil {
-		t.Fatalf("docs.links.list by entity: %v", err)
-	}
-	if len(fromEntity.Documents) != 1 || fromEntity.Documents[0].Path != "lore/defias-and-stormwind.md" {
-		t.Fatalf("the entity side answered %+v", fromEntity.Documents)
-	}
+	assert.Must(t, err == nil, "docs.links.list by entity: %v", err)
+	assert.Must(t, len(fromEntity.Documents) == 1 && fromEntity.Documents[0].Path == "lore/defias-and-stormwind.md", "the entity side answered %+v", fromEntity.Documents)
 	if fromEntity.Documents[0].Role != "origin" {
 		t.Fatalf("the entity side lost the role: %+v", fromEntity.Documents[0])
 	}
@@ -971,9 +787,7 @@ func (w *proseWorld) assertTheListingPagesAndFilters(t *testing.T) {
 		Path: "notes/scrapped.md", Content: "# Scrapped\n\nAgain.\n",
 		Message: "again", ExpectedVersion: int32Ptr(5),
 	})
-	if len(back.Links) != 1 || back.Links[0].EntityKey != "elwynn-forest" {
-		t.Fatalf("the link did not survive a delete and a resurrection: %+v", back.Links)
-	}
+	assert.Must(t, len(back.Links) == 1 && back.Links[0].EntityKey == "elwynn-forest", "the link did not survive a delete and a resurrection: %+v", back.Links)
 }
 
 // assertAnotherGamesTokenIsRefusedEverywhere is step 12: a token for a
@@ -1079,20 +893,14 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 			continue
 		}
 		call, ok := calls[name]
-		if !ok {
-			t.Fatalf("%s is registered and this sweep does not drive it", name)
-		}
+		assert.Must(t, ok, "%s is registered and this sweep does not drive it", name)
 		swept++
 		if err := call(); !errors.Is(err, web.ErrScopeViolation) {
 			t.Fatalf("%s answered %v for another game's token, want a scope violation", name, err)
 		}
 	}
-	if swept != len(calls) {
-		t.Fatalf("swept %d tools, the table has %d entries", swept, len(calls))
-	}
-	if swept != 15 {
-		t.Fatalf("swept %d tools; the fourteen docs.* plus search is 15", swept)
-	}
+	assert.Must(t, swept == len(calls), "swept %d tools, the table has %d entries", swept, len(calls))
+	assert.Must(t, swept == 15, "swept %d tools; the fourteen docs.* plus search is 15", swept)
 
 	// The document is untouched by all of that: the sweep must not have
 	// been a sequence of refusals that nevertheless changed something.
@@ -1122,9 +930,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, w.token)
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("tools/list: %v", err)
-	}
+	assert.Must(t, err == nil, "tools/list: %v", err)
 	names := map[string]bool{}
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
@@ -1134,17 +940,13 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 		"docs.read_version", "docs.revert", "docs.diff",
 		"docs.links.list", "docs.links.add", "docs.links.remove", "search",
 	} {
-		if !names[want] {
-			t.Fatalf("tools/list does not carry %s: %v", want, names)
-		}
+		assert.Must(t, names[want], "tools/list does not carry %s: %v", want, names)
 	}
 
 	call := func(name string, args map[string]any) *mcp.CallToolResult {
 		t.Helper()
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
+		assert.Must(t, err == nil, "%s: %v", name, err)
 		return result
 	}
 
@@ -1162,9 +964,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	}
 	var doc web.DocumentOutput
 	decodeStructured(t, written, &doc)
-	if doc.Version != 1 || len(doc.Links) != 1 {
-		t.Fatalf("docs.write answered %+v", doc)
-	}
+	assert.Must(t, doc.Version == 1 && len(doc.Links) == 1, "docs.write answered %+v", doc)
 
 	// A conflict, read as an agent reads it: the wire's own details
 	// object, carrying the version to merge onto and the body to merge.
@@ -1176,9 +976,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 		"game": w.gameSlug, "path": e2eLeadScript, "content": e2eLeadV1,
 		"message": "stale", "expected_version": 1,
 	})
-	if !conflict.IsError {
-		t.Fatal("a stale write over the wire succeeded")
-	}
+	assert.Must(t, conflict.IsError, "a stale write over the wire succeeded")
 	var wire struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
@@ -1189,58 +987,40 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 		} `json:"details"`
 	}
 	decodeToolText(t, conflict, &wire)
-	if wire.Error != "version_conflict" {
-		t.Fatalf("the wire called a conflict %q: %s", wire.Error, wire.Message)
-	}
-	if wire.Details.CurrentVersion != 2 {
-		t.Fatalf("details.current_version on the wire = %d, want 2", wire.Details.CurrentVersion)
-	}
-	if !strings.Contains(wire.Details.CurrentBody, "# Act two") {
-		t.Fatalf("details.current_body on the wire = %q", wire.Details.CurrentBody)
-	}
-	if wire.Details.CurrentTitle != "The Defias Brotherhood" {
-		t.Fatalf("details.current_title on the wire = %q", wire.Details.CurrentTitle)
-	}
+	assert.Must(t, wire.Error == "version_conflict", "the wire called a conflict %q: %s", wire.Error, wire.Message)
+	assert.Must(t, wire.Details.CurrentVersion == 2, "details.current_version on the wire = %d, want 2", wire.Details.CurrentVersion)
+	assert.Must(t, strings.Contains(wire.Details.CurrentBody, "# Act two"), "details.current_body on the wire = %q", wire.Details.CurrentBody)
+	assert.Must(t, wire.Details.CurrentTitle == "The Defias Brotherhood", "details.current_title on the wire = %q", wire.Details.CurrentTitle)
 
 	// And the reads an agent makes next, over the same transport.
 	var history web.DocsHistoryOutput
 	decodeStructured(t, call("docs.history", map[string]any{
 		"game": w.gameSlug, "path": e2eLeadScript,
 	}), &history)
-	if len(history.Items) != 2 || history.Items[0].AuthorKind != "token" {
-		t.Fatalf("docs.history over the wire = %+v", history.Items)
-	}
+	assert.Must(t, len(history.Items) == 2 && history.Items[0].AuthorKind == "token", "docs.history over the wire = %+v", history.Items)
 
 	var diff web.DocsDiffOutput
 	decodeStructured(t, call("docs.diff", map[string]any{
 		"game": w.gameSlug, "path": e2eLeadScript, "from_version": 1, "to_version": 2,
 	}), &diff)
-	if diff.Coarse || !strings.Contains(diff.Unified, "+# Act two") {
-		t.Fatalf("docs.diff over the wire = %+v", diff)
-	}
+	assert.Must(t, !diff.Coarse && strings.Contains(diff.Unified, "+# Act two"), "docs.diff over the wire = %+v", diff)
 
 	var reverted web.DocumentOutput
 	decodeStructured(t, call("docs.revert", map[string]any{
 		"game": w.gameSlug, "path": e2eLeadScript, "to_version": 1, "expected_version": 2,
 	}), &reverted)
-	if reverted.Version != 3 {
-		t.Fatalf("docs.revert over the wire landed at %d, want 3", reverted.Version)
-	}
+	assert.Must(t, reverted.Version == 3, "docs.revert over the wire landed at %d, want 3", reverted.Version)
 
 	var fromDoc web.DocsLinksOutput
 	decodeStructured(t, call("docs.links.list", map[string]any{
 		"game": w.gameSlug, "path": e2eLeadScript,
 	}), &fromDoc)
-	if len(fromDoc.Entities) != 1 || fromDoc.Entities[0].EntityKey != e2eLeadQuest {
-		t.Fatalf("docs.links.list by path over the wire = %+v", fromDoc)
-	}
+	assert.Must(t, len(fromDoc.Entities) == 1 && fromDoc.Entities[0].EntityKey == e2eLeadQuest, "docs.links.list by path over the wire = %+v", fromDoc)
 	var fromEntity web.DocsLinksOutput
 	decodeStructured(t, call("docs.links.list", map[string]any{
 		"game": w.gameSlug, "entity_type": "quest", "entity_key": e2eLeadQuest,
 	}), &fromEntity)
-	if len(fromEntity.Documents) != 1 || fromEntity.Documents[0].Path != e2eLeadScript {
-		t.Fatalf("docs.links.list by entity over the wire = %+v", fromEntity)
-	}
+	assert.Must(t, len(fromEntity.Documents) == 1 && fromEntity.Documents[0].Path == e2eLeadScript, "docs.links.list by entity over the wire = %+v", fromEntity)
 
 	var found web.SearchOutput
 	decodeStructured(t, call("search", map[string]any{
@@ -1250,9 +1030,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	for _, hit := range found.Items {
 		kinds[hit.Kind]++
 	}
-	if kinds["entity"] == 0 || kinds["document"] == 0 {
-		t.Fatalf("search over the wire returned %v, want both kinds", kinds)
-	}
+	assert.Must(t, kinds["entity"] != 0 && kinds["document"] != 0, "search over the wire returned %v, want both kinds", kinds)
 	if found.Items[0].Kind != "entity" || !found.Items[0].NameMatch {
 		t.Fatalf("search over the wire did not rank the named entity first: %+v", found.Items[0])
 	}

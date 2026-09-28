@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -207,30 +208,20 @@ func newE2EWorld(t *testing.T) *e2eWorld {
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create the second game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create the second game: %v", err)
 	var agentSecret string
 	mint := func(project uuid.UUID, label string) web.Caller {
 		t.Helper()
 		secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 			ProjectID: project, UserID: owner.ID, Label: label,
 		})
-		if err != nil {
-			t.Fatalf("CreateAPIToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CreateAPIToken %s: %v", label, err)
 		caller, err := web.CallerForToken(ctx, ids, secret)
-		if err != nil {
-			t.Fatalf("CallerForToken %s: %v", label, err)
-		}
+		assert.Must(t, err == nil, "CallerForToken %s: %v", label, err)
 		if agentSecret == "" {
 			agentSecret = secret
 		}
@@ -267,9 +258,7 @@ func (w *e2eWorld) seed(t *testing.T) {
 		{Key: "zone", Label: "Zone", LabelPlural: "Zones"},
 	} {
 		out, err := web.MCPTypesUpsert(ctx, w.deps, w.agent, w.game, spec)
-		if err != nil {
-			t.Fatalf("types.upsert %s: %v", spec.Key, err)
-		}
+		assert.Must(t, err == nil, "types.upsert %s: %v", spec.Key, err)
 		w.typeID[spec.Key] = out.ID
 	}
 
@@ -324,12 +313,8 @@ func (w *e2eWorld) seed(t *testing.T) {
 
 	out, err := web.MCPRelationsUpsert(ctx, w.deps, w.agent, w.game,
 		web.RelationsUpsertInput{Items: edges})
-	if err != nil {
-		t.Fatalf("relations.upsert: %v", err)
-	}
-	if out.Count != len(edges) || len(out.Failed) != 0 {
-		t.Fatalf("seeded %d of %d edges, failed %v", out.Count, len(edges), out.Failed)
-	}
+	assert.Must(t, err == nil, "relations.upsert: %v", err)
+	assert.Must(t, out.Count == len(edges) && len(out.Failed) == 0, "seeded %d of %d edges, failed %v", out.Count, len(edges), out.Failed)
 }
 
 // upsertEntities writes a batch and records every id, so the deletions in
@@ -338,12 +323,8 @@ func (w *e2eWorld) upsertEntities(t *testing.T, items []web.EntityItemInput) {
 	t.Helper()
 	out, err := web.MCPEntitiesUpsert(context.Background(), w.deps, w.agent, w.game,
 		web.EntitiesUpsertInput{Items: items})
-	if err != nil {
-		t.Fatalf("entities.upsert: %v", err)
-	}
-	if out.Count != len(items) || len(out.Failed) != 0 {
-		t.Fatalf("wrote %d of %d entities, failed %v", out.Count, len(items), out.Failed)
-	}
+	assert.Must(t, err == nil, "entities.upsert: %v", err)
+	assert.Must(t, out.Count == len(items) && len(out.Failed) == 0, "wrote %d of %d entities, failed %v", out.Count, len(items), out.Failed)
 	for _, written := range out.Written {
 		w.entity[written.TypeKey+"/"+written.Key] = written.ID
 	}
@@ -352,9 +333,7 @@ func (w *e2eWorld) upsertEntities(t *testing.T, items []web.EntityItemInput) {
 func (w *e2eWorld) run(t *testing.T, in web.ViewsRunInput) map[string]any {
 	t.Helper()
 	out, err := web.MCPViewsRun(context.Background(), w.deps, w.agent, w.game, in)
-	if err != nil {
-		t.Fatalf("views.run %+v: %v", in, err)
-	}
+	assert.Must(t, err == nil, "views.run %+v: %v", in, err)
 	return out
 }
 
@@ -382,13 +361,9 @@ func edgesOf(t *testing.T, envelope map[string]any) []views.Edge {
 func e2ePositionsOf(t *testing.T, envelope map[string]any) []views.Position {
 	t.Helper()
 	raw, ok := envelope["positions"]
-	if !ok {
-		t.Fatalf("a run of a saved view carries no positions member at all")
-	}
+	assert.Must(t, ok, "a run of a saved view carries no positions member at all")
 	positions, ok := raw.([]views.Position)
-	if !ok {
-		t.Fatalf("the envelope's positions are %T, not a position list", raw)
-	}
+	assert.Must(t, ok, "the envelope's positions are %T, not a position list", raw)
 	return positions
 }
 
@@ -419,12 +394,8 @@ func drewNode(nodes []views.Node, key string) bool {
 func queryErrorOf(t *testing.T, err error, code string) *views.QueryError {
 	t.Helper()
 	var qe *views.QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("err = %v (%T), want a views query error", err, err)
-	}
-	if qe.Code != code {
-		t.Fatalf("code = %q, want %q (err: %v)", qe.Code, code, err)
-	}
+	assert.Must(t, errors.As(err, &qe), "err = %v (%T), want a views query error", err, err)
+	assert.Must(t, qe.Code == code, "code = %q, want %q (err: %v)", qe.Code, code, err)
 	return qe
 }
 
@@ -502,11 +473,8 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	// The message has to carry both halves — what the field is declared
 	// as, and what that declaration does answer — because an agent
 	// holding only the refusal cannot guess the second.
-	if !strings.Contains(sentence, "number") || !strings.Contains(sentence, "gte") ||
-		!strings.Contains(sentence, "contains") {
-		t.Errorf("the refusal at /traverse/0/where/op is %q; it must name the declared "+
-			"type, the operators it answers and the one that was asked for", sentence)
-	}
+	assert.Should(t, strings.Contains(sentence, "number") && strings.Contains(sentence, "gte") && strings.Contains(sentence, "contains"), "the refusal at /traverse/0/where/op is %q; it must name the declared "+
+		"type, the operators it answers and the one that was asked for", sentence)
 
 	// --- Step 4: the query the agent gets right, saved once.
 	//
@@ -519,12 +487,8 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 		Query: json.RawMessage(e2eQuery), Renderer: "graph",
 		RendererParams: map[string]any{"color_by": "color_by"},
 	})
-	if err != nil {
-		t.Fatalf("views.validate of the repaired document: %v", err)
-	}
-	if !valid.Valid {
-		t.Fatal("views.validate answered valid=false without an error")
-	}
+	assert.Must(t, err == nil, "views.validate of the repaired document: %v", err)
+	assert.Must(t, valid.Valid, "views.validate answered valid=false without an error")
 	// The refs are what the deletion in step 11 will read, so they are
 	// asserted here rather than taken on trust: three type references,
 	// each at the position that names it.
@@ -550,29 +514,21 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 		RendererParams:  map[string]any{"color_by": "color_by"},
 		ExpectedVersion: int32Of(0),
 	})
-	if err != nil {
-		t.Fatalf("views.upsert: %v", err)
-	}
-	if saved.Version != 1 {
-		t.Fatalf("the first save landed at version %d, want 1", saved.Version)
-	}
+	assert.Must(t, err == nil, "views.upsert: %v", err)
+	assert.Must(t, saved.Version == 1, "the first save landed at version %d, want 1", saved.Version)
 
 	// --- Step 5: the picture the spec asks for.
 
 	first := w.run(t, web.ViewsRunInput{Key: "mage-2030"})
 	nodes := nodesOf(t, first)
 	for _, key := range e2eReachable {
-		if !drewNode(nodes, key) {
-			t.Errorf("%s is a mage quest between 20 and 30 and did not come back; drew %v",
-				key, keysOf(nodes))
-		}
+		assert.Should(t, drewNode(nodes, key), "%s is a mage quest between 20 and 30 and did not come back; drew %v",
+			key, keysOf(nodes))
 	}
 	// The class itself is drawn, as the seed: the document says so, and a
 	// picture of quests with nothing anchoring them is not the picture
 	// that was asked for.
-	if !drewNode(nodes, "mage") {
-		t.Errorf("the seed class did not come back; drew %v", keysOf(nodes))
-	}
+	assert.Should(t, drewNode(nodes, "mage"), "the seed class did not come back; drew %v", keysOf(nodes))
 	// The four negatives, each a different rule.
 	for key, why := range map[string]string{
 		"cooking-for-bruises":   "is level 12 and below the band",
@@ -580,14 +536,10 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 		"charge-of-the-mounted": "is level 26 but available to the warrior, not the mage",
 		"warrior":               "is a class this run's parameter did not name",
 	} {
-		if drewNode(nodes, key) {
-			t.Errorf("%s came back and %s; drew %v", key, why, keysOf(nodes))
-		}
+		assert.Should(t, !drewNode(nodes, key), "%s came back and %s; drew %v", key, why, keysOf(nodes))
 	}
-	if len(nodes) != len(e2eReachable)+1 {
-		t.Errorf("drew %d nodes (%v), want the four reachable quests and the seed class",
-			len(nodes), keysOf(nodes))
-	}
+	assert.Should(t, len(nodes) == len(e2eReachable)+1, "drew %d nodes (%v), want the four reachable quests and the seed class",
+		len(nodes), keysOf(nodes))
 	// Each quest carries its own zone's name, and the two zones differ:
 	// a colour that came back the same for every node would satisfy a
 	// "colour is present" assertion and mean nothing.
@@ -605,9 +557,7 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 		if got := n.Attrs["color_by"]; got != want {
 			t.Errorf("%s came back coloured %v, want %q", n.Key, got, want)
 		}
-		if n.Ambiguous {
-			t.Errorf("%s is in one zone and was reported ambiguous", n.Key)
-		}
+		assert.Should(t, !n.Ambiguous, "%s is in one zone and was reported ambiguous", n.Key)
 	}
 	// The prerequisite arrow inside the band is drawn and the one leaving
 	// it is not: `between` is what the spec's example has a second edges[]
@@ -627,13 +577,9 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 			leavingBand++
 		}
 	}
-	if withinBand != 1 {
-		t.Errorf("the requires edge inside the band was drawn %d times, want once", withinBand)
-	}
-	if leavingBand != 0 {
-		t.Errorf("a requires edge to a level-15 quest outside the band was drawn %d times",
-			leavingBand)
-	}
+	assert.Should(t, withinBand == 1, "the requires edge inside the band was drawn %d times, want once", withinBand)
+	assert.Should(t, leavingBand == 0, "a requires edge to a level-15 quest outside the band was drawn %d times",
+		leavingBand)
 
 	stats, ok := first["stats"].(views.Stats)
 	if !ok {
@@ -644,10 +590,8 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	// rather than merely asserted about.
 	t.Logf("step 5: %d nodes, %d edges, duration_ms = %d",
 		stats.Nodes, stats.Edges, stats.DurationMS)
-	if stats.Nodes != len(nodes) || stats.Edges != len(edges) {
-		t.Errorf("stats say %d nodes and %d edges; the envelope holds %d and %d",
-			stats.Nodes, stats.Edges, len(nodes), len(edges))
-	}
+	assert.Should(t, stats.Nodes == len(nodes) && stats.Edges == len(edges), "stats say %d nodes and %d edges; the envelope holds %d and %d",
+		stats.Nodes, stats.Edges, len(nodes), len(edges))
 	if truncated, ok := first["truncated"].(views.Truncated); !ok || truncated.Nodes ||
 		truncated.Edges || truncated.Depth {
 		t.Errorf("truncated = %+v over a nine-quest game at max_nodes 500", first["truncated"])
@@ -673,12 +617,8 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	}
 	written, err := web.MCPViewsSetPositions(ctx, w.deps, w.agent, w.game,
 		web.ViewsSetPositionsInput{Key: "mage-2030", Positions: drag})
-	if err != nil {
-		t.Fatalf("views.set_positions: %v", err)
-	}
-	if written.Written != len(drag) {
-		t.Fatalf("wrote %d positions, want %d", written.Written, len(drag))
-	}
+	assert.Must(t, err == nil, "views.set_positions: %v", err)
+	assert.Must(t, written.Written == len(drag), "wrote %d positions, want %d", written.Written, len(drag))
 
 	afterDrag := w.run(t, web.ViewsRunInput{Key: "mage-2030"})
 	placed := e2ePositionsOf(t, afterDrag)
@@ -688,13 +628,9 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	}
 	for i, key := range e2eReachable {
 		got, ok := byKey[key]
-		if !ok {
-			t.Fatalf("%s was dragged and came back with no position", key)
-		}
-		if got.X != float64(100*i) || got.Y != float64(-25*i) {
-			t.Errorf("%s came back at (%v, %v), want (%v, %v)",
-				key, got.X, got.Y, float64(100*i), float64(-25*i))
-		}
+		assert.Must(t, ok, "%s was dragged and came back with no position", key)
+		assert.Should(t, got.X == float64(100*i) && got.Y == float64(-25*i), "%s came back at (%v, %v), want (%v, %v)",
+			key, got.X, got.Y, float64(100*i), float64(-25*i))
 		if want := i != 2; got.Pinned != want {
 			t.Errorf("%s came back pinned=%v, want %v", key, got.Pinned, want)
 		}
@@ -706,10 +642,8 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	if _, ok := byKey["mage"]; ok {
 		t.Errorf("the class was never dragged and came back placed at %+v", byKey["mage"])
 	}
-	if len(placed) != len(e2eReachable) {
-		t.Errorf("%d positions came back for %d dragged nodes: %+v",
-			len(placed), len(e2eReachable), placed)
-	}
+	assert.Should(t, len(placed) == len(e2eReachable), "%d positions came back for %d dragged nodes: %+v",
+		len(placed), len(e2eReachable), placed)
 
 	// --- Step 7: the agent adds twelve more quests, and the afternoon of
 	// map work survives it.
@@ -744,25 +678,19 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	// Eleven of the twelve are inside the band (20 + i%8 gives 20..27 and
 	// one 20), so the picture grew; what matters is that it grew *and*
 	// the four coordinates did not move.
-	if len(widenedNodes) <= len(nodes) {
-		t.Fatalf("the twelve new quests did not widen the picture: %d nodes, was %d",
-			len(widenedNodes), len(nodes))
-	}
+	assert.Must(t, len(widenedNodes) > len(nodes), "the twelve new quests did not widen the picture: %d nodes, was %d",
+		len(widenedNodes), len(nodes))
 	widenedPlaced := e2ePositionsOf(t, widened)
-	if len(widenedPlaced) != len(e2eReachable) {
-		t.Errorf("%d positions after adding twelve quests, want the four that were dragged: %+v",
-			len(widenedPlaced), widenedPlaced)
-	}
+	assert.Should(t, len(widenedPlaced) == len(e2eReachable), "%d positions after adding twelve quests, want the four that were dragged: %+v",
+		len(widenedPlaced), widenedPlaced)
 	for _, p := range widenedPlaced {
 		before, ok := byKey[p.EntityKey]
 		if !ok {
 			t.Errorf("%s arrived with a position and was never dragged", p.EntityKey)
 			continue
 		}
-		if p.X != before.X || p.Y != before.Y || p.Pinned != before.Pinned {
-			t.Errorf("%s moved from %+v to %+v when twelve quests were added",
-				p.EntityKey, before, p)
-		}
+		assert.Should(t, p.X == before.X && p.Y == before.Y && p.Pinned == before.Pinned, "%s moved from %+v to %+v when twelve quests were added",
+			p.EntityKey, before, p)
 	}
 	// The twelve arrive unpinned — which here means carrying no position
 	// at all, because a position is what pinning is stored on. A new node
@@ -775,9 +703,7 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 			continue
 		}
 		for _, p := range widenedPlaced {
-			if p.EntityKey == n.Key {
-				t.Errorf("%s was added after the drag and came back placed at %+v", n.Key, p)
-			}
+			assert.Should(t, p.EntityKey != n.Key, "%s was added after the drag and came back placed at %+v", n.Key, p)
 		}
 	}
 
@@ -806,9 +732,7 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	// is step 11, and it is where on_stale earns its two spellings.
 	beforeRename, err := web.MCPRelationTypesGet(ctx, w.deps, w.agent, w.game,
 		web.RelationTypesGetInput{Key: "available_to"})
-	if err != nil {
-		t.Fatalf("read available_to before renaming it: %v", err)
-	}
+	assert.Must(t, err == nil, "read available_to before renaming it: %v", err)
 	if _, err := web.MCPRelationTypesRename(ctx, w.deps, w.agent, w.game,
 		web.RelationTypesRenameInput{
 			From: "available_to", To: "usable_by",
@@ -834,9 +758,7 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	}
 	renamed := diagnosticAt(t, renamedDiagnostics, views.DiagRelationTypeRenamed,
 		"/traverse/0/via/0")
-	if renamed.Was != "available_to" || renamed.Now != "usable_by" {
-		t.Errorf("the rename diagnostic is %+v, want was=available_to now=usable_by", renamed)
-	}
+	assert.Should(t, renamed.Was == "available_to" && renamed.Now == "usable_by", "the rename diagnostic is %+v, want was=available_to now=usable_by", renamed)
 	// The picture is the one it was before the rename, node for node.
 	// This is the half that makes the diagnostic a *warning* rather than
 	// a refusal, and a test that only read the diagnostic could not tell
@@ -846,25 +768,16 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 			got, want)
 	}
 	for _, key := range e2eReachable {
-		if !drewNode(nodesOf(t, renamedRun), key) {
-			t.Errorf("the renamed view lost %s", key)
-		}
+		assert.Should(t, drewNode(nodesOf(t, renamedRun), key), "the renamed view lost %s", key)
 	}
 	// And the stored document is untouched: a rename that rewrote it
 	// would edit an author's document underneath them with no version
 	// bump, which makes the next expected_version check pass against a
 	// document nobody wrote.
 	stored, err := web.MCPViewsGet(ctx, w.deps, w.agent, w.game, web.ViewsGetInput{Key: "mage-2030"})
-	if err != nil {
-		t.Fatalf("views.get after the rename: %v", err)
-	}
-	if !strings.Contains(string(stored.Query), "available_to") ||
-		strings.Contains(string(stored.Query), "usable_by") {
-		t.Errorf("the rename rewrote the stored query: %s", stored.Query)
-	}
-	if stored.Version != 1 {
-		t.Errorf("the rename moved the view to version %d; it must move nothing", stored.Version)
-	}
+	assert.Must(t, err == nil, "views.get after the rename: %v", err)
+	assert.Should(t, strings.Contains(string(stored.Query), "available_to") && !strings.Contains(string(stored.Query), "usable_by"), "the rename rewrote the stored query: %s", stored.Query)
+	assert.Should(t, stored.Version == 1, "the rename moved the view to version %d; it must move nothing", stored.Version)
 
 	// --- Step 9: the agent repairs the view, and the repair is what the
 	// diagnostic told it to do.
@@ -875,28 +788,20 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 		RendererParams:  map[string]any{"color_by": "color_by"},
 		ExpectedVersion: int32Of(1),
 	})
-	if err != nil {
-		t.Fatalf("views.upsert of the repair: %v", err)
-	}
-	if repaired.Version != 2 {
-		t.Fatalf("the repair landed at version %d, want 2", repaired.Version)
-	}
+	assert.Must(t, err == nil, "views.upsert of the repair: %v", err)
+	assert.Must(t, repaired.Version == 2, "the repair landed at version %d, want 2", repaired.Version)
 	clean := w.run(t, web.ViewsRunInput{Key: "mage-2030"})
 	if _, reported := clean["stale"]; reported {
 		t.Errorf("the repaired view still reports staleness: %v", clean["stale"])
 	}
 	cleanNodes := nodesOf(t, clean)
 	for _, key := range e2eReachable {
-		if !drewNode(cleanNodes, key) {
-			t.Errorf("the repaired view lost %s; drew %v", key, keysOf(cleanNodes))
-		}
+		assert.Should(t, drewNode(cleanNodes, key), "the repaired view lost %s; drew %v", key, keysOf(cleanNodes))
 	}
 	// The repair is an edit of the query and not of the placement: the
 	// four coordinates are still there, which is what makes "repair by
 	// re-saving" something a designer will actually do.
-	if len(e2ePositionsOf(t, clean)) != len(e2eReachable) {
-		t.Errorf("the repair lost the arrangement: %+v", e2ePositionsOf(t, clean))
-	}
+	assert.Should(t, len(e2ePositionsOf(t, clean)) == len(e2eReachable), "the repair lost the arrangement: %+v", e2ePositionsOf(t, clean))
 
 	// --- Step 10: the designer deletes the zone type, and is told what
 	// it broke.
@@ -917,12 +822,8 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	removed, err := web.MCPTypesRemove(ctx, w.deps, w.agent, w.game, web.TypesRemoveInput{
 		Key: "zone",
 	})
-	if err != nil {
-		t.Fatalf("types.remove zone: %v", err)
-	}
-	if !removed.Removed {
-		t.Fatal("types.remove answered removed=false without an error")
-	}
+	assert.Must(t, err == nil, "types.remove zone: %v", err)
+	assert.Must(t, removed.Removed, "types.remove answered removed=false without an error")
 	// The response lists what it broke, with the pointer into the
 	// projection: the colour is what the zone type was holding up, and a
 	// designer who is not told which views lose their colours finds out
@@ -931,16 +832,12 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	for _, broke := range removed.BrokeViews {
 		if broke.ViewKey == "mage-2030" && broke.Pointer == "/project/color_by/related/type" {
 			listed = true
-			if broke.Key != "zone" {
-				t.Errorf("the broken reference is reported as %q, want the key the document "+
-					"spells: zone", broke.Key)
-			}
+			assert.Should(t, broke.Key == "zone", "the broken reference is reported as %q, want the key the document "+
+				"spells: zone", broke.Key)
 		}
 	}
-	if !listed {
-		t.Errorf("the deletion reported %+v; the view it broke is mage-2030 at "+
-			"/project/color_by/related/type", removed.BrokeViews)
-	}
+	assert.Should(t, listed, "the deletion reported %+v; the view it broke is mage-2030 at "+
+		"/project/color_by/related/type", removed.BrokeViews)
 
 	// --- Step 11: the two spellings of on_stale, over a reference that
 	// really is dead.
@@ -964,13 +861,9 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	// made visible rather than described.
 	best := w.run(t, web.ViewsRunInput{Key: "mage-2030", OnStale: views.OnStaleBestEffort})
 	bestNodes := nodesOf(t, best)
-	if len(bestNodes) == 0 {
-		t.Fatal("best_effort drew nothing; the point of it is that most of the graph survives")
-	}
+	assert.Must(t, len(bestNodes) != 0, "best_effort drew nothing; the point of it is that most of the graph survives")
 	for _, key := range e2eReachable {
-		if !drewNode(bestNodes, key) {
-			t.Errorf("best_effort lost %s, which the dead colour reference does not reach", key)
-		}
+		assert.Should(t, drewNode(bestNodes, key), "best_effort lost %s, which the dead colour reference does not reach", key)
 	}
 	bestStale, ok := best["stale"].([]views.Diagnostic)
 	if !ok {
@@ -1043,18 +936,12 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	}
 	for _, p := range e2ePositionsOf(t, survived) {
 		before := byKey[p.EntityKey]
-		if p.X != before.X || p.Y != before.Y {
-			t.Errorf("%s moved to %+v during the isolation sweep, was %+v", p.EntityKey, p, before)
-		}
+		assert.Should(t, p.X == before.X && p.Y == before.Y, "%s moved to %+v during the isolation sweep, was %+v", p.EntityKey, p, before)
 	}
 	still, err := web.MCPViewsGet(ctx, w.deps, w.agent, w.game, web.ViewsGetInput{Key: "mage-2030"})
-	if err != nil {
-		t.Fatalf("the view did not survive the isolation sweep: %v", err)
-	}
-	if still.Version != 2 {
-		t.Errorf("the view is at version %d after the sweep, want the 2 the repair left",
-			still.Version)
-	}
+	assert.Must(t, err == nil, "the view did not survive the isolation sweep: %v", err)
+	assert.Should(t, still.Version == 2, "the view is at version %d after the sweep, want the 2 the repair left",
+		still.Version)
 }
 
 // TestASavedViewArrivesOverTheRealTransport is the walk's last step and
@@ -1090,9 +977,7 @@ func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
 			"expected_version": 0,
 		},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(views.upsert): %v", err)
-	}
+	assert.Must(t, err == nil, "CallTool(views.upsert): %v", err)
 	if upsert.IsError {
 		var msg any
 		decodeToolText(t, upsert, &msg)
@@ -1103,9 +988,7 @@ func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
 		Name:      "views.run",
 		Arguments: map[string]any{"key": "mage-2030"},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(views.run): %v", err)
-	}
+	assert.Must(t, err == nil, "CallTool(views.run): %v", err)
 	if run.IsError {
 		var msg any
 		decodeToolText(t, run, &msg)
@@ -1135,15 +1018,11 @@ func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
 			t.Errorf("over the wire %s came back coloured %q, want %q", key, got[key], e2eZoneOf[key])
 		}
 	}
-	if envelope.Stats.Nodes != len(envelope.Nodes) {
-		t.Errorf("the wire's stats say %d nodes over %d in the envelope",
-			envelope.Stats.Nodes, len(envelope.Nodes))
-	}
+	assert.Should(t, envelope.Stats.Nodes == len(envelope.Nodes), "the wire's stats say %d nodes over %d in the envelope",
+		envelope.Stats.Nodes, len(envelope.Nodes))
 	// A saved view always carries the member, empty here because nothing
 	// has been dragged in this world.
-	if envelope.Positions == nil {
-		t.Error("a run of a saved view arrived over the wire with no positions member")
-	}
+	assert.Should(t, envelope.Positions != nil, "a run of a saved view arrived over the wire with no positions member")
 }
 
 // TestEveryViewsToolIsCallableOverTheRealTransport drives all ten tools
@@ -1175,9 +1054,7 @@ func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 	// tool for it and this one setup step goes through the service.
 	asset, err := w.vs.CreateAsset(ctx, w.game, views.Actor{}, "world.png",
 		bytes.NewReader(testPNG(t, 8, 4)))
-	if err != nil {
-		t.Fatalf("upload a background: %v", err)
-	}
+	assert.Must(t, err == nil, "upload a background: %v", err)
 
 	calls := map[string]map[string]any{
 		"views.upsert": {
@@ -1217,9 +1094,7 @@ func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 		"views.set_positions", "views.run", "views.clear_positions", "views.list_assets",
 		"views.set_background", "views.remove",
 	}
-	if len(order) != len(calls) {
-		t.Fatalf("the ordering names %d tools and the table has %d", len(order), len(calls))
-	}
+	assert.Must(t, len(order) == len(calls), "the ordering names %d tools and the table has %d", len(order), len(calls))
 	registered := 0
 	for _, name := range w.srv.ScopedToolNamesForTest() {
 		if !strings.HasPrefix(name, "views.") {
@@ -1231,21 +1106,15 @@ func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 				"input and output schemas are asserted by nothing at all", name)
 		}
 	}
-	if registered != len(calls) {
-		t.Fatalf("%d views tools are registered and the table has %d", registered, len(calls))
-	}
-	if registered == 0 {
-		t.Fatal("no views tool is registered; this test would pass vacuously")
-	}
+	assert.Must(t, registered == len(calls), "%d views tools are registered and the table has %d", registered, len(calls))
+	assert.Must(t, registered != 0, "no views tool is registered; this test would pass vacuously")
 
 	for _, name := range order {
 		t.Run(name, func(t *testing.T) {
 			result, err := session.CallTool(ctx, &mcp.CallToolParams{
 				Name: name, Arguments: calls[name],
 			})
-			if err != nil {
-				t.Fatalf("CallTool(%s): %v", name, err)
-			}
+			assert.Must(t, err == nil, "CallTool(%s): %v", name, err)
 			if result.IsError {
 				var msg any
 				decodeToolText(t, result, &msg)
@@ -1254,9 +1123,7 @@ func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 			// Every one of these tools declares an output schema, so a
 			// successful call must carry structured content: an answer
 			// that arrived only as prose is one no client can read.
-			if result.StructuredContent == nil {
-				t.Fatalf("%s answered with no structured content", name)
-			}
+			assert.Must(t, result.StructuredContent != nil, "%s answered with no structured content", name)
 		})
 	}
 }

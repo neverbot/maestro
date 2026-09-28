@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 )
 
@@ -64,15 +65,11 @@ func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
 
 	t.Run("REST", func(t *testing.T) {
 		rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), body)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST with a layout_seed = %d: %s\nwant 400: an argument this "+
-				"surface does not have must be answered, not dropped",
-				rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "layout_seed") {
-			t.Fatalf("the refusal does not name the member that caused it: %s",
-				rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusBadRequest, "POST with a layout_seed = %d: %s\nwant 400: an argument this "+
+			"surface does not have must be answered, not dropped",
+			rec.Code, rec.Body.String())
+		assert.Must(t, strings.Contains(rec.Body.String(), "layout_seed"), "the refusal does not name the member that caused it: %s",
+			rec.Body.String())
 		// And nothing was written: a refusal that stored the row anyway
 		// would be the same silence with a louder status code.
 		if _, err := f.views.ViewByKey(ctx, f.game, "seeded"); err == nil {
@@ -86,9 +83,7 @@ func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
 		token, _, err := f.ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 			ProjectID: f.game, UserID: f.ownerID, Label: "agent",
 		})
-		if err != nil {
-			t.Fatalf("CreateAPIToken: %v", err)
-		}
+		assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 		session := connectMCP(t, httpSrv.URL, token)
 
 		args := map[string]any{}
@@ -106,9 +101,7 @@ func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{
 			Name: "views.upsert", Arguments: args,
 		})
-		if err != nil {
-			t.Fatalf("CallTool(views.upsert): %v", err)
-		}
+		assert.Must(t, err == nil, "CallTool(views.upsert): %v", err)
 		if !result.IsError {
 			t.Fatal("views.upsert accepted a layout_seed: the tool's input schema " +
 				"must close the struct to members it does not have")
@@ -142,36 +135,24 @@ func TestTheViewToolDescriptionNamesNoSeed(t *testing.T) {
 	token, _, err := f.ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: f.game, UserID: f.ownerID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	session := connectMCP(t, httpSrv.URL, token)
 
 	var found int
 	for tool, err := range session.Tools(ctx, nil) {
-		if err != nil {
-			t.Fatalf("list tools: %v", err)
-		}
+		assert.Must(t, err == nil, "list tools: %v", err)
 		if !strings.HasPrefix(tool.Name, "views.") {
 			continue
 		}
 		found++
-		if strings.Contains(tool.Description, "layout_seed") {
-			t.Errorf("%s's description still names layout_seed", tool.Name)
-		}
-		if schemaHasProperty(t, tool.InputSchema, "layout_seed") {
-			t.Errorf("%s's input schema still has a layout_seed property", tool.Name)
-		}
-		if schemaHasProperty(t, tool.OutputSchema, "layout_seed") {
-			t.Errorf("%s's output schema still has a layout_seed property", tool.Name)
-		}
+		assert.Should(t, !strings.Contains(tool.Description, "layout_seed"), "%s's description still names layout_seed", tool.Name)
+		assert.Should(t, !schemaHasProperty(t, tool.InputSchema, "layout_seed"), "%s's input schema still has a layout_seed property", tool.Name)
+		assert.Should(t, !schemaHasProperty(t, tool.OutputSchema, "layout_seed"), "%s's output schema still has a layout_seed property", tool.Name)
 	}
 	// Without this the loop above passes on a server that registered no
 	// views tools at all, which is the shape every "assert nothing
 	// matches" test fails in.
-	if found == 0 {
-		t.Fatal("no views.* tool was listed: this test asserted nothing")
-	}
+	assert.Must(t, found != 0, "no views.* tool was listed: this test asserted nothing")
 }
 
 // schemaHasProperty reports whether a schema as the client received it
@@ -183,9 +164,7 @@ func schemaHasProperty(t *testing.T, schema any, name string) bool {
 		return false
 	}
 	raw, err := json.Marshal(schema)
-	if err != nil {
-		t.Fatalf("marshal schema: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal schema: %v", err)
 	var decoded struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
@@ -265,13 +244,9 @@ func TestNoSourceFileNamesALayoutSeed(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("the seed came back in %d place(s):\n%s",
-			len(offenders), strings.Join(offenders, "\n"))
-	}
+	assert.Must(t, err == nil, "walk %s: %v", root, err)
+	assert.Must(t, len(offenders) <= 0, "the seed came back in %d place(s):\n%s",
+		len(offenders), strings.Join(offenders, "\n"))
 }
 
 // seedGrepRoot walks up from this file to the directory holding go.mod,
@@ -279,9 +254,7 @@ func TestNoSourceFileNamesALayoutSeed(t *testing.T) {
 func seedGrepRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
+	assert.Must(t, ok, "runtime.Caller failed")
 	dir := filepath.Dir(file)
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -320,9 +293,7 @@ func TestARequestBodyWithAnUnknownMemberIsRefusedByName(t *testing.T) {
 		"key": "typo", "name": "Typo", "query": json.RawMessage(questsQuery),
 		"renderer": "graph", "layotu_mode": "manual", "expected_version": 0,
 	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("POST with a misspelled member = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusBadRequest, "POST with a misspelled member = %d: %s", rec.Code, rec.Body.String())
 	var body struct {
 		Error   string `json:"error"`
 		Details struct {
@@ -335,12 +306,8 @@ func TestARequestBodyWithAnUnknownMemberIsRefusedByName(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode the refusal %s: %v", rec.Body.String(), err)
 	}
-	if body.Error != "bad_request" {
-		t.Errorf("error = %q, want bad_request", body.Error)
-	}
-	if len(body.Details.Fields) != 1 || body.Details.Fields[0].Path != "layotu_mode" {
-		t.Fatalf("the refusal does not name the misspelled member: %s", rec.Body.String())
-	}
+	assert.Should(t, body.Error == "bad_request", "error = %q, want bad_request", body.Error)
+	assert.Must(t, len(body.Details.Fields) == 1 && body.Details.Fields[0].Path == "layotu_mode", "the refusal does not name the misspelled member: %s", rec.Body.String())
 	// The nearby correct spelling is not in the answer, deliberately:
 	// this surface says what it did not recognise, not what it guesses
 	// was meant, because a guess that is wrong is worse than no guess.

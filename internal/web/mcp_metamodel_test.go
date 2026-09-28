@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -82,27 +83,17 @@ func newMetamodelFixture(t *testing.T) metamodelFixture {
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
-	if err != nil {
-		t.Fatalf("Create other game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create other game: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: user.ID, Label: "agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	return metamodelFixture{
 		deps:      web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
 		caller:    caller,
@@ -126,34 +117,20 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		Schema: []web.FieldInput{{Key: "min_level", Type: "number", Required: true}},
 	})
-	if err != nil {
-		t.Fatalf("MCPTypesUpsert: %v", err)
-	}
-	if created.Key != "quest" || created.Version != 1 {
-		t.Fatalf("created = %+v, want key quest at version 1", created)
-	}
-	if len(created.Schema) != 1 || created.Schema[0].Key != "min_level" {
-		t.Fatalf("schema = %+v, want the declared field back", created.Schema)
-	}
+	assert.Must(t, err == nil, "MCPTypesUpsert: %v", err)
+	assert.Must(t, created.Key == "quest" && created.Version == 1, "created = %+v, want key quest at version 1", created)
+	assert.Must(t, len(created.Schema) == 1 && created.Schema[0].Key == "min_level", "schema = %+v, want the declared field back", created.Schema)
 
 	list, err := web.MCPTypesList(ctx, f.deps, f.caller, f.game, web.TypesListInput{})
-	if err != nil {
-		t.Fatalf("MCPTypesList: %v", err)
-	}
-	if len(list.Items) != 1 || list.Items[0].Key != "quest" {
-		t.Fatalf("types = %+v", list.Items)
-	}
+	assert.Must(t, err == nil, "MCPTypesList: %v", err)
+	assert.Must(t, len(list.Items) == 1 && list.Items[0].Key == "quest", "types = %+v", list.Items)
 	if list.Items[0].ID != created.ID {
 		t.Fatalf("the listing's id %s is not the created type's %s", list.Items[0].ID, created.ID)
 	}
 
 	got, err := web.MCPTypesGet(ctx, f.deps, f.caller, f.game, web.TypesGetInput{Key: "QUEST"})
-	if err != nil {
-		t.Fatalf("MCPTypesGet: %v", err)
-	}
-	if got.ID != created.ID {
-		t.Fatalf("a key matched without regard to case found %s, want %s", got.ID, created.ID)
-	}
+	assert.Must(t, err == nil, "MCPTypesGet: %v", err)
+	assert.Must(t, got.ID == created.ID, "a key matched without regard to case found %s, want %s", got.ID, created.ID)
 }
 
 // TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire is the
@@ -176,15 +153,9 @@ func TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire(t *testing.T) {
 		Key: "circuit", Label: "Circuit", LabelPlural: "Circuits",
 		ExpectedVersion: ptrInt32Web(1),
 	})
-	if !errors.Is(err, metamodel.ErrNotFound) {
-		t.Fatalf("err = %v, want not_found", err)
-	}
-	if errors.Is(err, metamodel.ErrVersionConflict) {
-		t.Fatalf("err = %v, want not_found and not version_conflict on the wire too", err)
-	}
-	if !strings.Contains(err.Error(), "was removed") {
-		t.Fatalf("err = %v, want the message an agent acts on", err)
-	}
+	assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found", err)
+	assert.Must(t, !errors.Is(err, metamodel.ErrVersionConflict), "err = %v, want not_found and not version_conflict on the wire too", err)
+	assert.Must(t, strings.Contains(err.Error(), "was removed"), "err = %v, want the message an agent acts on", err)
 	// And the type was not quietly created on the way to the refusal.
 	if _, err := web.MCPTypesGet(ctx, f.deps, f.caller, f.game,
 		web.TypesGetInput{Key: "circuit"}); !errors.Is(err, metamodel.ErrNotFound) {
@@ -210,12 +181,8 @@ func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
 			t.Errorf("%s is not served", tool)
 			continue
 		}
-		if !strings.Contains(got, "A version claim is a claim about a row that exists") {
-			t.Errorf("%s does not say what a version claim means", tool)
-		}
-		if !strings.Contains(got, "no expected_version") {
-			t.Errorf("%s does not name the recovery", tool)
-		}
+		assert.Should(t, strings.Contains(got, "A version claim is a claim about a row that exists"), "%s does not say what a version claim means", tool)
+		assert.Should(t, strings.Contains(got, "no expected_version"), "%s does not name the recovery", tool)
 	}
 }
 
@@ -249,9 +216,7 @@ func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {
 				"agent that does not know will read the refusal as a bug",
 			"never merges two types": "a taken destination is refused",
 		} {
-			if !strings.Contains(got, phrase) {
-				t.Errorf("%s does not say %q — %s", tool, phrase, why)
-			}
+			assert.Should(t, strings.Contains(got, phrase), "%s does not say %q — %s", tool, phrase, why)
 		}
 	}
 }
@@ -398,12 +363,8 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 	// Nothing may have landed in the other game, which is the assertion
 	// a refusal that merely returned early would still pass.
 	types, err := web.MCPTypesList(ctx, f.deps, f.caller, f.game, web.TypesListInput{})
-	if err != nil {
-		t.Fatalf("MCPTypesList: %v", err)
-	}
-	if len(types.Items) != 0 {
-		t.Fatalf("a refused call wrote into a game after all: %+v", types.Items)
-	}
+	assert.Must(t, err == nil, "MCPTypesList: %v", err)
+	assert.Must(t, len(types.Items) == 0, "a refused call wrote into a game after all: %+v", types.Items)
 }
 
 func TestMCPEntitiesUpsertBulkReportsFailuresAndWhatLanded(t *testing.T) {
@@ -425,18 +386,12 @@ func TestMCPEntitiesUpsertBulkReportsFailuresAndWhatLanded(t *testing.T) {
 			{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": "nope"}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("MCPEntitiesUpsert: %v", err)
-	}
-	if out.Count != 1 || len(out.Written) != 1 {
-		t.Fatalf("count = %d, written = %+v, want exactly the one row that landed", out.Count, out.Written)
-	}
+	assert.Must(t, err == nil, "MCPEntitiesUpsert: %v", err)
+	assert.Must(t, out.Count == 1 && len(out.Written) == 1, "count = %d, written = %+v, want exactly the one row that landed", out.Count, out.Written)
 	if out.Written[0].Key != "a" || out.Written[0].Version != 1 {
 		t.Fatalf("written[0] = %+v, want key a at version 1", out.Written[0])
 	}
-	if len(out.Failed) != 1 || out.Failed[0].Code != "schema_violation" || out.Failed[0].Index != 1 {
-		t.Fatalf("failed = %+v, want one schema_violation at index 1", out.Failed)
-	}
+	assert.Must(t, len(out.Failed) == 1 && out.Failed[0].Code == "schema_violation" && out.Failed[0].Index == 1, "failed = %+v, want one schema_violation at index 1", out.Failed)
 }
 
 // TestMCPEntitiesUpsertRecordsTheCallersOwnToken pins the one thing the
@@ -460,15 +415,9 @@ func TestMCPEntitiesUpsertRecordsTheCallersOwnToken(t *testing.T) {
 	}
 
 	row, err := f.deps.Metamodel.EntityByKey(ctx, f.game, "quest", "a")
-	if err != nil {
-		t.Fatalf("EntityByKey: %v", err)
-	}
-	if row.UpdatedByTokenID == nil || *row.UpdatedByTokenID != *f.caller.TokenID {
-		t.Fatalf("updated_by_token_id = %v, want the calling token %v", row.UpdatedByTokenID, f.caller.TokenID)
-	}
-	if row.UpdatedByUserID == nil || *row.UpdatedByUserID != f.caller.UserID {
-		t.Fatalf("updated_by_user_id = %v, want the calling user %v", row.UpdatedByUserID, f.caller.UserID)
-	}
+	assert.Must(t, err == nil, "EntityByKey: %v", err)
+	assert.Must(t, row.UpdatedByTokenID != nil && *row.UpdatedByTokenID == *f.caller.TokenID, "updated_by_token_id = %v, want the calling token %v", row.UpdatedByTokenID, f.caller.TokenID)
+	assert.Must(t, row.UpdatedByUserID != nil && *row.UpdatedByUserID == f.caller.UserID, "updated_by_user_id = %v, want the calling user %v", row.UpdatedByUserID, f.caller.UserID)
 }
 
 // TestMCPMalformedIDIsTheCallersOwnArgument pins that an id this layer
@@ -501,12 +450,8 @@ func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
 		SourceTypeKeys: []string{"circuit", "nope"},
 	})
 	var invalid *metamodel.ValidationError
-	if !errors.As(err, &invalid) || invalid.Code != "invalid_input" {
-		t.Fatalf("err = %#v, want an invalid_input ValidationError", err)
-	}
-	if len(invalid.Fields) != 1 {
-		t.Fatalf("problems = %+v, want only the bad element", invalid.Fields)
-	}
+	assert.Must(t, errors.As(err, &invalid) && invalid.Code == "invalid_input", "err = %#v, want an invalid_input ValidationError", err)
+	assert.Must(t, len(invalid.Fields) == 1, "problems = %+v, want only the bad element", invalid.Fields)
 	if invalid.Fields[0].Path != "source_type_keys[1]" ||
 		!strings.Contains(invalid.Fields[0].Message, "nope") {
 		t.Fatalf("problem = %+v, want it to name the element at fault and the key",
@@ -523,10 +468,7 @@ func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
 		Key: "requires", Label: "requires",
 		SourceTypeKeys: []string{"circuit", "CIRCUIT"},
 	})
-	if !errors.As(err, &invalid) || len(invalid.Fields) != 1 ||
-		invalid.Fields[0].Path != "source_type_keys[1]" {
-		t.Fatalf("err = %#v, want the repeated element named", err)
-	}
+	assert.Must(t, errors.As(err, &invalid) && len(invalid.Fields) == 1 && invalid.Fields[0].Path == "source_type_keys[1]", "err = %#v, want the repeated element named", err)
 }
 
 // TestMCPMetamodelToolsAreServedOverTheRealTransport is the end-to-end
@@ -549,9 +491,7 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, f.token)
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	names := map[string]bool{}
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
@@ -566,9 +506,7 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 		"relations.upsert", "relations.list", "relations.remove", "relations.repair",
 		"search",
 	} {
-		if !names[want] {
-			t.Fatalf("the served tool list is missing %q", want)
-		}
+		assert.Must(t, names[want], "the served tool list is missing %q", want)
 	}
 
 	var questType struct {
@@ -616,9 +554,7 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 			map[string]any{"type_key": "zone", "key": "elwynn", "name": "Elwynn Forest"},
 		},
 	}), &seeded)
-	if seeded.Count != 2 || len(seeded.Written) != 2 || len(seeded.Failed) != 0 {
-		t.Fatalf("seed = %+v, want two rows written and none failed", seeded)
-	}
+	assert.Must(t, seeded.Count == 2 && len(seeded.Written) == 2 && len(seeded.Failed) == 0, "seed = %+v, want two rows written and none failed", seeded)
 	if seeded.Written[0].Version != 1 || seeded.Written[0].ID == "" {
 		t.Fatalf("written[0] = %+v, want an id and version 1", seeded.Written[0])
 	}
@@ -647,9 +583,7 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 			"direction":         "outgoing",
 		},
 	}), &related)
-	if len(related.Items) != 1 || related.Items[0].Key != "elwynn" || related.Items[0].TypeKey != "zone" {
-		t.Fatalf("related = %+v, want the zone the quest takes place in", related.Items)
-	}
+	assert.Must(t, len(related.Items) == 1 && related.Items[0].Key == "elwynn" && related.Items[0].TypeKey == "zone", "related = %+v, want the zone the quest takes place in", related.Items)
 
 	// The search hit's shape on the actual wire, decoded from the JSON
 	// the transport produced rather than from the Go struct: `kind` is
@@ -669,17 +603,12 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 		Truncated bool `json:"truncated"`
 	}
 	decodeStructured(t, callOK(t, session, "search", map[string]any{"query": "gnoll"}), &found)
-	if len(found.Items) != 1 || found.Items[0].Kind != "entity" ||
-		found.Items[0].Entity == nil || found.Items[0].Entity.Key != "hogger" {
-		t.Fatalf("search = %+v, want one labelled entity hit for the quest whose summary "+
-			"carries the word", found.Items)
-	}
+	assert.Must(t, len(found.Items) == 1 && found.Items[0].Kind == "entity" && found.Items[0].Entity != nil && found.Items[0].Entity.Key == "hogger", "search = %+v, want one labelled entity hit for the quest whose summary "+
+		"carries the word", found.Items)
 	if found.Items[0].Document != nil {
 		t.Fatalf("an entity hit carries a document half: %+v", found.Items[0])
 	}
-	if found.Truncated {
-		t.Fatal("one hit under the default limit must not report the answer as truncated")
-	}
+	assert.Must(t, !found.Truncated, "one hit under the default limit must not report the answer as truncated")
 
 	// A listing without verbose carries no fields; with it, it does.
 	var slim struct {
@@ -689,14 +618,10 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 		} `json:"items"`
 	}
 	decodeStructured(t, callOK(t, session, "entities.list", map[string]any{"type_key": "quest"}), &slim)
-	if len(slim.Items) != 1 || slim.Items[0].Fields != nil {
-		t.Fatalf("a slim listing carried fields: %+v", slim.Items)
-	}
+	assert.Must(t, len(slim.Items) == 1 && slim.Items[0].Fields == nil, "a slim listing carried fields: %+v", slim.Items)
 	decodeStructured(t, callOK(t, session, "entities.list",
 		map[string]any{"type_key": "quest", "verbose": true}), &slim)
-	if len(slim.Items) != 1 || slim.Items[0].Fields["min_level"] == nil {
-		t.Fatalf("a verbose listing carried no fields: %+v", slim.Items)
-	}
+	assert.Must(t, len(slim.Items) == 1 && slim.Items[0].Fields["min_level"] != nil, "a verbose listing carried no fields: %+v", slim.Items)
 }
 
 // TestMCPMetamodelErrorsCarryTheirOwnCode pins that the domain's error
@@ -770,22 +695,14 @@ func TestMCPMetamodelErrorsCarryTheirOwnCode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: tc.tool, Arguments: tc.args})
-			if err != nil {
-				t.Fatalf("CallTool(%s): %v", tc.tool, err)
-			}
-			if !result.IsError {
-				t.Fatalf("%s must have failed, got %+v", tc.tool, result.StructuredContent)
-			}
-			if result.StructuredContent != nil {
-				t.Fatalf("an error result must carry no StructuredContent, got %#v", result.StructuredContent)
-			}
+			assert.Must(t, err == nil, "CallTool(%s): %v", tc.tool, err)
+			assert.Must(t, result.IsError, "%s must have failed, got %+v", tc.tool, result.StructuredContent)
+			assert.Must(t, result.StructuredContent == nil, "an error result must carry no StructuredContent, got %#v", result.StructuredContent)
 			var wireErr struct {
 				Error string `json:"error"`
 			}
 			decodeToolText(t, result, &wireErr)
-			if wireErr.Error != tc.want {
-				t.Fatalf("error = %q, want %q", wireErr.Error, tc.want)
-			}
+			assert.Must(t, wireErr.Error == tc.want, "error = %q, want %q", wireErr.Error, tc.want)
 		})
 	}
 
@@ -794,28 +711,20 @@ func TestMCPMetamodelErrorsCarryTheirOwnCode(t *testing.T) {
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "types.remove", Arguments: map[string]any{"key": "quest"},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(types.remove): %v", err)
-	}
+	assert.Must(t, err == nil, "CallTool(types.remove): %v", err)
 	var wireErr struct {
 		Error string `json:"error"`
 	}
 	decodeToolText(t, result, &wireErr)
-	if wireErr.Error != "in_use" {
-		t.Fatalf("removing a type that still has entities reported %q, want in_use", wireErr.Error)
-	}
+	assert.Must(t, wireErr.Error == "in_use", "removing a type that still has entities reported %q, want in_use", wireErr.Error)
 }
 
 // callOK calls a tool and fails the test unless it succeeded.
 func callOK(t *testing.T, session *mcp.ClientSession, name string, args map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
-	if err != nil {
-		t.Fatalf("CallTool(%s): %v", name, err)
-	}
-	if result.IsError {
-		t.Fatalf("CallTool(%s) reported an error: %+v", name, result.Content)
-	}
+	assert.Must(t, err == nil, "CallTool(%s): %v", name, err)
+	assert.Must(t, !result.IsError, "CallTool(%s) reported an error: %+v", name, result.Content)
 	return result
 }
 
@@ -848,25 +757,19 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, f.token)
 
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	var list *mcp.Tool
 	for _, tool := range tools.Tools {
 		if tool.Name == "entities.list" {
 			list = tool
 		}
 	}
-	if list == nil {
-		t.Fatal("entities.list is not served")
-	}
+	assert.Must(t, list != nil, "entities.list is not served")
 	// InputSchema crosses the wire as raw JSON, so the served schema is
 	// read as JSON rather than as a Go type — which is also the shape an
 	// agent's client sees.
 	raw, err := json.Marshal(list.InputSchema)
-	if err != nil {
-		t.Fatalf("marshal input schema: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal input schema: %v", err)
 	var served struct {
 		Properties struct {
 			RelatedTo struct {
@@ -877,10 +780,8 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 	if err := json.Unmarshal(raw, &served); err != nil {
 		t.Fatalf("decode input schema: %v", err)
 	}
-	if !slices.Contains(served.Properties.RelatedTo.Required, "direction") {
-		t.Fatalf("related_to.required = %v, want direction among them: %s",
-			served.Properties.RelatedTo.Required, raw)
-	}
+	assert.Must(t, slices.Contains(served.Properties.RelatedTo.Required, "direction"), "related_to.required = %v, want direction among them: %s",
+		served.Properties.RelatedTo.Required, raw)
 
 	var questType, zoneType struct {
 		ID string `json:"id"`
@@ -932,16 +833,12 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 		NextCursor string `json:"next_cursor"`
 	}
 	decodeStructured(t, callOK(t, session, "entities.list", anchor(nil)), &page)
-	if len(page.Items) != 2 || page.NextCursor == "" {
-		t.Fatalf("first traversal page = %+v, want two neighbours and a cursor", page)
-	}
+	assert.Must(t, len(page.Items) == 2 && page.NextCursor != "", "first traversal page = %+v, want two neighbours and a cursor", page)
 
 	seen := []string{page.Items[0].Key, page.Items[1].Key}
 	decodeStructured(t, callOK(t, session, "entities.list",
 		anchor(map[string]any{"cursor": page.NextCursor})), &page)
-	if len(page.Items) != 1 {
-		t.Fatalf("second traversal page = %+v, want the remaining neighbour", page.Items)
-	}
+	assert.Must(t, len(page.Items) == 1, "second traversal page = %+v, want the remaining neighbour", page.Items)
 	seen = append(seen, page.Items[0].Key)
 	if want := []string{"quest-0", "quest-1", "quest-2"}; !slices.Equal(seen, want) {
 		t.Fatalf("paged over %v, want %v", seen, want)
@@ -958,9 +855,7 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 			"entity_key":        "elwynn",
 		}},
 	})
-	if err == nil && !result.IsError {
-		t.Fatalf("a traversal with no direction was answered: %+v", result.StructuredContent)
-	}
+	assert.Must(t, err != nil || result.IsError, "a traversal with no direction was answered: %+v", result.StructuredContent)
 }
 
 // TestMCPSearchNameMatchAgreesWithTheOrderItExplains closes the Task 7
@@ -1015,12 +910,8 @@ func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 	}
 
 	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "gnoll pack"})
-	if err != nil {
-		t.Fatalf("MCPSearch: %v", err)
-	}
-	if len(out.Items) != 2 {
-		t.Fatalf("items = %+v, want both rows", out.Items)
-	}
+	assert.Must(t, err == nil, "MCPSearch: %v", err)
+	assert.Must(t, len(out.Items) == 2, "items = %+v, want both rows", out.Items)
 	// The order the ranking fix exists to guarantee: the named row
 	// first, regardless of how the un-weighted rank alone would compare.
 	if out.Items[0].Entity.Key != "named" || out.Items[1].Entity.Key != "mentioned" {
@@ -1031,10 +922,8 @@ func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 	// thing the position does, for every adjacent pair — the assertion
 	// that generalises past this one fixture.
 	for i := 1; i < len(out.Items); i++ {
-		if !out.Items[i-1].NameMatch && out.Items[i].NameMatch {
-			t.Fatalf("items[%d].NameMatch = false sorted before items[%d].NameMatch = true: "+
-				"the wire order and the wire field disagree", i-1, i)
-		}
+		assert.Must(t, out.Items[i-1].NameMatch || !out.Items[i].NameMatch, "items[%d].NameMatch = false sorted before items[%d].NameMatch = true: "+
+			"the wire order and the wire field disagree", i-1, i)
 	}
 	if !out.Items[0].NameMatch {
 		t.Fatalf("items[0] (%s) NameMatch = false, want true", out.Items[0].Entity.Key)
@@ -1093,9 +982,7 @@ func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.value)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
+			assert.Must(t, err == nil, "marshal: %v", err)
 			var keyed map[string]json.RawMessage
 			if err := json.Unmarshal(raw, &keyed); err != nil {
 				t.Fatalf("decode %s: %v", raw, err)
@@ -1105,11 +992,9 @@ func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
 				got = append(got, k)
 			}
 			slices.Sort(got)
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("wire keys = %v, want %v — a domain type on this surface grew a "+
-					"field; decide whether an agent should see it, then update this list",
-					got, tc.want)
-			}
+			assert.Must(t, slices.Equal(got, tc.want), "wire keys = %v, want %v — a domain type on this surface grew a "+
+				"field; decide whether an agent should see it, then update this list",
+				got, tc.want)
 		})
 	}
 }
@@ -1152,12 +1037,8 @@ func seedOneEdge(t *testing.T, f metamodelFixture) (source, target uuid.UUID) {
 			{TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("MCPEntitiesUpsert: %v", err)
-	}
-	if written.Count != 2 {
-		t.Fatalf("seeded %d entities, want 2: %+v", written.Count, written.Failed)
-	}
+	assert.Must(t, err == nil, "MCPEntitiesUpsert: %v", err)
+	assert.Must(t, written.Count == 2, "seeded %d entities, want 2: %+v", written.Count, written.Failed)
 	if _, err := web.MCPRelationsUpsert(ctx, f.deps, f.caller, f.game, web.RelationsUpsertInput{
 		Items: []web.RelationItemInput{{
 			TypeKey: "takes_place_in",
@@ -1184,25 +1065,13 @@ func TestRelationsListNamesBothEndpointsByRef(t *testing.T) {
 	sourceID, targetID := seedOneEdge(t, f)
 
 	page, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game, web.RelationsListInput{})
-	if err != nil {
-		t.Fatalf("MCPRelationsList: %v", err)
-	}
-	if len(page.Items) != 1 {
-		t.Fatalf("items = %+v, want the one edge", page.Items)
-	}
+	assert.Must(t, err == nil, "MCPRelationsList: %v", err)
+	assert.Must(t, len(page.Items) == 1, "items = %+v, want the one edge", page.Items)
 	edge := page.Items[0]
-	if edge.SourceID != sourceID || edge.TargetID != targetID {
-		t.Fatalf("edge ids = (%s, %s), want (%s, %s)", edge.SourceID, edge.TargetID, sourceID, targetID)
-	}
-	if edge.Source == nil || edge.Target == nil {
-		t.Fatalf("edge = %+v, want both endpoints resolved to refs", edge)
-	}
-	if edge.Source.TypeKey != "quest" || edge.Source.Key != "hogger" || edge.Source.Name != "Wanted: Hogger" {
-		t.Fatalf("source = %+v, want the quest it was written with", edge.Source)
-	}
-	if edge.Target.TypeKey != "zone" || edge.Target.Key != "elwynn" || edge.Target.Name != "Elwynn Forest" {
-		t.Fatalf("target = %+v, want the zone it was written with", edge.Target)
-	}
+	assert.Must(t, edge.SourceID == sourceID && edge.TargetID == targetID, "edge ids = (%s, %s), want (%s, %s)", edge.SourceID, edge.TargetID, sourceID, targetID)
+	assert.Must(t, edge.Source != nil && edge.Target != nil, "edge = %+v, want both endpoints resolved to refs", edge)
+	assert.Must(t, edge.Source.TypeKey == "quest" && edge.Source.Key == "hogger" && edge.Source.Name == "Wanted: Hogger", "source = %+v, want the quest it was written with", edge.Source)
+	assert.Must(t, edge.Target.TypeKey == "zone" && edge.Target.Key == "elwynn" && edge.Target.Name == "Elwynn Forest", "target = %+v, want the zone it was written with", edge.Target)
 }
 
 // TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs is the
@@ -1218,22 +1087,16 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 
 	session := connectMCP(t, httpSrv.URL, f.token)
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	var list *mcp.Tool
 	for _, tool := range tools.Tools {
 		if tool.Name == "relations.list" {
 			list = tool
 		}
 	}
-	if list == nil {
-		t.Fatal("relations.list is not served")
-	}
+	assert.Must(t, list != nil, "relations.list is not served")
 	raw, err := json.Marshal(list.OutputSchema)
-	if err != nil {
-		t.Fatalf("marshal output schema: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal output schema: %v", err)
 	var served struct {
 		Properties struct {
 			Items struct {
@@ -1250,9 +1113,7 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 	}
 	for _, end := range []string{"source", "target"} {
 		ref, ok := served.Properties.Items.Items.Properties[end]
-		if !ok {
-			t.Fatalf("output schema has no %q property: %s", end, raw)
-		}
+		assert.Must(t, ok, "output schema has no %q property: %s", end, raw)
 		for _, key := range []string{"type_key", "key", "name"} {
 			if _, ok := ref.Properties[key]; !ok {
 				t.Fatalf("%s ref schema has no %q: %s", end, key, raw)
@@ -1275,40 +1136,25 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 	// 7 shipped it saying the opposite of what the tool now does — twice
 	// over: it also told an agent an edge had no version and no
 	// expected_version to guard it, which 0009 made false.
-	if strings.Contains(list.Description, "not as the (type_key, key) refs") {
-		t.Fatalf("relations.list still tells an agent its endpoints are ids only: %s", list.Description)
-	}
-	if !strings.Contains(list.Description, "invalid") {
-		t.Fatalf("relations.list does not mention its invalid filter: %s", list.Description)
-	}
+	assert.Must(t, !strings.Contains(list.Description, "not as the (type_key, key) refs"), "relations.list still tells an agent its endpoints are ids only: %s", list.Description)
+	assert.Must(t, strings.Contains(list.Description, "invalid"), "relations.list does not mention its invalid filter: %s", list.Description)
 	var upsert *mcp.Tool
 	for _, tool := range tools.Tools {
 		if tool.Name == "relations.upsert" {
 			upsert = tool
 		}
 	}
-	if upsert == nil {
-		t.Fatal("relations.upsert is not served")
-	}
-	if strings.Contains(upsert.Description, "has no version") ||
-		strings.Contains(upsert.Description, "last writer wins") {
-		t.Fatalf("relations.upsert still promises last-writer-wins, which 0009 ended: %s",
-			upsert.Description)
-	}
-	if !strings.Contains(upsert.Description, "expected_version") {
-		t.Fatalf("relations.upsert does not tell an agent to send expected_version: %s",
-			upsert.Description)
-	}
+	assert.Must(t, upsert != nil, "relations.upsert is not served")
+	assert.Must(t, !strings.Contains(upsert.Description, "has no version") && !strings.Contains(upsert.Description, "last writer wins"), "relations.upsert still promises last-writer-wins, which 0009 ended: %s",
+		upsert.Description)
+	assert.Must(t, strings.Contains(upsert.Description, "expected_version"), "relations.upsert does not tell an agent to send expected_version: %s",
+		upsert.Description)
 	// The input schema is the third copy of the same claim: the SDK
 	// infers it from RelationItemInput, so a field the struct lacks is a
 	// field an agent cannot send however the prose reads.
 	rawIn, err := json.Marshal(upsert.InputSchema)
-	if err != nil {
-		t.Fatalf("marshal input schema: %v", err)
-	}
-	if !strings.Contains(string(rawIn), "expected_version") {
-		t.Fatalf("relations.upsert's input schema has no expected_version: %s", rawIn)
-	}
+	assert.Must(t, err == nil, "marshal input schema: %v", err)
+	assert.Must(t, strings.Contains(string(rawIn), "expected_version"), "relations.upsert's input schema has no expected_version: %s", rawIn)
 }
 
 // TestRelationsListFindsTheEdgesASchemaEditBroke is the MCP half of the
@@ -1348,16 +1194,10 @@ func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			page, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game,
 				web.RelationsListInput{Invalid: tc.filter})
-			if err != nil {
-				t.Fatalf("MCPRelationsList: %v", err)
-			}
-			if len(page.Items) != tc.want {
-				t.Fatalf("items = %d, want %d: %+v", len(page.Items), tc.want, page.Items)
-			}
+			assert.Must(t, err == nil, "MCPRelationsList: %v", err)
+			assert.Must(t, len(page.Items) == tc.want, "items = %d, want %d: %+v", len(page.Items), tc.want, page.Items)
 			for _, item := range page.Items {
-				if !item.Invalid {
-					t.Fatalf("the edge a schema edit broke is reported as valid: %+v", item)
-				}
+				assert.Must(t, item.Invalid, "the edge a schema edit broke is reported as valid: %+v", item)
 			}
 		})
 	}
@@ -1370,16 +1210,10 @@ func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
 		Source:  web.RefInput{TypeKey: "quest", Key: "hogger"},
 		Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
 	})
-	if err != nil {
-		t.Fatalf("MCPRelationsGet: %v", err)
-	}
-	if !got.Invalid {
-		t.Fatalf("relations.get = %+v, want the flag the listing reports", got)
-	}
-	if got.Version != 1 {
-		t.Fatalf("version = %d, want 1: a sweep is not an edit and must not move it",
-			got.Version)
-	}
+	assert.Must(t, err == nil, "MCPRelationsGet: %v", err)
+	assert.Must(t, got.Invalid, "relations.get = %+v, want the flag the listing reports", got)
+	assert.Must(t, got.Version == 1, "version = %d, want 1: a sweep is not an edit and must not move it",
+		got.Version)
 }
 
 // TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge is Metamodel
@@ -1406,46 +1240,27 @@ func TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge(t *testing.T) {
 		Source:  web.RefInput{TypeKey: "quest", Key: "hogger"},
 		Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
 	})
-	if err != nil {
-		t.Fatalf("MCPRelationsGet: %v", err)
-	}
-	if got.Fields["act"] != "one" {
-		t.Fatalf("relations.get fields = %v, want act one", got.Fields)
-	}
+	assert.Must(t, err == nil, "MCPRelationsGet: %v", err)
+	assert.Must(t, got.Fields["act"] == "one", "relations.get fields = %v, want act one", got.Fields)
 	// One edge, addressed two ways: what relations.get answers is the
 	// same row relations.list pages over, endpoint refs included.
-	if got.SourceID != sourceID || got.TargetID != targetID {
-		t.Fatalf("relations.get ids = (%s, %s), want (%s, %s)",
-			got.SourceID, got.TargetID, sourceID, targetID)
-	}
-	if got.TypeKey != "takes_place_in" {
-		t.Fatalf("relations.get type key = %q, want takes_place_in", got.TypeKey)
-	}
-	if got.Source == nil || got.Source.Name != "Wanted: Hogger" ||
-		got.Target == nil || got.Target.Name != "Elwynn Forest" {
-		t.Fatalf("relations.get endpoints = %+v / %+v, want both resolved", got.Source, got.Target)
-	}
+	assert.Must(t, got.SourceID == sourceID && got.TargetID == targetID, "relations.get ids = (%s, %s), want (%s, %s)",
+		got.SourceID, got.TargetID, sourceID, targetID)
+	assert.Must(t, got.TypeKey == "takes_place_in", "relations.get type key = %q, want takes_place_in", got.TypeKey)
+	assert.Must(t, got.Source != nil && got.Source.Name == "Wanted: Hogger" && got.Target != nil && got.Target.Name == "Elwynn Forest", "relations.get endpoints = %+v / %+v, want both resolved", got.Source, got.Target)
 
 	verbose, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game,
 		web.RelationsListInput{Verbose: true})
-	if err != nil {
-		t.Fatalf("MCPRelationsList verbose: %v", err)
-	}
-	if len(verbose.Items) != 1 || verbose.Items[0].Fields["act"] != "one" {
-		t.Fatalf("verbose listing = %+v, want the edge with act one", verbose.Items)
-	}
+	assert.Must(t, err == nil, "MCPRelationsList verbose: %v", err)
+	assert.Must(t, len(verbose.Items) == 1 && verbose.Items[0].Fields["act"] == "one", "verbose listing = %+v, want the edge with act one", verbose.Items)
 
 	// Off by default, for the reason entities.list defaults it off and
 	// then some: a game has more edges than entities, so a page of five
 	// hundred of them carrying their fields is more of the game back in
 	// one answer than the listing this rule was written for.
 	plain, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game, web.RelationsListInput{})
-	if err != nil {
-		t.Fatalf("MCPRelationsList: %v", err)
-	}
-	if len(plain.Items) != 1 {
-		t.Fatalf("items = %+v, want the one edge", plain.Items)
-	}
+	assert.Must(t, err == nil, "MCPRelationsList: %v", err)
+	assert.Must(t, len(plain.Items) == 1, "items = %+v, want the one edge", plain.Items)
 	if plain.Items[0].Fields != nil {
 		t.Fatalf("a listing that was not asked to be verbose carried fields: %+v", plain.Items[0])
 	}
@@ -1453,12 +1268,8 @@ func TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge(t *testing.T) {
 	// omitempty on the wire and a client must be able to tell "not
 	// asked for" from "asked for and empty".
 	raw, err := json.Marshal(plain.Items[0])
-	if err != nil {
-		t.Fatalf("marshal edge: %v", err)
-	}
-	if strings.Contains(string(raw), "fields") {
-		t.Fatalf("non-verbose edge carries a fields key on the wire: %s", raw)
-	}
+	assert.Must(t, err == nil, "marshal edge: %v", err)
+	assert.Must(t, !strings.Contains(string(raw), "fields"), "non-verbose edge carries a fields key on the wire: %s", raw)
 }
 
 // TestRelationsGetNamesWhichPieceOfAnAddressIsWrong: an edge is
@@ -1504,19 +1315,13 @@ func TestRelationsGetNamesWhichPieceOfAnAddressIsWrong(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := web.MCPRelationsGet(ctx, f.deps, f.caller, f.game, tc.in)
-			if err == nil {
-				t.Fatal("err = nil, want a refusal")
-			}
+			assert.Must(t, err != nil, "err = nil, want a refusal")
 			want := metamodel.ErrNotFound
 			if tc.wantInvalid {
 				want = metamodel.ErrInvalidInput
 			}
-			if !errors.Is(err, want) {
-				t.Fatalf("err = %v, want %v", err, want)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %q, want it to contain %q", err, tc.want)
-			}
+			assert.Must(t, errors.Is(err, want), "err = %v, want %v", err, want)
+			assert.Must(t, strings.Contains(err.Error(), tc.want), "err = %q, want it to contain %q", err, tc.want)
 		})
 	}
 }
@@ -1535,21 +1340,15 @@ func TestTheServedEdgeSchemasAdvertiseAnEdgesFields(t *testing.T) {
 
 	session := connectMCP(t, httpSrv.URL, f.token)
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	served := map[string]*mcp.Tool{}
 	for _, tool := range tools.Tools {
 		served[tool.Name] = tool
 	}
 	get, ok := served["relations.get"]
-	if !ok {
-		t.Fatal("relations.get is not served")
-	}
+	assert.Must(t, ok, "relations.get is not served")
 	rawGet, err := json.Marshal(get.OutputSchema)
-	if err != nil {
-		t.Fatalf("marshal relations.get output schema: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal relations.get output schema: %v", err)
 	var edge struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
@@ -1561,13 +1360,9 @@ func TestTheServedEdgeSchemasAdvertiseAnEdgesFields(t *testing.T) {
 	}
 
 	list, ok := served["relations.list"]
-	if !ok {
-		t.Fatal("relations.list is not served")
-	}
+	assert.Must(t, ok, "relations.list is not served")
 	rawList, err := json.Marshal(list.OutputSchema)
-	if err != nil {
-		t.Fatalf("marshal relations.list output schema: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal relations.list output schema: %v", err)
 	var page struct {
 		Properties struct {
 			Items struct {
@@ -1586,10 +1381,6 @@ func TestTheServedEdgeSchemasAdvertiseAnEdgesFields(t *testing.T) {
 	// The input half: a caller cannot ask for the fields unless the
 	// input schema says the flag exists.
 	rawIn, err := json.Marshal(list.InputSchema)
-	if err != nil {
-		t.Fatalf("marshal relations.list input schema: %v", err)
-	}
-	if !strings.Contains(string(rawIn), "verbose") {
-		t.Fatalf("relations.list takes no verbose flag: %s", rawIn)
-	}
+	assert.Must(t, err == nil, "marshal relations.list input schema: %v", err)
+	assert.Must(t, strings.Contains(string(rawIn), "verbose"), "relations.list takes no verbose flag: %s", rawIn)
 }

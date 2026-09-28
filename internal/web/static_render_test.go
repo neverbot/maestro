@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/views"
 )
 
@@ -162,18 +163,14 @@ func controlKinds(t *testing.T) map[string]string {
 			out[match[1]] = match[2]
 		}
 	}
-	if len(out) == 0 {
-		t.Fatal("read no CONTROL_ constant out of render/controls.js; the module's shape moved and this guard did not")
-	}
+	assert.Must(t, len(out) != 0, "read no CONTROL_ constant out of render/controls.js; the module's shape moved and this guard did not")
 	return out
 }
 
 func renderModule(t *testing.T, name string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("static", "render", name))
-	if err != nil {
-		t.Fatalf("read static/render/%s: %v", name, err)
-	}
+	assert.Must(t, err == nil, "read static/render/%s: %v", name, err)
 	return string(raw)
 }
 
@@ -215,22 +212,16 @@ func TestEveryRendererInTheCatalogueHasAModule(t *testing.T) {
 		withModule[entry.renderer] = true
 	}
 	for _, name := range views.RendererNames() {
-		if !withModule[name] {
-			t.Errorf("the catalogue offers %q and no module in this table draws it: an agent can save that view and a designer meets a blank canvas", name)
-		}
+		assert.Should(t, withModule[name], "the catalogue offers %q and no module in this table draws it: an agent can save that view and a designer meets a blank canvas", name)
 	}
 	inCatalogue := map[string]bool{}
 	for _, name := range views.RendererNames() {
 		inCatalogue[name] = true
 	}
 	for _, entry := range rendererModules {
-		if !inCatalogue[entry.renderer] {
-			t.Errorf("render/%s claims to draw %q and the catalogue has no such renderer", entry.module, entry.renderer)
-		}
+		assert.Should(t, inCatalogue[entry.renderer], "render/%s claims to draw %q and the catalogue has no such renderer", entry.module, entry.renderer)
 	}
-	if len(rendererModules) != len(views.RendererNames()) {
-		t.Errorf("%d modules and %d renderers: the two lists have to be the same list", len(rendererModules), len(views.RendererNames()))
-	}
+	assert.Should(t, len(rendererModules) == len(views.RendererNames()), "%d modules and %d renderers: the two lists have to be the same list", len(rendererModules), len(views.RendererNames()))
 }
 
 // TestARenderersControlsAreTheCataloguesParameters is the join.
@@ -248,9 +239,7 @@ func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
 			for _, match := range moduleParamConst.FindAllStringSubmatch(source, -1) {
 				byConstant[match[1]] = match[2]
 			}
-			if len(byConstant) == 0 {
-				t.Fatalf("read no PARAM_ constant out of render/%s: the module's parameter spellings moved and this guard did not", entry.module)
-			}
+			assert.Must(t, len(byConstant) != 0, "read no PARAM_ constant out of render/%s: the module's parameter spellings moved and this guard did not", entry.module)
 
 			var controlled []string
 			for _, match := range moduleControl.FindAllStringSubmatch(source, -1) {
@@ -272,33 +261,23 @@ func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
 				declared = append(declared, name)
 			}
 			sort.Strings(declared)
-			if strings.Join(controlled, ",") != strings.Join(declared, ",") {
-				t.Errorf("render/%s's controls are %v and its parameter constants are %v; every parameter it knows needs a control", entry.module, controlled, declared)
-			}
+			assert.Should(t, strings.Join(controlled, ",") == strings.Join(declared, ","), "render/%s's controls are %v and its parameter constants are %v; every parameter it knows needs a control", entry.module, controlled, declared)
 
 			want := catalogueParams(views.RendererDescription(), entry.renderer)
-			if len(want) == 0 {
-				t.Fatalf("read no parameter for %q out of the renderer catalogue; this guard is reading the wrong text", entry.renderer)
-			}
-			if strings.Join(controlled, ",") != strings.Join(want, ",") {
-				t.Errorf("render/%s offers %v and the catalogue declares %v: a control with no parameter composes a document "+
-					"the server refuses, and a parameter with no control is a knob only an agent can set", entry.module, controlled, want)
-			}
+			assert.Must(t, len(want) != 0, "read no parameter for %q out of the renderer catalogue; this guard is reading the wrong text", entry.renderer)
+			assert.Should(t, strings.Join(controlled, ",") == strings.Join(want, ","), "render/%s offers %v and the catalogue declares %v: a control with no parameter composes a document "+
+				"the server refuses, and a parameter with no control is a knob only an agent can set", entry.module, controlled, want)
 
 			// And the renderer this module says it is, is one the
 			// catalogue has.
-			if !strings.Contains(source, `export const RENDERER = "`+entry.renderer+`";`) {
-				t.Errorf("render/%s does not name %q as its renderer", entry.module, entry.renderer)
-			}
+			assert.Should(t, strings.Contains(source, `export const RENDERER = "`+entry.renderer+`";`), "render/%s does not name %q as its renderer", entry.module, entry.renderer)
 			found := false
 			for _, name := range views.RendererNames() {
 				if name == entry.renderer {
 					found = true
 				}
 			}
-			if !found {
-				t.Errorf("the catalogue has no renderer named %q", entry.renderer)
-			}
+			assert.Should(t, found, "the catalogue has no renderer named %q", entry.renderer)
 		})
 	}
 }
@@ -326,17 +305,13 @@ func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
 				t.Errorf("render/%s offers values for %q and the catalogue does not declare it as an enum", entry.module, name)
 				continue
 			}
-			if strings.Join(values, ",") != strings.Join(want, ",") {
-				t.Errorf("render/%s offers %v for %q and the catalogue admits %v", entry.module, values, name, want)
-			}
+			assert.Should(t, strings.Join(values, ",") == strings.Join(want, ","), "render/%s offers %v for %q and the catalogue admits %v", entry.module, values, name, want)
 			checked++
 		}
 	}
 	// The guard on the guard: a reader that resolved nothing would pass
 	// over every module ever written.
-	if checked == 0 {
-		t.Fatal("read no enum control out of any renderer module; the modules' shape moved and this guard did not")
-	}
+	assert.Must(t, checked != 0, "read no enum control out of any renderer module; the modules' shape moved and this guard did not")
 }
 
 // TestAControlDeclaresTheKindTheCatalogueDeclares is the third arm of
@@ -380,10 +355,8 @@ func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 				t.Errorf("render/%s offers %q and the catalogue's %s has no such parameter", entry.module, param, entry.renderer)
 				continue
 			}
-			if kind != want {
-				t.Errorf("render/%s's control for %q is a %q and the catalogue declares a %q: a control of the wrong kind offers a designer an editor that composes a document the server refuses",
-					entry.module, param, kind, want)
-			}
+			assert.Should(t, kind == want, "render/%s's control for %q is a %q and the catalogue declares a %q: a control of the wrong kind offers a designer an editor that composes a document the server refuses",
+				entry.module, param, kind, want)
 			checked++
 		}
 	}
@@ -391,9 +364,7 @@ func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 	// TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits has one: a
 	// reader that resolved nothing would pass over every module ever
 	// written.
-	if checked < len(rendererModules) {
-		t.Fatalf("read %d control kinds out of %d renderer modules; the modules' shape moved and this guard did not", checked, len(rendererModules))
-	}
+	assert.Must(t, checked >= len(rendererModules), "read %d control kinds out of %d renderer modules; the modules' shape moved and this guard did not", checked, len(rendererModules))
 }
 
 // TestTheCatalogueParameterScanReadsWhatItClaimsTo is the guard on the
@@ -443,9 +414,7 @@ func TestTheCatalogueParameterScanReadsWhatItClaimsTo(t *testing.T) {
 	// enums, and a reader that resolved neither would make the join above
 	// vacuous.
 	values := moduleParamValues(renderModule(t, "layered.js"))
-	if len(values) != 2 {
-		t.Errorf("read %d enum controls out of render/layered.js, want 2: %v", len(values), values)
-	}
+	assert.Should(t, len(values) == 2, "read %d enum controls out of render/layered.js, want 2: %v", len(values), values)
 	if got := values["rank_direction"]; strings.Join(got, ",") != "TB,LR" {
 		t.Errorf(`rank_direction's module values = %v, want [TB LR]`, got)
 	}
@@ -454,12 +423,8 @@ func TestTheCatalogueParameterScanReadsWhatItClaimsTo(t *testing.T) {
 	// section has parameters, and every one of them is a name the module
 	// could plausibly spell.
 	real := catalogueParams(views.RendererDescription(), views.RendererGraph)
-	if len(real) < 2 {
-		t.Fatalf("the real catalogue gave %v for `graph`; the description's shape changed", real)
-	}
+	assert.Must(t, len(real) >= 2, "the real catalogue gave %v for `graph`; the description's shape changed", real)
 	for _, name := range real {
-		if strings.TrimSpace(name) != name || name == "" {
-			t.Errorf("parameter %q read out of the description is not a bare name", name)
-		}
+		assert.Should(t, strings.TrimSpace(name) == name && name != "", "parameter %q read out of the description is not a bare name", name)
 	}
 }

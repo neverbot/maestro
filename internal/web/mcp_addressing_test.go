@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -79,33 +80,21 @@ func TestEveryAddressOnThisSurfaceIsAKey(t *testing.T) {
 	// from every reader that carried it before.
 	entity, err := web.MCPEntitiesGet(ctx, f.deps, f.caller, f.game,
 		web.EntitiesGetInput{TypeKey: "quest", Key: "hogger"})
-	if err != nil {
-		t.Fatalf("entities.get: %v", err)
-	}
-	if entity.ID == uuid.Nil {
-		t.Fatalf("an entity came back without its id: %+v", entity)
-	}
+	assert.Must(t, err == nil, "entities.get: %v", err)
+	assert.Must(t, entity.ID != uuid.Nil, "an entity came back without its id: %+v", entity)
 	edges, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game,
 		web.RelationsListInput{
 			Source: &web.RefInput{TypeKey: "quest", Key: "hogger"},
 		})
-	if err != nil {
-		t.Fatalf("relations.list by source ref: %v", err)
-	}
-	if len(edges.Items) != 1 || edges.Items[0].SourceID != entity.ID {
-		t.Fatalf("the endpoint filter answered with %+v", edges.Items)
-	}
+	assert.Must(t, err == nil, "relations.list by source ref: %v", err)
+	assert.Must(t, len(edges.Items) == 1 && edges.Items[0].SourceID == entity.ID, "the endpoint filter answered with %+v", edges.Items)
 
 	// The filter is case-folded exactly as every other key lookup is, and
 	// two spellings are one listing rather than two.
 	upper, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game,
 		web.RelationsListInput{Source: &web.RefInput{TypeKey: "QUEST", Key: "HOGGER"}})
-	if err != nil {
-		t.Fatalf("relations.list with a differently cased ref: %v", err)
-	}
-	if len(upper.Items) != 1 {
-		t.Fatalf("a differently cased ref found %d edges, want 1", len(upper.Items))
-	}
+	assert.Must(t, err == nil, "relations.list with a differently cased ref: %v", err)
+	assert.Must(t, len(upper.Items) == 1, "a differently cased ref found %d edges, want 1", len(upper.Items))
 
 	// A ref that names no entity is not_found, not an empty page: an
 	// empty page is a wrong answer that looks like a right one.
@@ -126,16 +115,12 @@ func TestEveryAddressOnThisSurfaceIsAKey(t *testing.T) {
 		Target: &web.RefInput{TypeKey: "not a key", Key: "elwynn"},
 	})
 	var invalid *metamodel.ValidationError
-	if !errors.As(err, &invalid) || invalid.Code != "invalid_input" {
-		t.Fatalf("err = %#v, want an invalid_input ValidationError", err)
-	}
+	assert.Must(t, errors.As(err, &invalid) && invalid.Code == "invalid_input", "err = %#v, want an invalid_input ValidationError", err)
 	paths := make([]string, 0, len(invalid.Fields))
 	for _, p := range invalid.Fields {
 		paths = append(paths, p.Path)
 	}
-	if strings.Join(paths, ",") != "source.key,target.type_key" {
-		t.Fatalf("problems = %v, want both bad halves named at once", paths)
-	}
+	assert.Must(t, strings.Join(paths, ",") == "source.key,target.type_key", "problems = %v, want both bad halves named at once", paths)
 
 	// Then the four removals, each by the address the row was written
 	// under, innermost first.
@@ -178,13 +163,8 @@ func TestEveryAddressOnThisSurfaceIsAKey(t *testing.T) {
 	}
 
 	counts, err := web.MCPGameCounts(ctx, f.deps, f.caller, f.game, web.GameCountsInput{})
-	if err != nil {
-		t.Fatalf("games.counts: %v", err)
-	}
-	if len(counts.EntityTypes) != 0 || len(counts.RelationTypes) != 0 ||
-		counts.Totals.Entities != 0 || counts.Totals.Relations != 0 {
-		t.Fatalf("the game is not empty after four removals: %+v", counts)
-	}
+	assert.Must(t, err == nil, "games.counts: %v", err)
+	assert.Must(t, len(counts.EntityTypes) == 0 && len(counts.RelationTypes) == 0 && counts.Totals.Entities == 0 && counts.Totals.Relations == 0, "the game is not empty after four removals: %+v", counts)
 }
 
 // TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith is the
@@ -199,13 +179,8 @@ func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
 
 	detail, err := web.MCPRelationTypesGet(ctx, f.deps, f.caller, f.game,
 		web.RelationTypesGetInput{Key: "takes_place_in"})
-	if err != nil {
-		t.Fatalf("relation_types.get: %v", err)
-	}
-	if len(detail.SourceTypeKeys) != 1 || detail.SourceTypeKeys[0] != "quest" ||
-		len(detail.TargetTypeKeys) != 1 || detail.TargetTypeKeys[0] != "zone" {
-		t.Fatalf("endpoint rules read back as %+v", detail)
-	}
+	assert.Must(t, err == nil, "relation_types.get: %v", err)
+	assert.Must(t, len(detail.SourceTypeKeys) == 1 && detail.SourceTypeKeys[0] == "quest" && len(detail.TargetTypeKeys) == 1 && detail.TargetTypeKeys[0] == "zone", "endpoint rules read back as %+v", detail)
 	// The stored spelling, not the caller's: this type was declared with
 	// lower-case keys, and a differently cased declaration must not
 	// change what the answer says.
@@ -219,12 +194,8 @@ func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
 	}
 	again, err := web.MCPRelationTypesGet(ctx, f.deps, f.caller, f.game,
 		web.RelationTypesGetInput{Key: "takes_place_in"})
-	if err != nil {
-		t.Fatalf("relation_types.get: %v", err)
-	}
-	if again.SourceTypeKeys[0] != "quest" || again.TargetTypeKeys[0] != "zone" {
-		t.Fatalf("endpoint rules echoed the caller's casing: %+v", again)
-	}
+	assert.Must(t, err == nil, "relation_types.get: %v", err)
+	assert.Must(t, again.SourceTypeKeys[0] == "quest" && again.TargetTypeKeys[0] == "zone", "endpoint rules echoed the caller's casing: %+v", again)
 
 	// An undeclared endpoint list is `[]` and never null: "this type
 	// accepts any" and "the server said nothing" must not look alike.
@@ -234,17 +205,10 @@ func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
 	}
 	open, err := web.MCPRelationTypesGet(ctx, f.deps, f.caller, f.game,
 		web.RelationTypesGetInput{Key: "mentions"})
-	if err != nil {
-		t.Fatalf("relation_types.get mentions: %v", err)
-	}
+	assert.Must(t, err == nil, "relation_types.get mentions: %v", err)
 	raw, err := json.Marshal(open)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(raw), `"source_type_keys":[]`) ||
-		!strings.Contains(string(raw), `"target_type_keys":[]`) {
-		t.Fatalf("an undeclared endpoint rule marshalled as %s", raw)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, strings.Contains(string(raw), `"source_type_keys":[]`) && strings.Contains(string(raw), `"target_type_keys":[]`), "an undeclared endpoint rule marshalled as %s", raw)
 
 	// An endpoint key carrying a byte no key may hold is refused before
 	// the lookup runs, at its own indexed path. These keys reach Postgres
@@ -257,12 +221,8 @@ func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
 			SourceTypeKeys: []string{"quest", "zo\x00ne"},
 		})
 	var badKey *metamodel.ValidationError
-	if !errors.As(err, &badKey) || badKey.Code != "invalid_input" {
-		t.Fatalf("err = %#v, want an invalid_input ValidationError", err)
-	}
-	if len(badKey.Fields) != 1 || badKey.Fields[0].Path != "source_type_keys[1]" {
-		t.Fatalf("problems = %+v, want the malformed element named", badKey.Fields)
-	}
+	assert.Must(t, errors.As(err, &badKey) && badKey.Code == "invalid_input", "err = %#v, want an invalid_input ValidationError", err)
+	assert.Must(t, len(badKey.Fields) == 1 && badKey.Fields[0].Path == "source_type_keys[1]", "problems = %+v, want the malformed element named", badKey.Fields)
 
 	// And the endpoint rule is still enforced, which is what would be
 	// lost by a translation that resolved a key to the wrong id.
@@ -274,9 +234,7 @@ func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
 			Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
 		}},
 	})
-	if !errors.Is(err, metamodel.ErrEndpointTypeMismatch) {
-		t.Fatalf("err = %v, want ErrEndpointTypeMismatch", err)
-	}
+	assert.Must(t, errors.Is(err, metamodel.ErrEndpointTypeMismatch), "err = %v, want ErrEndpointTypeMismatch", err)
 }
 
 // TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo is the counting half
@@ -290,20 +248,13 @@ func TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo(t *testing.T) {
 	seedAddressable(t, f.deps(), f.caller(), gameRef{f.game})
 
 	counts, err := web.MCPGameCounts(ctx, f.deps(), f.caller(), f.game, web.GameCountsInput{})
-	if err != nil {
-		t.Fatalf("games.counts: %v", err)
-	}
+	assert.Must(t, err == nil, "games.counts: %v", err)
 	byType := map[string]int64{}
 	for _, row := range counts.EntityTypes {
 		byType[row.Key] = row.EntityCount
 	}
-	if byType["quest"] != 1 || byType["zone"] != 1 || counts.Totals.Entities != 2 {
-		t.Fatalf("games.counts read %+v", counts)
-	}
-	if len(counts.RelationTypes) != 1 || counts.RelationTypes[0].RelationCount != 1 ||
-		counts.Totals.Relations != 1 || counts.Totals.Invalid != 0 {
-		t.Fatalf("games.counts read %+v for edges", counts)
-	}
+	assert.Must(t, byType["quest"] == 1 && byType["zone"] == 1 && counts.Totals.Entities == 2, "games.counts read %+v", counts)
+	assert.Must(t, len(counts.RelationTypes) == 1 && counts.RelationTypes[0].RelationCount == 1 && counts.Totals.Relations == 1 && counts.Totals.Invalid == 0, "games.counts read %+v for edges", counts)
 
 	// The invalid count is the number a designer acts on, so it has to
 	// move when a schema edit flags rows — on both tables, which is the
@@ -326,36 +277,22 @@ func TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo(t *testing.T) {
 		t.Fatalf("narrow the edge schema: %v", err)
 	}
 	flagged, err := web.MCPGameCounts(ctx, f.deps(), f.caller(), f.game, web.GameCountsInput{})
-	if err != nil {
-		t.Fatalf("games.counts: %v", err)
-	}
-	if flagged.Totals.Invalid != 2 {
-		t.Fatalf("the totals count %d invalid rows, want the quest and the edge: %+v",
-			flagged.Totals.Invalid, flagged)
-	}
+	assert.Must(t, err == nil, "games.counts: %v", err)
+	assert.Must(t, flagged.Totals.Invalid == 2, "the totals count %d invalid rows, want the quest and the edge: %+v",
+		flagged.Totals.Invalid, flagged)
 
 	// And the page. Same numbers, plus the one field only it has.
 	rec := f.as(t, http.MethodGet, "/summary", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "summary = %d: %s", rec.Code, rec.Body.String())
 	var page web.GameSummaryOutput
 	decodeBody(t, rec, &page)
-	if page.Totals != flagged.Totals || len(page.EntityTypes) != len(flagged.EntityTypes) {
-		t.Fatalf("the page and the tool disagree: %+v against %+v", page.Totals, flagged.Totals)
-	}
-	if page.Role == "" {
-		t.Fatalf("the page lost the one field the tool does not carry")
-	}
+	assert.Must(t, page.Totals == flagged.Totals && len(page.EntityTypes) == len(flagged.EntityTypes), "the page and the tool disagree: %+v against %+v", page.Totals, flagged.Totals)
+	assert.Must(t, page.Role != "", "the page lost the one field the tool does not carry")
 	// The tool does not carry it, and must not: an agent has a token,
 	// not a membership row, and a `"role": ""` would say nothing.
 	raw, err := json.Marshal(flagged)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(raw), "role") {
-		t.Fatalf("the tool's answer carries a role: %s", raw)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, !strings.Contains(string(raw), "role"), "the tool's answer carries a role: %s", raw)
 }
 
 // TestTheRESTMirrorAddressesRowsByKeyToo is the human half of the
@@ -369,26 +306,19 @@ func TestTheRESTMirrorAddressesRowsByKeyToo(t *testing.T) {
 	// The endpoint filter, as a ref in the query string.
 	rec := f.as(t, http.MethodGet,
 		"/relations?source_type_key=quest&source_key=hogger", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("filtered listing = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "filtered listing = %d: %s", rec.Code, rec.Body.String())
 	var listing struct {
 		Items []json.RawMessage `json:"items"`
 	}
 	decodeBody(t, rec, &listing)
-	if len(listing.Items) != 1 {
-		t.Fatalf("the filtered listing returned %s", rec.Body.String())
-	}
+	assert.Must(t, len(listing.Items) == 1, "the filtered listing returned %s", rec.Body.String())
 
 	// **Half a ref is refused, at the half that is missing.** Reading it
 	// as "no filter" would answer a narrowed question with the whole
 	// listing, which is this surface's own wrong answer that looks like a
 	// right one.
 	half := f.as(t, http.MethodGet, "/relations?source_type_key=quest", nil)
-	if half.Code != http.StatusBadRequest ||
-		!strings.Contains(half.Body.String(), "source.key") {
-		t.Fatalf("half an endpoint ref = %d %s", half.Code, half.Body.String())
-	}
+	assert.Must(t, half.Code == http.StatusBadRequest && strings.Contains(half.Body.String(), "source.key"), "half an endpoint ref = %d %s", half.Code, half.Body.String())
 
 	// The four removals, by key, innermost first — and the edge one
 	// through /relations/one, the same five parameters its read takes.
@@ -414,9 +344,7 @@ func TestTheRESTMirrorAddressesRowsByKeyToo(t *testing.T) {
 	summary := f.as(t, http.MethodGet, "/summary", nil)
 	var page web.GameSummaryOutput
 	decodeBody(t, summary, &page)
-	if len(page.EntityTypes) != 0 || page.Totals.Entities != 0 {
-		t.Fatalf("the game is not empty after four removals: %+v", page)
-	}
+	assert.Must(t, len(page.EntityTypes) == 0 && page.Totals.Entities == 0, "the game is not empty after four removals: %+v", page)
 }
 
 func i32p(v int32) *int32 { return &v }

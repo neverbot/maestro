@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -78,16 +79,10 @@ func seedViewGame(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug st
 // unrelated reason -- a typo'd column name also produces an error.
 func assertCheckViolation(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("expected a check violation, but the statement succeeded")
-	}
+	assert.Must(t, err != nil, "expected a check violation, but the statement succeeded")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
-	}
-	if pgErr.Code != "23514" {
-		t.Fatalf("expected SQLSTATE 23514 (check_violation), got %s: %v", pgErr.Code, err)
-	}
+	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
+	assert.Must(t, pgErr.Code == "23514", "expected SQLSTATE 23514 (check_violation), got %s: %v", pgErr.Code, err)
 }
 
 // countRows fails the test unless the query returns exactly want rows.
@@ -99,9 +94,7 @@ func countRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query stri
 	if err := pool.QueryRow(ctx, query, args...).Scan(&got); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
-	if got != want {
-		t.Fatalf("expected %d rows, got %d", want, got)
-	}
+	assert.Must(t, got == want, "expected %d rows, got %d", want, got)
 }
 
 func TestViewTablesExist(t *testing.T) {
@@ -116,9 +109,7 @@ func TestViewTablesExist(t *testing.T) {
 			table).Scan(&exists); err != nil {
 			t.Fatalf("query %s: %v", table, err)
 		}
-		if !exists {
-			t.Fatalf("table %s was not created", table)
-		}
+		assert.Must(t, exists, "table %s was not created", table)
 	}
 }
 
@@ -322,12 +313,8 @@ func TestDeletingAnEntityTypeNullsTheRefAndKeepsItsKey(t *testing.T) {
 	if typeID != nil {
 		t.Fatalf("entity_type_id must be null after the type is deleted, got %v", *typeID)
 	}
-	if refKey != "quest" || pointer != "/from/0/type" {
-		t.Fatalf("the key and the pointer must survive: got %q at %q", refKey, pointer)
-	}
-	if projectID != a.projectID {
-		t.Fatalf("project_id must be untouched by the SET NULL, got %v want %v", projectID, a.projectID)
-	}
+	assert.Must(t, refKey == "quest" && pointer == "/from/0/type", "the key and the pointer must survive: got %q at %q", refKey, pointer)
+	assert.Must(t, projectID == a.projectID, "project_id must be untouched by the SET NULL, got %v want %v", projectID, a.projectID)
 }
 
 // TestDeletingARelationTypeNullsOnlyItsOwnRefColumn pins the second SET
@@ -367,18 +354,14 @@ func TestDeletingARelationTypeNullsOnlyItsOwnRefColumn(t *testing.T) {
 	if relationTypeID != nil {
 		t.Fatalf("relation_type_id must be null after the type is deleted, got %v", *relationTypeID)
 	}
-	if refKey != "requires" {
-		t.Fatalf("the key must survive: got %q", refKey)
-	}
+	assert.Must(t, refKey == "requires", "the key must survive: got %q", refKey)
 
 	var entityTypeID *string
 	if err := pool.QueryRow(ctx,
 		`SELECT entity_type_id FROM view_refs WHERE pointer = '/from/0/type'`).Scan(&entityTypeID); err != nil {
 		t.Fatalf("read the entity_type ref: %v", err)
 	}
-	if entityTypeID == nil || *entityTypeID != a.entityTypeID {
-		t.Fatalf("the entity_type ref must be untouched, got %v", entityTypeID)
-	}
+	assert.Must(t, entityTypeID != nil && *entityTypeID == a.entityTypeID, "the entity_type ref must be untouched, got %v", entityTypeID)
 }
 
 // TestRevokingATokenNullsOnlyTheTokenColumnOfAView pins the column list
@@ -422,12 +405,8 @@ func TestRevokingATokenNullsOnlyTheTokenColumnOfAView(t *testing.T) {
 	if gotToken != nil {
 		t.Fatalf("updated_by_token_id must be null, got %v", *gotToken)
 	}
-	if gotUser == nil || *gotUser != userID {
-		t.Fatalf("updated_by_user_id must be untouched, got %v", gotUser)
-	}
-	if gotProject != a.projectID {
-		t.Fatalf("project_id must be untouched by the SET NULL, got %v want %v", gotProject, a.projectID)
-	}
+	assert.Must(t, gotUser != nil && *gotUser == userID, "updated_by_user_id must be untouched, got %v", gotUser)
+	assert.Must(t, gotProject == a.projectID, "project_id must be untouched by the SET NULL, got %v want %v", gotProject, a.projectID)
 
 	// The same key on view_assets, which is a separate constraint.
 	var assetToken *string
@@ -440,9 +419,7 @@ func TestRevokingATokenNullsOnlyTheTokenColumnOfAView(t *testing.T) {
 	if assetToken != nil {
 		t.Fatalf("created_by_token_id must be null, got %v", *assetToken)
 	}
-	if assetProject != a.projectID {
-		t.Fatalf("the asset's project_id must be untouched, got %v want %v", assetProject, a.projectID)
-	}
+	assert.Must(t, assetProject == a.projectID, "the asset's project_id must be untouched, got %v want %v", assetProject, a.projectID)
 }
 
 // TestDeletingAnAssetNullsTheBackgroundOfEveryView pins the SET NULL
@@ -745,9 +722,7 @@ func TestAnUnknownLayoutModeIsRefused(t *testing.T) {
 		 RETURNING layout_mode`, a.projectID).Scan(&mode); err != nil {
 		t.Fatalf("an unknown renderer must be accepted by the schema: %v", err)
 	}
-	if mode != "mixed" {
-		t.Fatalf("layout_mode must default to mixed, got %q", mode)
-	}
+	assert.Must(t, mode == "mixed", "layout_mode must default to mixed, got %q", mode)
 
 	_, err := pool.Exec(ctx, `UPDATE views SET layout_mode = 'diagonal' WHERE id = $1`, a.viewID)
 	assertCheckViolation(t, err)
@@ -780,9 +755,7 @@ func TestTheViewsUpdatedAtTriggerFires(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT updated_at FROM views WHERE id = $1`, a.viewID).Scan(&after); err != nil {
 		t.Fatalf("read updated_at after: %v", err)
 	}
-	if !after.After(before) {
-		t.Fatalf("updated_at did not move on views: %s -> %s", before, after)
-	}
+	assert.Must(t, after.After(before), "updated_at did not move on views: %s -> %s", before, after)
 }
 
 func TestTheViewPositionsUpdatedAtTriggerFires(t *testing.T) {
@@ -810,9 +783,7 @@ func TestTheViewPositionsUpdatedAtTriggerFires(t *testing.T) {
 	if err := pool.QueryRow(ctx, read, a.viewID, a.entityID).Scan(&after); err != nil {
 		t.Fatalf("read updated_at after: %v", err)
 	}
-	if !after.After(before) {
-		t.Fatalf("updated_at did not move on view_positions: %s -> %s", before, after)
-	}
+	assert.Must(t, after.After(before), "updated_at did not move on view_positions: %s -> %s", before, after)
 }
 
 // TestRelationsTypeTargetIndexExists pins relations_type_target_idx
@@ -838,9 +809,7 @@ func TestRelationsTypeTargetIndexExists(t *testing.T) {
 		Scan(&exists); err != nil {
 		t.Fatalf("query pg_indexes: %v", err)
 	}
-	if !exists {
-		t.Fatal("relations_type_target_idx was not created")
-	}
+	assert.Must(t, exists, "relations_type_target_idx was not created")
 }
 
 // TestAViewPositionDefaultsToPinned pins view_positions.pinned's default
@@ -866,7 +835,5 @@ func TestAViewPositionDefaultsToPinned(t *testing.T) {
 		a.viewID, a.entityID).Scan(&pinned); err != nil {
 		t.Fatalf("read pinned: %v", err)
 	}
-	if !pinned {
-		t.Fatal("view_positions.pinned did not default to true")
-	}
+	assert.Must(t, pinned, "view_positions.pinned did not default to true")
 }

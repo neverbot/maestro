@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 )
 
@@ -32,29 +33,17 @@ func TestDiffArea(t *testing.T) {
 		}
 
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if got.Coarse {
-			t.Fatal("a one-line change must not come back coarse")
-		}
-		if got.Path != "bible" || got.FromVersion != 1 || got.ToVersion != 2 {
-			t.Fatalf("result = %+v, want it to name what it compared", got)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, !got.Coarse, "a one-line change must not come back coarse")
+		assert.Must(t, got.Path == "bible" && got.FromVersion == 1 && got.ToVersion == 2, "result = %+v, want it to name what it compared", got)
 		for _, want := range []string{"--- bible@1\n", "+++ bible@2\n", "-five", "+FIVE", "@@ "} {
-			if !strings.Contains(got.Unified, want) {
-				t.Fatalf("diff %q is missing %q", got.Unified, want)
-			}
+			assert.Must(t, strings.Contains(got.Unified, want), "diff %q is missing %q", got.Unified, want)
 		}
 		// Three lines of context each side, and nothing beyond it.
-		if strings.Contains(got.Unified, "one") {
-			t.Fatalf("diff %q reaches past three lines of context", got.Unified)
-		}
+		assert.Must(t, !strings.Contains(got.Unified, "one"), "diff %q reaches past three lines of context", got.Unified)
 		// The hunk header counts the lines it actually carries: four context
 		// lines (two above, two below the edit sits between) plus the pair.
-		if !strings.Contains(got.Unified, "@@ -2,7 +2,7 @@") {
-			t.Fatalf("diff %q does not place its hunk at the changed line", got.Unified)
-		}
+		assert.Must(t, strings.Contains(got.Unified, "@@ -2,7 +2,7 @@"), "diff %q does not place its hunk at the changed line", got.Unified)
 	})
 
 	t.Run("diffing a version against itself is empty", func(t *testing.T) {
@@ -64,15 +53,9 @@ func TestDiffArea(t *testing.T) {
 		writeVersions(t, svc, game, "bible", 2)
 
 		got, err := svc.Diff(ctx, game, "bible", 2, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if strings.Contains(got.Unified, "@@") {
-			t.Fatalf("diff = %q, want no hunks", got.Unified)
-		}
-		if got.Coarse {
-			t.Fatal("an empty diff is not a coarse one")
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, !strings.Contains(got.Unified, "@@"), "diff = %q, want no hunks", got.Unified)
+		assert.Must(t, !got.Coarse, "an empty diff is not a coarse one")
 	})
 
 	t.Run("diff reads in the direction it was asked", func(t *testing.T) {
@@ -82,17 +65,11 @@ func TestDiffArea(t *testing.T) {
 		writeVersions(t, svc, game, "bible", 2)
 
 		forward, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
 		backward, err := svc.Diff(ctx, game, "bible", 2, 1)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if !strings.Contains(forward.Unified, "+v2") || !strings.Contains(backward.Unified, "+v1") {
-			t.Fatalf("forward = %q, backward = %q: the direction must follow the arguments",
-				forward.Unified, backward.Unified)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, strings.Contains(forward.Unified, "+v2") && strings.Contains(backward.Unified, "+v1"), "forward = %q, backward = %q: the direction must follow the arguments",
+			forward.Unified, backward.Unified)
 	})
 
 	// TestDiffArea's "a diff of an added and a removed line counts both sides"
@@ -115,15 +92,9 @@ func TestDiffArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if !strings.Contains(got.Unified, "@@ -1,3 +1,5 @@") {
-			t.Fatalf("diff %q must count three lines before and five after", got.Unified)
-		}
-		if !strings.Contains(got.Unified, "+d\n+e\n") {
-			t.Fatalf("diff %q must show both added lines", got.Unified)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, strings.Contains(got.Unified, "@@ -1,3 +1,5 @@"), "diff %q must count three lines before and five after", got.Unified)
+		assert.Must(t, strings.Contains(got.Unified, "+d\n+e\n"), "diff %q must show both added lines", got.Unified)
 	})
 
 	// TestDiffArea's "an added documents diff numbers the empty side by GNU
@@ -151,15 +122,9 @@ func TestDiffArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if got.Coarse {
-			t.Fatal("a three-line body is not a coarse case")
-		}
-		if !strings.Contains(got.Unified, "@@ -0,0 +1,3 @@") {
-			t.Fatalf("diff %q must number the empty from-side by GNU's rule (@@ -0,0 +1,3 @@)", got.Unified)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, !got.Coarse, "a three-line body is not a coarse case")
+		assert.Must(t, strings.Contains(got.Unified, "@@ -0,0 +1,3 @@"), "diff %q must number the empty from-side by GNU's rule (@@ -0,0 +1,3 @@)", got.Unified)
 	})
 
 	t.Run("a deleted documents diff numbers the empty side by GNU rules", func(t *testing.T) {
@@ -178,15 +143,9 @@ func TestDiffArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if got.Coarse {
-			t.Fatal("a three-line body is not a coarse case")
-		}
-		if !strings.Contains(got.Unified, "@@ -1,3 +0,0 @@") {
-			t.Fatalf("diff %q must number the empty to-side by GNU's rule (@@ -1,3 +0,0 @@)", got.Unified)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, !got.Coarse, "a three-line body is not a coarse case")
+		assert.Must(t, strings.Contains(got.Unified, "@@ -1,3 +0,0 @@"), "diff %q must number the empty to-side by GNU's rule (@@ -1,3 +0,0 @@)", got.Unified)
 	})
 
 	// TestDiffArea's "a document that does not end in a newline diffs against
@@ -209,12 +168,8 @@ func TestDiffArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if strings.Contains(got.Unified, "@@") {
-			t.Fatalf("diff = %q, want no hunks: only the trailing newline moved", got.Unified)
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, !strings.Contains(got.Unified, "@@"), "diff = %q, want no hunks: only the trailing newline moved", got.Unified)
 	})
 
 	t.Run("a huge change comes back coarse and says so", func(t *testing.T) {
@@ -236,17 +191,11 @@ func TestDiffArea(t *testing.T) {
 		}
 
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if !got.Coarse {
-			t.Fatal("a 5,000-line rewrite must report itself coarse rather than pretending")
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, got.Coarse, "a 5,000-line rewrite must report itself coarse rather than pretending")
 		// A coarse answer is still an answer: every line of both sides is
 		// there, under one hunk.
-		if strings.Count(got.Unified, "\n-a") != 5000 || strings.Count(got.Unified, "\n+b") != 5000 {
-			t.Fatal("a coarse diff still carries both whole sides")
-		}
+		assert.Must(t, strings.Count(got.Unified, "\n-a") == 5000 && strings.Count(got.Unified, "\n+b") == 5000, "a coarse diff still carries both whole sides")
 	})
 
 	// TestDiffArea's "a coarse diff does not reprint its common head and tail
@@ -277,19 +226,11 @@ func TestDiffArea(t *testing.T) {
 		}
 
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if !got.Coarse {
-			t.Fatal("a 5,000-line rewrite must report itself coarse rather than pretending")
-		}
-		if strings.Count(got.Unified, "\n-a") != 5000 || strings.Count(got.Unified, "\n+b") != 5000 {
-			t.Fatal("a coarse diff still carries both whole sides")
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, got.Coarse, "a 5,000-line rewrite must report itself coarse rather than pretending")
+		assert.Must(t, strings.Count(got.Unified, "\n-a") == 5000 && strings.Count(got.Unified, "\n+b") == 5000, "a coarse diff still carries both whole sides")
 		for _, line := range []string{"ctx1", "ctx2", "ctx3", "ctx4", "ctx5", "ctx6"} {
-			if strings.Contains(got.Unified, "-"+line) || strings.Contains(got.Unified, "+"+line) {
-				t.Fatalf("diff %q reprints the common line %q as changed", got.Unified, line)
-			}
+			assert.Must(t, !strings.Contains(got.Unified, "-"+line) && !strings.Contains(got.Unified, "+"+line), "diff %q reprints the common line %q as changed", got.Unified, line)
 		}
 	})
 
@@ -315,18 +256,10 @@ func TestDiffArea(t *testing.T) {
 			t.Fatalf("second write: %v", err)
 		}
 		got, err := svc.Diff(ctx, game, "bible", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff: %v", err)
-		}
-		if got.Coarse {
-			t.Fatal("a one-line edit in a 40,000-line document is not a coarse case")
-		}
-		if !strings.Contains(got.Unified, "-before") || !strings.Contains(got.Unified, "+after") {
-			t.Fatalf("diff %q does not show the one line that moved", got.Unified)
-		}
-		if strings.Count(got.Unified, "\n") > 20 {
-			t.Fatalf("diff carries %d lines for a one-line edit", strings.Count(got.Unified, "\n"))
-		}
+		assert.Must(t, err == nil, "Diff: %v", err)
+		assert.Must(t, !got.Coarse, "a one-line edit in a 40,000-line document is not a coarse case")
+		assert.Must(t, strings.Contains(got.Unified, "-before") && strings.Contains(got.Unified, "+after"), "diff %q does not show the one line that moved", got.Unified)
+		assert.Must(t, strings.Count(got.Unified, "\n") <= 20, "diff carries %d lines for a one-line edit", strings.Count(got.Unified, "\n"))
 	})
 
 	t.Run("diff names which version argument was wrong", func(t *testing.T) {
@@ -350,9 +283,7 @@ func TestDiffArea(t *testing.T) {
 		writeVersions(t, svc, azeroth, "bible", 2)
 
 		_, err := svc.Diff(ctx, outland, "bible", 1, 2)
-		if !errors.Is(err, markdown.ErrNotFound) {
-			t.Fatalf("want not_found, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrNotFound), "want not_found, got %v", err)
 		// A missing *document* stays reported at `path`: versionArgument
 		// re-points only the miss ReadVersion raises at `version`, and
 		// sending a caller to check its version number when the document
@@ -399,22 +330,16 @@ func TestDiffArea(t *testing.T) {
 		}
 
 		across, err := svc.Diff(ctx, game, "notes/scrapped", 1, 2)
-		if err != nil {
-			t.Fatalf("Diff across the tombstone: %v", err)
-		}
+		assert.Must(t, err == nil, "Diff across the tombstone: %v", err)
 		// The premise: the two bodies really are identical, so the unified
 		// text cannot be what tells a caller a deletion happened.
 		for _, line := range strings.Split(across.Unified, "\n") {
 			if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
 				continue // the two file headers, which every diff carries
 			}
-			if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "+") {
-				t.Fatalf("the tombstone changed the body after all; this test's premise is gone:\n%s", across.Unified)
-			}
+			assert.Must(t, !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "+"), "the tombstone changed the body after all; this test's premise is gone:\n%s", across.Unified)
 		}
-		if across.FromDeleted {
-			t.Fatal("version 1 is a live version and the diff says it is deleted")
-		}
+		assert.Must(t, !across.FromDeleted, "version 1 is a live version and the diff says it is deleted")
 		if !across.ToDeleted {
 			t.Fatal("a diff onto a tombstone does not say the document was deleted; " +
 				"an empty unified diff is all the caller gets, and it reads as 'nothing changed'")
@@ -423,13 +348,9 @@ func TestDiffArea(t *testing.T) {
 		// And the opposite direction, which is a resurrection rather than a
 		// deletion and must not be reported as the same thing.
 		back, err := svc.Diff(ctx, game, "notes/scrapped", 2, 1)
-		if err != nil {
-			t.Fatalf("Diff back across the tombstone: %v", err)
-		}
-		if !back.FromDeleted || back.ToDeleted {
-			t.Fatalf("reading the comparison backwards = (%v, %v), want (true, false)",
-				back.FromDeleted, back.ToDeleted)
-		}
+		assert.Must(t, err == nil, "Diff back across the tombstone: %v", err)
+		assert.Must(t, back.FromDeleted && !back.ToDeleted, "reading the comparison backwards = (%v, %v), want (true, false)",
+			back.FromDeleted, back.ToDeleted)
 
 		// A comparison between two live versions says nothing about
 		// deletion, so the flags cannot be read as decoration.
@@ -439,11 +360,7 @@ func TestDiffArea(t *testing.T) {
 			t.Fatalf("resurrect: %v", err)
 		}
 		live, err := svc.Diff(ctx, game, "notes/scrapped", 1, 3)
-		if err != nil {
-			t.Fatalf("Diff between two live versions: %v", err)
-		}
-		if live.FromDeleted || live.ToDeleted {
-			t.Fatalf("two live versions reported (%v, %v)", live.FromDeleted, live.ToDeleted)
-		}
+		assert.Must(t, err == nil, "Diff between two live versions: %v", err)
+		assert.Must(t, !live.FromDeleted && !live.ToDeleted, "two live versions reported (%v, %v)", live.FromDeleted, live.ToDeleted)
 	})
 }

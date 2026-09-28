@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/testutil"
 	"github.com/neverbot/maestro/internal/views"
 )
@@ -51,9 +52,7 @@ func TestTheServingRoutesNoSniffHeaderIsItsOwn(t *testing.T) {
 	}
 	asset, err := svc.CreateAsset(ctx, project, views.Actor{}, "azeroth.png",
 		bytes.NewReader(raw.Bytes()))
-	if err != nil {
-		t.Fatalf("upload: %v", err)
-	}
+	assert.Must(t, err == nil, "upload: %v", err)
 
 	s := &Server{opts: Options{Views: svc}}
 	req := httptest.NewRequest(http.MethodGet, "/api/games/azeroth/view-assets/"+asset.ID.String(), nil)
@@ -61,9 +60,7 @@ func TestTheServingRoutesNoSniffHeaderIsItsOwn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleServeViewAsset(rec, req, Caller{}, ProjectScope{ProjectID: project})
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("serve = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "serve = %d: %s", rec.Code, rec.Body.String())
 	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q with no middleware in front, want "+
 			"nosniff: this route sets it itself precisely so that a global "+

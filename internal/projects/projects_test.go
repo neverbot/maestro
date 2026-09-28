@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/identity"
@@ -39,9 +40,7 @@ func newUserNamed(t *testing.T, ids *identity.Service, email, displayName string
 	user, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: email, DisplayName: displayName, Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser(%s): %v", email, err)
-	}
+	assert.Must(t, err == nil, "CreateUser(%s): %v", email, err)
 	return user
 }
 
@@ -55,20 +54,12 @@ func TestCreateProjectMakesCreatorOwner(t *testing.T) {
 	user := newUser(t, ids, "designer@example.test")
 
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if project.Slug != "azeroth" || project.Name != "Azeroth" {
-		t.Fatalf("project = %+v, want slug=azeroth name=Azeroth", project)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
+	assert.Must(t, project.Slug == "azeroth" && project.Name == "Azeroth", "project = %+v, want slug=azeroth name=Azeroth", project)
 
 	role, err := svc.RoleOf(ctx, user.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RoleOf: %v", err)
-	}
-	if role != "owner" {
-		t.Fatalf("role = %q, want owner", role)
-	}
+	assert.Must(t, err == nil, "RoleOf: %v", err)
+	assert.Must(t, role == "owner", "role = %q, want owner", role)
 }
 
 func TestCreateUnknownCreatorReturnsErrMemberNotFound(t *testing.T) {
@@ -97,20 +88,12 @@ func TestListForUserOnlyReturnsMemberships(t *testing.T) {
 	}
 
 	mine, err := svc.ListForUser(ctx, insider.ID)
-	if err != nil {
-		t.Fatalf("ListForUser: %v", err)
-	}
-	if len(mine) != 1 {
-		t.Fatalf("insider sees %d projects, want 1", len(mine))
-	}
+	assert.Must(t, err == nil, "ListForUser: %v", err)
+	assert.Must(t, len(mine) == 1, "insider sees %d projects, want 1", len(mine))
 
 	theirs, err := svc.ListForUser(ctx, outsider.ID)
-	if err != nil {
-		t.Fatalf("ListForUser: %v", err)
-	}
-	if len(theirs) != 0 {
-		t.Fatalf("outsider sees %d projects, want 0", len(theirs))
-	}
+	assert.Must(t, err == nil, "ListForUser: %v", err)
+	assert.Must(t, len(theirs) == 0, "outsider sees %d projects, want 0", len(theirs))
 }
 
 // TestListForUserOrderingIsStableOnTies exercises the `, id` tiebreak
@@ -134,21 +117,15 @@ func TestListForUserOrderingIsStableOnTies(t *testing.T) {
 	}
 
 	first, err := svc.ListForUser(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("ListForUser: %v", err)
-	}
-	if len(first) != 2 {
-		t.Fatalf("len = %d, want 2", len(first))
-	}
+	assert.Must(t, err == nil, "ListForUser: %v", err)
+	assert.Must(t, len(first) == 2, "len = %d, want 2", len(first))
 	if first[0].ID.String() >= first[1].ID.String() {
 		t.Fatalf("tied names not broken by id ascending: %s then %s", first[0].ID, first[1].ID)
 	}
 
 	for i := 0; i < 3; i++ {
 		again, err := svc.ListForUser(ctx, user.ID)
-		if err != nil {
-			t.Fatalf("ListForUser: %v", err)
-		}
+		assert.Must(t, err == nil, "ListForUser: %v", err)
 		if again[0].ID != first[0].ID || again[1].ID != first[1].ID {
 			t.Fatalf("order changed between calls: got [%s %s], want [%s %s]",
 				again[0].ID, again[1].ID, first[0].ID, first[1].ID)
@@ -166,9 +143,7 @@ func TestRoleOfNonMember(t *testing.T) {
 	owner := newUser(t, ids, "owner@example.test")
 	stranger := newUser(t, ids, "stranger@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.RoleOf(ctx, stranger.ID, project.ID); !errors.Is(err, projects.ErrNotAMember) {
 		t.Fatalf("err = %v, want ErrNotAMember", err)
@@ -220,12 +195,8 @@ func TestSlugIsNormalisedToLowerCase(t *testing.T) {
 
 	user := newUser(t, ids, "designer3@example.test")
 	project, err := svc.Create(ctx, "Azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if project.Slug != "azeroth" {
-		t.Fatalf("slug = %q, want lower-cased azeroth", project.Slug)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
+	assert.Must(t, project.Slug == "azeroth", "slug = %q, want lower-cased azeroth", project.Slug)
 }
 
 func TestSlugShapeIsValidated(t *testing.T) {
@@ -296,21 +267,15 @@ func TestListMembersReturnsRolesForEveryMember(t *testing.T) {
 	owner := newUser(t, ids, "owner3@example.test")
 	editor := newUser(t, ids, "editor@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
 	members, err := svc.ListMembers(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("ListMembers: %v", err)
-	}
-	if len(members) != 2 {
-		t.Fatalf("len(members) = %d, want 2", len(members))
-	}
+	assert.Must(t, err == nil, "ListMembers: %v", err)
+	assert.Must(t, len(members) == 2, "len(members) = %d, want 2", len(members))
 
 	roleByUser := map[uuid.UUID]string{}
 	for _, m := range members {
@@ -339,9 +304,7 @@ func TestListMembersOrderingIsStableOnTies(t *testing.T) {
 	twinA := newUserNamed(t, ids, "tie-a@example.test", "Twin")
 	twinB := newUserNamed(t, ids, "tie-b@example.test", "Twin")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := svc.SetRole(ctx, twinA.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -350,36 +313,28 @@ func TestListMembersOrderingIsStableOnTies(t *testing.T) {
 	}
 
 	first, err := svc.ListMembers(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("ListMembers: %v", err)
-	}
+	assert.Must(t, err == nil, "ListMembers: %v", err)
 	var twins []uuid.UUID
 	for _, m := range first {
 		if m.DisplayName == "Twin" {
 			twins = append(twins, m.UserID)
 		}
 	}
-	if len(twins) != 2 {
-		t.Fatalf("len(twins) = %d, want 2", len(twins))
-	}
+	assert.Must(t, len(twins) == 2, "len(twins) = %d, want 2", len(twins))
 	if twins[0].String() >= twins[1].String() {
 		t.Fatalf("tied names not broken by id ascending: %s then %s", twins[0], twins[1])
 	}
 
 	for i := 0; i < 3; i++ {
 		again, err := svc.ListMembers(ctx, project.ID)
-		if err != nil {
-			t.Fatalf("ListMembers: %v", err)
-		}
+		assert.Must(t, err == nil, "ListMembers: %v", err)
 		var againTwins []uuid.UUID
 		for _, m := range again {
 			if m.DisplayName == "Twin" {
 				againTwins = append(againTwins, m.UserID)
 			}
 		}
-		if len(againTwins) != 2 || againTwins[0] != twins[0] || againTwins[1] != twins[1] {
-			t.Fatalf("order changed between calls: got %v, want %v", againTwins, twins)
-		}
+		assert.Must(t, len(againTwins) == 2 && againTwins[0] == twins[0] && againTwins[1] == twins[1], "order changed between calls: got %v, want %v", againTwins, twins)
 	}
 }
 
@@ -393,20 +348,14 @@ func TestSetRoleCanPromoteAnotherMemberToOwner(t *testing.T) {
 	owner := newUser(t, ids, "owner4@example.test")
 	viewer := newUser(t, ids, "viewer@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, viewer.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	role, err := svc.RoleOf(ctx, viewer.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RoleOf: %v", err)
-	}
-	if role != "owner" {
-		t.Fatalf("role = %q, want owner", role)
-	}
+	assert.Must(t, err == nil, "RoleOf: %v", err)
+	assert.Must(t, role == "owner", "role = %q, want owner", role)
 
 	// With two owners now, demoting the original one must succeed.
 	if _, err := svc.SetRole(ctx, owner.ID, project.ID, "editor"); err != nil {
@@ -433,20 +382,14 @@ func TestSetRoleHasNoAuthorizationCheck(t *testing.T) {
 	owner := newUser(t, ids, "noauth-owner@example.test")
 	stranger := newUser(t, ids, "noauth-stranger@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, stranger.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	role, err := svc.RoleOf(ctx, stranger.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RoleOf: %v", err)
-	}
-	if role != "owner" {
-		t.Fatalf("role = %q, want owner", role)
-	}
+	assert.Must(t, err == nil, "RoleOf: %v", err)
+	assert.Must(t, role == "owner", "role = %q, want owner", role)
 }
 
 func TestSetRoleRejectsInvalidRole(t *testing.T) {
@@ -459,9 +402,7 @@ func TestSetRoleRejectsInvalidRole(t *testing.T) {
 	owner := newUser(t, ids, "owner5@example.test")
 	other := newUser(t, ids, "other@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, other.ID, project.ID, "superadmin"); !errors.Is(err, projects.ErrRoleInvalid) {
 		t.Fatalf("err = %v, want ErrRoleInvalid", err)
@@ -477,9 +418,7 @@ func TestSetRoleCannotDemoteSoleOwner(t *testing.T) {
 
 	owner := newUser(t, ids, "owner6@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, owner.ID, project.ID, "editor"); !errors.Is(err, projects.ErrLastOwner) {
 		t.Fatalf("err = %v, want ErrLastOwner", err)
@@ -487,12 +426,8 @@ func TestSetRoleCannotDemoteSoleOwner(t *testing.T) {
 
 	// The role must be unchanged.
 	role, err := svc.RoleOf(ctx, owner.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RoleOf: %v", err)
-	}
-	if role != "owner" {
-		t.Fatalf("role = %q, want owner (unchanged)", role)
-	}
+	assert.Must(t, err == nil, "RoleOf: %v", err)
+	assert.Must(t, role == "owner", "role = %q, want owner (unchanged)", role)
 }
 
 func TestSetRoleUnknownProjectReturnsErrProjectNotFound(t *testing.T) {
@@ -517,9 +452,7 @@ func TestSetRoleUnknownUserReturnsErrMemberNotFound(t *testing.T) {
 
 	owner := newUser(t, ids, "fk-user-owner@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, uuid.New(), project.ID, "editor"); !errors.Is(err, projects.ErrMemberNotFound) {
 		t.Fatalf("err = %v, want ErrMemberNotFound", err)
@@ -535,21 +468,15 @@ func TestRemoveMemberCannotRemoveSoleOwner(t *testing.T) {
 
 	owner := newUser(t, ids, "owner7@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.RemoveMember(ctx, owner.ID, project.ID); !errors.Is(err, projects.ErrLastOwner) {
 		t.Fatalf("err = %v, want ErrLastOwner", err)
 	}
 
 	role, err := svc.RoleOf(ctx, owner.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RoleOf: %v", err)
-	}
-	if role != "owner" {
-		t.Fatalf("owner membership should still exist")
-	}
+	assert.Must(t, err == nil, "RoleOf: %v", err)
+	assert.Must(t, role == "owner", "owner membership should still exist")
 }
 
 func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
@@ -562,9 +489,7 @@ func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
 	owner := newUser(t, ids, "owner8@example.test")
 	second := newUser(t, ids, "second@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := svc.SetRole(ctx, second.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -587,9 +512,7 @@ func TestRemoveMemberOfNonMemberIsNoop(t *testing.T) {
 	owner := newUser(t, ids, "owner9@example.test")
 	stranger := newUser(t, ids, "stranger3@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if revoked, err := svc.RemoveMember(ctx, stranger.ID, project.ID); err != nil {
 		t.Fatalf("RemoveMember of non-member: %v", err)
@@ -615,26 +538,18 @@ func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
 	owner := newUser(t, ids, "owner10@example.test")
 	member := newUser(t, ids, "member1@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: project.ID, UserID: member.ID, Label: "member's agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	revoked, err := svc.RemoveMember(ctx, member.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RemoveMember: %v", err)
-	}
-	if len(revoked) != 1 || revoked[0] != "member's agent" {
-		t.Fatalf("revoked = %v, want [\"member's agent\"]", revoked)
-	}
+	assert.Must(t, err == nil, "RemoveMember: %v", err)
+	assert.Must(t, len(revoked) == 1 && revoked[0] == "member's agent", "revoked = %v, want [\"member's agent\"]", revoked)
 
 	if _, err := ids.ResolveAPIToken(ctx, token); !errors.Is(err, identity.ErrTokenInvalid) {
 		t.Fatalf("err = %v, want ErrTokenInvalid: a removed member's token in that game must stop working", err)
@@ -655,13 +570,9 @@ func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
 	owner := newUser(t, ids, "owner11@example.test")
 	member := newUser(t, ids, "member2@example.test")
 	azeroth, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create (azeroth): %v", err)
-	}
+	assert.Must(t, err == nil, "Create (azeroth): %v", err)
 	leMans, err := svc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create (le mans): %v", err)
-	}
+	assert.Must(t, err == nil, "Create (le mans): %v", err)
 	if _, err := svc.SetRole(ctx, member.ID, azeroth.ID, "editor"); err != nil {
 		t.Fatalf("SetRole (azeroth): %v", err)
 	}
@@ -671,9 +582,7 @@ func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
 	otherProjectToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: leMans.ID, UserID: member.ID, Label: "member's other agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	if _, err := svc.RemoveMember(ctx, member.ID, azeroth.ID); err != nil {
 		t.Fatalf("RemoveMember: %v", err)
@@ -693,17 +602,11 @@ func TestByIDRoundTrips(t *testing.T) {
 
 	owner := newUser(t, ids, "owner10@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	found, err := svc.ByID(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("ByID: %v", err)
-	}
-	if found.Slug != "azeroth" {
-		t.Fatalf("found.Slug = %q, want azeroth", found.Slug)
-	}
+	assert.Must(t, err == nil, "ByID: %v", err)
+	assert.Must(t, found.Slug == "azeroth", "found.Slug = %q, want azeroth", found.Slug)
 
 	if _, err := svc.ByID(ctx, uuid.New()); !errors.Is(err, projects.ErrProjectNotFound) {
 		t.Fatalf("err = %v, want ErrProjectNotFound", err)
@@ -747,9 +650,7 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 		ownerA := newUser(t, ids, fmt.Sprintf("race-a-%d@example.test", run))
 		ownerB := newUser(t, ids, fmt.Sprintf("race-b-%d@example.test", run))
 		project, err := svc.Create(ctx, fmt.Sprintf("race-%d", run), "Race", ownerA.ID)
-		if err != nil {
-			t.Fatalf("run %d: Create: %v", run, err)
-		}
+		assert.Must(t, err == nil, "run %d: Create: %v", run, err)
 		if _, err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
 			t.Fatalf("run %d: SetRole: %v", run, err)
 		}
@@ -772,9 +673,7 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 				t.Fatalf("run %d: unexpected error: %v", run, e)
 			}
 		}
-		if succeeded != 1 || refused != 1 {
-			t.Fatalf("run %d: succeeded=%d refused=%d, want exactly one of each", run, succeeded, refused)
-		}
+		assert.Must(t, succeeded == 1 && refused == 1, "run %d: succeeded=%d refused=%d, want exactly one of each", run, succeeded, refused)
 
 		remainingOwners := 0
 		for _, uid := range []uuid.UUID{ownerA.ID, ownerB.ID} {
@@ -782,9 +681,7 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 				remainingOwners++
 			}
 		}
-		if remainingOwners != 1 {
-			t.Fatalf("run %d: %d owners remain, want exactly 1", run, remainingOwners)
-		}
+		assert.Must(t, remainingOwners == 1, "run %d: %d owners remain, want exactly 1", run, remainingOwners)
 	}
 }
 
@@ -810,9 +707,7 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 		ownerA := newUser(t, ids, fmt.Sprintf("mixed-race-a-%d@example.test", run))
 		ownerB := newUser(t, ids, fmt.Sprintf("mixed-race-b-%d@example.test", run))
 		project, err := svc.Create(ctx, fmt.Sprintf("mixed-race-%d", run), "Mixed Race", ownerA.ID)
-		if err != nil {
-			t.Fatalf("run %d: Create: %v", run, err)
-		}
+		assert.Must(t, err == nil, "run %d: Create: %v", run, err)
 		if _, err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
 			t.Fatalf("run %d: SetRole: %v", run, err)
 		}
@@ -835,9 +730,7 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 				t.Fatalf("run %d: unexpected error: %v", run, e)
 			}
 		}
-		if succeeded != 1 || refused != 1 {
-			t.Fatalf("run %d: succeeded=%d refused=%d, want exactly one of each (removeErr=%v demoteErr=%v)", run, succeeded, refused, removeErr, demoteErr)
-		}
+		assert.Must(t, succeeded == 1 && refused == 1, "run %d: succeeded=%d refused=%d, want exactly one of each (removeErr=%v demoteErr=%v)", run, succeeded, refused, removeErr, demoteErr)
 
 		remainingOwners := 0
 		for _, uid := range []uuid.UUID{ownerA.ID, ownerB.ID} {
@@ -845,9 +738,7 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 				remainingOwners++
 			}
 		}
-		if remainingOwners != 1 {
-			t.Fatalf("run %d: %d owners remain, want exactly 1", run, remainingOwners)
-		}
+		assert.Must(t, remainingOwners == 1, "run %d: %d owners remain, want exactly 1", run, remainingOwners)
 	}
 }
 
@@ -869,40 +760,28 @@ func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) 
 	owner := newUser(t, ids, "demote-owner@example.test")
 	member := newUser(t, ids, "demote-member@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole (editor): %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: project.ID, UserID: member.ID, Label: "demoted member's agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	// Demoting editor to editor (a no-op change) and re-promoting must
 	// not revoke anything: both stay AtLeast Editor, and SetRole must
 	// report no revoked labels for either.
 	revoked, err := svc.SetRole(ctx, member.ID, project.ID, "editor")
-	if err != nil {
-		t.Fatalf("SetRole (editor again): %v", err)
-	}
-	if len(revoked) != 0 {
-		t.Fatalf("revoked = %v, want none for a same-tier role change", revoked)
-	}
+	assert.Must(t, err == nil, "SetRole (editor again): %v", err)
+	assert.Must(t, len(revoked) == 0, "revoked = %v, want none for a same-tier role change", revoked)
 	if _, err := ids.ResolveAPIToken(ctx, token); err != nil {
 		t.Fatalf("token revoked by a same-tier role change: %v", err)
 	}
 
 	revoked, err = svc.SetRole(ctx, member.ID, project.ID, "viewer")
-	if err != nil {
-		t.Fatalf("SetRole (viewer): %v", err)
-	}
-	if len(revoked) != 1 || revoked[0] != "demoted member's agent" {
-		t.Fatalf("revoked = %v, want [\"demoted member's agent\"]", revoked)
-	}
+	assert.Must(t, err == nil, "SetRole (viewer): %v", err)
+	assert.Must(t, len(revoked) == 1 && revoked[0] == "demoted member's agent", "revoked = %v, want [\"demoted member's agent\"]", revoked)
 	if _, err := ids.ResolveAPIToken(ctx, token); !errors.Is(err, identity.ErrTokenInvalid) {
 		t.Fatalf("err = %v, want ErrTokenInvalid: a demotion below editor must revoke the member's tokens", err)
 	}
@@ -925,21 +804,15 @@ func TestDeletingSoleOwnerUserIsBlockedByDatabase(t *testing.T) {
 
 	owner := newUser(t, ids, "cascade-owner@example.test")
 	project, err := svc.Create(ctx, "cascade-azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := pool.Exec(ctx, "DELETE FROM users WHERE id = $1", owner.ID); err == nil {
 		t.Fatal("deleting the sole owner's user row succeeded, want the last-owner trigger to block it")
 	}
 
 	role, err := svc.RoleOf(ctx, owner.ID, project.ID)
-	if err != nil {
-		t.Fatalf("RoleOf after blocked delete: %v", err)
-	}
-	if role != "owner" {
-		t.Fatalf("role = %q, want owner (the blocked delete must have rolled back)", role)
-	}
+	assert.Must(t, err == nil, "RoleOf after blocked delete: %v", err)
+	assert.Must(t, role == "owner", "role = %q, want owner (the blocked delete must have rolled back)", role)
 }
 
 // TestDeletingNonSoleOwnerUserSucceeds is
@@ -956,9 +829,7 @@ func TestDeletingNonSoleOwnerUserSucceeds(t *testing.T) {
 	ownerA := newUser(t, ids, "cascade-a@example.test")
 	ownerB := newUser(t, ids, "cascade-b@example.test")
 	project, err := svc.Create(ctx, "cascade-two-owners", "Two Owners", ownerA.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -967,9 +838,7 @@ func TestDeletingNonSoleOwnerUserSucceeds(t *testing.T) {
 		t.Fatalf("delete user with a second owner present: %v", err)
 	}
 	role, err := svc.RoleOf(ctx, ownerB.ID, project.ID)
-	if err != nil || role != "owner" {
-		t.Fatalf("RoleOf(ownerB) = (%q, %v), want (owner, nil)", role, err)
-	}
+	assert.Must(t, err == nil && role == "owner", "RoleOf(ownerB) = (%q, %v), want (owner, nil)", role, err)
 }
 
 // TestDeletingProjectCascadesDespiteTrigger is the guard the trigger's own
@@ -986,9 +855,7 @@ func TestDeletingProjectCascadesDespiteTrigger(t *testing.T) {
 
 	owner := newUser(t, ids, "cascade-project-owner@example.test")
 	project, err := svc.Create(ctx, "cascade-doomed", "Doomed", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if _, err := pool.Exec(ctx, "DELETE FROM projects WHERE id = $1", project.ID); err != nil {
 		t.Fatalf("delete project (must not trip the last-owner trigger): %v", err)
@@ -1014,9 +881,7 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 
 	owner := newUser(t, ids, "roles-owner@example.test")
 	project, err := svc.Create(ctx, "roles-check", "Roles Check", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	q := dbq.New(pool)
 	for i, r := range roles.All() {
@@ -1058,9 +923,7 @@ func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
 
 	owner := newUser(t, ids, "owner@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"}); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -1093,9 +956,7 @@ func TestDeleteProjectTwiceIsIdempotent(t *testing.T) {
 
 	owner := newUser(t, ids, "owner@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 
 	if err := svc.Delete(ctx, project.ID); err != nil {
 		t.Fatalf("first Delete: %v", err)
@@ -1143,23 +1004,15 @@ func TestAnEmptySlugIsDerivedFromTheName(t *testing.T) {
 	user := newUser(t, ids, "derived@example.test")
 
 	first, err := svc.Create(ctx, "", "Crónicas de Valdivia", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if first.Slug != "cronicas-de-valdivia" {
-		t.Errorf("slug = %q, want the name's own address", first.Slug)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
+	assert.Should(t, first.Slug == "cronicas-de-valdivia", "slug = %q, want the name's own address", first.Slug)
 
 	// **A second game of the same name resolves rather than refusing.**
 	// The person never typed an address, so an error about one would be
 	// about a word they have not seen.
 	second, err := svc.Create(ctx, "", "Crónicas de Valdivia", user.ID)
-	if err != nil {
-		t.Fatalf("second Create: %v", err)
-	}
-	if second.Slug != "cronicas-de-valdivia-2" {
-		t.Errorf("second slug = %q, want the next free number", second.Slug)
-	}
+	assert.Must(t, err == nil, "second Create: %v", err)
+	assert.Should(t, second.Slug == "cronicas-de-valdivia-2", "second slug = %q, want the next free number", second.Slug)
 
 	// A caller that *did* type an address still hears that it is taken:
 	// they named it, so the refusal is about something they know.
@@ -1169,10 +1022,6 @@ func TestAnEmptySlugIsDerivedFromTheName(t *testing.T) {
 
 	// And a name with no usable address in it still gets one.
 	fallback, err := svc.Create(ctx, "", "日本語", user.ID)
-	if err != nil {
-		t.Fatalf("Create with an underivable name: %v", err)
-	}
-	if fallback.Slug == "" {
-		t.Error("a name that yields no address left the game without one")
-	}
+	assert.Must(t, err == nil, "Create with an underivable name: %v", err)
+	assert.Should(t, fallback.Slug != "", "a name that yields no address left the game without one")
 }

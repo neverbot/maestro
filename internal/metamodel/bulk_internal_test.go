@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestFoldedIdentityKeepsThePartsOfARowApart pins both halves of what
@@ -113,17 +115,9 @@ func TestABulkFailureNeverCarriesTheDatabasesOwnWords(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := failureFor(context.Background(), 3, "hogger", tc.err)
-			if got.Code != tc.wantCode {
-				t.Fatalf("code = %q, want %q", got.Code, tc.wantCode)
-			}
-			if got.Message != tc.wantMessage {
-				t.Fatalf("message = %q, want the fixed %q", got.Message, tc.wantMessage)
-			}
-			if strings.Contains(got.Message, "SQLSTATE") ||
-				strings.Contains(got.Message, "canceling statement") ||
-				strings.Contains(got.Message, "entities_secret") {
-				t.Fatalf("message leaks the database's own text: %q", got.Message)
-			}
+			assert.Must(t, got.Code == tc.wantCode, "code = %q, want %q", got.Code, tc.wantCode)
+			assert.Must(t, got.Message == tc.wantMessage, "message = %q, want the fixed %q", got.Message, tc.wantMessage)
+			assert.Must(t, !strings.Contains(got.Message, "SQLSTATE") && !strings.Contains(got.Message, "canceling statement") && !strings.Contains(got.Message, "entities_secret"), "message leaks the database's own text: %q", got.Message)
 		})
 	}
 
@@ -131,9 +125,7 @@ func TestABulkFailureNeverCarriesTheDatabasesOwnWords(t *testing.T) {
 	// report is the whole point of a batch failure.
 	spoken := failureFor(context.Background(), 0, "hogger", fmt.Errorf("%w: no entity type %q in this game",
 		ErrNotFound, "quest"))
-	if spoken.Code != "not_found" || !strings.Contains(spoken.Message, "quest") {
-		t.Fatalf("failure = %+v, want a not_found naming the key", spoken)
-	}
+	assert.Must(t, spoken.Code == "not_found" && strings.Contains(spoken.Message, "quest"), "failure = %+v, want a not_found naming the key", spoken)
 
 	// Finding L2: IsRetryable is checked *last*, and the reason is stated
 	// at length on failureFor. Nothing pinned it — moving the arm to the

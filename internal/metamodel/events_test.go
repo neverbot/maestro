@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -69,18 +70,12 @@ func TestEventsArea(t *testing.T) {
 		typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "Quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "type.upserted" {
-				t.Fatalf("%s: Kind = %q, want type.upserted", name, got.Kind)
-			}
-			if got.ProjectID != project {
-				t.Fatalf("%s: ProjectID = %v, want %v", name, got.ProjectID, project)
-			}
+			assert.Must(t, got.Kind == "type.upserted", "%s: Kind = %q, want type.upserted", name, got.Kind)
+			assert.Must(t, got.ProjectID == project, "%s: ProjectID = %v, want %v", name, got.ProjectID, project)
 			assertIdentityPayload(t, name, got, typ.ID, "Quest")
 		}
 
@@ -89,9 +84,7 @@ func TestEventsArea(t *testing.T) {
 		}
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			got := receive(t, sub)
-			if got.Kind != "type.removed" {
-				t.Fatalf("%s: Kind = %q, want type.removed", name, got.Kind)
-			}
+			assert.Must(t, got.Kind == "type.removed", "%s: Kind = %q, want type.removed", name, got.Kind)
 			// A removal announced with an empty key tells a client a type
 			// keyed "" is gone, which is not a type it has ever seen.
 			assertIdentityPayload(t, name, got, typ.ID, "Quest")
@@ -207,9 +200,7 @@ func TestEventsArea(t *testing.T) {
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
 		})
-		if err != nil {
-			t.Fatalf("declare type: %v", err)
-		}
+		assert.Must(t, err == nil, "declare type: %v", err)
 		// The entity carries an undeclared field, so the sweep will flip it to
 		// invalid — meaning the sweep really does issue the UPDATE that the
 		// rival's lock blocks, rather than skipping it under the invalid <>
@@ -219,9 +210,7 @@ func TestEventsArea(t *testing.T) {
 		})
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		var locked uuid.UUID
 		if err := rival.QueryRow(ctx,
@@ -254,9 +243,7 @@ func TestEventsArea(t *testing.T) {
 		}
 		select {
 		case err := <-result:
-			if err != nil {
-				t.Fatalf("upsert: %v", err)
-			}
+			assert.Must(t, err == nil, "upsert: %v", err)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival released its lock")
 		}
@@ -290,9 +277,7 @@ func TestEventsArea(t *testing.T) {
 		zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "zone", Label: "Zone", LabelPlural: "Zones",
 		})
-		if err != nil {
-			t.Fatalf("seed zone: %v", err)
-		}
+		assert.Must(t, err == nil, "seed zone: %v", err)
 		if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		}); err != nil {
@@ -303,9 +288,7 @@ func TestEventsArea(t *testing.T) {
 			SourceTypeKeys: []string{"quest"},
 			TargetTypeKeys: []string{"zone"},
 		})
-		if err != nil {
-			t.Fatalf("seed takes_place_in: %v", err)
-		}
+		assert.Must(t, err == nil, "seed takes_place_in: %v", err)
 		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "requires", Label: "requires",
 			SourceTypeKeys: []string{"quest"},
@@ -322,15 +305,11 @@ func TestEventsArea(t *testing.T) {
 		}
 
 		removed := receive(t, sub)
-		if removed.Kind != "type.removed" {
-			t.Fatalf("first event = %q, want type.removed", removed.Kind)
-		}
+		assert.Must(t, removed.Kind == "type.removed", "first event = %q, want type.removed", removed.Kind)
 		assertIdentityPayload(t, "removal", removed, zone.ID, "zone")
 
 		pruned := receive(t, sub)
-		if pruned.Kind != "relation_type.upserted" {
-			t.Fatalf("second event = %q, want relation_type.upserted for the pruned rule", pruned.Kind)
-		}
+		assert.Must(t, pruned.Kind == "relation_type.upserted", "second event = %q, want relation_type.upserted for the pruned rule", pruned.Kind)
 		assertIdentityPayload(t, "prune", pruned, takesPlaceIn.ID, "takes_place_in")
 
 		requireNothing(t, sub, "the relation type that never named zone was not touched")
@@ -375,9 +354,7 @@ func TestEventsArea(t *testing.T) {
 		zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "zone", Label: "Zone", LabelPlural: "Zones",
 		})
-		if err != nil {
-			t.Fatalf("seed zone: %v", err)
-		}
+		assert.Must(t, err == nil, "seed zone: %v", err)
 
 		// Declared in the order that would, if RemoveEntityType published
 		// PruneEntityTypeFromEndpointLists' own RETURNING order unsorted,
@@ -386,15 +363,11 @@ func TestEventsArea(t *testing.T) {
 		zoneRel, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "Zone_rel", Label: "Zone_rel", TargetTypeKeys: []string{"zone"},
 		})
-		if err != nil {
-			t.Fatalf("seed Zone_rel: %v", err)
-		}
+		assert.Must(t, err == nil, "seed Zone_rel: %v", err)
 		appleRel, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 			Key: "apple_rel", Label: "apple_rel", TargetTypeKeys: []string{"zone"},
 		})
-		if err != nil {
-			t.Fatalf("seed apple_rel: %v", err)
-		}
+		assert.Must(t, err == nil, "seed apple_rel: %v", err)
 
 		sub := hub.Subscribe(project, "owner", false)
 		defer hub.Unsubscribe(sub)
@@ -404,9 +377,7 @@ func TestEventsArea(t *testing.T) {
 		}
 
 		removed := receive(t, sub)
-		if removed.Kind != "type.removed" {
-			t.Fatalf("first event = %q, want type.removed", removed.Kind)
-		}
+		assert.Must(t, removed.Kind == "type.removed", "first event = %q, want type.removed", removed.Kind)
 
 		// Byte order, not folded order: "Zone_rel" sorts before "apple_rel"
 		// because 'Z' < 'a' as raw bytes, and RemoveEntityType's sort must
@@ -425,9 +396,7 @@ func TestEventsArea(t *testing.T) {
 func assertIdentityPayload(t *testing.T, who string, e realtime.Event, wantID uuid.UUID, wantKey string) {
 	t.Helper()
 	raw, err := json.Marshal(e.Payload)
-	if err != nil {
-		t.Fatalf("%s: marshal payload: %v", who, err)
-	}
+	assert.Must(t, err == nil, "%s: marshal payload: %v", who, err)
 	var got struct {
 		ID  uuid.UUID `json:"id"`
 		Key string    `json:"key"`
@@ -435,12 +404,8 @@ func assertIdentityPayload(t *testing.T, who string, e realtime.Event, wantID uu
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("%s: decode payload %s: %v", who, raw, err)
 	}
-	if got.ID != wantID {
-		t.Fatalf("%s: payload id = %v, want %v", who, got.ID, wantID)
-	}
-	if got.Key != wantKey {
-		t.Fatalf("%s: payload key = %q, want %q", who, got.Key, wantKey)
-	}
+	assert.Must(t, got.ID == wantID, "%s: payload id = %v, want %v", who, got.ID, wantID)
+	assert.Must(t, got.Key == wantKey, "%s: payload key = %q, want %q", who, got.Key, wantKey)
 }
 
 // TestNoEventIsPublishedWhenTheCommitFails is the last placement
@@ -479,13 +444,9 @@ func TestNoEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 	})
-	if err == nil {
-		t.Fatal("the commit must fail under the deferred constraint")
-	}
+	assert.Must(t, err != nil, "the commit must fail under the deferred constraint")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-		t.Fatalf("err = %v, want a deferred foreign-key violation at commit", err)
-	}
+	assert.Must(t, errors.As(err, &pgErr) && pgErr.Code == "23503", "err = %v, want a deferred foreign-key violation at commit", err)
 	requireNothing(t, sub, "the transaction never committed")
 
 	if _, err := svc.EntityTypeByKey(ctx, project, "quest"); !errors.Is(err, metamodel.ErrNotFound) {

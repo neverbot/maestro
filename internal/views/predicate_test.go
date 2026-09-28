@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -28,13 +29,9 @@ func TestTheOperatorTableIsTheSpecsTable(t *testing.T) {
 	}
 	for typ, ops := range want {
 		got := OperatorsFor(typ)
-		if len(got) != len(ops) {
-			t.Fatalf("%s admits %v, want %v", typ, got, ops)
-		}
+		assert.Must(t, len(got) == len(ops), "%s admits %v, want %v", typ, got, ops)
 		for _, op := range ops {
-			if !AdmitsOperator(typ, op) {
-				t.Errorf("%s must admit %q", typ, op)
-			}
+			assert.Should(t, AdmitsOperator(typ, op), "%s must admit %q", typ, op)
 		}
 	}
 	// Every type the table names is a type this engine can be asked
@@ -48,20 +45,12 @@ func TestTheOperatorTableIsTheSpecsTable(t *testing.T) {
 	}
 	// The negative half, which is the half that matters: a text field
 	// must not admit a range, and a number must not admit a substring.
-	if AdmitsOperator(metamodel.FieldText, OpGt) {
-		t.Error("text must not admit gt: a lexicographic > on a jsonb text is not the comparison anybody meant")
-	}
-	if AdmitsOperator(metamodel.FieldNumber, OpContains) {
-		t.Error("number must not admit contains")
-	}
-	if AdmitsOperator(metamodel.FieldListText, OpEq) {
-		t.Error("list<text> must not admit eq: equality on a list is a question the language does not answer")
-	}
+	assert.Should(t, !AdmitsOperator(metamodel.FieldText, OpGt), "text must not admit gt: a lexicographic > on a jsonb text is not the comparison anybody meant")
+	assert.Should(t, !AdmitsOperator(metamodel.FieldNumber, OpContains), "number must not admit contains")
+	assert.Should(t, !AdmitsOperator(metamodel.FieldListText, OpEq), "list<text> must not admit eq: equality on a list is a question the language does not answer")
 	// A type nobody declared admits nothing, rather than admitting
 	// everything by falling off the end of a lookup.
-	if len(OperatorsFor(metamodel.FieldType("colour"))) != 0 {
-		t.Error("an undeclared field type must admit no operator at all")
-	}
+	assert.Should(t, len(OperatorsFor(metamodel.FieldType("colour"))) == 0, "an undeclared field type must admit no operator at all")
 }
 
 // TestThereIsNoRegexOperator pins a deliberate absence. A regex over
@@ -71,9 +60,7 @@ func TestTheOperatorTableIsTheSpecsTable(t *testing.T) {
 func TestThereIsNoRegexOperator(t *testing.T) {
 	for _, typ := range []metamodel.FieldType{metamodel.FieldText, metamodel.FieldLongText} {
 		for _, op := range OperatorsFor(typ) {
-			if op == "regex" || op == "matches_regex" {
-				t.Fatalf("%s admits %q, and this language has no regular expressions", typ, op)
-			}
+			assert.Must(t, op != "regex" && op != "matches_regex", "%s admits %q, and this language has no regular expressions", typ, op)
 		}
 	}
 	// And the spelling is refused as an operator at all, rather than
@@ -101,18 +88,14 @@ func TestAnOperatorCannotBeHalfAdded(t *testing.T) {
 		}
 	}
 	for op := range shapeOf {
-		if !knownOperators[op] {
-			t.Errorf("%q has a value shape and no type admits it: it is unreachable, and an "+
-				"unreachable arm is a spelling somebody meant to add to the table", op)
-		}
+		assert.Should(t, knownOperators[op], "%q has a value shape and no type admits it: it is unreachable, and an "+
+			"unreachable arm is a spelling somebody meant to add to the table", op)
 	}
 	// The printed vocabulary is the third reader, and an agent that
 	// mistyped an operator is told the whole of it.
 	names := allOperatorNames()
 	for op := range knownOperators {
-		if !strings.Contains(names, string(op)) {
-			t.Errorf("%q is admitted by a type and is not in the vocabulary the refusal prints", op)
-		}
+		assert.Should(t, strings.Contains(names, string(op)), "%q is admitted by a type and is not in the vocabulary the refusal prints", op)
 	}
 }
 
@@ -182,22 +165,14 @@ func TestAFieldTestNamesAFieldAndAnOperator(t *testing.T) {
 func TestAFieldKeyIsAFieldKeyOrASigil(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","where":` +
 		`{"field":"@name","op":"contains","value":"Hogger"}}]}`))
-	if err != nil {
-		t.Fatalf("a sigil must parse: %v", err)
-	}
-	if !q.From[0].Where.FieldRef.Builtin {
-		t.Fatal("@name must parse as a built-in, not as a declared field key")
-	}
+	assert.Must(t, err == nil, "a sigil must parse: %v", err)
+	assert.Must(t, q.From[0].Where.FieldRef.Builtin, "@name must parse as a built-in, not as a declared field key")
 	// The other half of the ambiguity: a declared field called `name` is
 	// a different reference, and is not marked as a built-in.
 	q, err = ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","where":` +
 		`{"field":"name","op":"contains","value":"Hogger"}}]}`))
-	if err != nil {
-		t.Fatalf("a game may declare a field called name: %v", err)
-	}
-	if q.From[0].Where.FieldRef.Builtin {
-		t.Fatal("a declared field called name must not be read as the built-in @name")
-	}
+	assert.Must(t, err == nil, "a game may declare a field called name: %v", err)
+	assert.Must(t, !q.From[0].Where.FieldRef.Builtin, "a declared field called name must not be read as the built-in @name")
 	parseFails(t, `{"v":1,"from":[{"type":"quest","where":{"field":"@nmae","op":"eq","value":"x"}}]}`,
 		"/from/0/where/field", `is not a built-in: the built-ins are @name, @key, @type, @invalid, @created_at`)
 	parseFails(t, `{"v":1,"from":[{"type":"quest","where":{"field":"Min Level","op":"eq","value":1}}]}`,
@@ -220,9 +195,7 @@ func TestAFieldKeyIsAFieldKeyOrASigil(t *testing.T) {
 // sorted alphabetically: @name first is the one an agent reaches for.
 func TestTheBuiltinVocabularyIsListedInTheOrderItIsDeclared(t *testing.T) {
 	want := []string{AttrName, AttrKey, AttrType, AttrInvalid, AttrCreatedAt}
-	if len(builtinNames) != len(want) {
-		t.Fatalf("the printed vocabulary is %v, want %v", builtinNames, want)
-	}
+	assert.Must(t, len(builtinNames) == len(want), "the printed vocabulary is %v, want %v", builtinNames, want)
 	for i, name := range want {
 		if builtinNames[i] != name {
 			t.Fatalf("builtinNames[%d] = %q, want %q", i, builtinNames[i], name)
@@ -232,15 +205,11 @@ func TestTheBuiltinVocabularyIsListedInTheOrderItIsDeclared(t *testing.T) {
 				"admits would be the operators of the empty type, which is none of them", name)
 		}
 	}
-	if len(builtinTypes) != len(want) {
-		t.Fatalf("a built-in has a type and is not printed: %v against %v", builtinTypes, want)
-	}
+	assert.Must(t, len(builtinTypes) == len(want), "a built-in has a type and is not printed: %v against %v", builtinTypes, want)
 	// Every built-in's type admits at least one operator, which is what
 	// makes it usable in a field test at all.
 	for name, typ := range builtinTypes {
-		if len(OperatorsFor(typ)) == 0 {
-			t.Errorf("the built-in %s is declared %q, which admits no operator", name, typ)
-		}
+		assert.Should(t, len(OperatorsFor(typ)) != 0, "the built-in %s is declared %q, which admits no operator", name, typ)
 	}
 }
 
@@ -387,18 +356,14 @@ func TestAPredicateTreeIsBoundedByItsNodeCount(t *testing.T) {
 
 	_, err := ParseQuery([]byte(b.String()))
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
 	count := 0
 	for _, f := range qe.Fields {
 		if strings.Contains(f.Message, "conditions in one tree") {
 			count++
 		}
 	}
-	if count != 1 {
-		t.Fatalf("the node cap must be reported once, got %d copies", count)
-	}
+	assert.Must(t, count == 1, "the node cap must be reported once, got %d copies", count)
 
 	// The control: a tree of exactly MaxPredicateNodes parses. The `all`
 	// counts as a node itself, so the cap is reached with one fewer
@@ -456,13 +421,9 @@ func TestAPredicateValueHasItsOwnDepthBound(t *testing.T) {
 func TestAnAttributeReferenceIsAStringOrAOneHopRelated(t *testing.T) {
 	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}],"project":{"color_by":` +
 		`{"related":{"via":"takes_place_in","direction":"out","type":"zone","attr":"@name"}}}}`))
-	if err != nil {
-		t.Fatalf("a related attribute must parse: %v", err)
-	}
+	assert.Must(t, err == nil, "a related attribute must parse: %v", err)
 	rel := q.Project.ColorBy.Related
-	if rel == nil || rel.Via != "takes_place_in" || rel.Type != "zone" || rel.Attr != "@name" {
-		t.Fatalf("the related hop did not survive the parse: %+v", rel)
-	}
+	assert.Must(t, rel != nil && rel.Via == "takes_place_in" && rel.Type == "zone" && rel.Attr == "@name", "the related hop did not survive the parse: %+v", rel)
 	parseFails(t, `{"v":1,"from":[{"type":"quest"}],"project":{"color_by":`+
 		`{"related":{"via":"a","direction":"out","type":"z","attr":"@name","then":{"via":"b"}}}}}`,
 		"", `unknown key "then"`)
@@ -513,22 +474,12 @@ func TestEveryProjectionAttributeIsChecked(t *testing.T) {
 // limit is refused with its cap, not clamped down to it.
 func TestALimitAboveItsHardCapIsRefusedWithTheCap(t *testing.T) {
 	_, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}],"limits":{"max_depth":20}}`))
-	if err == nil {
-		t.Fatal("max_depth 20 must be refused")
-	}
-	if !errors.Is(err, ErrLimitExceeded) {
-		t.Fatalf("must be limit_exceeded, not query_invalid: %v", err)
-	}
-	if !strings.Contains(err.Error(), "the most this engine walks is 12") {
-		t.Fatalf("must carry the cap, got %v", err)
-	}
+	assert.Must(t, err != nil, "max_depth 20 must be refused")
+	assert.Must(t, errors.Is(err, ErrLimitExceeded), "must be limit_exceeded, not query_invalid: %v", err)
+	assert.Must(t, strings.Contains(err.Error(), "the most this engine walks is 12"), "must carry the cap, got %v", err)
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
-	if len(qe.Fields) != 1 || qe.Fields[0].Path != "/limits/max_depth" {
-		t.Fatalf("must be reported at /limits/max_depth, got %v", qe.Fields)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
+	assert.Must(t, len(qe.Fields) == 1 && qe.Fields[0].Path == "/limits/max_depth", "must be reported at /limits/max_depth, got %v", qe.Fields)
 	// It is refused rather than clamped, which is the assertion that
 	// matters: a clamp would return a query, and that query would answer
 	// a different question in silence.
@@ -553,30 +504,20 @@ func TestEveryLimitIsJudgedAgainstItsOwnCap(t *testing.T) {
 			t.Errorf("%s above its cap must be limit_exceeded, got %v", tc.name, err)
 			continue
 		}
-		if !strings.Contains(err.Error(), tc.cap) {
-			t.Errorf("%s must carry its cap: %v", tc.name, err)
-		}
+		assert.Should(t, strings.Contains(err.Error(), tc.cap), "%s must carry its cap: %v", tc.name, err)
 	}
 	// A limit below 1 is a different mistake with a different sentence,
 	// and it is still limit_exceeded rather than a silent default.
 	_, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}],"limits":{"max_nodes":0}}`))
-	if !errors.Is(err, ErrLimitExceeded) {
-		t.Fatalf("max_nodes 0 must be refused, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "must be at least 1") {
-		t.Fatalf("must say what the floor is, got %v", err)
-	}
+	assert.Must(t, errors.Is(err, ErrLimitExceeded), "max_nodes 0 must be refused, got %v", err)
+	assert.Must(t, strings.Contains(err.Error(), "must be at least 1"), "must say what the floor is, got %v", err)
 	// All three together are reported in one pass, because an agent that
 	// set every bound too high fixes them in one round trip.
 	_, err = ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}],` +
 		`"limits":{"max_depth":13,"max_nodes":5001,"max_edges":20001}}`))
 	var qe *QueryError
-	if !errors.As(err, &qe) {
-		t.Fatalf("must be a *QueryError, got %T", err)
-	}
-	if len(qe.Fields) != 3 {
-		t.Fatalf("all three limits must be reported in one pass, got %v", qe.Fields)
-	}
+	assert.Must(t, errors.As(err, &qe), "must be a *QueryError, got %T", err)
+	assert.Must(t, len(qe.Fields) == 3, "all three limits must be reported in one pass, got %v", qe.Fields)
 }
 
 // TestNoDocumentTypeCarriesCallerTextInAByteSlice verifies, rather than
@@ -649,19 +590,15 @@ func TestNoDocumentTypeCarriesCallerTextInAByteSlice(t *testing.T) {
 	for _, name := range []string{"Query", "ParamDecl", "Selector", "Step", "Depth",
 		"NodeSet", "EdgeSpec", "Projection", "Limits",
 		"Predicate", "FieldRef", "AttrRef", "RelHop"} {
-		if !structs[name] {
-			t.Errorf("the type graph reachable from Query does not include %s: this test is "+
-				"passing over a graph it never walked", name)
-		}
+		assert.Should(t, structs[name], "the type graph reachable from Query does not include %s: this test is "+
+			"passing over a graph it never walked", name)
 	}
 	// And the count, so a type *added* to the document without a line
 	// above is caught too: an unnamed new struct is one this list does
 	// not vouch for.
-	if len(structs) != 13 {
-		t.Errorf("the type graph reachable from Query holds %d structs and this list names 13: "+
-			"%v — name the new one, so the sanity half keeps vouching for the whole graph",
-			len(structs), structs)
-	}
+	assert.Should(t, len(structs) == 13, "the type graph reachable from Query holds %d structs and this list names 13: "+
+		"%v — name the new one, so the sanity half keeps vouching for the whole graph",
+		len(structs), structs)
 }
 
 // TestEveryProjectionAttributeReferenceHasALineInTheTable is the half of
@@ -699,20 +636,16 @@ func TestEveryProjectionAttributeReferenceHasALineInTheTable(t *testing.T) {
 				"refusal reports is the member name the caller wrote", f.Name)
 			continue
 		}
-		if !named[name] {
-			t.Errorf("Projection.%s (json %q) is an attribute reference with no line in "+
-				"projectionAttrs, so checkProjection never sees it and a misspelled built-in "+
-				"in it reaches the compiler unchecked: add {%q, func(p *Projection) *AttrRef "+
-				"{ return p.%s }} to the table", f.Name, name, name, f.Name)
-		}
+		assert.Should(t, named[name], "Projection.%s (json %q) is an attribute reference with no line in "+
+			"projectionAttrs, so checkProjection never sees it and a misspelled built-in "+
+			"in it reaches the compiler unchecked: add {%q, func(p *Projection) *AttrRef "+
+			"{ return p.%s }} to the table", f.Name, name, name, f.Name)
 	}
 	// The sanity half, for the same reason the type-graph test has one: a
 	// walk that matched nothing would pass every assertion above.
-	if found != len(projectionAttrs) {
-		t.Errorf("Projection declares %d attribute references and projectionAttrs has %d lines: "+
-			"either a member has no line, or the table names one that no longer exists",
-			found, len(projectionAttrs))
-	}
+	assert.Should(t, found == len(projectionAttrs), "Projection declares %d attribute references and projectionAttrs has %d lines: "+
+		"either a member has no line, or the table names one that no longer exists",
+		found, len(projectionAttrs))
 }
 
 // TestEveryLimitInTheDocumentIsJudged is the same guard for Limits, and
@@ -756,10 +689,8 @@ func TestEveryLimitInTheDocumentIsJudged(t *testing.T) {
 				"which is not what any caller means by a limit (got %v)", f.Name, name, err)
 		}
 	}
-	if found != 3 {
-		t.Errorf("Limits declares %d int members and this test expected 3: if a limit was added, "+
-			"give it a line in checkLimits and update this count", found)
-	}
+	assert.Should(t, found == 3, "Limits declares %d int members and this test expected 3: if a limit was added, "+
+		"give it a line in checkLimits and update this count", found)
 }
 
 // TestEveryPredicateInAStepIsChecked is the third of the same guard. A
@@ -788,10 +719,8 @@ func TestEveryPredicateInAStepIsChecked(t *testing.T) {
 			`"via":"leads_to","`+name+`":{"field":"Min Level","op":"eq","value":1}}]}`,
 			"/traverse/0/"+name+"/field", "must be lower_snake_case")
 	}
-	if found != 2 {
-		t.Errorf("Step declares %d predicate members and this test expected 2: if one was added, "+
-			"give it a checkPredicate call in checkQuery and update this count", found)
-	}
+	assert.Should(t, found == 2, "Step declares %d predicate members and this test expected 2: if one was added, "+
+		"give it a checkPredicate call in checkQuery and update this count", found)
 }
 
 // TestEveryFieldKeyLengthIsBoundedWhereverOneIsWritten pins the three
@@ -893,19 +822,13 @@ func TestAValueIsBoundedThroughObjectsAsWellAsLists(t *testing.T) {
 // this pins that no table entry can take it away.
 func TestEveryBuiltinCarriesItsSigil(t *testing.T) {
 	for _, b := range builtins {
-		if !strings.HasPrefix(b.Name, "@") {
-			t.Errorf("the built-in %q has no @ sigil: it would be found by a lookup for a "+
-				"declared field of that name and would shadow it", b.Name)
-		}
-		if b.Type == "" {
-			t.Errorf("the built-in %q has no declared type, so it would admit no operator at all",
-				b.Name)
-		}
+		assert.Should(t, strings.HasPrefix(b.Name, "@"), "the built-in %q has no @ sigil: it would be found by a lookup for a "+
+			"declared field of that name and would shadow it", b.Name)
+		assert.Should(t, b.Type != "", "the built-in %q has no declared type, so it would admit no operator at all",
+			b.Name)
 		typ, ok := BuiltinType(b.Name)
-		if !ok || typ != b.Type {
-			t.Errorf("BuiltinType(%q) = %q, %v; the exported answer must be the table's own",
-				b.Name, typ, ok)
-		}
+		assert.Should(t, ok && typ == b.Type, "BuiltinType(%q) = %q, %v; the exported answer must be the table's own",
+			b.Name, typ, ok)
 	}
 	// The other direction, for the exported surface Task 4 calls: a
 	// sigil-less spelling is not a built-in, whatever the table holds.
@@ -1015,9 +938,7 @@ func TestTheOperatorDescriptionIsGeneratedFromTheTable(t *testing.T) {
 			continue
 		}
 		name, values, ok := strings.Cut(rest, ": ")
-		if !ok {
-			t.Fatalf("a bullet with no colon: %q", line)
-		}
+		assert.Must(t, ok, "a bullet with no colon: %q", line)
 		if strings.HasPrefix(name, "@") {
 			printedBuiltins[name] = metamodel.FieldType(values)
 			continue
@@ -1029,10 +950,8 @@ func TestTheOperatorDescriptionIsGeneratedFromTheTable(t *testing.T) {
 		printed[metamodel.FieldType(name)] = ops
 	}
 
-	if len(printed) != len(operatorsByType) {
-		t.Fatalf("the description prints %d field types and the table declares %d",
-			len(printed), len(operatorsByType))
-	}
+	assert.Must(t, len(printed) == len(operatorsByType), "the description prints %d field types and the table declares %d",
+		len(printed), len(operatorsByType))
 	for typ, want := range operatorsByType {
 		got, ok := printed[typ]
 		if !ok {
@@ -1061,10 +980,8 @@ func TestTheOperatorDescriptionIsGeneratedFromTheTable(t *testing.T) {
 	// The built-in half, both ways as well: a sigil printed with the
 	// wrong type is a condition an agent writes and this package refuses,
 	// and one left out is a vocabulary an agent has to guess.
-	if len(printedBuiltins) != len(builtins) {
-		t.Fatalf("the description prints %d built-ins and the table declares %d",
-			len(printedBuiltins), len(builtins))
-	}
+	assert.Must(t, len(printedBuiltins) == len(builtins), "the description prints %d built-ins and the table declares %d",
+		len(printedBuiltins), len(builtins))
 	for _, builtin := range builtins {
 		if printedBuiltins[builtin.Name] != builtin.Type {
 			t.Errorf("%s is printed as %q and declared as %q",
@@ -1086,31 +1003,23 @@ func TestTheOperatorDescriptionIsGeneratedFromTheTable(t *testing.T) {
 // iteration — and it is a second list beside operatorsByType, which is
 // exactly the shape that drifts.
 func TestEveryFieldTypeInTheTableIsPrintedInADeterministicOrder(t *testing.T) {
-	if len(fieldTypeOrder) != len(operatorsByType) {
-		t.Fatalf("fieldTypeOrder names %d types and the table declares %d",
-			len(fieldTypeOrder), len(operatorsByType))
-	}
+	assert.Must(t, len(fieldTypeOrder) == len(operatorsByType), "fieldTypeOrder names %d types and the table declares %d",
+		len(fieldTypeOrder), len(operatorsByType))
 	seen := map[metamodel.FieldType]bool{}
 	for _, typ := range fieldTypeOrder {
-		if seen[typ] {
-			t.Errorf("%s is named twice", typ)
-		}
+		assert.Should(t, !(seen[typ]), "%s is named twice", typ)
 		seen[typ] = true
 		if _, ok := operatorsByType[typ]; !ok {
 			t.Errorf("fieldTypeOrder names %s and the table declares nothing for it", typ)
 		}
 	}
 	for typ := range operatorsByType {
-		if !seen[typ] {
-			t.Errorf("the table declares %s and fieldTypeOrder never prints it", typ)
-		}
+		assert.Should(t, seen[typ], "the table declares %s and fieldTypeOrder never prints it", typ)
 	}
 	// And the order really is stable, which is the only reason the slice
 	// exists: twenty generations of the same text.
 	first := OperatorDescription()
 	for i := 0; i < 20; i++ {
-		if OperatorDescription() != first {
-			t.Fatal("the description changed between two calls in one process")
-		}
+		assert.Must(t, OperatorDescription() == first, "the description changed between two calls in one process")
 	}
 }

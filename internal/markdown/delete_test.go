@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -28,20 +29,14 @@ func TestDeleteArea(t *testing.T) {
 		removed, err := svc.Delete(ctx, game, markdown.DeleteInput{
 			Path: "bible", ExpectedVersion: ptrInt32(1), Message: "cut for now",
 		})
-		if err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
+		assert.Must(t, err == nil, "Delete: %v", err)
 		// The tombstone's version number is the one a caller needs to
 		// resurrect the path, and Read cannot supply it: the document is
 		// gone from every read. So Delete returns it.
-		if removed.CurrentVersion != 2 {
-			t.Fatalf("CurrentVersion = %d, want 2 back from Delete", removed.CurrentVersion)
-		}
+		assert.Must(t, removed.CurrentVersion == 2, "CurrentVersion = %d, want 2 back from Delete", removed.CurrentVersion)
 		// pgtype.Timestamptz, not a *time.Time: "is it set" is Valid, and
 		// the plan's `!= nil` does not compile against the generated model.
-		if !removed.DeletedAt.Valid {
-			t.Fatalf("DeletedAt is unset, want the deletion timestamp back from Delete")
-		}
+		assert.Must(t, removed.DeletedAt.Valid, "DeletedAt is unset, want the deletion timestamp back from Delete")
 
 		if _, err := svc.Read(ctx, game, "bible"); !errors.Is(err, markdown.ErrNotFound) {
 			t.Fatalf("a deleted document must read as not_found, got %v", err)
@@ -55,21 +50,15 @@ func TestDeleteArea(t *testing.T) {
 			game).Scan(&current, &versions); err != nil {
 			t.Fatalf("read the document: %v", err)
 		}
-		if current != 2 || versions != 2 {
-			t.Fatalf("current_version = %d with %d version rows, want 2 and 2: "+
-				"a delete appends a tombstone and the two must never disagree", current, versions)
-		}
+		assert.Must(t, current == 2 && versions == 2, "current_version = %d with %d version rows, want 2 and 2: "+
+			"a delete appends a tombstone and the two must never disagree", current, versions)
 
 		// Task 4 asserted the tombstone's own values over SQL because no
 		// reader existed; Task 6 reads them back through ReadVersion.
 		tombstone, err := svc.ReadVersion(ctx, game, "bible", 2)
-		if err != nil {
-			t.Fatalf("ReadVersion of the tombstone: %v", err)
-		}
-		if !tombstone.Deleted || tombstone.BodyMd != "one\n" || tombstone.Message != "cut for now" {
-			t.Fatalf("tombstone = (deleted %t, body %q, message %q), want (true, %q, %q)",
-				tombstone.Deleted, tombstone.BodyMd, tombstone.Message, "one\n", "cut for now")
-		}
+		assert.Must(t, err == nil, "ReadVersion of the tombstone: %v", err)
+		assert.Must(t, tombstone.Deleted && tombstone.BodyMd == "one\n" && tombstone.Message == "cut for now", "tombstone = (deleted %t, body %q, message %q), want (true, %q, %q)",
+			tombstone.Deleted, tombstone.BodyMd, tombstone.Message, "one\n", "cut for now")
 	})
 
 	// The tombstone is the *only* version row carrying deleted = true. Task
@@ -104,17 +93,13 @@ func TestDeleteArea(t *testing.T) {
 		// Read back through History, the public reader Task 6 added: Task 4
 		// asserted this over a raw pool.Query because none existed.
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "bible"})
-		if err != nil {
-			t.Fatalf("History: %v", err)
-		}
+		assert.Must(t, err == nil, "History: %v", err)
 		got := map[int32]bool{}
 		for _, v := range page.Versions {
 			got[v.Version] = v.Deleted
 		}
 		want := map[int32]bool{1: false, 2: false, 3: true, 4: false}
-		if len(got) != len(want) {
-			t.Fatalf("versions = %v, want %v", got, want)
-		}
+		assert.Must(t, len(got) == len(want), "versions = %v, want %v", got, want)
 		for version, deleted := range want {
 			if got[version] != deleted {
 				t.Fatalf("version %d deleted = %t, want %t (all four: %v)",
@@ -142,31 +127,19 @@ func TestDeleteArea(t *testing.T) {
 		doc, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "bible", Content: "back again\n", ExpectedVersion: ptrInt32(2),
 		})
-		if err != nil {
-			t.Fatalf("resurrect: %v", err)
-		}
-		if doc.CurrentVersion != 3 {
-			t.Fatalf("CurrentVersion = %d, want 3: numbering continues, it does not restart",
-				doc.CurrentVersion)
-		}
-		if doc.DeletedAt.Valid {
-			t.Fatalf("DeletedAt = %v, want unset after a resurrection", doc.DeletedAt.Time)
-		}
+		assert.Must(t, err == nil, "resurrect: %v", err)
+		assert.Must(t, doc.CurrentVersion == 3, "CurrentVersion = %d, want 3: numbering continues, it does not restart",
+			doc.CurrentVersion)
+		assert.Must(t, !doc.DeletedAt.Valid, "DeletedAt = %v, want unset after a resurrection", doc.DeletedAt.Time)
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read after resurrection: %v", err)
-		}
-		if got.BodyMd != "back again\n" {
-			t.Fatalf("BodyMd = %q, want %q", got.BodyMd, "back again\n")
-		}
+		assert.Must(t, err == nil, "Read after resurrection: %v", err)
+		assert.Must(t, got.BodyMd == "back again\n", "BodyMd = %q, want %q", got.BodyMd, "back again\n")
 		// Resurrection goes through writeWith like any other edit, so
 		// WriteInput.Kind's "nil preserves what is stored" rule has to hold
 		// across a deletion too — a document brought back on the shelf it
 		// was taken from, not on no shelf at all.
-		if got.Kind != "lore" {
-			t.Fatalf("Kind = %q, want %q: a resurrection is an edit, and an edit that says "+
-				"nothing about kind leaves it alone", got.Kind, "lore")
-		}
+		assert.Must(t, got.Kind == "lore", "Kind = %q, want %q: a resurrection is an edit, and an edit that says "+
+			"nothing about kind leaves it alone", got.Kind, "lore")
 	})
 
 	t.Run("a stale version cannot silently resurrect a document", func(t *testing.T) {
@@ -190,20 +163,14 @@ func TestDeleteArea(t *testing.T) {
 		_, err := svc.Write(ctx, game, markdown.WriteInput{
 			Path: "bible", Content: "did not notice\n", ExpectedVersion: ptrInt32(1),
 		})
-		if !errors.Is(err, markdown.ErrVersionConflict) {
-			t.Fatalf("want version_conflict, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrVersionConflict), "want version_conflict, got %v", err)
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) || conflict.Current != 2 {
-			t.Fatalf("want a conflict at version 2, got %#v", err)
-		}
+		assert.Must(t, errors.As(err, &conflict) && conflict.Current == 2, "want a conflict at version 2, got %#v", err)
 		// And it is told *why* the ground moved. Without this, the recovery
 		// the message prescribes — re-read and merge — sends the agent to a
 		// Read that answers not_found, with nothing connecting the two.
-		if !conflict.Deleted {
-			t.Fatalf("Deleted = false, want true: the version this caller must merge onto "+
-				"is a tombstone, and %q says nothing about that", conflict.Error())
-		}
+		assert.Must(t, conflict.Deleted, "Deleted = false, want true: the version this caller must merge onto "+
+			"is a tombstone, and %q says nothing about that", conflict.Error())
 		details := conflict.Details()
 		if details["deleted"] != true {
 			t.Fatalf("Details()[%q] = %v, want true", "deleted", details["deleted"])
@@ -230,12 +197,8 @@ func TestDeleteArea(t *testing.T) {
 			Path: "bible", Content: "three\n", ExpectedVersion: ptrInt32(1),
 		})
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError, got %#v", err)
-		}
-		if conflict.Deleted {
-			t.Fatalf("Deleted = true on a live document: %q", conflict.Error())
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError, got %#v", err)
+		assert.Must(t, !conflict.Deleted, "Deleted = true on a live document: %q", conflict.Error())
 		if _, ok := conflict.Details()["deleted"]; ok {
 			t.Fatalf("Details() = %v, want no deleted key at all when nothing was deleted",
 				conflict.Details())
@@ -260,9 +223,7 @@ func TestDeleteArea(t *testing.T) {
 		_, err := svc.Delete(ctx, game, markdown.DeleteInput{
 			Path: "bible", ExpectedVersion: ptrInt32(2),
 		})
-		if !errors.Is(err, markdown.ErrNotFound) {
-			t.Fatalf("want not_found on a second delete, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrNotFound), "want not_found on a second delete, got %v", err)
 		// "Already gone" and "never here" are both not_found, and they have
 		// different recoveries: one is nothing to do, the other is a typo'd
 		// path. The message is the only thing that separates them.
@@ -274,9 +235,7 @@ func TestDeleteArea(t *testing.T) {
 			`SELECT count(*) FROM document_versions WHERE project_id = $1`, game).Scan(&versions); err != nil {
 			t.Fatalf("count versions: %v", err)
 		}
-		if versions != 2 {
-			t.Fatalf("%d version rows, want 2: a refused second delete writes no tombstone", versions)
-		}
+		assert.Must(t, versions == 2, "%d version rows, want 2: a refused second delete writes no tombstone", versions)
 	})
 
 	t.Run("deleting a document that was never there is not found naming the path", func(t *testing.T) {
@@ -287,9 +246,7 @@ func TestDeleteArea(t *testing.T) {
 		_, err := svc.Delete(ctx, game, markdown.DeleteInput{
 			Path: "lore/nowhere", ExpectedVersion: ptrInt32(1),
 		})
-		if !errors.Is(err, markdown.ErrNotFound) {
-			t.Fatalf("want not_found, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrNotFound), "want not_found, got %v", err)
 		requireMissing(t, err, "path", `this game has no document at "lore/nowhere"`)
 	})
 
@@ -312,27 +269,19 @@ func TestDeleteArea(t *testing.T) {
 			Path: "bible", ExpectedVersion: ptrInt32(1),
 		})
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) || conflict.Current != 2 {
-			t.Fatalf("want a conflict at version 2, got %#v", err)
-		}
+		assert.Must(t, errors.As(err, &conflict) && conflict.Current == 2, "want a conflict at version 2, got %#v", err)
 		// A caller asking to remove a document is not merging prose, so the
 		// body it asked to be rid of is not echoed back at it.
-		if conflict.Include {
-			t.Fatalf("Include = true: a delete's conflict must not carry the body")
-		}
+		assert.Must(t, !conflict.Include, "Include = true: a delete's conflict must not carry the body")
 		if _, ok := conflict.Details()["current_body"]; ok {
 			t.Fatalf("Details() = %v, want current_version alone", conflict.Details())
 		}
 
 		// The refused delete changed nothing.
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.CurrentVersion != 2 || got.DeletedAt.Valid {
-			t.Fatalf("document = (version %d, deleted_at valid %t), want it untouched at version 2",
-				got.CurrentVersion, got.DeletedAt.Valid)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, got.CurrentVersion == 2 && !got.DeletedAt.Valid, "document = (version %d, deleted_at valid %t), want it untouched at version 2",
+			got.CurrentVersion, got.DeletedAt.Valid)
 	})
 
 	t.Run("deleting another games document is not found", func(t *testing.T) {
@@ -349,17 +298,11 @@ func TestDeleteArea(t *testing.T) {
 		_, err := svc.Delete(ctx, outland, markdown.DeleteInput{
 			Path: "bible", ExpectedVersion: ptrInt32(1),
 		})
-		if !errors.Is(err, markdown.ErrNotFound) {
-			t.Fatalf("a token for outland must not delete azeroth's prose, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, markdown.ErrNotFound), "a token for outland must not delete azeroth's prose, got %v", err)
 		requireMissing(t, err, "path", `this game has no document at "bible"`)
 		got, err := svc.Read(ctx, azeroth, "bible")
-		if err != nil {
-			t.Fatalf("azeroth's document must still be there: %v", err)
-		}
-		if got.DeletedAt.Valid {
-			t.Fatalf("DeletedAt = %v, want azeroth's row untouched", got.DeletedAt.Time)
-		}
+		assert.Must(t, err == nil, "azeroth's document must still be there: %v", err)
+		assert.Must(t, !got.DeletedAt.Valid, "DeletedAt = %v, want azeroth's row untouched", got.DeletedAt.Time)
 	})
 
 	t.Run("a path is matched without regard to case on delete", func(t *testing.T) {
@@ -375,14 +318,10 @@ func TestDeleteArea(t *testing.T) {
 		removed, err := svc.Delete(ctx, game, markdown.DeleteInput{
 			Path: "Lore/Duskwood", ExpectedVersion: ptrInt32(1),
 		})
-		if err != nil {
-			t.Fatalf("Delete under another casing: %v", err)
-		}
+		assert.Must(t, err == nil, "Delete under another casing: %v", err)
 		// The stored spelling stands, on the row and therefore in the event
 		// payload: a path in a payload names an identity every reader shares.
-		if removed.Path != "lore/duskwood" {
-			t.Fatalf("Path = %q, want the stored spelling %q", removed.Path, "lore/duskwood")
-		}
+		assert.Must(t, removed.Path == "lore/duskwood", "Path = %q, want the stored spelling %q", removed.Path, "lore/duskwood")
 		if _, err := svc.Read(ctx, game, "lore/duskwood"); !errors.Is(err, markdown.ErrNotFound) {
 			t.Fatalf("want the document gone, got %v", err)
 		}
@@ -425,13 +364,9 @@ func TestDeleteArea(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("the committed delete announced nothing within 5s")
 		}
-		if ev.Kind != "document.deleted" {
-			t.Fatalf("Kind = %q, want %q", ev.Kind, "document.deleted")
-		}
+		assert.Must(t, ev.Kind == "document.deleted", "Kind = %q, want %q", ev.Kind, "document.deleted")
 		payload, ok := ev.Payload.(markdown.DocumentEvent)
-		if !ok || payload.Path != "bible" || payload.Version != 2 {
-			t.Fatalf("payload = %#v, want bible at version 2", ev.Payload)
-		}
+		assert.Must(t, ok && payload.Path == "bible" && payload.Version == 2, "payload = %#v, want bible at version 2", ev.Payload)
 	})
 
 	// TestDeleteArea's "no deletion is announced when the tombstone cannot be
@@ -478,12 +413,8 @@ func TestDeleteArea(t *testing.T) {
 		}
 		// And the rollback is real: the document is still readable.
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("the document must survive a delete that could not commit: %v", err)
-		}
-		if got.CurrentVersion != 1 {
-			t.Fatalf("CurrentVersion = %d, want 1: the whole delete rolled back", got.CurrentVersion)
-		}
+		assert.Must(t, err == nil, "the document must survive a delete that could not commit: %v", err)
+		assert.Must(t, got.CurrentVersion == 1, "CurrentVersion = %d, want 1: the whole delete rolled back", got.CurrentVersion)
 	})
 
 	// The delete is a compare-and-set in SQL and not a read-then-write, and
@@ -505,9 +436,7 @@ func TestDeleteArea(t *testing.T) {
 		}
 
 		other, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = other.Rollback(ctx) }()
 		if _, err := other.Exec(ctx,
 			`UPDATE documents SET current_version = 2, body_md = 'theirs' || chr(10)
@@ -530,21 +459,13 @@ func TestDeleteArea(t *testing.T) {
 
 		err = <-done
 		var conflict *markdown.ConflictError
-		if !errors.As(err, &conflict) {
-			t.Fatalf("want a *markdown.ConflictError from the losing delete, got %#v", err)
-		}
-		if conflict.Current != 2 {
-			t.Fatalf("Current = %d, want 2: the row moved while this delete was in flight",
-				conflict.Current)
-		}
+		assert.Must(t, errors.As(err, &conflict), "want a *markdown.ConflictError from the losing delete, got %#v", err)
+		assert.Must(t, conflict.Current == 2, "Current = %d, want 2: the row moved while this delete was in flight",
+			conflict.Current)
 		got, err := svc.Read(ctx, game, "bible")
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-		if got.DeletedAt.Valid || got.CurrentVersion != 2 {
-			t.Fatalf("document = (version %d, deleted_at valid %t), want the editor's row alive at 2",
-				got.CurrentVersion, got.DeletedAt.Valid)
-		}
+		assert.Must(t, err == nil, "Read: %v", err)
+		assert.Must(t, !got.DeletedAt.Valid && got.CurrentVersion == 2, "document = (version %d, deleted_at valid %t), want the editor's row alive at 2",
+			got.CurrentVersion, got.DeletedAt.Valid)
 	})
 
 	// The delete's audit columns, read back through the public surface —
@@ -568,23 +489,15 @@ func TestDeleteArea(t *testing.T) {
 			Path: "bible", ExpectedVersion: ptrInt32(1), Message: "cut",
 			Actor: markdown.Actor{UserID: &remover},
 		})
-		if err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		if removed.UpdatedByUserID == nil || *removed.UpdatedByUserID != remover {
-			t.Fatalf("UpdatedByUserID = %v, want the remover %v", removed.UpdatedByUserID, remover)
-		}
-		if removed.CreatedByUserID == nil || *removed.CreatedByUserID != author {
-			t.Fatalf("CreatedByUserID = %v, want the author %v: a deletion does not rewrite "+
-				"who created the document", removed.CreatedByUserID, author)
-		}
+		assert.Must(t, err == nil, "Delete: %v", err)
+		assert.Must(t, removed.UpdatedByUserID != nil && *removed.UpdatedByUserID == remover, "UpdatedByUserID = %v, want the remover %v", removed.UpdatedByUserID, remover)
+		assert.Must(t, removed.CreatedByUserID != nil && *removed.CreatedByUserID == author, "CreatedByUserID = %v, want the author %v: a deletion does not rewrite "+
+			"who created the document", removed.CreatedByUserID, author)
 
 		// The tombstone version carries its own author, read back through
 		// History rather than off the row as Task 4 had to.
 		page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "bible"})
-		if err != nil {
-			t.Fatalf("History: %v", err)
-		}
+		assert.Must(t, err == nil, "History: %v", err)
 		if page.Versions[0].Version != 2 {
 			t.Fatalf("newest version = %d, want the tombstone at 2", page.Versions[0].Version)
 		}
@@ -620,29 +533,15 @@ func TestDeleteArea(t *testing.T) {
 		// what makes "nothing is ever lost" true rather than claimed. A
 		// placeholder nobody replaces is how a feature ships write-only.
 		v2, err := svc.ReadVersion(ctx, game, "bible", 2)
-		if err != nil {
-			t.Fatalf("ReadVersion of the tombstone: %v", err)
-		}
-		if v2.BodyMd != "the world is called Azeroth\n" {
-			t.Fatalf("BodyMd = %q, want the body as it stood at deletion", v2.BodyMd)
-		}
-		if !v2.Deleted {
-			t.Fatal("the tombstone version must say it is one")
-		}
+		assert.Must(t, err == nil, "ReadVersion of the tombstone: %v", err)
+		assert.Must(t, v2.BodyMd == "the world is called Azeroth\n", "BodyMd = %q, want the body as it stood at deletion", v2.BodyMd)
+		assert.Must(t, v2.Deleted, "the tombstone version must say it is one")
 		// A tombstone is a full snapshot, not a body with the rest blanked:
 		// everything version 1 carried is carried here too.
-		if v2.Title != "The Bible" {
-			t.Fatalf("Title = %q, want the title as it stood at deletion", v2.Title)
-		}
-		if v2.Summary != "the world is called Azeroth" {
-			t.Fatalf("Summary = %q, want the summary as it stood at deletion", v2.Summary)
-		}
-		if string(v2.Frontmatter) != `{"title": "The Bible"}` {
-			t.Fatalf("Frontmatter = %s, want the frontmatter as it stood at deletion", v2.Frontmatter)
-		}
-		if v2.Message != "cut" {
-			t.Fatalf("Message = %q, want the reason the document was cut", v2.Message)
-		}
+		assert.Must(t, v2.Title == "The Bible", "Title = %q, want the title as it stood at deletion", v2.Title)
+		assert.Must(t, v2.Summary == "the world is called Azeroth", "Summary = %q, want the summary as it stood at deletion", v2.Summary)
+		assert.Must(t, string(v2.Frontmatter) == `{"title": "The Bible"}`, "Frontmatter = %s, want the frontmatter as it stood at deletion", v2.Frontmatter)
+		assert.Must(t, v2.Message == "cut", "Message = %q, want the reason the document was cut", v2.Message)
 	})
 }
 
@@ -688,12 +587,8 @@ func TestNoDeletionIsAnnouncedWhenTheDeleteCannotCommit(t *testing.T) {
 	_, err := svc.Delete(ctx, game, markdown.DeleteInput{
 		Path: "bible", ExpectedVersion: ptrInt32(1),
 	})
-	if err == nil {
-		t.Fatal("want the commit to fail")
-	}
-	if !strings.Contains(err.Error(), "commit") {
-		t.Fatalf("err = %v, want the commit to be what failed", err)
-	}
+	assert.Must(t, err != nil, "want the commit to fail")
+	assert.Must(t, strings.Contains(err.Error(), "commit"), "err = %v, want the commit to be what failed", err)
 	select {
 	case ev := <-sub.C:
 		t.Fatalf("a delete whose commit failed announced %v", ev)

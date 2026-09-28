@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -27,9 +28,7 @@ func seedRepairable(t *testing.T, svc *metamodel.Service, game uuid.UUID) {
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		Schema: metamodel.Schema{{Key: "summary", Type: metamodel.FieldText}},
 	})
-	if err != nil {
-		t.Fatalf("declare type: %v", err)
-	}
+	assert.Must(t, err == nil, "declare type: %v", err)
 	items := make([]metamodel.EntityInput, 0, 3)
 	for i := range 3 {
 		items = append(items, metamodel.EntityInput{
@@ -65,12 +64,8 @@ func seedRepairable(t *testing.T, svc *metamodel.Service, game uuid.UUID) {
 func requireDomainFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Helper()
 	var invalid *metamodel.ValidationError
-	if !errors.As(err, &invalid) {
-		t.Fatalf("err = %#v, want a *metamodel.ValidationError", err)
-	}
-	if len(invalid.Fields) != 1 {
-		t.Fatalf("got %d problems, want 1: %v", len(invalid.Fields), invalid.Fields)
-	}
+	assert.Must(t, errors.As(err, &invalid), "err = %#v, want a *metamodel.ValidationError", err)
+	assert.Must(t, len(invalid.Fields) == 1, "got %d problems, want 1: %v", len(invalid.Fields), invalid.Fields)
 	if invalid.Fields[0].Path != wantPath || invalid.Fields[0].Message != wantMessage {
 		t.Fatalf("problem = %+v, want %q: %q", invalid.Fields[0], wantPath, wantMessage)
 	}
@@ -89,22 +84,13 @@ func TestARepairPassAnswersOverTheToolSurface(t *testing.T) {
 	out, err := web.MCPEntitiesRepair(ctx, f.deps, f.caller, f.game, web.EntitiesRepairInput{
 		TypeKey: "quest", Set: map[string]any{"laps": float64(10)},
 	})
-	if err != nil {
-		t.Fatalf("entities.repair: %v", err)
-	}
-	if out.Scanned != 3 || len(out.Repaired) != 3 || len(out.Failed) != 0 {
-		t.Fatalf("the pass scanned %d, repaired %d, failed %+v",
-			out.Scanned, len(out.Repaired), out.Failed)
-	}
+	assert.Must(t, err == nil, "entities.repair: %v", err)
+	assert.Must(t, out.Scanned == 3 && len(out.Repaired) == 3 && len(out.Failed) == 0, "the pass scanned %d, repaired %d, failed %+v",
+		out.Scanned, len(out.Repaired), out.Failed)
 	row, err := web.MCPEntitiesGet(ctx, f.deps, f.caller, f.game,
 		web.EntitiesGetInput{TypeKey: "quest", Key: "q0"})
-	if err != nil {
-		t.Fatalf("entities.get: %v", err)
-	}
-	if row.Invalid || row.Fields["laps"] != float64(10) ||
-		row.Fields["summary"] != "Defeat the gnoll chieftain." {
-		t.Fatalf("repaired row = %+v", row)
-	}
+	assert.Must(t, err == nil, "entities.get: %v", err)
+	assert.Must(t, !row.Invalid && row.Fields["laps"] == float64(10) && row.Fields["summary"] == "Defeat the gnoll chieftain.", "repaired row = %+v", row)
 
 	// A second pass finds nothing, and says so with arrays rather than
 	// nulls: "the pass repaired nothing" and "the pass reported nothing"
@@ -112,20 +98,11 @@ func TestARepairPassAnswersOverTheToolSurface(t *testing.T) {
 	again, err := web.MCPEntitiesRepair(ctx, f.deps, f.caller, f.game, web.EntitiesRepairInput{
 		TypeKey: "quest", Set: map[string]any{"laps": float64(10)},
 	})
-	if err != nil {
-		t.Fatalf("entities.repair: %v", err)
-	}
-	if again.Scanned != 0 || len(again.Repaired) != 0 {
-		t.Fatalf("a second pass over a repaired type did work: %+v", again)
-	}
+	assert.Must(t, err == nil, "entities.repair: %v", err)
+	assert.Must(t, again.Scanned == 0 && len(again.Repaired) == 0, "a second pass over a repaired type did work: %+v", again)
 	raw, err := json.Marshal(again)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(raw), `"repaired":[]`) ||
-		!strings.Contains(string(raw), `"failed":[]`) {
-		t.Fatalf("an empty repair answer marshalled as %s", raw)
-	}
+	assert.Must(t, err == nil, "marshal: %v", err)
+	assert.Must(t, strings.Contains(string(raw), `"repaired":[]`) && strings.Contains(string(raw), `"failed":[]`), "an empty repair answer marshalled as %s", raw)
 
 	// The two refusals, as the wire sees them.
 	if _, err := web.MCPEntitiesRepair(ctx, f.deps, f.caller, f.game,
@@ -159,9 +136,7 @@ func TestTheRESTMirrorRepairsToo(t *testing.T) {
 		"type_key": "quest",
 		"set":      map[string]any{"laps": float64(10)},
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("repair = %d: %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "repair = %d: %s", rec.Code, rec.Body.String())
 	var out struct {
 		Scanned  int `json:"scanned"`
 		Repaired []struct {
@@ -170,17 +145,12 @@ func TestTheRESTMirrorRepairsToo(t *testing.T) {
 		Failed []json.RawMessage `json:"failed"`
 	}
 	decodeBody(t, rec, &out)
-	if out.Scanned != 3 || len(out.Repaired) != 3 || len(out.Failed) != 0 {
-		t.Fatalf("REST repair = %s", rec.Body.String())
-	}
+	assert.Must(t, out.Scanned == 3 && len(out.Repaired) == 3 && len(out.Failed) == 0, "REST repair = %s", rec.Body.String())
 
 	// A pass stating no operation is a status, not a report: it is a
 	// refusal of the call rather than of some of its rows.
 	refused := f.as(t, http.MethodPost, "/entities/repair", map[string]any{"type_key": "quest"})
-	if refused.Code != http.StatusBadRequest ||
-		!strings.Contains(refused.Body.String(), "invalid_input") {
-		t.Fatalf("an empty repair over REST = %d %s", refused.Code, refused.Body.String())
-	}
+	assert.Must(t, refused.Code == http.StatusBadRequest && strings.Contains(refused.Body.String(), "invalid_input"), "an empty repair over REST = %d %s", refused.Code, refused.Body.String())
 
 	// And the edge route exists, which is the half a mirror most easily
 	// forgets: relation types carry a field schema and an invalid flag
@@ -188,9 +158,7 @@ func TestTheRESTMirrorRepairsToo(t *testing.T) {
 	edges := f.as(t, http.MethodPost, "/relations/repair", map[string]any{
 		"type_key": "quest", "drop_unknown": true,
 	})
-	if edges.Code != http.StatusNotFound {
-		t.Fatalf("repairing an undeclared relation type = %d %s", edges.Code, edges.Body.String())
-	}
+	assert.Must(t, edges.Code == http.StatusNotFound, "repairing an undeclared relation type = %d %s", edges.Code, edges.Body.String())
 }
 
 // TestTheRepairWireTypesCarryExactlyTheseKeys is the search suite's
@@ -217,9 +185,7 @@ func TestTheRepairWireTypesCarryExactlyTheseKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.value)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
+			assert.Must(t, err == nil, "marshal: %v", err)
 			var keyed map[string]json.RawMessage
 			if err := json.Unmarshal(raw, &keyed); err != nil {
 				t.Fatalf("decode %s: %v", raw, err)
@@ -229,11 +195,9 @@ func TestTheRepairWireTypesCarryExactlyTheseKeys(t *testing.T) {
 				got = append(got, k)
 			}
 			slices.Sort(got)
-			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-				t.Fatalf("wire keys = %v, want %v — a repair wire type grew a field; decide "+
-					"whether an agent should see it, then update this list and the "+
-					"hand-written output schema beside it", got, tc.want)
-			}
+			assert.Must(t, strings.Join(got, ",") == strings.Join(tc.want, ","), "wire keys = %v, want %v — a repair wire type grew a field; decide "+
+				"whether an agent should see it, then update this list and the "+
+				"hand-written output schema beside it", got, tc.want)
 		})
 	}
 }
@@ -273,12 +237,8 @@ func TestAnOverLargeBatchIsRefusedOnBothSurfaces(t *testing.T) {
 	// would leave this green.
 	page, err := web.MCPEntitiesList(ctx, f.deps, f.caller, f.game,
 		web.EntitiesListInput{TypeKey: "quest", Limit: metamodel.MaxEntityPage})
-	if err != nil {
-		t.Fatalf("entities.list: %v", err)
-	}
-	if len(page.Items) != 0 {
-		t.Fatalf("an over-large batch landed %d rows", len(page.Items))
-	}
+	assert.Must(t, err == nil, "entities.list: %v", err)
+	assert.Must(t, len(page.Items) == 0, "an over-large batch landed %d rows", len(page.Items))
 
 	// And the bound is stated in the tool descriptions, over the real
 	// transport, which is what keeps a caller from discovering it by
@@ -289,9 +249,7 @@ func TestAnOverLargeBatchIsRefusedOnBothSurfaces(t *testing.T) {
 	defer httpSrv.Close()
 	session := connectMCP(t, httpSrv.URL, f.token)
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	stated := map[string]bool{}
 	for _, tool := range tools.Tools {
 		if strings.Contains(tool.Description, fmt.Sprint(metamodel.MaxBulkItems)) {
@@ -299,9 +257,7 @@ func TestAnOverLargeBatchIsRefusedOnBothSurfaces(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"entities.upsert", "relations.upsert", "docs.write_many"} {
-		if !stated[name] {
-			t.Fatalf("%s does not state the %d-item batch ceiling in its description",
-				name, metamodel.MaxBulkItems)
-		}
+		assert.Must(t, stated[name], "%s does not state the %d-item batch ceiling in its description",
+			name, metamodel.MaxBulkItems)
 	}
 }

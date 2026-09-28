@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/graph"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -19,9 +20,7 @@ import (
 func (g game) cycles(t *testing.T, in CyclesInput) CyclesResult {
 	t.Helper()
 	got, err := g.analysis.Cycles(context.Background(), g.projectID, in)
-	if err != nil {
-		t.Fatalf("cycles: %v", err)
-	}
+	assert.Must(t, err == nil, "cycles: %v", err)
 	return got
 }
 
@@ -72,21 +71,15 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "unlocks", "quest", "c", "d")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 0 {
-			t.Errorf("an acyclic game reported %d cycles: %v", len(got.Cycles), got.Cycles)
-		}
+		assert.Should(t, len(got.Cycles) == 0, "an acyclic game reported %d cycles: %v", len(got.Cycles), got.Cycles)
 		if got.EdgesWalked == 0 {
 			t.Error("edges_walked = 0 over a game with three edges: an empty findings list " +
 				"over a walk that followed nothing is the same JSON as an acyclic game, and " +
 				"this count is the only thing that separates them")
 		}
-		if got.SeedTotal != 4 {
-			t.Errorf("seed_total = %d, want the four entities the walk started from", got.SeedTotal)
-		}
-		if got.InvalidEdgesFollowed != 0 {
-			t.Errorf("invalid_edges_followed = %d over a game with no flagged edge",
-				got.InvalidEdgesFollowed)
-		}
+		assert.Should(t, got.SeedTotal == 4, "seed_total = %d, want the four entities the walk started from", got.SeedTotal)
+		assert.Should(t, got.InvalidEdgesFollowed == 0, "invalid_edges_followed = %d over a game with no flagged edge",
+			got.InvalidEdgesFollowed)
 	})
 
 	// TestASelfLoopIsReportedAsALengthOneCycle, including its single edge
@@ -101,16 +94,10 @@ func TestCycles(t *testing.T) {
 		relation := g.edge(t, "unlocks", "quest", "ouroboros", "ouroboros")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("a self-loop produced %d findings, want one: %v", len(got.Cycles), got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1, "a self-loop produced %d findings, want one: %v", len(got.Cycles), got.Cycles)
 		cycle := got.Cycles[0]
-		if cycle.Length != 1 || len(cycle.Entities) != 1 || cycle.Entities[0].Key != "ouroboros" {
-			t.Errorf("the finding names %v at length %d, want the one entity", cycle.keys(), cycle.Length)
-		}
-		if len(cycle.Edges) != 1 || cycle.Edges[0].RelationID != relation {
-			t.Errorf("the finding names edges %v, want the one relation %s", cycle.Edges, relation)
-		}
+		assert.Should(t, cycle.Length == 1 && len(cycle.Entities) == 1 && cycle.Entities[0].Key == "ouroboros", "the finding names %v at length %d, want the one entity", cycle.keys(), cycle.Length)
+		assert.Should(t, len(cycle.Edges) == 1 && cycle.Edges[0].RelationID == relation, "the finding names edges %v, want the one relation %s", cycle.Edges, relation)
 		if cycle.Edges[0].RelationType != "unlocks" {
 			t.Errorf("the edge names relation type %q, want unlocks", cycle.Edges[0].RelationType)
 		}
@@ -126,9 +113,7 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "unlocks", "quest", "egg", "chicken")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("a two-cycle produced %d findings, want one: %v", len(got.Cycles), got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1, "a two-cycle produced %d findings, want one: %v", len(got.Cycles), got.Cycles)
 		if got.Cycles[0].Length != 2 {
 			t.Errorf("length = %d, want 2 over %v", got.Cycles[0].Length, got.Cycles[0].keys())
 		}
@@ -147,9 +132,7 @@ func TestCycles(t *testing.T) {
 		}
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("a four-cycle produced %d findings, want one: %v", len(got.Cycles), got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1, "a four-cycle produced %d findings, want one: %v", len(got.Cycles), got.Cycles)
 		if len(got.Cycles[0].Entities) != 4 {
 			t.Errorf("the finding names %v, want all four members once each", got.Cycles[0].keys())
 		}
@@ -178,23 +161,17 @@ func TestCycles(t *testing.T) {
 		}
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("want one finding, got %d", len(got.Cycles))
-		}
+		assert.Must(t, len(got.Cycles) == 1, "want one finding, got %d", len(got.Cycles))
 		cycle := got.Cycles[0]
-		if len(cycle.Edges) != len(cycle.Entities) {
-			t.Fatalf("%d edges for %d entities: a cycle has one edge per node",
-				len(cycle.Edges), len(cycle.Entities))
-		}
+		assert.Must(t, len(cycle.Edges) == len(cycle.Entities), "%d edges for %d entities: a cycle has one edge per node",
+			len(cycle.Edges), len(cycle.Entities))
 		for i, edge := range cycle.Edges {
 			source, target := g.relationEnds(t, edge.RelationID)
 			wantSource := cycle.Entities[i].Key
 			wantTarget := cycle.Entities[(i+1)%len(cycle.Entities)].Key
-			if source != wantSource || target != wantTarget {
-				t.Errorf("edge %d is %s -> %s in the database, and the finding places it "+
-					"between %s and %s: the nodes rotated and the edges did not",
-					i, source, target, wantSource, wantTarget)
-			}
+			assert.Should(t, source == wantSource && target == wantTarget, "edge %d is %s -> %s in the database, and the finding places it "+
+				"between %s and %s: the nodes rotated and the edges did not",
+				i, source, target, wantSource, wantTarget)
 		}
 	})
 
@@ -223,9 +200,7 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "also_unlocks", "quest", "beta", "alpha")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) == 0 {
-			t.Fatal("no cycle found over four edges joining two entities in both directions")
-		}
+		assert.Must(t, len(got.Cycles) != 0, "no cycle found over four edges joining two entities in both directions")
 		// Every reported edge must be a real relation of this game, and the
 		// pairs the report names must be the pairs the walk walked.
 		reported := map[uuid.UUID]bool{}
@@ -268,19 +243,15 @@ func TestCycles(t *testing.T) {
 				}
 				return r.Err()
 			})
-		if err != nil {
-			t.Fatalf("run the walk directly: %v", err)
-		}
+		assert.Must(t, err == nil, "run the walk directly: %v", err)
 		if rows == 0 {
 			t.Fatal("graph.WalkCTE returned no closed row at all: this file reads closing " +
 				"hops, so a walk that suppresses them makes every cycle report a false negative")
 		}
 		for id := range reported {
-			if !closing[id] {
-				t.Errorf("the report names relation %s, which no closing hop of the walk "+
-					"carried: the edges of a finding come from rel_path and are never "+
-					"reconstructed from consecutive node pairs", id)
-			}
+			assert.Should(t, closing[id], "the report names relation %s, which no closing hop of the walk "+
+				"carried: the edges of a finding come from rel_path and are never "+
+				"reconstructed from consecutive node pairs", id)
 		}
 	})
 
@@ -310,10 +281,8 @@ func TestCycles(t *testing.T) {
 		}
 
 		got := g.cycles(t, CyclesInput{EntityTypes: []string{"prologue"}})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("seeded only outside the loop, the report names %d cycles, want the one: %v",
-				len(got.Cycles), got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1, "seeded only outside the loop, the report names %d cycles, want the one: %v",
+			len(got.Cycles), got.Cycles)
 		if got.Cycles[0].Length != 3 {
 			t.Errorf("length = %d, want the three-node loop: %v",
 				got.Cycles[0].Length, got.Cycles[0].keys())
@@ -333,9 +302,7 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "follows", "chapter", "two", "one")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("an ordering loop produced %d findings, want one", len(got.Cycles))
-		}
+		assert.Must(t, len(got.Cycles) == 1, "an ordering loop produced %d findings, want one", len(got.Cycles))
 		if got.Cycles[0].relationTypes()[0] != "follows" {
 			t.Errorf("the edges name %v, want follows", got.Cycles[0].relationTypes())
 		}
@@ -358,10 +325,8 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "variant_of", "item", "sword-of-ice", "sword")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("an acyclic-only type looping produced %d findings, want one: %v",
-				len(got.Cycles), got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1, "an acyclic-only type looping produced %d findings, want one: %v",
+			len(got.Cycles), got.Cycles)
 		if got.Cycles[0].Length != 3 {
 			t.Errorf("length = %d, want three", got.Cycles[0].Length)
 		}
@@ -380,20 +345,16 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "connects_to", "quest", "orgrimmar", "barrens")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 0 {
-			t.Errorf("a ring of symmetric edges reported %d cycles: an adjacency is a map, "+
-				"not a loop, and every connected game would fill this report", len(got.Cycles))
-		}
+		assert.Should(t, len(got.Cycles) == 0, "a ring of symmetric edges reported %d cycles: an adjacency is a map, "+
+			"not a loop, and every connected game would fill this report", len(got.Cycles))
 
 		// The control: the same three entities, joined by a gating type.
 		g.edge(t, "requires", "quest", "barrens", "durotar")
 		g.edge(t, "requires", "quest", "durotar", "orgrimmar")
 		g.edge(t, "requires", "quest", "orgrimmar", "barrens")
 		withGate := g.cycles(t, CyclesInput{})
-		if len(withGate.Cycles) != 1 {
-			t.Fatalf("the control found %d cycles over a requires loop, want one: a run that "+
-				"walks nothing at all passes the first half of this test", len(withGate.Cycles))
-		}
+		assert.Must(t, len(withGate.Cycles) == 1, "the control found %d cycles over a requires loop, want one: a run that "+
+			"walks nothing at all passes the first half of this test", len(withGate.Cycles))
 		if withGate.Cycles[0].relationTypes()[0] != "requires" {
 			t.Errorf("the control's edges name %v, want requires",
 				withGate.Cycles[0].relationTypes())
@@ -419,10 +380,8 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "requires", "quest", "b", "a")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 || len(got.ContainmentCycles) != 1 {
-			t.Fatalf("prerequisite cycles = %v, containment cycles = %v; want one of each in "+
-				"its own list", got.Cycles, got.ContainmentCycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1 && len(got.ContainmentCycles) == 1, "prerequisite cycles = %v, containment cycles = %v; want one of each in "+
+			"its own list", got.Cycles, got.ContainmentCycles)
 		if got.Cycles[0].relationTypes()[0] != "requires" {
 			t.Errorf("the prerequisite finding names %v", got.Cycles[0].relationTypes())
 		}
@@ -449,14 +408,10 @@ func TestCycles(t *testing.T) {
 		g.edge(t, "requires_not", "faction", "alliance", "horde")
 
 		got := g.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("want the one two-cycle, got %d: %v", len(got.Cycles), got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 1, "want the one two-cycle, got %d: %v", len(got.Cycles), got.Cycles)
 		types := got.Cycles[0].relationTypes()
-		if len(types) != 2 || types[0] != "requires_not" || types[1] != "requires_not" {
-			t.Errorf("the finding names %v, want requires_not on both edges: without the "+
-				"type a designer cannot tell mutual exclusion from a prerequisite loop", types)
-		}
+		assert.Should(t, len(types) == 2 && types[0] == "requires_not" && types[1] == "requires_not", "the finding names %v, want requires_not on both edges: without the "+
+			"type a designer cannot tell mutual exclusion from a prerequisite loop", types)
 	})
 
 	// TestATruncatedCycleReportKeepsTheShortestCycles.
@@ -484,14 +439,10 @@ func TestCycles(t *testing.T) {
 		}
 
 		full := g.cycles(t, CyclesInput{})
-		if len(full.Cycles) != 4 {
-			t.Fatalf("the fixture holds one 2-cycle and three 8-cycles; the full report names "+
-				"%d: %v", len(full.Cycles), full.Cycles)
-		}
+		assert.Must(t, len(full.Cycles) == 4, "the fixture holds one 2-cycle and three 8-cycles; the full report names "+
+			"%d: %v", len(full.Cycles), full.Cycles)
 		got := g.cycles(t, CyclesInput{MaxResults: 1})
-		if len(got.Cycles) != 1 {
-			t.Fatalf("max_results 1 returned %d findings", len(got.Cycles))
-		}
+		assert.Must(t, len(got.Cycles) == 1, "max_results 1 returned %d findings", len(got.Cycles))
 		if got.Cycles[0].Length != 2 {
 			t.Errorf("the truncated report kept a cycle of length %d, want the 2-cycle: a "+
 				"truncated answer that keeps arbitrary loops is less useful than one that "+
@@ -501,9 +452,7 @@ func TestCycles(t *testing.T) {
 			t.Error("truncated is false on a report that dropped three findings: a capped " +
 				"report that does not say so reads as the whole list of what is wrong")
 		}
-		if full.Truncated {
-			t.Error("truncated is true on a report that named every cycle it found")
-		}
+		assert.Should(t, !full.Truncated, "truncated is true on a report that named every cycle it found")
 	})
 
 	// TestCyclesOverAGameWithNoTraitsRefusesRatherThanReportingHealth.
@@ -516,12 +465,8 @@ func TestCycles(t *testing.T) {
 		g.declareEntityType(t, "quest")
 		g.declareRelationType(t, "mentions", "", nil)
 		_, err := g.analysis.Cycles(context.Background(), g.projectID, CyclesInput{})
-		if err == nil {
-			t.Fatal("a game that declares nothing was reported acyclic")
-		}
-		if !isSemanticsUndeclared(err) {
-			t.Fatalf("err = %v, want semantics_undeclared", err)
-		}
+		assert.Must(t, err != nil, "a game that declares nothing was reported acyclic")
+		assert.Must(t, isSemanticsUndeclared(err), "err = %v, want semantics_undeclared", err)
 	})
 
 	// TestCyclesOverAnotherGamesTokenIsScopeViolation -- the isolation half.
@@ -542,10 +487,8 @@ func TestCycles(t *testing.T) {
 		theirs.entity(t, "quest", "peaceful")
 
 		got := theirs.cycles(t, CyclesInput{})
-		if len(got.Cycles) != 0 {
-			t.Fatalf("the second game's report names %v, which belong to the first",
-				got.Cycles)
-		}
+		assert.Must(t, len(got.Cycles) == 0, "the second game's report names %v, which belong to the first",
+			got.Cycles)
 		// The control: the first game still reports its own loop, so a run
 		// that walked nothing at all cannot pass the assertion above.
 		if len(mine.cycles(t, CyclesInput{}).Cycles) != 1 {
@@ -590,21 +533,15 @@ func TestCycles(t *testing.T) {
 			t.Fatal("a walk under a one-millisecond budget completed, so this test measures " +
 				"nothing")
 		}
-		if !metamodel.IsRetryable(err) {
-			t.Fatalf("err = %v; a timed-out analysis is retryable -- change nothing and "+
-				"resend -- and a wrap that loses the PgError loses that answer", err)
-		}
+		assert.Must(t, metamodel.IsRetryable(err), "err = %v; a timed-out analysis is retryable -- change nothing and "+
+			"resend -- and a wrap that loses the PgError loses that answer", err)
 		message := err.Error()
-		if !strings.Contains(message, "1ms") {
-			t.Errorf("the message does not name the budget it exhausted: %s", message)
-		}
+		assert.Should(t, strings.Contains(message, "1ms"), "the message does not name the budget it exhausted: %s", message)
 		for _, bound := range []string{
 			"max_depth", "entity_types", "relation_types", "seed_entity_types",
 		} {
-			if !strings.Contains(message, bound) {
-				t.Errorf("the message does not name %q, which is one of the four arguments "+
-					"that narrow a run: %s", bound, message)
-			}
+			assert.Should(t, strings.Contains(message, bound), "the message does not name %q, which is one of the four arguments "+
+				"that narrow a run: %s", bound, message)
 		}
 	})
 
@@ -623,13 +560,9 @@ func TestCycles(t *testing.T) {
 		} {
 			_, err := g.analysis.Cycles(context.Background(), g.projectID, probe.in)
 			var invalid *metamodel.ValidationError
-			if !errors.As(err, &invalid) || invalid.Code != CodeLimitExceeded {
-				t.Fatalf("%s above its cap answered %v, want limit_exceeded", probe.path, err)
-			}
-			if len(invalid.Fields) != 1 || invalid.Fields[0].Path != probe.path {
-				t.Errorf("the refusal names %v, want the caller's own argument %q",
-					invalid.Fields, probe.path)
-			}
+			assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeLimitExceeded, "%s above its cap answered %v, want limit_exceeded", probe.path, err)
+			assert.Should(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == probe.path, "the refusal names %v, want the caller's own argument %q",
+				invalid.Fields, probe.path)
 		}
 	})
 }

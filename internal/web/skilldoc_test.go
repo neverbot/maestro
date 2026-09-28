@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -68,19 +69,15 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 		Analysis:  analysis.New(nil, nil),
 	})
 	registered := srv.ToolDescriptionsForTest()
-	if len(registered) < 40 {
-		t.Fatalf("this server registered %d tools; the comparison below would be over "+
-			"a table too small to be the real surface", len(registered))
-	}
+	assert.Must(t, len(registered) >= 40, "this server registered %d tools; the comparison below would be over "+
+		"a table too small to be the real surface", len(registered))
 	// Every domain this bundle routes through, asserted by hand. A
 	// service silently dropped from the Options above would otherwise
 	// take its whole domain out of *both* sides of the comparison.
 	for _, prefix := range []string{"analysis.", "docs.", "entities.", "games.",
 		"relation_types.", "relations.", "routes.", "types.", "views."} {
-		if !anyToolHasPrefix(registered, prefix) {
-			t.Fatalf("no registered tool starts with %q: this test's own server is missing a domain, "+
-				"so the comparison below cannot see whether the file is", prefix)
-		}
+		assert.Must(t, anyToolHasPrefix(registered, prefix), "no registered tool starts with %q: this test's own server is missing a domain, "+
+			"so the comparison below cannot see whether the file is", prefix)
 	}
 
 	named := toolNamesIn(t, readBundleFile(t, web.ToolReferencePath))
@@ -90,10 +87,8 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 	}
 
 	for name := range registered {
-		if !named[name] {
-			t.Errorf("%s is registered and is not in %s: run `go run ./cmd/maestro-skilldoc`",
-				name, web.ToolReferencePath)
-		}
+		assert.Should(t, named[name], "%s is registered and is not in %s: run `go run ./cmd/maestro-skilldoc`",
+			name, web.ToolReferencePath)
 	}
 	for name := range named {
 		if _, ok := registered[name]; !ok {
@@ -113,10 +108,8 @@ func TestTheToolReferenceCountsWhatItLists(t *testing.T) {
 	body := readBundleFile(t, web.ToolReferencePath)
 	named := toolNamesIn(t, body)
 	stated := regexp.MustCompile(`(?m)^(\d+) tools\.`).FindStringSubmatch(body)
-	if stated == nil {
-		t.Fatalf("no \"N tools.\" line in %s: the count this test checks is not on the page",
-			web.ToolReferencePath)
-	}
+	assert.Must(t, stated != nil, "no \"N tools.\" line in %s: the count this test checks is not on the page",
+		web.ToolReferencePath)
 	if want := strings.TrimSpace(stated[1]); want != strconv.Itoa(len(named)) {
 		t.Fatalf("%s says %s tools and lists %d", web.ToolReferencePath, want, len(named))
 	}
@@ -141,19 +134,13 @@ func TestTheToolReferenceCarriesFirstSentencesAndNotDescriptions(t *testing.T) {
 			continue
 		}
 		multiSentence++
-		if strings.Contains(body, flat) {
-			t.Errorf("%s's whole description is in %s: the index restates a contract the wire "+
-				"already carries", name, web.ToolReferencePath)
-		}
+		assert.Should(t, !strings.Contains(body, flat), "%s's whole description is in %s: the index restates a contract the wire "+
+			"already carries", name, web.ToolReferencePath)
 		rest := strings.TrimSpace(strings.TrimPrefix(flat, first))
-		if rest != "" && strings.Contains(body, rest) {
-			t.Errorf("%s: text past its first sentence reached %s", name, web.ToolReferencePath)
-		}
+		assert.Should(t, rest == "" || !strings.Contains(body, rest), "%s: text past its first sentence reached %s", name, web.ToolReferencePath)
 	}
-	if multiSentence < 10 {
-		t.Fatalf("only %d registered descriptions run past one sentence; this test would be "+
-			"asserting almost nothing", multiSentence)
-	}
+	assert.Must(t, multiSentence >= 10, "only %d registered descriptions run past one sentence; this test would be "+
+		"asserting almost nothing", multiSentence)
 }
 
 // TestTheFirstSentenceRuleIsPrecise drives the split with inputs the
@@ -198,13 +185,9 @@ func TestTheIndexGroupsAnUnprefixedToolUnderSession(t *testing.T) {
 		"views.validate": "Judge a query. And more.",
 	})
 	for _, want := range []string{"## session", "## entities", "## views", "- `whoami` — Report the calling identity."} {
-		if !strings.Contains(page, want) {
-			t.Errorf("the rendered index does not contain %q:\n%s", want, page)
-		}
+		assert.Should(t, strings.Contains(page, want), "the rendered index does not contain %q:\n%s", want, page)
 	}
-	if strings.Contains(page, "## \n") {
-		t.Error("an unprefixed tool produced an empty group heading")
-	}
+	assert.Should(t, !strings.Contains(page, "## \n"), "an unprefixed tool produced an empty group heading")
 	if got := strings.Index(page, "## entities"); got > strings.Index(page, "## session") {
 		t.Error("the groups are not in a stable, sorted order")
 	}
@@ -213,9 +196,7 @@ func TestTheIndexGroupsAnUnprefixedToolUnderSession(t *testing.T) {
 func readBundleFile(t *testing.T, path string) string {
 	t.Helper()
 	body, err := fs.ReadFile(skill.Files(), path)
-	if err != nil {
-		t.Fatalf("reading %s out of the bundle: %v", path, err)
-	}
+	assert.Must(t, err == nil, "reading %s out of the bundle: %v", path, err)
 	return string(body)
 }
 
@@ -429,11 +410,9 @@ func TestTheRouteReferenceNamesEveryAPIRoute(t *testing.T) {
 		}
 		registered[method+" "+path] = true
 	}
-	if len(registered) < 40 {
-		t.Fatalf("%d API route(s) registered, which is too few for this comparison to mean "+
-			"anything: a server that registered almost nothing would pass by having little to "+
-			"compare", len(registered))
-	}
+	assert.Must(t, len(registered) >= 40, "%d API route(s) registered, which is too few for this comparison to mean "+
+		"anything: a server that registered almost nothing would pass by having little to "+
+		"compare", len(registered))
 
 	listed := map[string]bool{}
 	for _, line := range strings.Split(readBundleFile(t, web.RouteReferencePath), "\n") {
@@ -445,15 +424,11 @@ func TestTheRouteReferenceNamesEveryAPIRoute(t *testing.T) {
 	}
 
 	for route := range registered {
-		if !listed[route] {
-			t.Errorf("%s is registered and missing from %s: an agent on the mirror cannot find it",
-				route, web.RouteReferencePath)
-		}
+		assert.Should(t, listed[route], "%s is registered and missing from %s: an agent on the mirror cannot find it",
+			route, web.RouteReferencePath)
 	}
 	for route := range listed {
-		if !registered[route] {
-			t.Errorf("%s is listed in %s and answered by nothing: a route table that sends an agent "+
-				"to a 404 is worse than none", route, web.RouteReferencePath)
-		}
+		assert.Should(t, registered[route], "%s is listed in %s and answered by nothing: a route table that sends an agent "+
+			"to a 404 is worse than none", route, web.RouteReferencePath)
 	}
 }

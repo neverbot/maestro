@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/paging"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -32,9 +33,7 @@ func version(v int32) *int32 { return &v }
 func (g game) upsert(t *testing.T, in RouteInput) Route {
 	t.Helper()
 	got, err := g.analysis.UpsertRoute(context.Background(), g.projectID, in)
-	if err != nil {
-		t.Fatalf("upsert route %q: %v", in.Key, err)
-	}
+	assert.Must(t, err == nil, "upsert route %q: %v", in.Key, err)
 	return got
 }
 
@@ -82,46 +81,22 @@ func TestRoutes(t *testing.T) {
 		g.upsert(t, in)
 
 		got, err := g.analysis.RouteByKey(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("read the route back: %v", err)
-		}
-		if got.Name != in.Name || got.Description != in.Description {
-			t.Errorf("name/description read back as %q / %q", got.Name, got.Description)
-		}
-		if got.Version != 1 {
-			t.Errorf("version = %d, want 1 on a creation", got.Version)
-		}
-		if got.Params.Gate != GatingAll || got.Params.MaxDepth != 7 || !got.Params.ExcludeInvalid {
-			t.Errorf("params read back as %+v", got.Params)
-		}
-		if got.Params.IncludeUngated == nil || *got.Params.IncludeUngated {
-			t.Errorf("include_ungated read back as %v, want the stored false: a tri-state "+
-				"that loses its false is a stored parameter nothing reads", got.Params.IncludeUngated)
-		}
-		if got.Params.PropagateContainment == nil || *got.Params.PropagateContainment {
-			t.Errorf("propagate_containment read back as %v", got.Params.PropagateContainment)
-		}
-		if len(got.Params.SeedEntities) != 1 || got.Params.SeedEntities[0].Key != "tutorial" {
-			t.Errorf("seed_entities read back as %v", got.Params.SeedEntities)
-		}
-		if len(got.Params.SeedEntityTypes) != 1 || got.Params.SeedEntityTypes[0] != "quest" {
-			t.Errorf("seed_entity_types read back as %v", got.Params.SeedEntityTypes)
-		}
-		if len(got.Steps) != 3 {
-			t.Fatalf("read back %d steps, want three", len(got.Steps))
-		}
+		assert.Must(t, err == nil, "read the route back: %v", err)
+		assert.Should(t, got.Name == in.Name && got.Description == in.Description, "name/description read back as %q / %q", got.Name, got.Description)
+		assert.Should(t, got.Version == 1, "version = %d, want 1 on a creation", got.Version)
+		assert.Should(t, got.Params.Gate == GatingAll && got.Params.MaxDepth == 7 && got.Params.ExcludeInvalid, "params read back as %+v", got.Params)
+		assert.Should(t, got.Params.IncludeUngated != nil && !(*got.Params.IncludeUngated), "include_ungated read back as %v, want the stored false: a tri-state "+
+			"that loses its false is a stored parameter nothing reads", got.Params.IncludeUngated)
+		assert.Should(t, got.Params.PropagateContainment != nil && !(*got.Params.PropagateContainment), "propagate_containment read back as %v", got.Params.PropagateContainment)
+		assert.Should(t, len(got.Params.SeedEntities) == 1 && got.Params.SeedEntities[0].Key == "tutorial", "seed_entities read back as %v", got.Params.SeedEntities)
+		assert.Should(t, len(got.Params.SeedEntityTypes) == 1 && got.Params.SeedEntityTypes[0] == "quest", "seed_entity_types read back as %v", got.Params.SeedEntityTypes)
+		assert.Must(t, len(got.Steps) == 3, "read back %d steps, want three", len(got.Steps))
 		for i, want := range in.Steps {
 			step := got.Steps[i]
-			if int(step.Position) != i || step.EntityType != want.EntityType || step.Key != want.Key {
-				t.Errorf("step %d read back as %+v, want %+v", i, step, want)
-			}
-			if step.Note != want.Note {
-				t.Errorf("step %d note read back as %q, want %q: a note stored and never "+
-					"read back is a field nothing would notice the loss of", i, step.Note, want.Note)
-			}
-			if step.EntityID == nil {
-				t.Errorf("step %d resolved to no entity id", i)
-			}
+			assert.Should(t, int(step.Position) == i && step.EntityType == want.EntityType && step.Key == want.Key, "step %d read back as %+v, want %+v", i, step, want)
+			assert.Should(t, step.Note == want.Note, "step %d note read back as %q, want %q: a note stored and never "+
+				"read back is a field nothing would notice the loss of", i, step.Note, want.Note)
+			assert.Should(t, step.EntityID != nil, "step %d resolved to no entity id", i)
 		}
 	})
 
@@ -139,12 +114,8 @@ func TestRoutes(t *testing.T) {
 			Steps:  steps("tutorial"),
 		})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("a nonsense gate answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "/params/gate" {
-			t.Fatalf("the refusal names %v, want /params/gate", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "a nonsense gate answered %v, want invalid_input", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "/params/gate", "the refusal names %v, want /params/gate", invalid.Fields)
 		if !strings.Contains(invalid.Fields[0].Message, string(GatingAll)) {
 			t.Errorf("the refusal does not name what would be right: %s", invalid.Fields[0].Message)
 		}
@@ -168,10 +139,7 @@ func TestRoutes(t *testing.T) {
 			_, err := g.analysis.UpsertRoute(context.Background(), g.projectID, RouteInput{
 				Key: "probe", Name: "Probe", ExpectedVersion: version(0), Params: probe.in,
 			})
-			if !errors.As(err, &invalid) || len(invalid.Fields) != 1 ||
-				invalid.Fields[0].Path != probe.path {
-				t.Errorf("a bound broken at %s answered %v", probe.path, err)
-			}
+			assert.Should(t, errors.As(err, &invalid) && len(invalid.Fields) == 1 && invalid.Fields[0].Path == probe.path, "a bound broken at %s answered %v", probe.path, err)
 		}
 	})
 
@@ -185,12 +153,8 @@ func TestRoutes(t *testing.T) {
 			Key: "levelling", Name: "Levelling", Steps: steps("tutorial"),
 		})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("an omitted expected_version answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "/expected_version" {
-			t.Fatalf("the refusal names %v", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "an omitted expected_version answered %v, want invalid_input", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "/expected_version", "the refusal names %v", invalid.Fields)
 	})
 
 	// TestAVersionClaimAgainstARouteThatIsGoneIsRefusedRatherThanRecreated.
@@ -215,9 +179,7 @@ func TestRoutes(t *testing.T) {
 			Key: "levelling", Name: "Levelling", ExpectedVersion: version(written.Version),
 			Steps: steps("tutorial", "hogger"),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a version claim against a removed route answered %v, want not_found", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "a version claim against a removed route answered %v, want not_found", err)
 		if errors.Is(err, ErrVersionConflict) {
 			t.Fatal("it must not also read as version_conflict: telling a caller to merge " +
 				"is the one instruction that cannot work against a row that is gone")
@@ -244,16 +206,10 @@ func TestRoutes(t *testing.T) {
 			Key: "long", Name: "Long", ExpectedVersion: version(0), Steps: long,
 		})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("a 501-step route answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "/steps" {
-			t.Fatalf("the refusal names %v, want /steps", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "a 501-step route answered %v, want invalid_input", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "/steps", "the refusal names %v, want /steps", invalid.Fields)
 		message := invalid.Fields[0].Message
-		if !strings.Contains(message, "501") || !strings.Contains(message, "500") {
-			t.Errorf("the refusal names neither the count nor the cap: %s", message)
-		}
+		assert.Should(t, strings.Contains(message, "501") && strings.Contains(message, "500"), "the refusal names neither the count nor the cap: %s", message)
 		if _, err := g.analysis.RouteByKey(context.Background(), g.projectID, "long"); !errors.Is(
 			err, ErrNotFound) {
 			t.Fatalf("a truncated route was stored: %v", err)
@@ -270,12 +226,8 @@ func TestRoutes(t *testing.T) {
 			Key: "typo", Name: "Typo", ExpectedVersion: version(0),
 			Steps: steps("tutorial", "hoggre"),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a step naming no entity answered %v, want not_found", err)
-		}
-		if !strings.Contains(err.Error(), "steps[1]") || !strings.Contains(err.Error(), "hoggre") {
-			t.Errorf("the refusal names neither the position nor the key: %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "a step naming no entity answered %v, want not_found", err)
+		assert.Should(t, strings.Contains(err.Error(), "steps[1]") && strings.Contains(err.Error(), "hoggre"), "the refusal names neither the position nor the key: %v", err)
 		if _, err := g.analysis.RouteByKey(context.Background(), g.projectID, "typo"); !errors.Is(
 			err, ErrNotFound) {
 			t.Fatalf("the route was stored with a step nobody could resolve: %v", err)
@@ -294,9 +246,7 @@ func TestRoutes(t *testing.T) {
 			Key: "borrowed", Name: "Borrowed", ExpectedVersion: version(0),
 			Steps: steps("tutorial", "their-secret"),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a step naming another game's entity answered %v, want not_found", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "a step naming another game's entity answered %v, want not_found", err)
 		// The control: the same key resolves in the game that owns it, so
 		// this test cannot pass on a resolver that finds nothing at all.
 		theirs.upsert(t, RouteInput{
@@ -339,13 +289,9 @@ func TestRoutes(t *testing.T) {
 			Key: "levelling", Name: "Levelling", ExpectedVersion: version(first.Version),
 			Steps: steps("deadmines", "tutorial"),
 		})
-		if second.Version != first.Version+1 {
-			t.Errorf("version = %d, want %d", second.Version, first.Version+1)
-		}
-		if len(second.Steps) != 2 {
-			t.Fatalf("the route holds %d steps after a two-step rewrite: %+v",
-				len(second.Steps), second.Steps)
-		}
+		assert.Should(t, second.Version == first.Version+1, "version = %d, want %d", second.Version, first.Version+1)
+		assert.Must(t, len(second.Steps) == 2, "the route holds %d steps after a two-step rewrite: %+v",
+			len(second.Steps), second.Steps)
 		if second.Steps[0].Key != "deadmines" || second.Steps[1].Key != "tutorial" {
 			t.Errorf("the rewritten steps are %v, want the new order in the new order",
 				[]string{second.Steps[0].Key, second.Steps[1].Key})
@@ -369,48 +315,31 @@ func TestRoutes(t *testing.T) {
 			Key: "levelling", Name: "Levelling", ExpectedVersion: version(0),
 			Steps: steps("tutorial", "hogger"),
 		})
-		if route.Status != RouteNeverChecked {
-			t.Fatalf("status = %q on a fresh route, want %q", route.Status, RouteNeverChecked)
-		}
-		if route.LastCheckedDesignVersion != nil || route.LastCheckedAt != nil {
-			t.Errorf("a never-checked route carries a verdict: %v / %v",
-				route.LastCheckedDesignVersion, route.LastCheckedAt)
-		}
+		assert.Must(t, route.Status == RouteNeverChecked, "status = %q on a fresh route, want %q", route.Status, RouteNeverChecked)
+		assert.Should(t, route.LastCheckedDesignVersion == nil && route.LastCheckedAt == nil, "a never-checked route carries a verdict: %v / %v",
+			route.LastCheckedDesignVersion, route.LastCheckedAt)
 
 		// Checked against the current design version. routes.check is Task
 		// 10; this writes the three columns it will write, which is the one
 		// part of this row the CRUD deliberately does not touch.
 		g.recordCheck(t, "levelling", route.DesignVersion)
 		checked, err := g.analysis.RouteByKey(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("read the route back: %v", err)
-		}
-		if checked.Status != RouteChecked {
-			t.Fatalf("status = %q after a check against the current design, want %q",
-				checked.Status, RouteChecked)
-		}
+		assert.Must(t, err == nil, "read the route back: %v", err)
+		assert.Must(t, checked.Status == RouteChecked, "status = %q after a check against the current design, want %q",
+			checked.Status, RouteChecked)
 
 		// Any write anywhere in the game moves design_version, and the
 		// counter is coarse on purpose: this one touches an entity the route
 		// does not even name.
 		g.entity(t, "quest", "an-unrelated-quest")
 		stale, err := g.analysis.RouteByKey(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("read the route back: %v", err)
-		}
-		if stale.Status != RouteStale {
-			t.Fatalf("status = %q after a write to the game, want %q", stale.Status, RouteStale)
-		}
-		if stale.LastCheckedDesignVersion == nil ||
-			*stale.LastCheckedDesignVersion >= stale.DesignVersion {
-			t.Errorf("last_checked_design_version %v is not below the game's %d, so the "+
-				"status above rests on nothing", stale.LastCheckedDesignVersion, stale.DesignVersion)
-		}
+		assert.Must(t, err == nil, "read the route back: %v", err)
+		assert.Must(t, stale.Status == RouteStale, "status = %q after a write to the game, want %q", stale.Status, RouteStale)
+		assert.Should(t, stale.LastCheckedDesignVersion != nil && *stale.LastCheckedDesignVersion < stale.DesignVersion, "last_checked_design_version %v is not below the game's %d, so the "+
+			"status above rests on nothing", stale.LastCheckedDesignVersion, stale.DesignVersion)
 		// And the verdict is still there: stale means "about a game that has
 		// changed", never "discarded".
-		if len(stale.LastCheck) == 0 {
-			t.Error("the stored verdict was lost when the route went stale")
-		}
+		assert.Should(t, len(stale.LastCheck) != 0, "the stored verdict was lost when the route went stale")
 	})
 
 	// TestAnOrdinaryUpsertLeavesAStoredVerdictStanding.
@@ -432,10 +361,7 @@ func TestRoutes(t *testing.T) {
 			Key: "levelling", Name: "Levelling, renamed", ExpectedVersion: version(route.Version),
 			Steps: steps("tutorial", "hogger"),
 		})
-		if len(after.LastCheck) == 0 || after.LastCheckedAt == nil ||
-			after.LastCheckedDesignVersion == nil {
-			t.Fatalf("an ordinary edit discarded the stored verdict: %+v", after)
-		}
+		assert.Must(t, len(after.LastCheck) != 0 && after.LastCheckedAt != nil && after.LastCheckedDesignVersion != nil, "an ordinary edit discarded the stored verdict: %+v", after)
 	})
 
 	// TestEditingARouteMakesItsOwnVerdictStale is the half design_version
@@ -460,39 +386,27 @@ func TestRoutes(t *testing.T) {
 		})
 		g.recordCheck(t, "levelling", route.DesignVersion)
 		checked, err := g.analysis.RouteByKey(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("read the route back: %v", err)
-		}
-		if checked.Status != RouteChecked {
-			t.Fatalf("status = %q straight after a check, want %q", checked.Status, RouteChecked)
-		}
+		assert.Must(t, err == nil, "read the route back: %v", err)
+		assert.Must(t, checked.Status == RouteChecked, "status = %q straight after a check, want %q", checked.Status, RouteChecked)
 
 		edited := g.upsert(t, RouteInput{
 			Key: "levelling", Name: "Levelling", ExpectedVersion: version(checked.Version),
 			Steps: steps("tutorial", "hogger", "defias"),
 		})
-		if edited.DesignVersion != checked.DesignVersion {
-			t.Fatalf("writing a route moved the design version from %d to %d: `routes` is "+
-				"deliberately not one of the watched tables, and a route write that marked "+
-				"every route in the game stale would be exactly the mechanism 0013 argues "+
-				"against", checked.DesignVersion, edited.DesignVersion)
-		}
-		if edited.Status != RouteStale {
-			t.Fatalf("status = %q after the steps were rewritten under the verdict, want %q: "+
-				"a verdict about a claim nobody makes any more must not read as green",
-				edited.Status, RouteStale)
-		}
+		assert.Must(t, edited.DesignVersion == checked.DesignVersion, "writing a route moved the design version from %d to %d: `routes` is "+
+			"deliberately not one of the watched tables, and a route write that marked "+
+			"every route in the game stale would be exactly the mechanism 0013 argues "+
+			"against", checked.DesignVersion, edited.DesignVersion)
+		assert.Must(t, edited.Status == RouteStale, "status = %q after the steps were rewritten under the verdict, want %q: "+
+			"a verdict about a claim nobody makes any more must not read as green",
+			edited.Status, RouteStale)
 		// The control: the other clock still works on its own. A design
 		// write with no route write is stale too.
 		g.recordCheck(t, "levelling", edited.DesignVersion)
 		g.entity(t, "quest", "an-unrelated-quest")
 		moved, err := g.analysis.RouteByKey(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("read the route back: %v", err)
-		}
-		if moved.Status != RouteStale {
-			t.Errorf("status = %q after a write to the game, want %q", moved.Status, RouteStale)
-		}
+		assert.Must(t, err == nil, "read the route back: %v", err)
+		assert.Should(t, moved.Status == RouteStale, "status = %q after a write to the game, want %q", moved.Status, RouteStale)
 	})
 
 	// TestARenameLeavesARouteStepSpellingTheOldKey is the rename lesson,
@@ -519,9 +433,7 @@ func TestRoutes(t *testing.T) {
 			Steps: steps("tutorial", "hogger"),
 		})
 		current, err := g.meta.EntityTypeByKey(context.Background(), g.projectID, "quest")
-		if err != nil {
-			t.Fatalf("read the entity type: %v", err)
-		}
+		assert.Must(t, err == nil, "read the entity type: %v", err)
 		if _, err := g.meta.RenameEntityType(context.Background(), g.projectID,
 			metamodel.RenameInput{From: "quest", To: "mission", ExpectedVersion: &current.Version},
 		); err != nil {
@@ -529,20 +441,14 @@ func TestRoutes(t *testing.T) {
 		}
 
 		route, err := g.analysis.RouteByKey(context.Background(), g.projectID, "levelling")
-		if err != nil {
-			t.Fatalf("read the route back after the rename: %v", err)
-		}
+		assert.Must(t, err == nil, "read the route back after the rename: %v", err)
 		for i, step := range route.Steps {
-			if step.EntityType != "quest" {
-				t.Errorf("step %d spells its type %q; a rename moves the catalogue row and "+
-					"nothing else, and the stored spelling is what lets a check report the "+
-					"key as moved rather than the step as missing", i, step.EntityType)
-			}
+			assert.Should(t, step.EntityType == "quest", "step %d spells its type %q; a rename moves the catalogue row and "+
+				"nothing else, and the stored spelling is what lets a check report the "+
+				"key as moved rather than the step as missing", i, step.EntityType)
 			// Resolution is by id, which the rename left standing, so the
 			// step still points at real content.
-			if step.EntityID == nil {
-				t.Errorf("step %d lost its entity id to a rename", i)
-			}
+			assert.Should(t, step.EntityID != nil, "step %d lost its entity id to a rename", i)
 		}
 	})
 
@@ -560,17 +466,11 @@ func TestRoutes(t *testing.T) {
 
 		err := g.analysis.RemoveRoute(context.Background(), g.projectID, "levelling", nil)
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("a removal with no version answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "/expected_version" {
-			t.Fatalf("the refusal names %v", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "a removal with no version answered %v, want invalid_input", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "/expected_version", "the refusal names %v", invalid.Fields)
 		message := invalid.Fields[0].Message
 		for _, said := range []string{"authored", "verdict"} {
-			if !strings.Contains(message, said) {
-				t.Errorf("the refusal does not say what would be lost (%q): %s", said, message)
-			}
+			assert.Should(t, strings.Contains(message, said), "the refusal does not say what would be lost (%q): %s", said, message)
 		}
 		// A stale version is a conflict rather than a silent success.
 		if err := g.analysis.RemoveRoute(context.Background(), g.projectID,
@@ -595,9 +495,7 @@ func TestRoutes(t *testing.T) {
 			Scan(&stepRows); err != nil {
 			t.Fatalf("count the steps: %v", err)
 		}
-		if stepRows != 0 {
-			t.Errorf("%d step rows survived the route they belong to", stepRows)
-		}
+		assert.Should(t, stepRows == 0, "%d step rows survived the route they belong to", stepRows)
 	})
 
 	// TestTheRouteListingCarriesHealthAndCountsButNoStepsOrVerdicts.
@@ -622,15 +520,9 @@ func TestRoutes(t *testing.T) {
 		g.entity(t, "quest", "an-unrelated-quest")
 
 		page, err := g.analysis.ListRoutes(context.Background(), g.projectID, "", 0)
-		if err != nil {
-			t.Fatalf("list routes: %v", err)
-		}
-		if len(page.Routes) != 2 {
-			t.Fatalf("the listing names %d routes, want two", len(page.Routes))
-		}
-		if page.Routes[0].Key != "alpha" || page.Routes[1].Key != "beta" {
-			t.Errorf("the listing is ordered %v, want by name", page.Routes)
-		}
+		assert.Must(t, err == nil, "list routes: %v", err)
+		assert.Must(t, len(page.Routes) == 2, "the listing names %d routes, want two", len(page.Routes))
+		assert.Should(t, page.Routes[0].Key == "alpha" && page.Routes[1].Key == "beta", "the listing is ordered %v, want by name", page.Routes)
 		if page.Routes[0].StepCount != 3 || page.Routes[1].StepCount != 1 {
 			t.Errorf("step counts are %d and %d, want 3 and 1",
 				page.Routes[0].StepCount, page.Routes[1].StepCount)
@@ -656,12 +548,8 @@ func TestRoutes(t *testing.T) {
 			})
 		}
 		first, err := mine.analysis.ListRoutes(context.Background(), mine.projectID, "", 1)
-		if err != nil {
-			t.Fatalf("list routes: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("the first page issued no cursor, so there is nothing to carry")
-		}
+		assert.Must(t, err == nil, "list routes: %v", err)
+		assert.Must(t, first.NextCursor != "", "the first page issued no cursor, so there is nothing to carry")
 
 		theirs := mine.sibling(t)
 		theirs.declareEntityType(t, "quest")
@@ -673,12 +561,8 @@ func TestRoutes(t *testing.T) {
 		_, err = theirs.analysis.ListRoutes(
 			context.Background(), theirs.projectID, first.NextCursor, 1)
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("another game's cursor answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "cursor" {
-			t.Errorf("the refusal names %v, want the caller's own `cursor`", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "another game's cursor answered %v, want invalid_input", err)
+		assert.Should(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "cursor", "the refusal names %v, want the caller's own `cursor`", invalid.Fields)
 	})
 
 	// TestTheRouteListingFingerprintIsProjectIdFirstAndCarriesItsDomain is
@@ -697,14 +581,10 @@ func TestRoutes(t *testing.T) {
 			t.Fatalf("routeListingFingerprint = %q, want %q: the project id is first and the "+
 				"domain follows it, which is internal/paging's contract", got, want)
 		}
-		if routeListingFingerprint(g.projectID) ==
-			paging.Fingerprint(g.projectID.String(), "views") {
-			t.Fatal("this listing shares a fingerprint with another domain's over one game")
-		}
-		if routeListingFingerprint(g.projectID) ==
-			routeListingFingerprint(g.sibling(t).projectID) {
-			t.Fatal("two games share a fingerprint, so one game's cursor pages the other")
-		}
+		assert.Must(t, routeListingFingerprint(g.projectID) !=
+			paging.Fingerprint(g.projectID.String(), "views"), "this listing shares a fingerprint with another domain's over one game")
+		assert.Must(t, routeListingFingerprint(g.projectID) !=
+			routeListingFingerprint(g.sibling(t).projectID), "two games share a fingerprint, so one game's cursor pages the other")
 	})
 
 	// TestARouteListingWalksEveryRouteExactlyOnce.
@@ -725,9 +605,7 @@ func TestRoutes(t *testing.T) {
 		cursor := ""
 		for pages := 0; pages < 10; pages++ {
 			page, err := g.analysis.ListRoutes(context.Background(), g.projectID, cursor, 3)
-			if err != nil {
-				t.Fatalf("list routes: %v", err)
-			}
+			assert.Must(t, err == nil, "list routes: %v", err)
 			for _, route := range page.Routes {
 				seen[route.Key]++
 			}
@@ -736,13 +614,9 @@ func TestRoutes(t *testing.T) {
 				break
 			}
 		}
-		if len(seen) != len(want) {
-			t.Fatalf("the walk saw %v, want the seven routes", seen)
-		}
+		assert.Must(t, len(seen) == len(want), "the walk saw %v, want the seven routes", seen)
 		for key, count := range seen {
-			if count != 1 || !want[key] {
-				t.Errorf("%q was seen %d times", key, count)
-			}
+			assert.Should(t, count == 1 && want[key], "%q was seen %d times", key, count)
 		}
 	})
 
@@ -767,20 +641,12 @@ func TestRoutes(t *testing.T) {
 			Key: "levelling", Name: "Levelling", ExpectedVersion: version(0),
 			Steps: steps("tutorial", "hogger"),
 		})
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		got := requireEvent(t, sub)
-		if got.Kind != eventRouteUpserted {
-			t.Errorf("kind = %q, want %q", got.Kind, eventRouteUpserted)
-		}
+		assert.Should(t, got.Kind == eventRouteUpserted, "kind = %q, want %q", got.Kind, eventRouteUpserted)
 		payload, ok := got.Payload.(routeEvent)
-		if !ok {
-			t.Fatalf("payload = %#v, want a routeEvent", got.Payload)
-		}
-		if payload.Key != "levelling" || payload.Version != route.Version || payload.ID != route.ID {
-			t.Errorf("payload = %+v, want the route's identity and version", payload)
-		}
+		assert.Must(t, ok, "payload = %#v, want a routeEvent", got.Payload)
+		assert.Should(t, payload.Key == "levelling" && payload.Version == route.Version && payload.ID == route.ID, "payload = %+v, want the route's identity and version", payload)
 
 		if err := svc.RemoveRoute(context.Background(), g.projectID,
 			"levelling", version(route.Version)); err != nil {
@@ -806,12 +672,8 @@ func TestRoutes(t *testing.T) {
 			Steps: steps("hogger"),
 		})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("a respelling answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "/key" {
-			t.Fatalf("the refusal names %v, want /key", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "a respelling answered %v, want invalid_input", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "/key", "the refusal names %v, want /key", invalid.Fields)
 		if !strings.Contains(invalid.Fields[0].Message, "levelling") {
 			t.Errorf("the refusal does not name the stored spelling: %s", invalid.Fields[0].Message)
 		}
@@ -892,13 +754,9 @@ func TestNoRouteEventIsPublishedWhenTheCommitFails(t *testing.T) {
 		Key: "levelling", Name: "Levelling", ExpectedVersion: version(0),
 		Steps: steps("tutorial", "hogger"),
 	})
-	if err == nil {
-		t.Fatal("the commit must fail under the deferred constraint")
-	}
+	assert.Must(t, err != nil, "the commit must fail under the deferred constraint")
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-		t.Fatalf("err = %v, want a deferred foreign-key violation at commit", err)
-	}
+	assert.Must(t, errors.As(err, &pgErr) && pgErr.Code == "23503", "err = %v, want a deferred foreign-key violation at commit", err)
 	requireNoEvent(t, sub, "the transaction never committed")
 
 	if _, err := svc.RouteByKey(ctx, g.projectID, "levelling"); !errors.Is(err, ErrNotFound) {
@@ -913,7 +771,5 @@ func TestNoRouteEventIsPublishedWhenTheCommitFails(t *testing.T) {
 		Scan(&stepRows); err != nil {
 		t.Fatalf("count the steps: %v", err)
 	}
-	if stepRows != 0 {
-		t.Fatalf("%d step rows survived a transaction that never committed", stepRows)
-	}
+	assert.Must(t, stepRows == 0, "%d step rows survived a transaction that never committed", stepRows)
 }

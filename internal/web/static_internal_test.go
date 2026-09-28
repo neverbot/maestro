@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestPublicPathsSkipAuthentication pins the requirement this task's own
@@ -28,9 +30,7 @@ func TestPublicPathsSkipAuthentication(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200", rec.Code)
-			}
+			assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 		})
 	}
 }

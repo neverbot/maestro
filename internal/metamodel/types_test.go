@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -30,9 +31,7 @@ func newProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	var id uuid.UUID
 	err := pool.QueryRow(context.Background(),
 		`INSERT INTO projects (slug, name) VALUES ($1, $1) RETURNING id`, slug).Scan(&id)
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
+	assert.Must(t, err == nil, "create project: %v", err)
 	return id
 }
 
@@ -44,9 +43,7 @@ func newProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 func standaloneConn(t *testing.T, pool *pgxpool.Pool) *pgx.Conn {
 	t.Helper()
 	conn, err := pgx.Connect(context.Background(), pool.Config().ConnString())
-	if err != nil {
-		t.Fatalf("open a standalone connection: %v", err)
-	}
+	assert.Must(t, err == nil, "open a standalone connection: %v", err)
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	return conn
 }
@@ -87,9 +84,7 @@ func waitFor(t *testing.T, what string, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for !ready() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
+		assert.Must(t, !time.Now().After(deadline), "timed out waiting for %s", what)
 		time.Sleep(5 * time.Millisecond)
 	}
 }
@@ -101,16 +96,12 @@ func waitFor(t *testing.T, what string, ready func() bool) {
 func insertEntity(t *testing.T, pool *pgxpool.Pool, project, typeID uuid.UUID, key string, fields map[string]any) uuid.UUID {
 	t.Helper()
 	raw, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatalf("encode fields: %v", err)
-	}
+	assert.Must(t, err == nil, "encode fields: %v", err)
 	var id uuid.UUID
 	err = pool.QueryRow(context.Background(),
 		`INSERT INTO entities (project_id, entity_type_id, key, name, fields)
 		 VALUES ($1, $2, $3, $3, $4) RETURNING id`, project, typeID, key, raw).Scan(&id)
-	if err != nil {
-		t.Fatalf("insert entity %q: %v", key, err)
-	}
+	assert.Must(t, err == nil, "insert entity %q: %v", key, err)
 	return id
 }
 
@@ -121,9 +112,7 @@ func entityState(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) (invalid bool, 
 	err := pool.QueryRow(context.Background(),
 		`SELECT invalid, fields::text, updated_at::text FROM entities WHERE id = $1`, id).
 		Scan(&invalid, &fields, &updatedAt)
-	if err != nil {
-		t.Fatalf("read entity: %v", err)
-	}
+	assert.Must(t, err == nil, "read entity: %v", err)
 	return invalid, fields, updatedAt
 }
 
@@ -135,12 +124,8 @@ func ptrInt32(v int32) *int32 { return &v }
 func requireFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Helper()
 	var invalid *metamodel.ValidationError
-	if !errors.As(err, &invalid) {
-		t.Fatalf("err = %v, want a *metamodel.ValidationError", err)
-	}
-	if len(invalid.Fields) != 1 {
-		t.Fatalf("got %d problems, want 1: %v", len(invalid.Fields), invalid.Fields)
-	}
+	assert.Must(t, errors.As(err, &invalid), "err = %v, want a *metamodel.ValidationError", err)
+	assert.Must(t, len(invalid.Fields) == 1, "got %d problems, want 1: %v", len(invalid.Fields), invalid.Fields)
 	if got := invalid.Fields[0].Path; got != wantPath {
 		t.Fatalf("path = %q, want %q", got, wantPath)
 	}
@@ -163,27 +148,17 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
 		})
-		if err != nil {
-			t.Fatalf("first upsert: %v", err)
-		}
-		if first.Version != 1 {
-			t.Fatalf("Version = %d, want 1", first.Version)
-		}
+		assert.Must(t, err == nil, "first upsert: %v", err)
+		assert.Must(t, first.Version == 1, "Version = %d, want 1", first.Version)
 
 		second, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Schema:          metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
 			ExpectedVersion: ptrInt32(1),
 		})
-		if err != nil {
-			t.Fatalf("second upsert: %v", err)
-		}
-		if second.ID != first.ID {
-			t.Fatal("upserting the same key created a second row")
-		}
-		if second.Version != 2 {
-			t.Fatalf("Version = %d, want 2", second.Version)
-		}
+		assert.Must(t, err == nil, "second upsert: %v", err)
+		assert.Must(t, second.ID == first.ID, "upserting the same key created a second row")
+		assert.Must(t, second.Version == 2, "Version = %d, want 2", second.Version)
 	})
 
 	t.Run("upsert entity type stores the declared schema and the actor", func(t *testing.T) {
@@ -202,29 +177,19 @@ func TestTypesArea(t *testing.T) {
 			},
 			Actor: metamodel.Actor{UserID: &user},
 		})
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 
 		stored, err := metamodel.ParseSchema(row.FieldSchema)
-		if err != nil {
-			t.Fatalf("ParseSchema: %v", err)
-		}
-		if len(stored) != 2 {
-			t.Fatalf("stored %d fields, want 2", len(stored))
-		}
+		assert.Must(t, err == nil, "ParseSchema: %v", err)
+		assert.Must(t, len(stored) == 2, "stored %d fields, want 2", len(stored))
 		// The declared default has to survive storage: it is declared on the
 		// wire by the presence of the "default" key alone, so a round trip that
 		// lost it would drop the fact silently.
 		if !stored[1].HasDefault || stored[1].Default != false {
 			t.Fatalf("repeatable = %+v, want a declared default of false", stored[1])
 		}
-		if row.Description != "Something to do" || row.Color != "#c41e3a" || row.Icon != "scroll" {
-			t.Fatalf("descriptive columns were not stored: %+v", row)
-		}
-		if row.UpdatedByUserID == nil || *row.UpdatedByUserID != user {
-			t.Fatalf("UpdatedByUserID = %v, want %v", row.UpdatedByUserID, user)
-		}
+		assert.Must(t, row.Description == "Something to do" && row.Color == "#c41e3a" && row.Icon == "scroll", "descriptive columns were not stored: %+v", row)
+		assert.Must(t, row.UpdatedByUserID != nil && *row.UpdatedByUserID == user, "UpdatedByUserID = %v, want %v", row.UpdatedByUserID, user)
 	})
 
 	t.Run("upsert entity type rejects stale version", func(t *testing.T) {
@@ -243,22 +208,14 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest renamed", LabelPlural: "Quests",
 			ExpectedVersion: ptrInt32(7),
 		})
-		if !errors.Is(err, metamodel.ErrVersionConflict) {
-			t.Fatalf("err = %v, want ErrVersionConflict", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrVersionConflict), "err = %v, want ErrVersionConflict", err)
 		var conflict *metamodel.VersionConflictError
-		if !errors.As(err, &conflict) || conflict.Current != 1 {
-			t.Fatalf("the conflict must carry the current version, got %v", err)
-		}
+		assert.Must(t, errors.As(err, &conflict) && conflict.Current == 1, "the conflict must carry the current version, got %v", err)
 
 		// The refused write must not have landed.
 		stored, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("EntityTypeByKey: %v", err)
-		}
-		if stored.Label != "Quest" || stored.Version != 1 {
-			t.Fatalf("the refused upsert changed the row: %+v", stored)
-		}
+		assert.Must(t, err == nil, "EntityTypeByKey: %v", err)
+		assert.Must(t, stored.Label == "Quest" && stored.Version == 1, "the refused upsert changed the row: %+v", stored)
 	})
 
 	t.Run("upsert entity type rejects a missing expected version on an existing type", func(t *testing.T) {
@@ -279,9 +236,7 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest renamed", LabelPlural: "Quests",
 		})
 		var conflict *metamodel.VersionConflictError
-		if !errors.As(err, &conflict) || conflict.Current != 1 {
-			t.Fatalf("err = %v, want a *VersionConflictError carrying version 1", err)
-		}
+		assert.Must(t, errors.As(err, &conflict) && conflict.Current == 1, "err = %v, want a *VersionConflictError carrying version 1", err)
 	})
 
 	t.Run("upsert entity type rejects bad schema", func(t *testing.T) {
@@ -297,18 +252,10 @@ func TestTypesArea(t *testing.T) {
 		// invalid_schema, not schema_violation: the declaration is what cannot
 		// stand here, and the two sentinels exist precisely so a caller need
 		// not tell them apart by reading paths.
-		if !errors.Is(err, metamodel.ErrInvalidSchema) {
-			t.Fatalf("err = %v, want ErrInvalidSchema", err)
-		}
-		if errors.Is(err, metamodel.ErrSchemaViolation) {
-			t.Fatalf("err = %v must not also satisfy ErrSchemaViolation", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidSchema), "err = %v, want ErrInvalidSchema", err)
+		assert.Must(t, !errors.Is(err, metamodel.ErrSchemaViolation), "err = %v must not also satisfy ErrSchemaViolation", err)
 		var schemaErr *metamodel.SchemaError
-		if !errors.As(err, &schemaErr) || len(schemaErr.Fields) != 1 ||
-			schemaErr.Fields[0].Path != "field_schema[0]" ||
-			schemaErr.Fields[0].Message != "an enum field needs options" {
-			t.Fatalf("err = %v, want field_schema[0]: an enum field needs options", err)
-		}
+		assert.Must(t, errors.As(err, &schemaErr) && len(schemaErr.Fields) == 1 && schemaErr.Fields[0].Path == "field_schema[0]" && schemaErr.Fields[0].Message == "an enum field needs options", "err = %v, want field_schema[0]: an enum field needs options", err)
 
 		if _, err := svc.EntityTypeByKey(ctx, project, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
 			t.Fatalf("a rejected declaration must store nothing, got %v", err)
@@ -357,12 +304,8 @@ func TestTypesArea(t *testing.T) {
 				row, err := svc.UpsertEntityType(context.Background(), project, metamodel.EntityTypeInput{
 					Key: key, Label: key, LabelPlural: key + "s",
 				})
-				if err != nil {
-					t.Fatalf("UpsertEntityType(%q): %v", key, err)
-				}
-				if row.Key != key {
-					t.Fatalf("stored key = %q, want %q", row.Key, key)
-				}
+				assert.Must(t, err == nil, "UpsertEntityType(%q): %v", key, err)
+				assert.Must(t, row.Key == key, "stored key = %q, want %q", row.Key, key)
 			})
 		}
 	})
@@ -410,12 +353,8 @@ func TestTypesArea(t *testing.T) {
 				`use "Quest" to update it, or pick a key that differs by more than capitalisation`)
 
 		stored, err := svc.EntityTypeByKey(ctx, project, "QUEST")
-		if err != nil {
-			t.Fatalf("EntityTypeByKey: %v", err)
-		}
-		if stored.Key != "Quest" || stored.Label != "Quest" || stored.Version != 1 {
-			t.Fatalf("the refused upsert changed the row: %+v", stored)
-		}
+		assert.Must(t, err == nil, "EntityTypeByKey: %v", err)
+		assert.Must(t, stored.Key == "Quest" && stored.Label == "Quest" && stored.Version == 1, "the refused upsert changed the row: %+v", stored)
 	})
 
 	// TestViewsArea's "a respelling is named even when the version is also
@@ -451,9 +390,7 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Something else", LabelPlural: "Something elses",
 			ExpectedVersion: ptrInt32(9),
 		})
-		if errors.Is(err, metamodel.ErrVersionConflict) {
-			t.Fatalf("err = %v, want the respelling refusal rather than the version conflict", err)
-		}
+		assert.Must(t, !errors.Is(err, metamodel.ErrVersionConflict), "err = %v, want the respelling refusal rather than the version conflict", err)
 		requireFieldError(t, err, "key",
 			`"quest" already exists here spelled "Quest", and keys are matched without regard to case: `+
 				`use "Quest" to update it, or pick a key that differs by more than capitalisation`)
@@ -474,9 +411,7 @@ func TestTypesArea(t *testing.T) {
 		// The rival is an open transaction rather than a second goroutine, so
 		// the interleaving is the test's to choose and not the scheduler's.
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`INSERT INTO entity_types (project_id, key, label, label_plural)
@@ -506,20 +441,14 @@ func TestTypesArea(t *testing.T) {
 		var conflict *metamodel.VersionConflictError
 		select {
 		case err := <-result:
-			if !errors.As(err, &conflict) || conflict.Current != 1 {
-				t.Fatalf("err = %v, want a *VersionConflictError carrying version 1", err)
-			}
+			assert.Must(t, errors.As(err, &conflict) && conflict.Current == 1, "err = %v, want a *VersionConflictError carrying version 1", err)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival committed")
 		}
 
 		row, err := svc.EntityTypeByKey(ctx, project, "quest")
-		if err != nil {
-			t.Fatalf("EntityTypeByKey: %v", err)
-		}
-		if row.Label != "Quest" || row.Version != 1 {
-			t.Fatalf("the losing writer overwrote the row: %+v", row)
-		}
+		assert.Must(t, err == nil, "EntityTypeByKey: %v", err)
+		assert.Must(t, row.Label == "Quest" && row.Version == 1, "the losing writer overwrote the row: %+v", row)
 	})
 
 	t.Run("schema change flags rows invalid without touching them", func(t *testing.T) {
@@ -532,9 +461,7 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
 		})
-		if err != nil {
-			t.Fatalf("declare type: %v", err)
-		}
+		assert.Must(t, err == nil, "declare type: %v", err)
 
 		complete := insertEntity(t, pool, project, typ.ID, "hogger", map[string]any{"min_level": 10, "summary": "x"})
 		sparse := insertEntity(t, pool, project, typ.ID, "kobold", map[string]any{"min_level": 3})
@@ -554,17 +481,11 @@ func TestTypesArea(t *testing.T) {
 			t.Fatal("an entity carrying an undeclared field must be flagged invalid")
 		}
 		invalid, fieldsAfter, updatedAfter := entityState(t, pool, sparse)
-		if invalid {
-			t.Fatal("an entity that still fits its schema must not be flagged")
-		}
-		if fieldsAfter != sparseFieldsBefore {
-			t.Fatalf("the sweep rewrote stored values: %s -> %s", sparseFieldsBefore, fieldsAfter)
-		}
+		assert.Must(t, !invalid, "an entity that still fits its schema must not be flagged")
+		assert.Must(t, fieldsAfter == sparseFieldsBefore, "the sweep rewrote stored values: %s -> %s", sparseFieldsBefore, fieldsAfter)
 		// A row whose verdict has not changed must not be rewritten at all: a
 		// validation pass is not an edit, and a moved updated_at says it was.
-		if updatedAfter != sparseUpdatedBefore {
-			t.Fatalf("the sweep touched updated_at: %s -> %s", sparseUpdatedBefore, updatedAfter)
-		}
+		assert.Must(t, updatedAfter == sparseUpdatedBefore, "the sweep touched updated_at: %s -> %s", sparseUpdatedBefore, updatedAfter)
 	})
 
 	t.Run("schema change does not back fill declared defaults", func(t *testing.T) {
@@ -577,9 +498,7 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
 		})
-		if err != nil {
-			t.Fatalf("declare type: %v", err)
-		}
+		assert.Must(t, err == nil, "declare type: %v", err)
 		entity := insertEntity(t, pool, project, typ.ID, "hogger", map[string]any{"min_level": 10})
 
 		// The new field declares a default. The sweep must judge the row, not
@@ -597,12 +516,8 @@ func TestTypesArea(t *testing.T) {
 		}
 
 		invalid, fields, _ := entityState(t, pool, entity)
-		if invalid {
-			t.Fatal("a row missing a field that has a default still fits the schema")
-		}
-		if strings.Contains(fields, "repeatable") {
-			t.Fatalf("the sweep back-filled the default: %s", fields)
-		}
+		assert.Must(t, !invalid, "a row missing a field that has a default still fits the schema")
+		assert.Must(t, !strings.Contains(fields, "repeatable"), "the sweep back-filled the default: %s", fields)
 	})
 
 	t.Run("schema change clears the flag when the row fits again", func(t *testing.T) {
@@ -615,9 +530,7 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
 		})
-		if err != nil {
-			t.Fatalf("declare type: %v", err)
-		}
+		assert.Must(t, err == nil, "declare type: %v", err)
 		entity := insertEntity(t, pool, project, typ.ID, "hogger", map[string]any{
 			"min_level": 10, "summary": "Kill Hogger.",
 		})
@@ -659,9 +572,7 @@ func TestTypesArea(t *testing.T) {
 		typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("upsert type: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert type: %v", err)
 		insertEntity(t, pool, project, typ.ID, "hogger", map[string]any{})
 
 		if err := svc.RemoveEntityType(ctx, project, typ.ID, false); !errors.Is(err, metamodel.ErrInUse) {
@@ -683,9 +594,7 @@ func TestTypesArea(t *testing.T) {
 			`SELECT count(*) FROM entities WHERE project_id = $1`, project).Scan(&remaining); err != nil {
 			t.Fatalf("count entities: %v", err)
 		}
-		if remaining != 0 {
-			t.Fatalf("%d entities survived the cascade", remaining)
-		}
+		assert.Must(t, remaining == 0, "%d entities survived the cascade", remaining)
 	})
 
 	t.Run("remove entity type reports an unknown ID", func(t *testing.T) {
@@ -707,9 +616,7 @@ func TestTypesArea(t *testing.T) {
 		typ, err := svc.UpsertEntityType(ctx, mine, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("upsert: %v", err)
-		}
+		assert.Must(t, err == nil, "upsert: %v", err)
 		if _, err := svc.EntityTypeByKey(ctx, theirs, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
 			t.Fatalf("a type must not be visible from another project, got %v", err)
 		}
@@ -726,12 +633,8 @@ func TestTypesArea(t *testing.T) {
 		}
 
 		types, err := svc.ListEntityTypes(ctx, theirs)
-		if err != nil {
-			t.Fatalf("ListEntityTypes: %v", err)
-		}
-		if len(types) != 0 {
-			t.Fatalf("the other project sees %d types, want 0", len(types))
-		}
+		assert.Must(t, err == nil, "ListEntityTypes: %v", err)
+		assert.Must(t, len(types) == 0, "the other project sees %d types, want 0", len(types))
 
 		// The same key in two games is two types, not a collision.
 		if _, err := svc.UpsertEntityType(ctx, theirs, metamodel.EntityTypeInput{
@@ -761,17 +664,13 @@ func TestTypesArea(t *testing.T) {
 		}
 
 		types, err := svc.ListEntityTypes(ctx, project)
-		if err != nil {
-			t.Fatalf("ListEntityTypes: %v", err)
-		}
+		assert.Must(t, err == nil, "ListEntityTypes: %v", err)
 		var got []string
 		for _, typ := range types {
 			got = append(got, typ.Label)
 		}
 		want := []string{"Class", "Quest", "Zone"}
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("labels = %v, want %v", got, want)
-		}
+		assert.Must(t, strings.Join(got, ",") == strings.Join(want, ","), "labels = %v, want %v", got, want)
 	})
 
 	// TestTypesArea's "a race that would land under another spelling is
@@ -798,9 +697,7 @@ func TestTypesArea(t *testing.T) {
 		project := newProject(t, pool)
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`INSERT INTO entity_types (project_id, key, label, label_plural)
@@ -853,12 +750,8 @@ func TestTypesArea(t *testing.T) {
 		// bypass this test exists for landed the label under the rival's
 		// spelling and bumped the version while returning nil.
 		row, err := svc.EntityTypeByKey(ctx, project, "hogger")
-		if err != nil {
-			t.Fatalf("EntityTypeByKey: %v", err)
-		}
-		if row.Key != "Hogger" || row.Label != "Hogger" || row.Version != 1 {
-			t.Fatalf("the losing writer changed the row: %+v", row)
-		}
+		assert.Must(t, err == nil, "EntityTypeByKey: %v", err)
+		assert.Must(t, row.Key == "Hogger" && row.Label == "Hogger" && row.Version == 1, "the losing writer changed the row: %+v", row)
 	})
 
 	// TestTypesArea's "a creation that loses its key to another spelling is
@@ -880,9 +773,7 @@ func TestTypesArea(t *testing.T) {
 		project := newProject(t, pool)
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`INSERT INTO entity_types (project_id, key, label, label_plural)
@@ -915,9 +806,7 @@ func TestTypesArea(t *testing.T) {
 			requireFieldError(t, err, "key",
 				`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
 					`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
-			if errors.Is(err, metamodel.ErrVersionConflict) {
-				t.Fatalf("err = %v must not read as a version conflict", err)
-			}
+			assert.Must(t, !errors.Is(err, metamodel.ErrVersionConflict), "err = %v must not read as a version conflict", err)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival committed")
 		}
@@ -945,14 +834,10 @@ func TestTypesArea(t *testing.T) {
 		typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 		})
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		assert.Must(t, err == nil, "create: %v", err)
 
 		rival, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
+		assert.Must(t, err == nil, "begin: %v", err)
 		defer func() { _ = rival.Rollback(ctx) }()
 		if _, err := rival.Exec(ctx,
 			`UPDATE entity_types SET version = version + 1, label = 'Theirs' WHERE id = $1`,
@@ -982,14 +867,10 @@ func TestTypesArea(t *testing.T) {
 		select {
 		case err := <-result:
 			var conflict *metamodel.VersionConflictError
-			if !errors.As(err, &conflict) {
-				t.Fatalf("err = %v, want a *VersionConflictError", err)
-			}
-			if conflict.Current != 2 {
-				t.Fatalf("Current = %d, want 2: the caller must be told the version its own "+
-					"write would have met, not the one visible before the rival committed",
-					conflict.Current)
-			}
+			assert.Must(t, errors.As(err, &conflict), "err = %v, want a *VersionConflictError", err)
+			assert.Must(t, conflict.Current == 2, "Current = %d, want 2: the caller must be told the version its own "+
+				"write would have met, not the one visible before the rival committed",
+				conflict.Current)
 		case <-time.After(10 * time.Second):
 			t.Fatal("the upsert never returned after the rival committed")
 		}
@@ -1127,16 +1008,12 @@ func TestTypesArea(t *testing.T) {
 		_, err := svc.UpsertEntityType(context.Background(), newProject(t, pool),
 			metamodel.EntityTypeInput{Key: "main quest", Color: "crimson"})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) {
-			t.Fatalf("err = %v, want a *metamodel.ValidationError", err)
-		}
+		assert.Must(t, errors.As(err, &invalid), "err = %v, want a *metamodel.ValidationError", err)
 		var paths []string
 		for _, f := range invalid.Fields {
 			paths = append(paths, f.Path)
 		}
-		if strings.Join(paths, ",") != "key,label,color" {
-			t.Fatalf("paths = %v, want key,label,color reported together", paths)
-		}
+		assert.Must(t, strings.Join(paths, ",") == "key,label,color", "paths = %v, want key,label,color reported together", paths)
 	})
 
 	// TestTypesArea's "an actor from another game is named" case covers the
@@ -1162,9 +1039,7 @@ func TestTypesArea(t *testing.T) {
 			Key: "quest", Label: "Quest", LabelPlural: "Quests",
 			Actor: metamodel.Actor{TokenID: &foreign},
 		})
-		if !errors.Is(err, metamodel.ErrActorNotInGame) {
-			t.Fatalf("err = %v, want ErrActorNotInGame", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrActorNotInGame), "err = %v, want ErrActorNotInGame", err)
 		if _, err := svc.EntityTypeByKey(ctx, mine, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
 			t.Fatalf("the refused write must store nothing, got %v", err)
 		}
@@ -1210,15 +1085,9 @@ func TestTypesArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.UpsertEntityType(ctx, project, tc.in)
-				if err == nil || err.Error() != tc.want {
-					t.Fatalf("err = %v, want %s", err, tc.want)
-				}
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("errors.Is(%v, ErrInvalidInput) = false", err)
-				}
-				if errors.Is(err, metamodel.ErrSchemaViolation) {
-					t.Fatalf("err = %v must not also read as a schema violation", err)
-				}
+				assert.Must(t, err != nil && err.Error() == tc.want, "err = %v, want %s", err, tc.want)
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "errors.Is(%v, ErrInvalidInput) = false", err)
+				assert.Must(t, !errors.Is(err, metamodel.ErrSchemaViolation), "err = %v must not also read as a schema violation", err)
 			})
 		}
 
@@ -1232,9 +1101,7 @@ func TestTypesArea(t *testing.T) {
 		_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "hogger", Label: "Hogger", ExpectedVersion: ptrInt32(1),
 		})
-		if !errors.Is(err, metamodel.ErrInvalidInput) || errors.Is(err, metamodel.ErrSchemaViolation) {
-			t.Fatalf("a respelled key must read as invalid_input, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput) && !errors.Is(err, metamodel.ErrSchemaViolation), "a respelled key must read as invalid_input, got %v", err)
 
 		// A value that does not fit a declared schema keeps schema_violation:
 		// splitting the code must not have moved the case it was named for.
@@ -1272,18 +1139,14 @@ func TestTypesArea(t *testing.T) {
 			"ErrInvalidInput":    metamodel.ErrInvalidInput,
 			"ErrInvalidSchema":   metamodel.ErrInvalidSchema,
 		} {
-			if errors.Is(typo, sentinel) {
-				t.Fatalf("errors.Is(%v, %s) = true, want no sentinel to match", typo, name)
-			}
+			assert.Must(t, !errors.Is(typo, sentinel), "errors.Is(%v, %s) = true, want no sentinel to match", typo, name)
 		}
 
 		// The zero value still means schema_violation, and still matches it:
 		// that is the default the value validator relies on, not a fallback
 		// for anything unrecognised.
 		zero := &metamodel.ValidationError{Fields: []metamodel.FieldError{{Path: "fields.x", Message: "bad"}}}
-		if !errors.Is(zero, metamodel.ErrSchemaViolation) {
-			t.Fatal("an unset Code must still read as a schema violation")
-		}
+		assert.Must(t, errors.Is(zero, metamodel.ErrSchemaViolation), "an unset Code must still read as a schema violation")
 	})
 
 	// TestTypesArea's "a relation type created during a type removal cannot
@@ -1320,9 +1183,7 @@ func TestTypesArea(t *testing.T) {
 		zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 			Key: "zone", Label: "Zone", LabelPlural: "Zones",
 		})
-		if err != nil {
-			t.Fatalf("seed zone type: %v", err)
-		}
+		assert.Must(t, err == nil, "seed zone type: %v", err)
 
 		// Two connections of this test's own, outside the service pool: one
 		// to hold the blocking row, one to watch the other two from outside
@@ -1331,9 +1192,7 @@ func TestTypesArea(t *testing.T) {
 		watcher := standaloneConn(t, pool)
 
 		tx, err := blocker.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin blocking transaction: %v", err)
-		}
+		assert.Must(t, err == nil, "begin blocking transaction: %v", err)
 		defer func() { _ = tx.Rollback(ctx) }()
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO relation_types (project_id, key, label, description,
@@ -1387,9 +1246,7 @@ func TestTypesArea(t *testing.T) {
 			project).Scan(&dangling); err != nil {
 			t.Fatalf("look for dangling endpoint ids: %v", err)
 		}
-		if len(dangling) > 0 {
-			t.Fatalf("endpoint lists still name %d removed entity type(s): %v", len(dangling), dangling)
-		}
+		assert.Must(t, len(dangling) <= 0, "endpoint lists still name %d removed entity type(s): %v", len(dangling), dangling)
 	})
 }
 
@@ -1403,9 +1260,7 @@ func newUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 		`INSERT INTO users (email, display_name, password_hash)
 		 VALUES ($1, 'Designer', 'x') RETURNING id`,
 		uuid.NewString()[:8]+"@example.test").Scan(&id)
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
+	assert.Must(t, err == nil, "create user: %v", err)
 	return id
 }
 
@@ -1419,8 +1274,6 @@ func newToken(t *testing.T, pool *pgxpool.Pool, project uuid.UUID) uuid.UUID {
 		`INSERT INTO api_tokens (project_id, user_id, label, token_hint, token_hash)
 		 VALUES ($1, $2, 'seeder', 'abcd', $3) RETURNING id`,
 		project, user, []byte(uuid.NewString())).Scan(&id)
-	if err != nil {
-		t.Fatalf("create token: %v", err)
-	}
+	assert.Must(t, err == nil, "create token: %v", err)
 	return id
 }

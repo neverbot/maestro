@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestEveryTestDatabaseNameCarriesItsStamp is a source guard, and it is
@@ -34,9 +36,7 @@ func TestEveryTestDatabaseNameCarriesItsStamp(t *testing.T) {
 	const stamped = `"maestro_test_%d_`
 
 	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the repository root: %v", err)
-	}
+	assert.Must(t, err == nil, "resolve the repository root: %v", err)
 	// **Scanned, and counted.** The first version of this walk skipped
 	// every directory whose name began with a dot, computed the root as
 	// "../.." — whose base is ".." — and therefore skipped the whole
@@ -87,10 +87,6 @@ func TestEveryTestDatabaseNameCarriesItsStamp(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk the repository: %v", err)
-	}
-	if scanned < 100 {
-		t.Fatalf("this guard read %d Go files; the repository has many more, so it asserted nothing", scanned)
-	}
+	assert.Must(t, err == nil, "walk the repository: %v", err)
+	assert.Must(t, scanned >= 100, "this guard read %d Go files; the repository has many more, so it asserted nothing", scanned)
 }

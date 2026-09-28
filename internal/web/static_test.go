@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 func TestLoginPageIsServed(t *testing.T) {
@@ -20,15 +22,11 @@ func TestLoginPageIsServed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("Content-Type = %q, want text/html", ct)
 	}
-	if !strings.Contains(rec.Body.String(), "form") {
-		t.Fatal("the login page has no form")
-	}
+	assert.Must(t, strings.Contains(rec.Body.String(), "form"), "the login page has no form")
 }
 
 func TestStylesheetIsServed(t *testing.T) {
@@ -38,9 +36,7 @@ func TestStylesheetIsServed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
 		t.Fatalf("Content-Type = %q, want text/css", ct)
 	}
@@ -53,9 +49,7 @@ func TestAppScriptIsServed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
 		t.Fatalf("Content-Type = %q, want text/javascript", ct)
 	}
@@ -74,15 +68,11 @@ func TestGamePageIsServedForAnySlug(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("Content-Type = %q, want text/html", ct)
 	}
-	if !strings.Contains(rec.Body.String(), "game-name") {
-		t.Fatal("the game page has no #game-name element")
-	}
+	assert.Must(t, strings.Contains(rec.Body.String(), "game-name"), "the game page has no #game-name element")
 }
 
 // TestDocumentPageIsServedForAnySlug pins that GET /g/{slug}/doc serves
@@ -101,15 +91,11 @@ func TestDocumentPageIsServedForAnySlug(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("Content-Type = %q, want text/html", ct)
 	}
-	if !strings.Contains(rec.Body.String(), "doc-title") {
-		t.Fatal("the document page has no #doc-title element")
-	}
+	assert.Must(t, strings.Contains(rec.Body.String(), "doc-title"), "the document page has no #doc-title element")
 }
 
 // TestDocumentScriptIsServed pins the second ES module this product
@@ -123,9 +109,7 @@ func TestDocumentScriptIsServed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200", rec.Code)
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
 		t.Fatalf("Content-Type = %q, want text/javascript", ct)
 	}
@@ -138,9 +122,7 @@ func TestUnknownStaticAssetIsNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
 }
 
 // TestStaticDoesNotServeHTMLShellsAgain pins a correction a quality review
@@ -158,9 +140,7 @@ func TestStaticDoesNotServeHTMLShellsAgain(t *testing.T) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET /static/%s: status = %d, want 404", name, rec.Code)
-		}
+		assert.Should(t, rec.Code == http.StatusNotFound, "GET /static/%s: status = %d, want 404", name, rec.Code)
 	}
 }
 
@@ -194,13 +174,9 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 	// literal that would have to be re-typed on every vendored change.
 	policy := rec.Header().Get("Content-Security-Policy")
 	for _, directive := range []string{"default-src 'self'", "frame-ancestors 'none'", "script-src 'self' "} {
-		if !strings.Contains(policy, directive) {
-			t.Errorf("Content-Security-Policy = %q, which does not carry %q", policy, directive)
-		}
+		assert.Should(t, strings.Contains(policy, directive), "Content-Security-Policy = %q, which does not carry %q", policy, directive)
 	}
-	if strings.Contains(policy, "unsafe-inline") {
-		t.Errorf("Content-Security-Policy = %q: 'unsafe-inline' re-admits every injected script this policy exists to refuse", policy)
-	}
+	assert.Should(t, !strings.Contains(policy, "unsafe-inline"), "Content-Security-Policy = %q: 'unsafe-inline' re-admits every injected script this policy exists to refuse", policy)
 }
 
 // TestThePolicyAdmitsEveryShellsImportMap is the check that would have
@@ -226,33 +202,23 @@ func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
 	policy := rec.Header().Get("Content-Security-Policy")
 
 	shells, err := filepath.Glob(filepath.Join("static", "*.html"))
-	if err != nil {
-		t.Fatalf("glob shells: %v", err)
-	}
-	if len(shells) == 0 {
-		t.Fatal("found no shell: this test would pass on an empty tree")
-	}
+	assert.Must(t, err == nil, "glob shells: %v", err)
+	assert.Must(t, len(shells) != 0, "found no shell: this test would pass on an empty tree")
 	found := 0
 	inline := regexp.MustCompile(`(?s)<script type="importmap">(.*?)</script>`)
 	for _, shell := range shells {
 		body, err := os.ReadFile(shell)
-		if err != nil {
-			t.Fatalf("read %s: %v", shell, err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", shell, err)
 		for _, match := range inline.FindAllSubmatch(body, -1) {
 			found++
 			sum := sha256.Sum256(match[1])
 			source := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
-			if !strings.Contains(policy, source) {
-				t.Errorf("%s ships an import map the policy does not admit (%s); a browser silently "+
-					"ignores it and every bare specifier on that page fails to resolve",
-					filepath.Base(shell), source)
-			}
+			assert.Should(t, strings.Contains(policy, source), "%s ships an import map the policy does not admit (%s); a browser silently "+
+				"ignores it and every bare specifier on that page fails to resolve",
+				filepath.Base(shell), source)
 		}
 	}
-	if found == 0 {
-		t.Fatal("no shell declares an import map: this test would pass whatever the policy said")
-	}
+	assert.Must(t, found != 0, "no shell declares an import map: this test would pass whatever the policy said")
 	t.Logf("the policy admits the import map of %d shell(s)", found)
 }
 
@@ -335,12 +301,8 @@ func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if scanned < 10 {
-		t.Fatalf("scanned only %d asset(s): this test would pass on a tree it never read", scanned)
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Must(t, scanned >= 10, "scanned only %d asset(s): this test would pass on a tree it never read", scanned)
 	t.Logf("%d shipped asset(s) carry no inline style", scanned)
 }
 
@@ -364,9 +326,7 @@ func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
 func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
-	if err != nil {
-		t.Fatalf("read view.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read view.js: %v", err)
 	code := withoutComments(string(body))
 
 	// `(?:^|[^\w.])(?:function\s+)?` lets the declaration be recognised
@@ -383,16 +343,12 @@ func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 		sites++
 		asset := match[3]
 		assigned := regexp.MustCompile(regexp.QuoteMeta(asset) + `\s*=\s*(await\s+)?backgroundAssetFor\(`)
-		if !assigned.MatchString(code) {
-			t.Errorf("backgroundOf is given %q as the asset and nothing in view.js assigns %q from "+
-				"backgroundAssetFor: an unresolved asset makes backgroundOf answer an empty href, which "+
-				"is how this page spells \"the image is gone\", so a placed background draws nothing and "+
-				"bands nothing", asset, asset)
-		}
+		assert.Should(t, assigned.MatchString(code), "backgroundOf is given %q as the asset and nothing in view.js assigns %q from "+
+			"backgroundAssetFor: an unresolved asset makes backgroundOf answer an empty href, which "+
+			"is how this page spells \"the image is gone\", so a placed background draws nothing and "+
+			"bands nothing", asset, asset)
 	}
-	if sites == 0 {
-		t.Fatal("view.js calls backgroundOf nowhere: this guard would pass over a page that draws no ground at all")
-	}
+	assert.Must(t, sites != 0, "view.js calls backgroundOf nowhere: this guard would pass over a page that draws no ground at all")
 	t.Logf("every ground backgroundOf is given (%d call site(s)) is resolved first", sites)
 }
 
@@ -414,9 +370,7 @@ func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
-	if err != nil {
-		t.Fatalf("read view.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read view.js: %v", err)
 	code := withoutComments(string(body))
 
 	given := regexp.MustCompile(`(?m)^\s*axis:\s*([^,\n]+),`)
@@ -428,11 +382,9 @@ func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
 	for _, match := range matches {
 		axis := strings.TrimSpace(match[1])
 		assigned := regexp.MustCompile(regexp.QuoteMeta(axis) + `\s*=\s*(await\s+)?axisDeclarationFor\(`)
-		if !assigned.MatchString(code) {
-			t.Errorf("a renderer is handed %q as its axis and nothing in view.js assigns %q from "+
-				"axisDeclarationFor: without the game's own declaration a timeline has only a number "+
-				"axis, and every enum value is off it", axis, axis)
-		}
+		assert.Should(t, assigned.MatchString(code), "a renderer is handed %q as its axis and nothing in view.js assigns %q from "+
+			"axisDeclarationFor: without the game's own declaration a timeline has only a number "+
+			"axis, and every enum value is off it", axis, axis)
 	}
 	t.Logf("every axis a renderer is handed (%d) is resolved from the type that declares it", len(matches))
 }
@@ -450,9 +402,7 @@ func TestConfigEndpointIsPublicAndMinimal(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
@@ -460,7 +410,5 @@ func TestConfigEndpointIsPublicAndMinimal(t *testing.T) {
 	if _, ok := body["registration_mode"]; !ok {
 		t.Fatal(`body has no "registration_mode" field`)
 	}
-	if len(body) != 1 {
-		t.Fatalf("body has %d fields, want exactly 1: %v", len(body), body)
-	}
+	assert.Must(t, len(body) == 1, "body has %d fields, want exactly 1: %v", len(body), body)
 }

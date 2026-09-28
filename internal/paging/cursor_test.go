@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/paging"
 )
 
@@ -24,19 +25,13 @@ func refuse(message string) error { return fmt.Errorf("%w: %s", errRefused, mess
 func TestARoundTrippedCursorComesBackUnchanged(t *testing.T) {
 	want := paging.Cursor{Sort: "Duskwood", ID: uuid.New(), Fingerprint: "abc"}
 	got, err := paging.Decode(paging.Encode(want), "abc", refuse)
-	if err != nil {
-		t.Fatalf("Decode: %v", err)
-	}
-	if got != want {
-		t.Fatalf("Decode(Encode(c)) = %+v, want %+v", got, want)
-	}
+	assert.Must(t, err == nil, "Decode: %v", err)
+	assert.Must(t, got == want, "Decode(Encode(c)) = %+v, want %+v", got, want)
 }
 
 func TestAnEmptyCursorIsTheStartOfTheListing(t *testing.T) {
 	got, err := paging.Decode("", "abc", refuse)
-	if err != nil || got.ID != uuid.Nil {
-		t.Fatalf("Decode(\"\") = (%+v, %v), want the zero position and no error", got, err)
-	}
+	assert.Must(t, err == nil && got.ID == uuid.Nil, "Decode(\"\") = (%+v, %v), want the zero position and no error", got, err)
 }
 
 func TestAnUnreadableCursorIsMalformedBeforeItIsJudgedAgainstAFingerprint(t *testing.T) {
@@ -44,12 +39,8 @@ func TestAnUnreadableCursorIsMalformedBeforeItIsJudgedAgainstAFingerprint(t *tes
 	// truncated cursor sends a caller to inspect its filter, which is
 	// not where the problem is.
 	_, err := paging.Decode("!!!not base64!!!", "abc", refuse)
-	if !errors.Is(err, errRefused) {
-		t.Fatalf("err = %v, want the refusal the caller's own function built", err)
-	}
-	if !strings.Contains(err.Error(), "is malformed") {
-		t.Fatalf("err = %v, want it to say the cursor is malformed", err)
-	}
+	assert.Must(t, errors.Is(err, errRefused), "err = %v, want the refusal the caller's own function built", err)
+	assert.Must(t, strings.Contains(err.Error(), "is malformed"), "err = %v, want it to say the cursor is malformed", err)
 }
 
 // TestEveryUnreadableCursorIsRefusedTheSameWay covers the three shapes
@@ -67,12 +58,8 @@ func TestEveryUnreadableCursorIsRefusedTheSameWay(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := paging.Decode(tc.in, "abc", refuse)
-			if err == nil || !strings.Contains(err.Error(), "is malformed") {
-				t.Fatalf("err = %v, want it reported as malformed", err)
-			}
-			if strings.Contains(err.Error(), "different listing") {
-				t.Fatalf("err = %v, want it not judged against the fingerprint", err)
-			}
+			assert.Must(t, err != nil && strings.Contains(err.Error(), "is malformed"), "err = %v, want it reported as malformed", err)
+			assert.Must(t, !strings.Contains(err.Error(), "different listing"), "err = %v, want it not judged against the fingerprint", err)
 		})
 	}
 }
@@ -80,12 +67,8 @@ func TestEveryUnreadableCursorIsRefusedTheSameWay(t *testing.T) {
 func TestACursorFromAnotherListingIsRefused(t *testing.T) {
 	c := paging.Cursor{Sort: "a", ID: uuid.New(), Fingerprint: paging.Fingerprint("game-a", "documents")}
 	_, err := paging.Decode(paging.Encode(c), paging.Fingerprint("game-b", "documents"), refuse)
-	if err == nil || !strings.Contains(err.Error(), "different listing") {
-		t.Fatalf("err = %v, want a refusal naming the listing", err)
-	}
-	if !errors.Is(err, errRefused) {
-		t.Fatalf("err = %v, want the refusal the caller's own function built", err)
-	}
+	assert.Must(t, err != nil && strings.Contains(err.Error(), "different listing"), "err = %v, want a refusal naming the listing", err)
+	assert.Must(t, errors.Is(err, errRefused), "err = %v, want the refusal the caller's own function built", err)
 }
 
 // TestMalformedSaysTheSameThingDecodeDoes pins the exported helper the
@@ -99,24 +82,16 @@ func TestMalformedSaysTheSameThingDecodeDoes(t *testing.T) {
 	if _, err = paging.Decode("!!!not base64!!!", "abc", refuse); err != nil {
 		viaDecode = err.Error()
 	}
-	if direct.Error() != viaDecode {
-		t.Fatalf("Malformed says %q, Decode says %q", direct.Error(), viaDecode)
-	}
+	assert.Must(t, direct.Error() == viaDecode, "Malformed says %q, Decode says %q", direct.Error(), viaDecode)
 }
 
 func TestPartsThatDivideDifferentlyDoNotShareAFingerprint(t *testing.T) {
 	// Without the length prefix, ("ab", "c") and ("a", "bc") spell one
 	// string and two different listings share one fingerprint.
-	if paging.Fingerprint("ab", "c") == paging.Fingerprint("a", "bc") {
-		t.Fatal("two filters that divide differently must not share a fingerprint")
-	}
-	if paging.Fingerprint("a", "") == paging.Fingerprint("", "a") {
-		t.Fatal("an empty part is not distinguished from a missing one")
-	}
+	assert.Must(t, paging.Fingerprint("ab", "c") != paging.Fingerprint("a", "bc"), "two filters that divide differently must not share a fingerprint")
+	assert.Must(t, paging.Fingerprint("a", "") != paging.Fingerprint("", "a"), "an empty part is not distinguished from a missing one")
 	first, second := paging.Fingerprint("a", "b"), paging.Fingerprint("a", "b")
-	if first != second {
-		t.Fatalf("a fingerprint is not stable across two calls: %q then %q", first, second)
-	}
+	assert.Must(t, first == second, "a fingerprint is not stable across two calls: %q then %q", first, second)
 }
 
 func TestSizeClampsRatherThanFoldingOntoTheDefault(t *testing.T) {
@@ -132,9 +107,7 @@ func TestSizeClampsRatherThanFoldingOntoTheDefault(t *testing.T) {
 func TestTriStateKeepsNoOpinionDistinctFromBothOpinions(t *testing.T) {
 	yes, no := true, false
 	got := []string{paging.TriState(nil), paging.TriState(&yes), paging.TriState(&no)}
-	if got[0] == got[1] || got[0] == got[2] || got[1] == got[2] {
-		t.Fatalf("TriState produced %v, want three distinct spellings", got)
-	}
+	assert.Must(t, got[0] != got[1] && got[0] != got[2] && got[1] != got[2], "TriState produced %v, want three distinct spellings", got)
 }
 
 // TestTheWireNamesArePinnedHereToo guards Cursor's JSON tags from inside
@@ -149,9 +122,7 @@ func TestTheWireNamesArePinnedHereToo(t *testing.T) {
 		Sort: "Elwynn Forest", ID: uuid.New(), Fingerprint: "abc",
 	})
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	assert.Must(t, err == nil, "decode: %v", err)
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -161,9 +132,7 @@ func TestTheWireNamesArePinnedHereToo(t *testing.T) {
 			t.Fatalf("cursor is missing %q: %s", want, raw)
 		}
 	}
-	if len(fields) != 3 {
-		t.Fatalf("cursor carries %d fields, want 3: %s", len(fields), raw)
-	}
+	assert.Must(t, len(fields) == 3, "cursor carries %d fields, want 3: %s", len(fields), raw)
 }
 
 // TestTheRecoveryAdviceIsPinnedTooNotJustTheMalformedPrefix guards the
@@ -175,9 +144,7 @@ func TestTheWireNamesArePinnedHereToo(t *testing.T) {
 func TestTheRecoveryAdviceIsPinnedTooNotJustTheMalformedPrefix(t *testing.T) {
 	err := paging.Malformed("some reason", refuse)
 	const advice = "page from the cursor a previous call returned, or omit it to start"
-	if !strings.Contains(err.Error(), advice) {
-		t.Fatalf("err = %q, want it to contain the recovery advice %q", err.Error(), advice)
-	}
+	assert.Must(t, strings.Contains(err.Error(), advice), "err = %q, want it to contain the recovery advice %q", err.Error(), advice)
 }
 
 // TestMalformedPanicsOnANilRefuse pins the nil-refuse contract Malformed
@@ -187,9 +154,7 @@ func TestTheRecoveryAdviceIsPinnedTooNotJustTheMalformedPrefix(t *testing.T) {
 // refusal.
 func TestMalformedPanicsOnANilRefuse(t *testing.T) {
 	defer func() {
-		if recover() == nil {
-			t.Fatal("Malformed with a nil refuse did not panic")
-		}
+		assert.Must(t, recover() != nil, "Malformed with a nil refuse did not panic")
 	}()
 	nilRefuse := func(string) error { return nil }
 	_ = paging.Malformed("why", nilRefuse)
@@ -199,9 +164,7 @@ func TestMalformedPanicsOnANilRefuse(t *testing.T) {
 // contract from Decode's malformed arms.
 func TestANilRefusePanicsRatherThanReturningTheZeroPosition(t *testing.T) {
 	defer func() {
-		if recover() == nil {
-			t.Fatal("Decode with a nil refuse did not panic on a malformed cursor")
-		}
+		assert.Must(t, recover() != nil, "Decode with a nil refuse did not panic on a malformed cursor")
 	}()
 	nilRefuse := func(string) error { return nil }
 	_, _ = paging.Decode("!!!not base64!!!", "abc", nilRefuse)
@@ -212,9 +175,7 @@ func TestANilRefusePanicsRatherThanReturningTheZeroPosition(t *testing.T) {
 // through Malformed and so needed its own enforcement.
 func TestAFingerprintMismatchWithANilRefusePanics(t *testing.T) {
 	defer func() {
-		if recover() == nil {
-			t.Fatal("Decode with a nil refuse did not panic on a fingerprint mismatch")
-		}
+		assert.Must(t, recover() != nil, "Decode with a nil refuse did not panic on a fingerprint mismatch")
 	}()
 	c := paging.Cursor{Sort: "a", ID: uuid.New(), Fingerprint: "abc"}
 	nilRefuse := func(string) error { return nil }

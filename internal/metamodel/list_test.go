@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -59,28 +60,18 @@ func TestListArea(t *testing.T) {
 		filter := metamodel.EntityFilter{TypeKey: "quest", Limit: 10}
 		for page := 1; ; page++ {
 			got, err := svc.ListEntities(ctx, project, filter)
-			if err != nil {
-				t.Fatalf("page %d: %v", page, err)
-			}
+			assert.Must(t, err == nil, "page %d: %v", page, err)
 			seen = append(seen, keysOf(got)...)
 			if got.NextCursor == "" {
-				if len(got.Entities) == 10 {
-					t.Fatalf("page %d is full and carries no cursor", page)
-				}
+				assert.Must(t, len(got.Entities) != 10, "page %d is full and carries no cursor", page)
 				break
 			}
-			if len(got.Entities) != 10 {
-				t.Fatalf("page %d has %d rows and still carries a cursor", page, len(got.Entities))
-			}
-			if page > 5 {
-				t.Fatal("the listing never ran out of pages")
-			}
+			assert.Must(t, len(got.Entities) == 10, "page %d has %d rows and still carries a cursor", page, len(got.Entities))
+			assert.Must(t, page <= 5, "the listing never ran out of pages")
 			filter.Cursor = got.NextCursor
 		}
 
-		if len(seen) != 25 {
-			t.Fatalf("paged over %d rows, want 25: %v", len(seen), seen)
-		}
+		assert.Must(t, len(seen) == 25, "paged over %d rows, want 25: %v", len(seen), seen)
 		for i, key := range seen {
 			if want := fmt.Sprintf("quest-%02d", i); key != want {
 				t.Fatalf("row %d is %q, want %q (the pages overlapped or skipped)", i, key, want)
@@ -107,24 +98,14 @@ func TestListArea(t *testing.T) {
 		seedQuests(t, svc, project, 10)
 
 		full, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 10})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if len(full.Entities) != 10 || full.NextCursor == "" {
-			t.Fatalf("first page has %d rows, cursor %q", len(full.Entities), full.NextCursor)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, len(full.Entities) == 10 && full.NextCursor != "", "first page has %d rows, cursor %q", len(full.Entities), full.NextCursor)
 
 		empty, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Limit: 10, Cursor: full.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
-		if len(empty.Entities) != 0 {
-			t.Fatalf("second page has %d rows, want 0", len(empty.Entities))
-		}
-		if empty.NextCursor != "" {
-			t.Fatal("the empty page must end the listing")
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
+		assert.Must(t, len(empty.Entities) == 0, "second page has %d rows, want 0", len(empty.Entities))
+		assert.Must(t, empty.NextCursor == "", "the empty page must end the listing")
 	})
 
 	// TestListArea's "a page is not shifted by a concurrent write" case pins
@@ -148,9 +129,7 @@ func TestListArea(t *testing.T) {
 		seedQuests(t, svc, project, 12)
 
 		first, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 5})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
 
 		// A deletion inside the page already read, and an insertion that sorts
 		// before the cursor's position.
@@ -166,9 +145,7 @@ func TestListArea(t *testing.T) {
 
 		second, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Limit: 5, Cursor: first.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
 		want := []string{"quest-05", "quest-06", "quest-07", "quest-08", "quest-09"}
 		if got := keysOf(second); !equalStrings(got, want) {
 			t.Fatalf("second page = %v, want %v", got, want)
@@ -188,18 +165,14 @@ func TestListArea(t *testing.T) {
 		seedQuests(t, svc, project, 6)
 
 		first, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
 		if err := svc.RemoveEntity(ctx, project, "quest", first.Entities[2].Key); err != nil {
 			t.Fatalf("remove the row the cursor names: %v", err)
 		}
 
 		second, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Limit: 3, Cursor: first.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
 		want := []string{"quest-03", "quest-04", "quest-05"}
 		if got := keysOf(second); !equalStrings(got, want) {
 			t.Fatalf("second page = %v, want %v", got, want)
@@ -234,16 +207,10 @@ func TestListArea(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := svc.ListEntities(ctx, project,
 					metamodel.EntityFilter{TypeKey: "quest", Limit: 2, Cursor: tc.cursor})
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("err = %v, want a ValidationError", err)
-				}
-				if len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
-					t.Fatalf("fields = %+v, want one problem at path \"cursor\"", ve.Fields)
-				}
+				assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+				assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "cursor", "fields = %+v, want one problem at path \"cursor\"", ve.Fields)
 				if !strings.Contains(ve.Fields[0].Message, "is malformed") {
 					t.Fatalf("message = %q, want it to say the cursor is malformed", ve.Fields[0].Message)
 				}
@@ -269,12 +236,8 @@ func TestListArea(t *testing.T) {
 		seedWorld(t, svc, project)
 
 		quests, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 1})
-		if err != nil {
-			t.Fatalf("quest page: %v", err)
-		}
-		if quests.NextCursor == "" {
-			t.Fatal("the quest page must carry a cursor for this test to mean anything")
-		}
+		assert.Must(t, err == nil, "quest page: %v", err)
+		assert.Must(t, quests.NextCursor != "", "the quest page must carry a cursor for this test to mean anything")
 
 		for _, tc := range []struct {
 			name   string
@@ -290,16 +253,10 @@ func TestListArea(t *testing.T) {
 				f := tc.filter
 				f.Cursor = quests.NextCursor
 				_, err := svc.ListEntities(ctx, project, f)
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("err = %v, want a ValidationError", err)
-				}
-				if len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
-					t.Fatalf("fields = %+v, want one problem at path \"cursor\"", ve.Fields)
-				}
+				assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+				assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "cursor", "fields = %+v, want one problem at path \"cursor\"", ve.Fields)
 				if !strings.Contains(ve.Fields[0].Message, "different listing") {
 					t.Fatalf("message = %q, want it to name the mismatch", ve.Fields[0].Message)
 				}
@@ -339,30 +296,20 @@ func TestListArea(t *testing.T) {
 
 		// A cursor of my own, to lift the fingerprint out of.
 		page, err := svc.ListEntities(ctx, mine, metamodel.EntityFilter{TypeKey: "quest", Limit: 1})
-		if err != nil {
-			t.Fatalf("my first page: %v", err)
-		}
+		assert.Must(t, err == nil, "my first page: %v", err)
 		theirRows, err := svc.ListEntities(ctx, theirs, metamodel.EntityFilter{TypeKey: "quest", Limit: 4})
-		if err != nil {
-			t.Fatalf("their listing: %v", err)
-		}
+		assert.Must(t, err == nil, "their listing: %v", err)
 
 		forged := reissueCursor(t, page.NextCursor, theirRows.Entities[0].Name, theirRows.Entities[0].ID)
 		got, err := svc.ListEntities(ctx, mine,
 			metamodel.EntityFilter{TypeKey: "quest", Limit: 10, Cursor: forged})
-		if err != nil {
-			t.Fatalf("forged page: %v", err)
-		}
+		assert.Must(t, err == nil, "forged page: %v", err)
 		for _, row := range got.Entities {
-			if row.ProjectID != mine {
-				t.Fatalf("a forged cursor returned a row of project %s", row.ProjectID)
-			}
+			assert.Must(t, row.ProjectID == mine, "a forged cursor returned a row of project %s", row.ProjectID)
 		}
 		// Their first row sorts at the same name as mine, so the forgery lands
 		// mid-listing and returns the rest of my own rows.
-		if len(got.Entities) == 0 {
-			t.Fatal("the forged cursor returned nothing at all; it must page my own rows")
-		}
+		assert.Must(t, len(got.Entities) != 0, "the forged cursor returned nothing at all; it must page my own rows")
 	})
 
 	t.Run("list filters by invalid", func(t *testing.T) {
@@ -401,9 +348,7 @@ func TestListArea(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				page, err := svc.ListEntities(ctx, project,
 					metamodel.EntityFilter{TypeKey: "quest", Invalid: tc.flag, Limit: 50})
-				if err != nil {
-					t.Fatalf("ListEntities: %v", err)
-				}
+				assert.Must(t, err == nil, "ListEntities: %v", err)
 				if got := keysOf(page); !equalStrings(got, tc.want) {
 					t.Fatalf("got %v, want %v", got, tc.want)
 				}
@@ -424,12 +369,8 @@ func TestListArea(t *testing.T) {
 		seedQuestType(t, svc, project)
 
 		_, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quesst", Limit: 10})
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want not_found", err)
-		}
-		if !strings.Contains(err.Error(), `"quesst"`) {
-			t.Fatalf("err = %v, want it to name the key that was not found", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found", err)
+		assert.Must(t, strings.Contains(err.Error(), `"quesst"`), "err = %v, want it to name the key that was not found", err)
 	})
 
 	// TestListArea's "a type key filter is bounded before postgres sees it"
@@ -466,12 +407,8 @@ func TestListArea(t *testing.T) {
 		seedQuests(t, svc, theirs, 3)
 
 		page, err := svc.ListEntities(ctx, mine, metamodel.EntityFilter{Limit: 50})
-		if err != nil {
-			t.Fatalf("ListEntities: %v", err)
-		}
-		if len(page.Entities) != 0 {
-			t.Fatalf("my empty game listed %d rows of somebody else's", len(page.Entities))
-		}
+		assert.Must(t, err == nil, "ListEntities: %v", err)
+		assert.Must(t, len(page.Entities) == 0, "my empty game listed %d rows of somebody else's", len(page.Entities))
 	})
 
 	// TestListArea's "one hop traversal answers in both directions" case pins
@@ -501,9 +438,7 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if err != nil {
-			t.Fatalf("incoming: %v", err)
-		}
+		assert.Must(t, err == nil, "incoming: %v", err)
 		// Ordered by name, not by key: "Kobold Camp" sorts before "Wanted:
 		// Hogger". Every listing in this file shares that order, which is
 		// what the cursor is a position in.
@@ -520,9 +455,7 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if err != nil {
-			t.Fatalf("outgoing: %v", err)
-		}
+		assert.Must(t, err == nil, "outgoing: %v", err)
 		if got := keysOf(outgoing); !equalStrings(got, []string{"elwynn"}) {
 			t.Fatalf("outgoing = %v, want the zone", got)
 		}
@@ -536,12 +469,8 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if err != nil {
-			t.Fatalf("the empty direction: %v", err)
-		}
-		if len(empty.Entities) != 0 {
-			t.Fatalf("incoming from a source entity returned %v", keysOf(empty))
-		}
+		assert.Must(t, err == nil, "the empty direction: %v", err)
+		assert.Must(t, len(empty.Entities) == 0, "incoming from a source entity returned %v", keysOf(empty))
 	})
 
 	// TestListArea's "an unknown direction is refused" case pins that a
@@ -569,16 +498,10 @@ func TestListArea(t *testing.T) {
 					},
 					Limit: 50,
 				})
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("err = %v, want a ValidationError", err)
-				}
-				if len(ve.Fields) != 1 || ve.Fields[0].Path != "related_to.direction" {
-					t.Fatalf("fields = %+v, want one problem at path \"related_to.direction\"", ve.Fields)
-				}
+				assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+				assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "related_to.direction", "fields = %+v, want one problem at path \"related_to.direction\"", ve.Fields)
 				for _, want := range []string{`"outgoing"`, `"incoming"`} {
 					if !strings.Contains(ve.Fields[0].Message, want) {
 						t.Fatalf("message = %q, want it to name %s", ve.Fields[0].Message, want)
@@ -617,9 +540,7 @@ func TestListArea(t *testing.T) {
 					},
 					Limit: 50,
 				})
-				if err != nil {
-					t.Fatalf("ListEntities: %v", err)
-				}
+				assert.Must(t, err == nil, "ListEntities: %v", err)
 				if got := keysOf(page); !equalStrings(got, []string{"hogger"}) {
 					t.Fatalf("got %v, want the anchor exactly once", got)
 				}
@@ -662,12 +583,8 @@ func TestListArea(t *testing.T) {
 				rel := tc.rel
 				_, err := svc.ListEntities(ctx, project,
 					metamodel.EntityFilter{RelatedTo: &rel, Limit: 50})
-				if !errors.Is(err, metamodel.ErrNotFound) {
-					t.Fatalf("err = %v, want not_found", err)
-				}
-				if !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("err = %v, want it to name %s", err, tc.want)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found", err)
+				assert.Must(t, strings.Contains(err.Error(), tc.want), "err = %v, want it to name %s", err, tc.want)
 			})
 		}
 	})
@@ -702,9 +619,7 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if err != nil {
-			t.Fatalf("unfiltered: %v", err)
-		}
+		assert.Must(t, err == nil, "unfiltered: %v", err)
 		if got := keysOf(all); !equalStrings(got, []string{"mage", "hogger"}) {
 			t.Fatalf("unfiltered = %v, want both neighbours", got)
 		}
@@ -717,9 +632,7 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if err != nil {
-			t.Fatalf("filtered: %v", err)
-		}
+		assert.Must(t, err == nil, "filtered: %v", err)
 		if got := keysOf(quests); !equalStrings(got, []string{"hogger"}) {
 			t.Fatalf("filtered = %v, want only the quest", got)
 		}
@@ -787,9 +700,7 @@ func TestListArea(t *testing.T) {
 				page, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
 					RelatedTo: &rel, Invalid: tc.flag, Limit: 50,
 				})
-				if err != nil {
-					t.Fatalf("ListEntities: %v", err)
-				}
+				assert.Must(t, err == nil, "ListEntities: %v", err)
 				if got := keysOf(page); !equalStrings(got, tc.want) {
 					t.Fatalf("got %v, want %v", got, tc.want)
 				}
@@ -834,18 +745,14 @@ func TestListArea(t *testing.T) {
 		filter := metamodel.EntityFilter{RelatedTo: &rel, Limit: 3}
 		for page := 1; page <= 5; page++ {
 			got, err := svc.ListEntities(ctx, project, filter)
-			if err != nil {
-				t.Fatalf("page %d: %v", page, err)
-			}
+			assert.Must(t, err == nil, "page %d: %v", page, err)
 			seen = append(seen, keysOf(got)...)
 			if got.NextCursor == "" {
 				break
 			}
 			filter.Cursor = got.NextCursor
 		}
-		if len(seen) != 7 {
-			t.Fatalf("paged over %d neighbours, want 7: %v", len(seen), seen)
-		}
+		assert.Must(t, len(seen) == 7, "paged over %d neighbours, want 7: %v", len(seen), seen)
 		for i, key := range seen {
 			if want := fmt.Sprintf("quest-%02d", i); key != want {
 				t.Fatalf("neighbour %d is %q, want %q", i, key, want)
@@ -855,14 +762,10 @@ func TestListArea(t *testing.T) {
 		// A traversal's cursor belongs to that traversal, so it cannot be
 		// carried over to the plain listing of the same entity type.
 		first, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{RelatedTo: &rel, Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
 		_, err = svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Limit: 3, Cursor: first.NextCursor})
-		if !errors.Is(err, metamodel.ErrInvalidInput) {
-			t.Fatalf("err = %v, want a traversal's cursor refused by the plain listing", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want a traversal's cursor refused by the plain listing", err)
 	})
 
 	// TestListArea's "a traversal is scoped to its game" case pins that two
@@ -891,12 +794,8 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if err != nil {
-			t.Fatalf("ListEntities: %v", err)
-		}
-		if len(page.Entities) != 0 {
-			t.Fatalf("my Elwynn has %v as neighbours, all of them somebody else's", keysOf(page))
-		}
+		assert.Must(t, err == nil, "ListEntities: %v", err)
+		assert.Must(t, len(page.Entities) == 0, "my Elwynn has %v as neighbours, all of them somebody else's", keysOf(page))
 	})
 
 	// TestListArea's "an edge cannot outlive its relation type" case pins the
@@ -920,9 +819,7 @@ func TestListArea(t *testing.T) {
 			metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
 
 		relType, err := svc.RelationTypeByKey(ctx, project, "takes_place_in")
-		if err != nil {
-			t.Fatalf("RelationTypeByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "RelationTypeByKey: %v", err)
 		if err := svc.RemoveRelationType(ctx, project, relType.ID, false); !errors.Is(err, metamodel.ErrInUse) {
 			t.Fatalf("removing a type with edges: err = %v, want in_use", err)
 		}
@@ -935,9 +832,7 @@ func TestListArea(t *testing.T) {
 			`SELECT count(*) FROM relations WHERE project_id = $1`, project).Scan(&edges); err != nil {
 			t.Fatalf("count edges: %v", err)
 		}
-		if edges != 0 {
-			t.Fatalf("%d edges outlived their relation type", edges)
-		}
+		assert.Must(t, edges == 0, "%d edges outlived their relation type", edges)
 		// And the traversal that named it now names the key, rather than
 		// answering over edges that are no longer classified.
 		_, err = svc.ListEntities(ctx, project, metamodel.EntityFilter{
@@ -947,9 +842,7 @@ func TestListArea(t *testing.T) {
 			},
 			Limit: 50,
 		})
-		if !errors.Is(err, metamodel.ErrNotFound) {
-			t.Fatalf("err = %v, want not_found naming the removed relation type", err)
-		}
+		assert.Must(t, errors.Is(err, metamodel.ErrNotFound), "err = %v, want not_found naming the removed relation type", err)
 	})
 
 	// TestListArea's "a relation listing pages with a cursor" case pins the
@@ -982,13 +875,9 @@ func TestListArea(t *testing.T) {
 		filter := metamodel.RelationFilter{Limit: 2}
 		for page := 1; page <= 5; page++ {
 			got, err := svc.ListRelations(ctx, project, filter)
-			if err != nil {
-				t.Fatalf("page %d: %v", page, err)
-			}
+			assert.Must(t, err == nil, "page %d: %v", page, err)
 			for _, edge := range got.Relations {
-				if seen[edge.ID] {
-					t.Fatalf("page %d repeated edge %s", page, edge.ID)
-				}
+				assert.Must(t, !(seen[edge.ID]), "page %d repeated edge %s", page, edge.ID)
 				seen[edge.ID] = true
 			}
 			if got.NextCursor == "" {
@@ -996,9 +885,7 @@ func TestListArea(t *testing.T) {
 			}
 			filter.Cursor = got.NextCursor
 		}
-		if len(seen) != 6 {
-			t.Fatalf("paged over %d edges, want 6", len(seen))
-		}
+		assert.Must(t, len(seen) == 6, "paged over %d edges, want 6", len(seen))
 	})
 
 	// TestListArea's "a relation cursor belongs to its own filter" case pins
@@ -1026,17 +913,11 @@ func TestListArea(t *testing.T) {
 			metamodel.Ref{TypeKey: "quest", Key: "hogger"})
 
 		first, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("a full page must carry a cursor")
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page must carry a cursor")
 
 		hogger, err := svc.EntityByKey(ctx, project, "quest", "hogger")
-		if err != nil {
-			t.Fatalf("EntityByKey: %v", err)
-		}
+		assert.Must(t, err == nil, "EntityByKey: %v", err)
 		for _, tc := range []struct {
 			name   string
 			filter metamodel.RelationFilter
@@ -1051,16 +932,10 @@ func TestListArea(t *testing.T) {
 				f := tc.filter
 				f.Cursor = first.NextCursor
 				_, err := svc.ListRelations(ctx, project, f)
-				if !errors.Is(err, metamodel.ErrInvalidInput) {
-					t.Fatalf("err = %v, want invalid_input", err)
-				}
+				assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("err = %v, want a ValidationError", err)
-				}
-				if len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
-					t.Fatalf("fields = %+v, want one problem at path \"cursor\"", ve.Fields)
-				}
+				assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+				assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "cursor", "fields = %+v, want one problem at path \"cursor\"", ve.Fields)
 			})
 		}
 
@@ -1068,9 +943,7 @@ func TestListArea(t *testing.T) {
 		// give, at the same path.
 		_, err = svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1, Cursor: "nonsense!"})
 		var ve *metamodel.ValidationError
-		if !errors.As(err, &ve) || ve.Fields[0].Path != "cursor" {
-			t.Fatalf("err = %v, want invalid_input at path \"cursor\"", err)
-		}
+		assert.Must(t, errors.As(err, &ve) && ve.Fields[0].Path == "cursor", "err = %v, want invalid_input at path \"cursor\"", err)
 	})
 
 	// TestListArea's "a cursor from another game is refused" case pins the
@@ -1121,12 +994,8 @@ func TestListArea(t *testing.T) {
 
 		t.Run("the unfiltered entity listing", func(t *testing.T) {
 			theirPage, err := svc.ListEntities(ctx, theirs, metamodel.EntityFilter{Limit: 8})
-			if err != nil {
-				t.Fatalf("their page: %v", err)
-			}
-			if theirPage.NextCursor == "" {
-				t.Fatal("their page must carry a cursor for this test to mean anything")
-			}
+			assert.Must(t, err == nil, "their page: %v", err)
+			assert.Must(t, theirPage.NextCursor != "", "their page must carry a cursor for this test to mean anything")
 			_, err = svc.ListEntities(ctx, mine,
 				metamodel.EntityFilter{Limit: 8, Cursor: theirPage.NextCursor})
 			requireCursorRefused(t, err)
@@ -1135,12 +1004,8 @@ func TestListArea(t *testing.T) {
 		t.Run("the traversal", func(t *testing.T) {
 			theirPage, err := svc.ListEntities(ctx, theirs,
 				metamodel.EntityFilter{RelatedTo: traversal(), Limit: 8})
-			if err != nil {
-				t.Fatalf("their page: %v", err)
-			}
-			if theirPage.NextCursor == "" {
-				t.Fatal("their page must carry a cursor for this test to mean anything")
-			}
+			assert.Must(t, err == nil, "their page: %v", err)
+			assert.Must(t, theirPage.NextCursor != "", "their page must carry a cursor for this test to mean anything")
 			_, err = svc.ListEntities(ctx, mine,
 				metamodel.EntityFilter{RelatedTo: traversal(), Limit: 8, Cursor: theirPage.NextCursor})
 			requireCursorRefused(t, err)
@@ -1148,12 +1013,8 @@ func TestListArea(t *testing.T) {
 
 		t.Run("the relation listing", func(t *testing.T) {
 			theirPage, err := svc.ListRelations(ctx, theirs, metamodel.RelationFilter{Limit: 8})
-			if err != nil {
-				t.Fatalf("their page: %v", err)
-			}
-			if theirPage.NextCursor == "" {
-				t.Fatal("their page must carry a cursor for this test to mean anything")
-			}
+			assert.Must(t, err == nil, "their page: %v", err)
+			assert.Must(t, theirPage.NextCursor != "", "their page must carry a cursor for this test to mean anything")
 			_, err = svc.ListRelations(ctx, mine,
 				metamodel.RelationFilter{Limit: 8, Cursor: theirPage.NextCursor})
 			requireCursorRefused(t, err)
@@ -1163,18 +1024,12 @@ func TestListArea(t *testing.T) {
 		// part narrows the fingerprint and must not have invalidated it.
 		t.Run("a game's own cursor still pages it", func(t *testing.T) {
 			first, err := svc.ListEntities(ctx, mine, metamodel.EntityFilter{Limit: 8})
-			if err != nil {
-				t.Fatalf("first page: %v", err)
-			}
+			assert.Must(t, err == nil, "first page: %v", err)
 			rest, err := svc.ListEntities(ctx, mine,
 				metamodel.EntityFilter{Limit: 8, Cursor: first.NextCursor})
-			if err != nil {
-				t.Fatalf("second page: %v", err)
-			}
-			if len(first.Entities)+len(rest.Entities) != 11 {
-				t.Fatalf("paged over %d rows, want the game's 11",
-					len(first.Entities)+len(rest.Entities))
-			}
+			assert.Must(t, err == nil, "second page: %v", err)
+			assert.Must(t, len(first.Entities)+len(rest.Entities) == 11, "paged over %d rows, want the game's 11",
+				len(first.Entities)+len(rest.Entities))
 		})
 	})
 
@@ -1234,9 +1089,7 @@ func TestListArea(t *testing.T) {
 				filter := tc.filter
 				for page := 1; page <= rows+1; page++ {
 					got, err := svc.ListEntities(ctx, project, filter)
-					if err != nil {
-						t.Fatalf("page %d: %v", page, err)
-					}
+					assert.Must(t, err == nil, "page %d: %v", page, err)
 					for _, key := range keysOf(got) {
 						seen[key]++
 						if seen[key] > 1 {
@@ -1249,9 +1102,7 @@ func TestListArea(t *testing.T) {
 					}
 					filter.Cursor = got.NextCursor
 				}
-				if len(seen) != rows {
-					t.Fatalf("paged over %d of %d rows sharing one name", len(seen), rows)
-				}
+				assert.Must(t, len(seen) == rows, "paged over %d of %d rows sharing one name", len(seen), rows)
 			})
 		}
 	})
@@ -1278,9 +1129,7 @@ func TestListArea(t *testing.T) {
 		seedQuests(t, svc, project, 6)
 
 		first, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
 		if got := keysOf(first); !equalStrings(got, []string{"quest-00", "quest-01", "quest-02"}) {
 			t.Fatalf("first page = %v", got)
 		}
@@ -1296,21 +1145,15 @@ func TestListArea(t *testing.T) {
 
 		rest, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Limit: 10, Cursor: first.NextCursor})
-		if err != nil {
-			t.Fatalf("second page: %v", err)
-		}
+		assert.Must(t, err == nil, "second page: %v", err)
 		if got := keysOf(rest); !equalStrings(got, []string{"quest-03", "quest-05"}) {
 			t.Fatalf("second page = %v, want the renamed row to have moved behind the reader", got)
 		}
 
 		// It did not go anywhere: a listing started over sees all six.
 		whole, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 50})
-		if err != nil {
-			t.Fatalf("re-read: %v", err)
-		}
-		if len(whole.Entities) != 6 {
-			t.Fatalf("re-read %d rows, want the game's 6", len(whole.Entities))
-		}
+		assert.Must(t, err == nil, "re-read: %v", err)
+		assert.Must(t, len(whole.Entities) == 6, "re-read %d rows, want the game's 6", len(whole.Entities))
 	})
 
 	// TestListArea's "list filters by name prefix" case pins the one filter a
@@ -1369,9 +1212,7 @@ func TestListArea(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				page, err := svc.ListEntities(ctx, project,
 					metamodel.EntityFilter{TypeKey: "quest", Prefix: tc.prefix, Limit: 50})
-				if err != nil {
-					t.Fatalf("ListEntities: %v", err)
-				}
+				assert.Must(t, err == nil, "ListEntities: %v", err)
 				if got := keysOf(page); !equalStrings(got, tc.want) {
 					t.Fatalf("got %v, want %v", got, tc.want)
 				}
@@ -1400,12 +1241,8 @@ func TestListArea(t *testing.T) {
 
 		first, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Prefix: "Quest 0", Limit: 2})
-		if err != nil {
-			t.Fatalf("ListEntities: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("a full page carried no cursor, so this test is holding nothing")
-		}
+		assert.Must(t, err == nil, "ListEntities: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page carried no cursor, so this test is holding nothing")
 
 		if _, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Cursor: first.NextCursor, Limit: 2}); err == nil {
@@ -1442,17 +1279,11 @@ func TestListArea(t *testing.T) {
 		for _, tc := range cases {
 			page, err := svc.ListEntities(ctx, project,
 				metamodel.EntityFilter{TypeKey: "quest", Order: tc.order, Limit: 10})
-			if err != nil {
-				t.Fatalf("order %q: %v", tc.order, err)
-			}
+			assert.Must(t, err == nil, "order %q: %v", tc.order, err)
 			keys := keysOf(page)
-			if len(keys) != 5 {
-				t.Fatalf("order %q: got %d rows, want 5", tc.order, len(keys))
-			}
-			if keys[0] != tc.first || keys[len(keys)-1] != tc.last {
-				t.Errorf("order %q ran %v; want it to start at %s and end at %s",
-					tc.order, keys, tc.first, tc.last)
-			}
+			assert.Must(t, len(keys) == 5, "order %q: got %d rows, want 5", tc.order, len(keys))
+			assert.Should(t, keys[0] == tc.first && keys[len(keys)-1] == tc.last, "order %q ran %v; want it to start at %s and end at %s",
+				tc.order, keys, tc.first, tc.last)
 		}
 	})
 
@@ -1476,27 +1307,19 @@ func TestListArea(t *testing.T) {
 			var seen []string
 			filter := metamodel.EntityFilter{TypeKey: "quest", Order: order, Limit: 4}
 			for page := 1; ; page++ {
-				if page > 20 {
-					t.Fatalf("order %q: paging did not end", order)
-				}
+				assert.Must(t, page <= 20, "order %q: paging did not end", order)
 				got, err := svc.ListEntities(ctx, project, filter)
-				if err != nil {
-					t.Fatalf("order %q page %d: %v", order, page, err)
-				}
+				assert.Must(t, err == nil, "order %q page %d: %v", order, page, err)
 				seen = append(seen, keysOf(got)...)
 				if got.NextCursor == "" {
 					break
 				}
 				filter.Cursor = got.NextCursor
 			}
-			if len(seen) != 25 {
-				t.Errorf("order %q walked %d rows, want 25: %v", order, len(seen), seen)
-			}
+			assert.Should(t, len(seen) == 25, "order %q walked %d rows, want 25: %v", order, len(seen), seen)
 			unique := map[string]bool{}
 			for _, key := range seen {
-				if unique[key] {
-					t.Errorf("order %q returned %s twice", order, key)
-				}
+				assert.Should(t, !(unique[key]), "order %q returned %s twice", order, key)
 				unique[key] = true
 			}
 		}
@@ -1515,19 +1338,13 @@ func TestListArea(t *testing.T) {
 
 		first, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Order: "name", Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("a full page issued no cursor")
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page issued no cursor")
 		for _, order := range []string{"-name", "key", "updated", "-updated"} {
 			_, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
 				TypeKey: "quest", Order: order, Limit: 3, Cursor: first.NextCursor,
 			})
-			if err == nil {
-				t.Errorf("a name cursor paged the %q listing", order)
-			}
+			assert.Should(t, err != nil, "a name cursor paged the %q listing", order)
 		}
 		// And the two spellings of the default order are one listing, not
 		// two: a caller that omitted the order and one that wrote "name"
@@ -1553,12 +1370,8 @@ func TestListArea(t *testing.T) {
 		_, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Order: "level", Limit: 10})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) {
-			t.Fatalf("got %v, want a validation error", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "order" {
-			t.Fatalf("refused at %+v, want one problem at path order", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid), "got %v, want a validation error", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "order", "refused at %+v, want one problem at path order", invalid.Fields)
 		for _, spelling := range []string{"name", "key", "updated"} {
 			if !strings.Contains(invalid.Fields[0].Message, spelling) {
 				t.Errorf("the refusal does not name %q: %s", spelling, invalid.Fields[0].Message)
@@ -1588,12 +1401,8 @@ func TestListArea(t *testing.T) {
 			},
 		})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) {
-			t.Fatalf("got %v, want a validation error", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "order" {
-			t.Fatalf("refused at %+v, want one problem at path order", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid), "got %v, want a validation error", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "order", "refused at %+v, want one problem at path order", invalid.Fields)
 	})
 
 	// Ten rows sharing one timestamp and a page of three: the tiebreak is what
@@ -1623,13 +1432,9 @@ func TestListArea(t *testing.T) {
 		var seen []string
 		filter := metamodel.EntityFilter{TypeKey: "quest", Order: "-updated", Limit: 3}
 		for page := 1; ; page++ {
-			if page > 10 {
-				t.Fatal("paging did not end")
-			}
+			assert.Must(t, page <= 10, "paging did not end")
 			got, err := svc.ListEntities(ctx, project, filter)
-			if err != nil {
-				t.Fatalf("page %d: %v", page, err)
-			}
+			assert.Must(t, err == nil, "page %d: %v", page, err)
 			seen = append(seen, namesOf(got)...)
 			if got.NextCursor == "" {
 				break
@@ -1638,14 +1443,10 @@ func TestListArea(t *testing.T) {
 		}
 		unique := map[string]bool{}
 		for _, name := range seen {
-			if unique[name] {
-				t.Fatalf("%s came back twice: %v", name, seen)
-			}
+			assert.Must(t, !(unique[name]), "%s came back twice: %v", name, seen)
 			unique[name] = true
 		}
-		if len(seen) != 10 {
-			t.Fatalf("walked %d rows, want 10: %v", len(seen), seen)
-		}
+		assert.Must(t, len(seen) == 10, "walked %d rows, want 10: %v", len(seen), seen)
 	})
 
 	t.Run("a field order sorts numbers as numbers", func(t *testing.T) {
@@ -1659,13 +1460,9 @@ func TestListArea(t *testing.T) {
 
 		page, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Order: "field:min_level", Limit: 20})
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
+		assert.Must(t, err == nil, "list: %v", err)
 		got := keysOf(page)
-		if len(got) != 12 {
-			t.Fatalf("got %d rows, want 12", len(got))
-		}
+		assert.Must(t, len(got) == 12, "got %d rows, want 12", len(got))
 		// seedQuests writes min_level = index + 1, so the field order and
 		// the key order agree — which is what makes this an assertion about
 		// numbers rather than about text: sorted as text, quest-08 (9) would
@@ -1674,20 +1471,14 @@ func TestListArea(t *testing.T) {
 		for i := range 12 {
 			want = append(want, fmt.Sprintf("quest-%02d", i))
 		}
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("field order ran %v, want %v", got, want)
-		}
+		assert.Must(t, strings.Join(got, ",") == strings.Join(want, ","), "field order ran %v, want %v", got, want)
 
 		reversed, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Order: "-field:min_level", Limit: 20})
-		if err != nil {
-			t.Fatalf("list reversed: %v", err)
-		}
+		assert.Must(t, err == nil, "list reversed: %v", err)
 		back := keysOf(reversed)
 		for i, key := range got {
-			if back[len(back)-1-i] != key {
-				t.Fatalf("-field:min_level %v is not the reverse of field:min_level %v", back, got)
-			}
+			assert.Must(t, back[len(back)-1-i] == key, "-field:min_level %v is not the reverse of field:min_level %v", back, got)
 		}
 	})
 
@@ -1730,27 +1521,19 @@ func TestListArea(t *testing.T) {
 			var seen []string
 			filter := metamodel.EntityFilter{TypeKey: "quest", Order: order, Limit: 3}
 			for page := 1; ; page++ {
-				if page > 10 {
-					t.Fatalf("order %q: paging did not end", order)
-				}
+				assert.Must(t, page <= 10, "order %q: paging did not end", order)
 				got, err := svc.ListEntities(ctx, project, filter)
-				if err != nil {
-					t.Fatalf("order %q page %d: %v", order, page, err)
-				}
+				assert.Must(t, err == nil, "order %q page %d: %v", order, page, err)
 				seen = append(seen, keysOf(got)...)
 				if got.NextCursor == "" {
 					break
 				}
 				filter.Cursor = got.NextCursor
 			}
-			if len(seen) != 10 {
-				t.Errorf("order %q walked %d rows, want 10: %v", order, len(seen), seen)
-			}
+			assert.Should(t, len(seen) == 10, "order %q walked %d rows, want 10: %v", order, len(seen), seen)
 			unique := map[string]bool{}
 			for _, key := range seen {
-				if unique[key] {
-					t.Errorf("order %q returned %s twice", order, key)
-				}
+				assert.Should(t, !(unique[key]), "order %q returned %s twice", order, key)
 				unique[key] = true
 			}
 			// Last in both directions, not first in one of them.
@@ -1778,12 +1561,8 @@ func TestListArea(t *testing.T) {
 		_, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Order: "field:levl", Limit: 10})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) {
-			t.Fatalf("got %v, want a validation error", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "order" {
-			t.Fatalf("refused at %+v, want one problem at path order", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid), "got %v, want a validation error", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "order", "refused at %+v, want one problem at path order", invalid.Fields)
 		if !strings.Contains(invalid.Fields[0].Message, "levl") {
 			t.Errorf("the refusal does not name the field: %s", invalid.Fields[0].Message)
 		}
@@ -1792,12 +1571,8 @@ func TestListArea(t *testing.T) {
 		// same name in two types is two different fields.
 		_, err = svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{Order: "field:min_level", Limit: 10})
-		if !errors.As(err, &invalid) {
-			t.Fatalf("got %v, want a validation error", err)
-		}
-		if invalid.Fields[0].Path != "order" || !strings.Contains(invalid.Fields[0].Message, "type_key") {
-			t.Fatalf("refused with %+v, want it to ask for a type_key", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid), "got %v, want a validation error", err)
+		assert.Must(t, invalid.Fields[0].Path == "order" && strings.Contains(invalid.Fields[0].Message, "type_key"), "refused with %+v, want it to ask for a type_key", invalid.Fields)
 	})
 
 	// A cursor from a field order belongs to that field, not to "a field
@@ -1813,12 +1588,8 @@ func TestListArea(t *testing.T) {
 
 		first, err := svc.ListEntities(ctx, project,
 			metamodel.EntityFilter{TypeKey: "quest", Order: "field:min_level", Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
-		if first.NextCursor == "" {
-			t.Fatal("a full page issued no cursor")
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page issued no cursor")
 		if _, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
 			TypeKey: "quest", Order: "-field:min_level", Limit: 3, Cursor: first.NextCursor,
 		}); err == nil {
@@ -1848,9 +1619,7 @@ func TestListArea(t *testing.T) {
 func reissueCursor(t *testing.T, encoded, name string, id uuid.UUID) string {
 	t.Helper()
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("decode cursor: %v", err)
-	}
+	assert.Must(t, err == nil, "decode cursor: %v", err)
 	var fields map[string]any
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		t.Fatalf("unmarshal cursor: %v", err)
@@ -1858,9 +1627,7 @@ func reissueCursor(t *testing.T, encoded, name string, id uuid.UUID) string {
 	fields["n"] = name
 	fields["i"] = id.String()
 	out, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatalf("marshal cursor: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal cursor: %v", err)
 	return base64.RawURLEncoding.EncodeToString(out)
 }
 
@@ -1903,16 +1670,10 @@ func relate(t *testing.T, svc *metamodel.Service, project uuid.UUID, typeKey str
 // invalid_input, one problem, at the path the caller passed the value at.
 func requireCursorRefused(t *testing.T, err error) {
 	t.Helper()
-	if !errors.Is(err, metamodel.ErrInvalidInput) {
-		t.Fatalf("err = %v, want invalid_input", err)
-	}
+	assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want invalid_input", err)
 	var ve *metamodel.ValidationError
-	if !errors.As(err, &ve) {
-		t.Fatalf("err = %v, want a ValidationError", err)
-	}
-	if len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
-		t.Fatalf("fields = %+v, want one problem at path \"cursor\"", ve.Fields)
-	}
+	assert.Must(t, errors.As(err, &ve), "err = %v, want a ValidationError", err)
+	assert.Must(t, len(ve.Fields) == 1 && ve.Fields[0].Path == "cursor", "fields = %+v, want one problem at path \"cursor\"", ve.Fields)
 	if !strings.Contains(ve.Fields[0].Message, "different listing") {
 		t.Fatalf("message = %q, want it to name the mismatch", ve.Fields[0].Message)
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/views"
 )
 
@@ -52,22 +53,16 @@ func layoutModules(t *testing.T) map[string]string {
 	t.Helper()
 	found := map[string]string{}
 	entries, err := os.ReadDir(layoutDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", layoutDir, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", layoutDir, err)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".js" {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(layoutDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
+		assert.Must(t, err == nil, "read %s: %v", entry.Name(), err)
 		found[entry.Name()] = string(raw)
 	}
-	if len(found) == 0 {
-		t.Fatalf("no modules found under %s: this guard read nothing", layoutDir)
-	}
+	assert.Must(t, len(found) != 0, "no modules found under %s: this guard read nothing", layoutDir)
 	return found
 }
 
@@ -89,19 +84,15 @@ func TestTheLayoutModulesResolveWithoutAnImportMap(t *testing.T) {
 	}
 	sort.Strings(names)
 	want := []string{"budget.js", "compose.js", "engine.js", "worker.js"}
-	if strings.Join(names, ",") != strings.Join(want, ",") {
-		t.Fatalf("layout modules = %v, want %v; a new module here needs the same relative-import rule", names, want)
-	}
+	assert.Must(t, strings.Join(names, ",") == strings.Join(want, ","), "layout modules = %v, want %v; a new module here needs the same relative-import rule", names, want)
 
 	vendored := 0
 	for _, name := range names {
 		for _, match := range importSpecifier.FindAllStringSubmatch(modules[name], -1) {
 			specifier := match[1]
-			if !strings.HasPrefix(specifier, "./") && !strings.HasPrefix(specifier, "../") {
-				t.Errorf("%s/%s imports %q by bare specifier: a module worker has no import map, "+
-					"so this resolves to nothing at load and the page sees a worker that never answers",
-					layoutDir, name, specifier)
-			}
+			assert.Should(t, strings.HasPrefix(specifier, "./") || strings.HasPrefix(specifier, "../"), "%s/%s imports %q by bare specifier: a module worker has no import map, "+
+				"so this resolves to nothing at load and the page sees a worker that never answers",
+				layoutDir, name, specifier)
 			if strings.Contains(specifier, "/vendor/") {
 				vendored++
 			}
@@ -110,9 +101,7 @@ func TestTheLayoutModulesResolveWithoutAnImportMap(t *testing.T) {
 	// And the reason the rule exists is really exercised: this directory
 	// does reach the vendored runtime, so the guard above is guarding
 	// something rather than describing a directory that imports nothing.
-	if vendored == 0 {
-		t.Error("no layout module imports the vendored runtime; the bare-specifier guard above tests nothing")
-	}
+	assert.Should(t, vendored != 0, "no layout module imports the vendored runtime; the bare-specifier guard above tests nothing")
 }
 
 // TestTheLayoutBudgetIsOneNumberAndItsSentenceIsGenerated pins O10's
@@ -122,15 +111,11 @@ func TestTheLayoutBudgetIsOneNumberAndItsSentenceIsGenerated(t *testing.T) {
 	t.Parallel()
 	modules := layoutModules(t)
 	budget, ok := modules["budget.js"]
-	if !ok {
-		t.Fatal("static/layout/budget.js is missing")
-	}
+	assert.Must(t, ok, "static/layout/budget.js is missing")
 
 	for _, name := range []string{"LAYOUT_BUDGET_MS", "LAYOUT_RETRY_MS"} {
 		declarations := strings.Count(budget, "export const "+name+" =")
-		if declarations != 1 {
-			t.Errorf("%s is declared %d times in budget.js, want exactly 1", name, declarations)
-		}
+		assert.Should(t, declarations == 1, "%s is declared %d times in budget.js, want exactly 1", name, declarations)
 		// And nowhere else under static/: a second declaration is a
 		// second budget, and the one a designer waits on would be
 		// whichever module the canvas happened to import.
@@ -138,9 +123,7 @@ func TestTheLayoutBudgetIsOneNumberAndItsSentenceIsGenerated(t *testing.T) {
 			if path == layoutDir+"/budget.js" {
 				continue
 			}
-			if strings.Contains(src, "const "+name) {
-				t.Errorf("%s declares %s as well; the budget lives in budget.js and nowhere else", path, name)
-			}
+			assert.Should(t, !strings.Contains(src, "const "+name), "%s declares %s as well; the budget lives in budget.js and nowhere else", path, name)
 		}
 	}
 
@@ -159,9 +142,7 @@ func TestTheLayoutBudgetIsOneNumberAndItsSentenceIsGenerated(t *testing.T) {
 				hit)
 		}
 	}
-	if !strings.Contains(budget, "${ms / 1000} seconds") {
-		t.Error("budgetSentence no longer derives its number from its argument")
-	}
+	assert.Should(t, strings.Contains(budget, "${ms / 1000} seconds"), "budgetSentence no longer derives its number from its argument")
 }
 
 // everyOwnModule is the static tree minus the vendored subtree, which is
@@ -192,12 +173,8 @@ func everyOwnModule(t *testing.T) map[string]string {
 		out[filepath.ToSlash(path)] = string(raw)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk static: %v", err)
-	}
-	if len(out) == 0 {
-		t.Fatal("walked no own modules under static/")
-	}
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Must(t, len(out) != 0, "walked no own modules under static/")
 	return out
 }
 
@@ -237,18 +214,14 @@ func everyOwnModule(t *testing.T) map[string]string {
 func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.T) {
 	t.Parallel()
 	encoded, err := json.Marshal(views.Position{})
-	if err != nil {
-		t.Fatalf("marshal a position: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal a position: %v", err)
 	var fields map[string]any
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		t.Fatalf("unmarshal a position: %v", err)
 	}
 
 	raw, err := os.ReadFile(filepath.Join("static", "positions.js"))
-	if err != nil {
-		t.Fatalf("read static/positions.js: %v", err)
-	}
+	assert.Must(t, err == nil, "read static/positions.js: %v", err)
 	code := withoutComments(string(raw))
 
 	// UpdatedAt is the one field nothing renders — internal/views'
@@ -265,19 +238,15 @@ func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.
 		}
 		read++
 	}
-	if read == 0 {
-		t.Fatal("positions.js reads none of the members a stored position marshals to")
-	}
+	assert.Must(t, read != 0, "positions.js reads none of the members a stored position marshals to")
 	// The Go field names are the spelling the envelope used before
 	// Position was tagged, and reading them was compose.js's workaround
 	// for it. One spelling crosses the wire now, so a second reader is
 	// not a belt and braces — it is the thing that would let the tags be
 	// lost again without this file noticing.
 	for _, gone := range []string{"EntityType", "EntityKey", "Pinned"} {
-		if reads(code, gone) {
-			t.Errorf("positions.js still reads %q: the envelope speaks one spelling now, and a "+
-				"reader of the old one hides the day it stops", gone)
-		}
+		assert.Should(t, !reads(code, gone), "positions.js still reads %q: the envelope speaks one spelling now, and a "+
+			"reader of the old one hides the day it stops", gone)
 	}
 }
 
@@ -313,11 +282,6 @@ func TestTheCommentStripperRemovesCommentsAndKeepsCode(t *testing.T) {
 	t.Parallel()
 	const src = "// row.entity_key in a comment\nconst a = row.entity_key;\n/* row.pinned */\nconst b = 1;"
 	stripped := withoutComments(src)
-	if strings.Contains(stripped, "comment") || strings.Contains(stripped, "row.pinned") {
-		t.Errorf("comments survived stripping: %q", stripped)
-	}
-	if !strings.Contains(stripped, "const a = row.entity_key;") ||
-		!strings.Contains(stripped, "const b = 1;") {
-		t.Errorf("code did not survive stripping: %q", stripped)
-	}
+	assert.Should(t, !strings.Contains(stripped, "comment") && !strings.Contains(stripped, "row.pinned"), "comments survived stripping: %q", stripped)
+	assert.Should(t, strings.Contains(stripped, "const a = row.entity_key;") && strings.Contains(stripped, "const b = 1;"), "code did not survive stripping: %q", stripped)
 }

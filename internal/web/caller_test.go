@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // TestTokenCallerShape pins the one shape newTokenCaller ever produces:
@@ -14,22 +16,12 @@ func TestTokenCallerShape(t *testing.T) {
 	userID, tokenID, projectID := uuid.New(), uuid.New(), uuid.New()
 	c := newTokenCaller(userID, true, tokenID, projectID)
 
-	if !c.IsToken() {
-		t.Fatal("IsToken() = false, want true for a token caller")
-	}
+	assert.Must(t, c.IsToken(), "IsToken() = false, want true for a token caller")
 	got, ok := c.ScopedProject()
-	if !ok || got != projectID {
-		t.Fatalf("ScopedProject() = (%v, %v), want (%v, true)", got, ok, projectID)
-	}
-	if c.UserID != userID {
-		t.Fatalf("UserID = %v, want %v", c.UserID, userID)
-	}
-	if !c.IsAdmin {
-		t.Fatal("IsAdmin = false, want true as constructed")
-	}
-	if c.TokenID == nil || *c.TokenID != tokenID {
-		t.Fatalf("TokenID = %v, want %v", c.TokenID, tokenID)
-	}
+	assert.Must(t, ok && got == projectID, "ScopedProject() = (%v, %v), want (%v, true)", got, ok, projectID)
+	assert.Must(t, c.UserID == userID, "UserID = %v, want %v", c.UserID, userID)
+	assert.Must(t, c.IsAdmin, "IsAdmin = false, want true as constructed")
+	assert.Must(t, c.TokenID != nil && *c.TokenID == tokenID, "TokenID = %v, want %v", c.TokenID, tokenID)
 }
 
 // TestSessionCallerShape pins the other shape newSessionCaller ever
@@ -40,18 +32,12 @@ func TestSessionCallerShape(t *testing.T) {
 	userID := uuid.New()
 	c := newSessionCaller(userID, false)
 
-	if c.IsToken() {
-		t.Fatal("IsToken() = true, want false for a session caller")
-	}
+	assert.Must(t, !c.IsToken(), "IsToken() = true, want false for a session caller")
 	if _, ok := c.ScopedProject(); ok {
 		t.Fatal("ScopedProject() ok = true, want false: a session caller carries no project")
 	}
-	if c.TokenID != nil {
-		t.Fatalf("TokenID = %v, want nil", c.TokenID)
-	}
-	if c.ProjectID != nil {
-		t.Fatalf("ProjectID = %v, want nil", c.ProjectID)
-	}
+	assert.Must(t, c.TokenID == nil, "TokenID = %v, want nil", c.TokenID)
+	assert.Must(t, c.ProjectID == nil, "ProjectID = %v, want nil", c.ProjectID)
 }
 
 // TestScopedProjectIgnoresIsAdmin pins the property this task exists to
@@ -64,7 +50,5 @@ func TestScopedProjectIgnoresIsAdmin(t *testing.T) {
 	c := newTokenCaller(uuid.New(), true, uuid.New(), projectID)
 
 	got, ok := c.ScopedProject()
-	if !ok || got != projectID {
-		t.Fatalf("ScopedProject() = (%v, %v), want (%v, true) even though IsAdmin is true", got, ok, projectID)
-	}
+	assert.Must(t, ok && got == projectID, "ScopedProject() = (%v, %v), want (%v, true) even though IsAdmin is true", got, ok, projectID)
 }

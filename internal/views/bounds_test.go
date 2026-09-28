@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -48,9 +49,7 @@ func TestBoundsArea(t *testing.T) {
 			}); err != nil {
 			t.Fatalf("a read must go through: %v", err)
 		}
-		if read != 1 {
-			t.Fatalf("the control must have read its row, got %d", read)
-		}
+		assert.Must(t, read == 1, "the control must have read its row, got %d", read)
 
 		err := g.views.runInTx(t.Context(), time.Second,
 			`INSERT INTO projects (slug, name) VALUES ('written-by-a-view', 'no')`, nil,
@@ -61,12 +60,8 @@ func TestBoundsArea(t *testing.T) {
 				"tasks add")
 		}
 		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) {
-			t.Fatalf("must be refused by the database, got %T: %v", err, err)
-		}
-		if pgErr.Code != "25006" {
-			t.Fatalf("must be read_only_sql_transaction (25006), got %s: %v", pgErr.Code, err)
-		}
+		assert.Must(t, errors.As(err, &pgErr), "must be refused by the database, got %T: %v", err, err)
+		assert.Must(t, pgErr.Code == "25006", "must be read_only_sql_transaction (25006), got %s: %v", pgErr.Code, err)
 	})
 
 	// TestBoundsArea's "a truncated result is flagged not errored" case is the
@@ -84,20 +79,14 @@ func TestBoundsArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"quests"}],
 				"limits":{"max_nodes":10}}`)})
-		if err != nil {
-			t.Fatalf("truncation is not an error: %v", err)
-		}
-		if len(res.Nodes) != 10 {
-			t.Fatalf("a cap of 10 over 12 quests must return exactly 10 nodes, got %d: "+
-				"11 would be the sentinel row leaking into the result", len(res.Nodes))
-		}
+		assert.Must(t, err == nil, "truncation is not an error: %v", err)
+		assert.Must(t, len(res.Nodes) == 10, "a cap of 10 over 12 quests must return exactly 10 nodes, got %d: "+
+			"11 would be the sentinel row leaking into the result", len(res.Nodes))
 		if !res.Truncated.Nodes {
 			t.Fatal("the node cap was hit and must be flagged: a designer reading a partial " +
 				"picture as the whole one is the failure this flag exists to prevent")
 		}
-		if res.Stats.Nodes != 10 {
-			t.Fatalf("stats must count what came back, got %+v", res.Stats)
-		}
+		assert.Must(t, res.Stats.Nodes == 10, "stats must count what came back, got %+v", res.Stats)
 	})
 
 	// TestBoundsArea's "an untruncated result says so" case is the control the
@@ -109,18 +98,10 @@ func TestBoundsArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"quests"}],
 				"limits":{"max_nodes":10}}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("the fixture seeds three quests, got %d", len(res.Nodes))
-		}
-		if res.Truncated.Nodes {
-			t.Fatal("three nodes under a cap of ten is not truncated")
-		}
-		if res.Truncated.Edges || res.Truncated.Depth {
-			t.Fatalf("nothing else was capped either: %+v", res.Truncated)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "the fixture seeds three quests, got %d", len(res.Nodes))
+		assert.Must(t, !res.Truncated.Nodes, "three nodes under a cap of ten is not truncated")
+		assert.Must(t, !res.Truncated.Edges && !res.Truncated.Depth, "nothing else was capped either: %+v", res.Truncated)
 	})
 
 	// TestBoundsArea's "the node cap counts nodes not rows" case is the
@@ -148,18 +129,12 @@ func TestBoundsArea(t *testing.T) {
 		for _, cap := range []int{3, 4, 6} {
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 				Query: mustParse(t, fmt.Sprintf(doc, cap))})
-			if err != nil {
-				t.Fatalf("cap %d: %v", cap, err)
-			}
-			if len(res.Nodes) != 3 {
-				t.Fatalf("cap %d: two overlapping sets over three quests are three nodes, "+
-					"got %d", cap, len(res.Nodes))
-			}
-			if res.Truncated.Nodes {
-				t.Errorf("cap %d: three nodes under a cap of %d is not truncated — the flag "+
-					"is counting the rows the sets overlap in, not the nodes the caller got",
-					cap, cap)
-			}
+			assert.Must(t, err == nil, "cap %d: %v", cap, err)
+			assert.Must(t, len(res.Nodes) == 3, "cap %d: two overlapping sets over three quests are three nodes, "+
+				"got %d", cap, len(res.Nodes))
+			assert.Should(t, !res.Truncated.Nodes, "cap %d: three nodes under a cap of %d is not truncated — the flag "+
+				"is counting the rows the sets overlap in, not the nodes the caller got",
+				cap, cap)
 		}
 
 		// The control: six quests over the same two sets really do exceed a
@@ -167,13 +142,9 @@ func TestBoundsArea(t *testing.T) {
 		seedQuests(t, g, 3)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, fmt.Sprintf(doc, 5))})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 5 || !res.Truncated.Nodes {
-			t.Fatalf("six nodes under a cap of five is five nodes and a flag, got %d and %+v",
-				len(res.Nodes), res.Truncated)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 5 && res.Truncated.Nodes, "six nodes under a cap of five is five nodes and a flag, got %d and %+v",
+			len(res.Nodes), res.Truncated)
 	})
 
 	// TestBoundsArea's "an edge result is truncated too" case is the same
@@ -190,30 +161,18 @@ func TestBoundsArea(t *testing.T) {
 
 		all, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, fmt.Sprintf(doc, 10))})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(all.Edges) != 3 || all.Truncated.Edges {
-			t.Fatalf("the control must draw three edges untruncated, got %d and %+v",
-				len(all.Edges), all.Truncated)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(all.Edges) == 3 && !all.Truncated.Edges, "the control must draw three edges untruncated, got %d and %+v",
+			len(all.Edges), all.Truncated)
 
 		capped, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, fmt.Sprintf(doc, 2))})
-		if err != nil {
-			t.Fatalf("truncation is not an error: %v", err)
-		}
-		if len(capped.Edges) != 2 {
-			t.Fatalf("a cap of 2 over 3 edges must return exactly 2, got %d", len(capped.Edges))
-		}
-		if !capped.Truncated.Edges {
-			t.Fatal("the edge cap was hit and must be flagged")
-		}
+		assert.Must(t, err == nil, "truncation is not an error: %v", err)
+		assert.Must(t, len(capped.Edges) == 2, "a cap of 2 over 3 edges must return exactly 2, got %d", len(capped.Edges))
+		assert.Must(t, capped.Truncated.Edges, "the edge cap was hit and must be flagged")
 		// The nodes are untouched by an edge cap, which is what makes the two
 		// caps two caps rather than one.
-		if capped.Truncated.Nodes {
-			t.Fatalf("only the edges were capped: %+v", capped.Truncated)
-		}
+		assert.Must(t, !capped.Truncated.Nodes, "only the edges were capped: %+v", capped.Truncated)
 	})
 
 	// TestBoundsArea's "stats count what came back" case pins the three
@@ -228,23 +187,15 @@ func TestBoundsArea(t *testing.T) {
 				"traverse":[{"from":"cls","via":"available_to","direction":"in",
 				             "to_type":"quest","as":"reachable"}],
 				"edges":[{"from_step":"reachable"}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if res.Stats.Nodes != len(res.Nodes) || res.Stats.Edges != len(res.Edges) {
-			t.Fatalf("stats must count the envelope it ships with: %+v against %d/%d",
-				res.Stats, len(res.Nodes), len(res.Edges))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, res.Stats.Nodes == len(res.Nodes) && res.Stats.Edges == len(res.Edges), "stats must count the envelope it ships with: %+v against %d/%d",
+			res.Stats, len(res.Nodes), len(res.Edges))
 		// The mage and the three quests reachable from it, drawn by the three
 		// available_to relations between them: a document with no `nodes`
 		// entry draws every set it declared.
-		if res.Stats.Nodes != 4 || res.Stats.Edges != 3 {
-			t.Fatalf("the mage and its three quests, joined by three edges: %+v", res.Stats)
-		}
-		if res.Stats.DurationMS <= 0 {
-			t.Fatalf("a run takes measurable time and the measurement is what open question O2 "+
-				"is to be re-argued with: %+v", res.Stats)
-		}
+		assert.Must(t, res.Stats.Nodes == 4 && res.Stats.Edges == 3, "the mage and its three quests, joined by three edges: %+v", res.Stats)
+		assert.Must(t, res.Stats.DurationMS > 0, "a run takes measurable time and the measurement is what open question O2 "+
+			"is to be re-argued with: %+v", res.Stats)
 	})
 
 	// TestBoundsArea's "a timed out query is retryable and says which bound to
@@ -275,32 +226,22 @@ func TestBoundsArea(t *testing.T) {
 
 		g.views.statementTimeout = time.Millisecond
 		_, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-		if err == nil {
-			t.Fatal("a query given a millisecond must run out of it")
-		}
-		if !metamodel.IsRetryable(err) {
-			t.Fatalf("a cancelled statement must stay retryable — the wire code is the one that "+
-				"already exists — got %T: %v", err, err)
-		}
+		assert.Must(t, err != nil, "a query given a millisecond must run out of it")
+		assert.Must(t, metamodel.IsRetryable(err), "a cancelled statement must stay retryable — the wire code is the one that "+
+			"already exists — got %T: %v", err, err)
 		var timeout *TimeoutError
-		if !errors.As(err, &timeout) {
-			t.Fatalf("must be a *TimeoutError so Task 15 can map it before the generic "+
-				"retryable arm, got %T", err)
-		}
+		assert.Must(t, errors.As(err, &timeout), "must be a *TimeoutError so Task 15 can map it before the generic "+
+			"retryable arm, got %T", err)
 		message := err.Error()
 		for _, want := range []string{"max_depth", "max_nodes", "max_edges", "1ms"} {
-			if !strings.Contains(message, want) {
-				t.Errorf("the message must name %q — the elapsed budget and the bounds to "+
-					"lower are the whole difference between this and a bare retryable — got: %s",
-					want, message)
-			}
+			assert.Should(t, strings.Contains(message, want), "the message must name %q — the elapsed budget and the bounds to "+
+				"lower are the whole difference between this and a bare retryable — got: %s",
+				want, message)
 		}
 		// The bounds are named with the values this run actually used, not the
 		// package defaults, or the advice would be wrong for any query that
 		// declared its own limits.
-		if !strings.Contains(message, fmt.Sprint(DefaultMaxNodes)) {
-			t.Errorf("the message must carry the run's own max_nodes: %s", message)
-		}
+		assert.Should(t, strings.Contains(message, fmt.Sprint(DefaultMaxNodes)), "the message must carry the run's own max_nodes: %s", message)
 	})
 
 	// TestBoundsArea's "the statement budget is clamped to its hard cap" case
@@ -313,10 +254,8 @@ func TestBoundsArea(t *testing.T) {
 		// is written in terms of these two names, so a default quietly raised
 		// to a minute — a minute of database time for one picture — would
 		// change what every view costs and fail nothing.
-		if DefaultStatementTimeout != 5*time.Second || HardStatementTimeout != 15*time.Second {
-			t.Fatalf("the budget is 5s with a 15s ceiling, got %s and %s",
-				DefaultStatementTimeout, HardStatementTimeout)
-		}
+		assert.Must(t, DefaultStatementTimeout == 5*time.Second && HardStatementTimeout == 15*time.Second, "the budget is 5s with a 15s ceiling, got %s and %s",
+			DefaultStatementTimeout, HardStatementTimeout)
 		s := &Service{}
 		if got := s.statementBudget(); got != DefaultStatementTimeout {
 			t.Errorf("an unset knob must give the default, got %s", got)
@@ -380,10 +319,8 @@ func TestBoundsArea(t *testing.T) {
 			var seen []string
 			g.views.observeBounds = func(timeout, readOnly string) {
 				seen = append(seen, timeout)
-				if readOnly != "on" {
-					t.Errorf("the transaction must be holding transaction_read_only on, got %q",
-						readOnly)
-				}
+				assert.Should(t, readOnly == "on", "the transaction must be holding transaction_read_only on, got %q",
+					readOnly)
 			}
 			return &seen
 		}
@@ -451,9 +388,7 @@ func TestBoundsArea(t *testing.T) {
 		var held []*pgxpool.Conn
 		for i := int32(0); i < g.pool.Config().MaxConns; i++ {
 			conn, err := g.pool.Acquire(t.Context())
-			if err != nil {
-				t.Fatalf("acquire connection %d of %d: %v", i, g.pool.Config().MaxConns, err)
-			}
+			assert.Must(t, err == nil, "acquire connection %d of %d: %v", i, g.pool.Config().MaxConns, err)
 			held = append(held, conn)
 		}
 		for i, conn := range held {
@@ -463,14 +398,10 @@ func TestBoundsArea(t *testing.T) {
 				Scan(&timeout, &readOnly); err != nil {
 				t.Fatalf("read the settings back from connection %d: %v", i, err)
 			}
-			if timeout != "0" {
-				t.Errorf("connection %d kept a statement timeout of %q past the transaction "+
-					"that set it", i, timeout)
-			}
-			if readOnly != "off" {
-				t.Errorf("connection %d is still read-only (%q): every later write in this "+
-					"process would be refused", i, readOnly)
-			}
+			assert.Should(t, timeout == "0", "connection %d kept a statement timeout of %q past the transaction "+
+				"that set it", i, timeout)
+			assert.Should(t, readOnly == "off", "connection %d is still read-only (%q): every later write in this "+
+				"process would be refused", i, readOnly)
 			conn.Release()
 		}
 
@@ -536,9 +467,7 @@ func TestBoundsArea(t *testing.T) {
 		for _, file := range packageFiles(t) {
 			fset := token.NewFileSet()
 			parsed, err := parser.ParseFile(fset, file, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", file, err)
-			}
+			assert.Must(t, err == nil, "parse %s: %v", file, err)
 			ast.Inspect(parsed, func(n ast.Node) bool {
 				if assign, ok := n.(*ast.AssignStmt); ok {
 					// Route: the value of an allowed identifier, rather than the
@@ -619,14 +548,10 @@ func TestBoundsArea(t *testing.T) {
 		// running queries. The same for the assignment arm — `statement` is
 		// assigned in Run, and an arm that matched nothing would let anything
 		// through.
-		if found < 2 {
-			t.Fatalf("found %d statements executed in this package; the guard above is no "+
-				"longer watching what it names", found)
-		}
-		if built < 1 {
-			t.Fatalf("found %d assignments of a statement identifier; the assignment arm is "+
-				"watching nothing", built)
-		}
+		assert.Must(t, found >= 2, "found %d statements executed in this package; the guard above is no "+
+			"longer watching what it names", found)
+		assert.Must(t, built >= 1, "found %d assignments of a statement identifier; the assignment arm is "+
+			"watching nothing", built)
 	})
 }
 

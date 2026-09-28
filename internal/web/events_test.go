@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -96,9 +97,7 @@ func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, id, data string) {
 	}()
 	select {
 	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("read SSE stream: %v", got.err)
-		}
+		assert.Must(t, got.err == nil, "read SSE stream: %v", got.err)
 		return got.kind, got.id, got.data
 	case <-time.After(sseFrameTimeout):
 		t.Fatalf("no SSE frame within %s: the event this read is waiting for was never published, "+
@@ -115,9 +114,7 @@ func TestEventsStreamRequiresAuthentication(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401; body = %s", rec.Code, rec.Body.String())
 }
 
 func TestEventsStreamRequiresMembership(t *testing.T) {
@@ -130,9 +127,7 @@ func TestEventsStreamRequiresMembership(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "stranger@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/events", nil)
@@ -142,9 +137,7 @@ func TestEventsStreamRequiresMembership(t *testing.T) {
 
 	// 404, not 403: see resolveGameRef — a slug naming a game you are not
 	// in and a slug naming nothing must read the same.
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404; body = %s", rec.Code, rec.Body.String())
 }
 
 // TestEventsStreamDeliversPublishedEvent drives the endpoint over a real
@@ -162,13 +155,9 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -177,19 +166,13 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequestWithContext: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequestWithContext: %v", err)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Fatalf("Content-Type = %q, want text/event-stream", got)
 	}
@@ -209,15 +192,9 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 
 	reader := bufio.NewReader(resp.Body)
 	kind, id, data := readOneSSEFrame(t, reader)
-	if kind != "project.updated" {
-		t.Fatalf("Kind = %q, want project.updated (cross-game leak or missed the real event)", kind)
-	}
-	if id != "1" {
-		t.Fatalf("id = %q, want 1 (this project's first-ever published event)", id)
-	}
-	if data != `{"slug":"azeroth"}` {
-		t.Fatalf("data = %q", data)
-	}
+	assert.Must(t, kind == "project.updated", "Kind = %q, want project.updated (cross-game leak or missed the real event)", kind)
+	assert.Must(t, id == "1", "id = %q, want 1 (this project's first-ever published event)", id)
+	assert.Must(t, data == `{"slug":"azeroth"}`, "data = %q", data)
 }
 
 // TestEventsStreamSendsAnInitialConnectFrame pins the fix for a defect a
@@ -238,9 +215,7 @@ func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
@@ -249,34 +224,20 @@ func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequestWithContext: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequestWithContext: %v", err)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	reader := bufio.NewReader(resp.Body)
 	line1, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatalf("read first line: %v", err)
-	}
-	if line1 != ": connected\n" {
-		t.Fatalf("first line = %q, want %q", line1, ": connected\n")
-	}
+	assert.Must(t, err == nil, "read first line: %v", err)
+	assert.Must(t, line1 == ": connected\n", "first line = %q, want %q", line1, ": connected\n")
 	line2, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatalf("read second line: %v", err)
-	}
-	if line2 != "\n" {
-		t.Fatalf("second line = %q, want a blank line terminating the comment frame", line2)
-	}
+	assert.Must(t, err == nil, "read second line: %v", err)
+	assert.Must(t, line2 == "\n", "second line = %q, want a blank line terminating the comment frame", line2)
 }
 
 // TestEventsStreamClosesAtMaxLifetime pins the bounded-lifetime design
@@ -292,23 +253,17 @@ func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
 
 	done := make(chan struct{})
@@ -345,30 +300,20 @@ func TestEventsStreamClosesOnTokenRevokedMidStream(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: tok.ID}); err != nil {
 		t.Fatalf("RevokeAPIToken: %v", err)
@@ -407,9 +352,7 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@example.test", DisplayName: "Member", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	if _, err := projSvc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
@@ -419,18 +362,12 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 	defer ts.Close()
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	if _, err := projSvc.RemoveMember(ctx, member.ID, project.ID); err != nil {
 		t.Fatalf("RemoveMember: %v", err)
@@ -484,13 +421,9 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 	pastHalfway := time.Now().Add(cfg.SessionTTL/2 - time.Minute)
 	tokenHash := sha256.Sum256([]byte(token))
 	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`, pastHalfway, tokenHash[:]); err != nil {
@@ -501,18 +434,12 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 	defer ts.Close()
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	// Admission itself goes through the ordinary, sliding
 	// resolveSessionCaller (auth.go's authenticate middleware runs
@@ -522,23 +449,15 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 	// and is not what this test is checking; it establishes the
 	// baseline the heartbeat re-check must not move further.
 	_, afterAdmission, err := ids.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
-	if afterAdmission.Equal(pastHalfway) {
-		t.Fatal("admission itself did not renew the session — the precondition this test depends on did not hold")
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
+	assert.Must(t, !afterAdmission.Equal(pastHalfway), "admission itself did not renew the session — the precondition this test depends on did not hold")
 
 	// Let several heartbeat ticks (each a read-only re-check) pass.
 	time.Sleep(150 * time.Millisecond)
 
 	_, expiry, err := ids.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
-	if !expiry.Equal(afterAdmission) {
-		t.Fatalf("expiry moved from %v to %v after admission's own renewal — the heartbeat re-check slid the session", afterAdmission, expiry)
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
+	assert.Must(t, expiry.Equal(afterAdmission), "expiry moved from %v to %v after admission's own renewal — the heartbeat re-check slid the session", afterAdmission, expiry)
 }
 
 // TestEventsStreamMarshalsPayloadPreventingFrameForgery pins the wire
@@ -556,27 +475,19 @@ func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 	if got := hub.SubscriberCount(project.ID); got != 1 {
 		t.Fatalf("SubscriberCount(project) = %d immediately after the 200, want 1", got)
 	}
@@ -588,18 +499,14 @@ func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
 
 	reader := bufio.NewReader(resp.Body)
 	kind, _, data := readOneSSEFrame(t, reader)
-	if kind != "entity.updated" {
-		t.Fatalf("Kind = %q, want entity.updated (a forged event: line was parsed as its own frame)", kind)
-	}
+	assert.Must(t, kind == "entity.updated", "Kind = %q, want entity.updated (a forged event: line was parsed as its own frame)", kind)
 	var decoded struct {
 		Note string `json:"note"`
 	}
 	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
 		t.Fatalf("data %q did not decode as the single JSON object it should be: %v", data, err)
 	}
-	if decoded.Note != forgedAttempt {
-		t.Fatalf("decoded note = %q, want %q", decoded.Note, forgedAttempt)
-	}
+	assert.Must(t, decoded.Note == forgedAttempt, "decoded note = %q, want %q", decoded.Note, forgedAttempt)
 }
 
 // TestEventsStreamClosesOnServerClose pins the shutdown lever itself
@@ -615,27 +522,19 @@ func TestEventsStreamClosesOnServerClose(t *testing.T) {
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	assert.Must(t, err == nil, "Create: %v", err)
 	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest: %v", err)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
+	assert.Must(t, err == nil, "Do: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "status = %d, want 200", resp.StatusCode)
 
 	srv.Close()
 

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -58,9 +59,7 @@ func TestMCPHandlerRefusesAnUnauthenticatedRequest(t *testing.T) {
 
 	srv.mcpHandler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 // TestMCPHandlerRefusesASessionCaller pins that the MCP surface is
@@ -81,9 +80,7 @@ func TestMCPHandlerRefusesASessionCaller(t *testing.T) {
 
 	srv.mcpHandler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 for a session caller on /mcp", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401 for a session caller on /mcp", rec.Code)
 }
 
 // TestMCPErrorForReportsContentionAsRetryable pins Task 7's third
@@ -116,9 +113,7 @@ func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
 				&pgconn.PgError{Code: tc.sqlstate, Message: "canceling statement due to lock timeout"})
 			result := mcpErrorFor(context.Background(), "entities.upsert", caller, err)
 
-			if !result.IsError {
-				t.Fatal("a failed call must be reported as an error")
-			}
+			assert.Must(t, result.IsError, "a failed call must be reported as an error")
 			text, ok := result.Content[0].(*mcp.TextContent)
 			if !ok {
 				t.Fatalf("content[0] = %T, want *mcp.TextContent", result.Content[0])
@@ -130,15 +125,11 @@ func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
 			if err := json.Unmarshal([]byte(text.Text), &body); err != nil {
 				t.Fatalf("decode %q: %v", text.Text, err)
 			}
-			if body.Error != tc.want {
-				t.Fatalf("error = %q, want %q", body.Error, tc.want)
-			}
+			assert.Must(t, body.Error == tc.want, "error = %q, want %q", body.Error, tc.want)
 			// The database's own message never reaches the agent: it
 			// describes the server's internals, not the caller's next
 			// move, and mcpErrorFor logs it instead.
-			if strings.Contains(body.Message, "canceling statement") {
-				t.Fatalf("message = %q leaks the database's own text", body.Message)
-			}
+			assert.Must(t, !strings.Contains(body.Message, "canceling statement"), "message = %q leaks the database's own text", body.Message)
 		})
 	}
 }
@@ -180,9 +171,7 @@ func TestADomainCodeOutranksAContentionSQLSTATE(t *testing.T) {
 			if err := json.Unmarshal([]byte(text.Text), &body); err != nil {
 				t.Fatalf("decode %q: %v", text.Text, err)
 			}
-			if body.Error != tc.want {
-				t.Fatalf("error = %q, want %q", body.Error, tc.want)
-			}
+			assert.Must(t, body.Error == tc.want, "error = %q, want %q", body.Error, tc.want)
 		})
 	}
 }

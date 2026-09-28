@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/paging"
 )
@@ -15,9 +16,7 @@ import (
 func (g game) orphans(t *testing.T, in OrphansInput) OrphansResult {
 	t.Helper()
 	got, err := g.analysis.Orphans(context.Background(), g.projectID, in)
-	if err != nil {
-		t.Fatalf("orphans: %v", err)
-	}
+	assert.Must(t, err == nil, "orphans: %v", err)
 	return got
 }
 
@@ -67,17 +66,11 @@ func TestOrphans(t *testing.T) {
 		}
 
 		got := g.orphans(t, OrphansInput{})
-		if len(got.Findings) != 0 {
-			t.Errorf("a game where every entity has an edge reported %v as orphaned", got.keys())
-		}
-		if got.ConsideredTotal != int64(len(keys)) {
-			t.Errorf("considered_total = %d, want %d: an empty findings list over a run that "+
-				"considered nothing is the same JSON as a game with no orphans, and this "+
-				"count is what separates them", got.ConsideredTotal, len(keys))
-		}
-		if got.Mode != OrphanIsolated {
-			t.Errorf("mode = %q, want the default %q", got.Mode, OrphanIsolated)
-		}
+		assert.Should(t, len(got.Findings) == 0, "a game where every entity has an edge reported %v as orphaned", got.keys())
+		assert.Should(t, got.ConsideredTotal == int64(len(keys)), "considered_total = %d, want %d: an empty findings list over a run that "+
+			"considered nothing is the same JSON as a game with no orphans, and this "+
+			"count is what separates them", got.ConsideredTotal, len(keys))
+		assert.Should(t, got.Mode == OrphanIsolated, "mode = %q, want the default %q", got.Mode, OrphanIsolated)
 	})
 
 	// TestAnEntityWithOnlyAnAnnotationEdgeIsAnOrphan and its other half, in
@@ -97,18 +90,12 @@ func TestOrphans(t *testing.T) {
 		g.edge(t, "unlocks", "quest", "connected", "target")
 
 		got := g.orphans(t, OrphansInput{})
-		if !contains(got.keys(), "decorated") {
-			t.Errorf("the report names %v; an entity whose only edge is of an annotation "+
-				"type is an orphan, which is what the trait is for", got.keys())
-		}
-		if contains(got.keys(), "connected") || contains(got.keys(), "target") {
-			t.Errorf("the report names %v; an entity with a real edge is not an orphan",
-				got.keys())
-		}
-		if len(got.ExcludedRelationTypes) != 1 || got.ExcludedRelationTypes[0] != "is_illustrated_by" {
-			t.Errorf("excluded_relation_types = %v, want the one annotation type: a verdict "+
-				"that rests on an exclusion has to name it", got.ExcludedRelationTypes)
-		}
+		assert.Should(t, contains(got.keys(), "decorated"), "the report names %v; an entity whose only edge is of an annotation "+
+			"type is an orphan, which is what the trait is for", got.keys())
+		assert.Should(t, !contains(got.keys(), "connected") && !contains(got.keys(), "target"), "the report names %v; an entity with a real edge is not an orphan",
+			got.keys())
+		assert.Should(t, len(got.ExcludedRelationTypes) == 1 && got.ExcludedRelationTypes[0] == "is_illustrated_by", "excluded_relation_types = %v, want the one annotation type: a verdict "+
+			"that rests on an exclusion has to name it", got.ExcludedRelationTypes)
 		// The degrees are over the counted types, so the decorated entity
 		// reports zero even though it has an edge in the database.
 		if finding := got.find(t, "decorated"); finding.OutDegree != 0 {
@@ -137,16 +124,10 @@ func TestOrphans(t *testing.T) {
 		g.entity(t, "quest", "lonely")
 
 		got := g.orphans(t, OrphansInput{})
-		if len(got.Findings) != 1 || got.Findings[0].Key != "lonely" {
-			t.Fatalf("the report names %v, want the one entity with no edges", got.keys())
-		}
-		if len(got.ExcludedRelationTypes) != 0 {
-			t.Errorf("excluded_relation_types = %v over a game that declared nothing: no "+
-				"type was called decoration, so none was excluded", got.ExcludedRelationTypes)
-		}
-		if len(got.SemanticsSource) != 0 {
-			t.Errorf("semantics_source = %v over a game that declared nothing", got.SemanticsSource)
-		}
+		assert.Must(t, len(got.Findings) == 1 && got.Findings[0].Key == "lonely", "the report names %v, want the one entity with no edges", got.keys())
+		assert.Should(t, len(got.ExcludedRelationTypes) == 0, "excluded_relation_types = %v over a game that declared nothing: no "+
+			"type was called decoration, so none was excluded", got.ExcludedRelationTypes)
+		assert.Should(t, len(got.SemanticsSource) == 0, "semantics_source = %v over a game that declared nothing", got.SemanticsSource)
 
 		// The control: the three analyses that walk edges do refuse it.
 		if _, err := g.analysis.Cycles(context.Background(), g.projectID, CyclesInput{}); err == nil {
@@ -179,15 +160,11 @@ func TestOrphans(t *testing.T) {
 		g.invalidate(t, "unlocks")
 
 		got := g.orphans(t, OrphansInput{})
-		if contains(got.keys(), "flagged-source") || contains(got.keys(), "flagged-target") {
-			t.Errorf("the report names %v; an entity whose only edge is flagged invalid has "+
-				"an edge, and reporting it as an orphan sends a designer to delete content "+
-				"that is connected", got.keys())
-		}
+		assert.Should(t, !contains(got.keys(), "flagged-source") && !contains(got.keys(), "flagged-target"), "the report names %v; an entity whose only edge is flagged invalid has "+
+			"an edge, and reporting it as an orphan sends a designer to delete content "+
+			"that is connected", got.keys())
 		// The control, so a report that found nothing at all cannot pass.
-		if !contains(got.keys(), "truly-alone") {
-			t.Errorf("the report names %v and not the entity with no edges at all", got.keys())
-		}
+		assert.Should(t, contains(got.keys(), "truly-alone"), "the report names %v and not the entity with no edges at all", got.keys())
 		if finding := got.find(t, "truly-alone"); finding.InDegree != 0 || finding.OutDegree != 0 {
 			t.Errorf("degrees = %d/%d for an entity with no edges", finding.InDegree, finding.OutDegree)
 		}
@@ -209,36 +186,24 @@ func TestOrphans(t *testing.T) {
 
 		sinks := g.orphans(t, OrphansInput{Mode: OrphanSink})
 		sources := g.orphans(t, OrphansInput{Mode: OrphanSource})
-		if len(sinks.Findings) == 0 || len(sources.Findings) == 0 {
-			t.Fatalf("sinks = %v, sources = %v; both halves must be non-empty or the "+
-				"disjointness below is vacuous", sinks.keys(), sources.keys())
-		}
+		assert.Must(t, len(sinks.Findings) != 0 && len(sources.Findings) != 0, "sinks = %v, sources = %v; both halves must be non-empty or the "+
+			"disjointness below is vacuous", sinks.keys(), sources.keys())
 		for _, key := range sinks.keys() {
-			if contains(sources.keys(), key) {
-				t.Errorf("%q is reported as both a sink and a source: the two modes are "+
-					"defined as one direction each and cannot overlap", key)
-			}
+			assert.Should(t, !contains(sources.keys(), key), "%q is reported as both a sink and a source: the two modes are "+
+				"defined as one direction each and cannot overlap", key)
 		}
 		for _, finding := range sinks.Findings {
-			if finding.InDegree == 0 || finding.OutDegree != 0 {
-				t.Errorf("sink %q has degrees %d/%d, want incoming only",
-					finding.Key, finding.InDegree, finding.OutDegree)
-			}
+			assert.Should(t, finding.InDegree != 0 && finding.OutDegree == 0, "sink %q has degrees %d/%d, want incoming only",
+				finding.Key, finding.InDegree, finding.OutDegree)
 		}
 		for _, finding := range sources.Findings {
-			if finding.OutDegree == 0 || finding.InDegree != 0 {
-				t.Errorf("source %q has degrees %d/%d, want outgoing only",
-					finding.Key, finding.InDegree, finding.OutDegree)
-			}
+			assert.Should(t, finding.OutDegree != 0 && finding.InDegree == 0, "source %q has degrees %d/%d, want outgoing only",
+				finding.Key, finding.InDegree, finding.OutDegree)
 		}
 		// And the entity with no edges at all is in neither, which is what
 		// makes `isolated` a third mode rather than the union of these two.
-		if contains(sinks.keys(), "alone") || contains(sources.keys(), "alone") {
-			t.Error("the isolated entity was reported by a directional mode")
-		}
-		if !contains(g.orphans(t, OrphansInput{}).keys(), "alone") {
-			t.Error("isolated mode did not report the entity with no edges at all")
-		}
+		assert.Should(t, !contains(sinks.keys(), "alone") && !contains(sources.keys(), "alone"), "the isolated entity was reported by a directional mode")
+		assert.Should(t, contains(g.orphans(t, OrphansInput{}).keys(), "alone"), "isolated mode did not report the entity with no edges at all")
 	})
 
 	// TestTheDegreesReportedMatchTheEdgesInTheDatabase reads the counts back
@@ -262,20 +227,14 @@ func TestOrphans(t *testing.T) {
 		// source; in-1 and in-2 are sources; out-1 is a sink.
 		sinks := g.orphans(t, OrphansInput{Mode: OrphanSink})
 		out1 := sinks.find(t, "out-1")
-		if out1.InDegree != 1 || out1.OutDegree != 0 {
-			t.Errorf("out-1 degrees = %d/%d, want 1/0", out1.InDegree, out1.OutDegree)
-		}
+		assert.Should(t, out1.InDegree == 1 && out1.OutDegree == 0, "out-1 degrees = %d/%d, want 1/0", out1.InDegree, out1.OutDegree)
 		sources := g.orphans(t, OrphansInput{Mode: OrphanSource})
 		for _, key := range []string{"in-1", "in-2", "in-3"} {
 			finding := sources.find(t, key)
-			if finding.OutDegree != 1 || finding.InDegree != 0 {
-				t.Errorf("%s degrees = %d/%d, want 0/1", key, finding.InDegree, finding.OutDegree)
-			}
+			assert.Should(t, finding.OutDegree == 1 && finding.InDegree == 0, "%s degrees = %d/%d, want 0/1", key, finding.InDegree, finding.OutDegree)
 		}
-		if contains(sinks.keys(), "hub") || contains(sources.keys(), "hub") {
-			t.Errorf("the hub, with three incoming and one outgoing edge, was reported: "+
-				"sinks %v, sources %v", sinks.keys(), sources.keys())
-		}
+		assert.Should(t, !contains(sinks.keys(), "hub") && !contains(sources.keys(), "hub"), "the hub, with three incoming and one outgoing edge, was reported: "+
+			"sinks %v, sources %v", sinks.keys(), sources.keys())
 	})
 
 	// TestOrphansAreNotReportedForIgnoredTypes, with the totals excluding
@@ -289,25 +248,17 @@ func TestOrphans(t *testing.T) {
 		g.entity(t, "note", "lonely-note-2")
 
 		all := g.orphans(t, OrphansInput{})
-		if len(all.Findings) != 3 || all.ConsideredTotal != 3 {
-			t.Fatalf("the unfiltered report names %v over %d considered, want all three",
-				all.keys(), all.ConsideredTotal)
-		}
+		assert.Must(t, len(all.Findings) == 3 && all.ConsideredTotal == 3, "the unfiltered report names %v over %d considered, want all three",
+			all.keys(), all.ConsideredTotal)
 		got := g.orphans(t, OrphansInput{IgnoreEntityTypes: []string{"note"}})
-		if len(got.Findings) != 1 || got.Findings[0].Key != "lonely-quest" {
-			t.Errorf("the report names %v, want only the quest", got.keys())
-		}
-		if got.ConsideredTotal != 1 {
-			t.Errorf("considered_total = %d, want 1: an ignored type is removed from the "+
-				"totals as well as from the findings", got.ConsideredTotal)
-		}
+		assert.Should(t, len(got.Findings) == 1 && got.Findings[0].Key == "lonely-quest", "the report names %v, want only the quest", got.keys())
+		assert.Should(t, got.ConsideredTotal == 1, "considered_total = %d, want 1: an ignored type is removed from the "+
+			"totals as well as from the findings", got.ConsideredTotal)
 		// And the same through the positive filter, which is the other way a
 		// caller narrows the same report.
 		narrowed := g.orphans(t, OrphansInput{EntityTypes: []string{"note"}})
-		if len(narrowed.Findings) != 2 || narrowed.ConsideredTotal != 2 {
-			t.Errorf("entity_types narrowed to note names %v over %d considered",
-				narrowed.keys(), narrowed.ConsideredTotal)
-		}
+		assert.Should(t, len(narrowed.Findings) == 2 && narrowed.ConsideredTotal == 2, "entity_types narrowed to note names %v over %d considered",
+			narrowed.keys(), narrowed.ConsideredTotal)
 	})
 
 	// TestAnOrphanCursorFromAnotherGameIsRefused is the behavioural half of
@@ -320,9 +271,7 @@ func TestOrphans(t *testing.T) {
 			mine.entity(t, "quest", key)
 		}
 		first := mine.orphans(t, OrphansInput{Limit: 1})
-		if first.NextCursor == "" {
-			t.Fatal("the first page issued no cursor, so there is nothing to carry")
-		}
+		assert.Must(t, first.NextCursor != "", "the first page issued no cursor, so there is nothing to carry")
 
 		theirs := mine.sibling(t)
 		theirs.declareEntityType(t, "quest")
@@ -333,13 +282,9 @@ func TestOrphans(t *testing.T) {
 		_, err := theirs.analysis.Orphans(context.Background(), theirs.projectID,
 			OrphansInput{Limit: 1, Cursor: first.NextCursor})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("another game's cursor answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "cursor" {
-			t.Errorf("the refusal names %v, want the caller's own `cursor` argument",
-				invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "another game's cursor answered %v, want invalid_input", err)
+		assert.Should(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "cursor", "the refusal names %v, want the caller's own `cursor` argument",
+			invalid.Fields)
 	})
 
 	// TestTheOrphanFingerprintIsProjectIdFirstAndCarriesItsMode is the
@@ -360,14 +305,10 @@ func TestOrphans(t *testing.T) {
 		// The mode is load-bearing on its own: paging through the isolated
 		// entities and having page 2 answer with the sinks is a wrong answer
 		// with no error.
-		if orphanFingerprint(g.projectID, OrphanSink, nil) ==
-			orphanFingerprint(g.projectID, OrphanSource, nil) {
-			t.Fatal("two modes share a fingerprint, so a cursor from one pages the other")
-		}
-		if orphanFingerprint(g.projectID, OrphanSink, nil) ==
-			orphanFingerprint(g.sibling(t).projectID, OrphanSink, nil) {
-			t.Fatal("two games share a fingerprint over an unfiltered listing")
-		}
+		assert.Must(t, orphanFingerprint(g.projectID, OrphanSink, nil) !=
+			orphanFingerprint(g.projectID, OrphanSource, nil), "two modes share a fingerprint, so a cursor from one pages the other")
+		assert.Must(t, orphanFingerprint(g.projectID, OrphanSink, nil) !=
+			orphanFingerprint(g.sibling(t).projectID, OrphanSink, nil), "two games share a fingerprint over an unfiltered listing")
 	})
 
 	// TestAnOrphanPageWalksEveryEntityExactlyOnce -- the cursor is a
@@ -394,13 +335,9 @@ func TestOrphans(t *testing.T) {
 				break
 			}
 		}
-		if len(seen) != len(want) {
-			t.Fatalf("the walk saw %v, want the seven entities", seen)
-		}
+		assert.Must(t, len(seen) == len(want), "the walk saw %v, want the seven entities", seen)
 		for key, count := range seen {
-			if count != 1 || !want[key] {
-				t.Errorf("%q was seen %d times", key, count)
-			}
+			assert.Should(t, count == 1 && want[key], "%q was seen %d times", key, count)
 		}
 	})
 
@@ -415,12 +352,8 @@ func TestOrphans(t *testing.T) {
 		_, err := g.analysis.Orphans(context.Background(), g.projectID,
 			OrphansInput{Mode: OrphanMode("dangling")})
 		var invalid *metamodel.ValidationError
-		if !errors.As(err, &invalid) || invalid.Code != CodeInvalidInput {
-			t.Fatalf("an unknown mode answered %v, want invalid_input", err)
-		}
-		if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "mode" {
-			t.Fatalf("the refusal names %v, want the caller's own `mode` argument", invalid.Fields)
-		}
+		assert.Must(t, errors.As(err, &invalid) && invalid.Code == CodeInvalidInput, "an unknown mode answered %v, want invalid_input", err)
+		assert.Must(t, len(invalid.Fields) == 1 && invalid.Fields[0].Path == "mode", "the refusal names %v, want the caller's own `mode` argument", invalid.Fields)
 		for _, known := range OrphanModes {
 			if !strings.Contains(invalid.Fields[0].Message, string(known)) {
 				t.Errorf("the refusal does not name %q, so it says something is wrong "+
@@ -442,14 +375,10 @@ func TestOrphans(t *testing.T) {
 		theirs.entity(t, "quest", "their-lonely-quest")
 
 		got := theirs.orphans(t, OrphansInput{})
-		if len(got.Findings) != 1 || got.Findings[0].Key != "their-lonely-quest" {
-			t.Fatalf("the second game's report names %v", got.keys())
-		}
-		if got.ConsideredTotal != 1 {
-			t.Errorf("considered_total = %d, want the one entity of this game: a total that "+
-				"counted the other game's rows would be the same defect one statement along",
-				got.ConsideredTotal)
-		}
+		assert.Must(t, len(got.Findings) == 1 && got.Findings[0].Key == "their-lonely-quest", "the second game's report names %v", got.keys())
+		assert.Should(t, got.ConsideredTotal == 1, "considered_total = %d, want the one entity of this game: a total that "+
+			"counted the other game's rows would be the same defect one statement along",
+			got.ConsideredTotal)
 		if len(mine.orphans(t, OrphansInput{}).Findings) != 1 {
 			t.Fatal("the first game stopped reporting its own orphan, so the assertion " +
 				"above proves nothing")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -98,9 +99,7 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		UserID    string `json:"user_id"`
@@ -111,18 +110,10 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.UserID != user.ID.String() {
-		t.Fatalf("user_id = %q, want %q", body.UserID, user.ID.String())
-	}
-	if body.ProjectID != project.ID.String() {
-		t.Fatalf("project_id = %q, want %q", body.ProjectID, project.ID.String())
-	}
-	if body.TokenID != tok.ID.String() {
-		t.Fatalf("token_id = %q, want %q", body.TokenID, tok.ID.String())
-	}
-	if body.IsAdmin {
-		t.Fatalf("is_admin = true, want false for a non-admin user's token")
-	}
+	assert.Must(t, body.UserID == user.ID.String(), "user_id = %q, want %q", body.UserID, user.ID.String())
+	assert.Must(t, body.ProjectID == project.ID.String(), "project_id = %q, want %q", body.ProjectID, project.ID.String())
+	assert.Must(t, body.TokenID == tok.ID.String(), "token_id = %q, want %q", body.TokenID, tok.ID.String())
+	assert.Must(t, !body.IsAdmin, "is_admin = true, want false for a non-admin user's token")
 }
 
 func TestMissingCredentialsAreUnauthorized(t *testing.T) {
@@ -132,9 +123,7 @@ func TestMissingCredentialsAreUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 func TestInvalidBearerTokenIsUnauthorized(t *testing.T) {
@@ -145,9 +134,7 @@ func TestInvalidBearerTokenIsUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 func TestRevokedTokenIsUnauthorized(t *testing.T) {
@@ -167,9 +154,7 @@ func TestRevokedTokenIsUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 // TestExpelledMemberTokenIsUnauthorized pins the property Task 9 closed and
@@ -190,9 +175,7 @@ func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: agent.ID, Label: "agent token"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	if _, err := projSvc.RemoveMember(ctx, agent.ID, project.ID); err != nil {
 		t.Fatalf("RemoveMember: %v", err)
@@ -203,9 +186,7 @@ func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 for an expelled member's token; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401 for an expelled member's token; body = %s", rec.Code, rec.Body.String())
 }
 
 func TestSessionCookieIdentifiesCaller(t *testing.T) {
@@ -215,18 +196,14 @@ func TestSessionCookieIdentifiesCaller(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		UserID    string `json:"user_id"`
@@ -235,12 +212,8 @@ func TestSessionCookieIdentifiesCaller(t *testing.T) {
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.UserID != user.ID.String() {
-		t.Fatalf("user_id = %q, want %q", body.UserID, user.ID.String())
-	}
-	if body.ProjectID != "" {
-		t.Fatalf("project_id = %q, want empty: a session caller carries no project", body.ProjectID)
-	}
+	assert.Must(t, body.UserID == user.ID.String(), "user_id = %q, want %q", body.UserID, user.ID.String())
+	assert.Must(t, body.ProjectID == "", "project_id = %q, want empty: a session caller carries no project", body.ProjectID)
 }
 
 func TestExpiredSessionCookieIsUnauthorized(t *testing.T) {
@@ -250,9 +223,7 @@ func TestExpiredSessionCookieIsUnauthorized(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 	if err := ids.RevokeSession(ctx, token); err != nil {
 		t.Fatalf("RevokeSession: %v", err)
 	}
@@ -262,9 +233,7 @@ func TestExpiredSessionCookieIsUnauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
 }
 
 // TestInvalidBearerDoesNotFallBackToCookie pins a deliberate choice: an
@@ -281,9 +250,7 @@ func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer garbage")
@@ -291,9 +258,7 @@ func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401: an invalid bearer must not fall back to a valid cookie", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401: an invalid bearer must not fall back to a valid cookie", rec.Code)
 }
 
 func TestHealthzStaysPublic(t *testing.T) {
@@ -303,9 +268,7 @@ func TestHealthzStaysPublic(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/healthz: status = %d, want 200 with no credentials", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "/healthz: status = %d, want 200 with no credentials", rec.Code)
 }
 
 func TestVersionRejectsAnonymousRequests(t *testing.T) {
@@ -315,9 +278,7 @@ func TestVersionRejectsAnonymousRequests(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("/version: status = %d, want 401 with no credentials", rec.Code)
-	}
+	assert.Must(t, rec.Code == http.StatusUnauthorized, "/version: status = %d, want 401 with no credentials", rec.Code)
 }
 
 // TestVersionReturnsBuildVersionToAnAuthenticatedCaller is /version's
@@ -333,17 +294,13 @@ func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/version: status = %d, want 200 for an authenticated caller; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "/version: status = %d, want 200 for an authenticated caller; body = %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		Version string `json:"version"`
@@ -351,9 +308,7 @@ func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Version != "test" {
-		t.Fatalf("version = %q, want %q", body.Version, "test")
-	}
+	assert.Must(t, body.Version == "test", "version = %q, want %q", body.Version, "test")
 }
 
 // TestSessionRenewsPastHalfwayThroughItsLifetime pins the sliding-session
@@ -390,9 +345,7 @@ func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	pastHalfway := time.Now().Add(cfg.SessionTTL/2 - time.Minute)
 	tokenHash := sha256.Sum256([]byte(token))
@@ -406,22 +359,16 @@ func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	after := time.Now()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 
 	_, newExpiry, err := ids.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
 	// clockSkewSlack allows for the target being computed by Postgres'
 	// own now(), not the Go process' — see sessions_test.go's identical
 	// constant for why a tight, zero-slack bracket flaked here.
 	const clockSkewSlack = 2 * time.Second
 	wantMin, wantMax := before.Add(cfg.SessionTTL-clockSkewSlack), after.Add(cfg.SessionTTL+clockSkewSlack)
-	if newExpiry.Before(wantMin) || newExpiry.After(wantMax) {
-		t.Fatalf("expiry = %v, want between %v and %v (now + SessionTTL, bracketed around the request)", newExpiry, wantMin, wantMax)
-	}
+	assert.Must(t, !newExpiry.Before(wantMin) && !newExpiry.After(wantMax), "expiry = %v, want between %v and %v (now + SessionTTL, bracketed around the request)", newExpiry, wantMin, wantMax)
 }
 
 // TestSessionDoesNotRenewBeforeHalfway pins the other half of the same
@@ -436,25 +383,17 @@ func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, originalExpiry, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 
 	_, expiryAfter, err := ids.UserForSession(ctx, token)
-	if err != nil {
-		t.Fatalf("UserForSession: %v", err)
-	}
-	if !expiryAfter.Equal(originalExpiry) {
-		t.Fatalf("expiry changed from %v to %v for a fresh session well before halfway", originalExpiry, expiryAfter)
-	}
+	assert.Must(t, err == nil, "UserForSession: %v", err)
+	assert.Must(t, expiryAfter.Equal(originalExpiry), "expiry changed from %v to %v for a fresh session well before halfway", originalExpiry, expiryAfter)
 }
 
 // TestAdminTokenReturnsProjectAndIsAdmin pins the admin half of the
@@ -478,29 +417,19 @@ func TestAdminTokenReturnsProjectAndIsAdmin(t *testing.T) {
 		t.Fatalf("BootstrapFirstAdmin: %v", err)
 	}
 	admin, err := ids.Authenticate(ctx, cfg.FirstAdminEmail, cfg.FirstAdminPassword)
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
-	if !admin.IsAdmin {
-		t.Fatal("bootstrapped user is not an admin")
-	}
+	assert.Must(t, err == nil, "Authenticate: %v", err)
+	assert.Must(t, admin.IsAdmin, "bootstrapped user is not an admin")
 
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", admin.ID)
-	if err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
+	assert.Must(t, err == nil, "Create project: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: admin.ID, Label: "admin token"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		IsAdmin   bool   `json:"is_admin"`
@@ -509,12 +438,8 @@ func TestAdminTokenReturnsProjectAndIsAdmin(t *testing.T) {
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !body.IsAdmin {
-		t.Fatal("is_admin = false, want true for an admin's token")
-	}
-	if body.ProjectID != project.ID.String() {
-		t.Fatalf("project_id = %q, want %q: an admin's token stays bound to its own project, not exempted", body.ProjectID, project.ID.String())
-	}
+	assert.Must(t, body.IsAdmin, "is_admin = false, want true for an admin's token")
+	assert.Must(t, body.ProjectID == project.ID.String(), "project_id = %q, want %q: an admin's token stays bound to its own project, not exempted", body.ProjectID, project.ID.String())
 }
 
 // TestBearerTakesPrecedenceOverCookieForADifferentUser is where the
@@ -531,22 +456,16 @@ func TestBearerTakesPrecedenceOverCookieForADifferentUser(t *testing.T) {
 	cookieUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cookie-user@example.test", DisplayName: "Cookie User", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", tokenUser.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: tokenUser.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	sessionToken, _, err := ids.IssueSession(ctx, cookieUser.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: sessionToken})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusOK, "status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 
 	var body struct {
 		UserID string `json:"user_id"`
@@ -554,9 +473,7 @@ func TestBearerTakesPrecedenceOverCookieForADifferentUser(t *testing.T) {
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.UserID != tokenUser.ID.String() {
-		t.Fatalf("user_id = %q, want the bearer token's user %q, not the cookie's user %q", body.UserID, tokenUser.ID.String(), cookieUser.ID.String())
-	}
+	assert.Must(t, body.UserID == tokenUser.ID.String(), "user_id = %q, want the bearer token's user %q, not the cookie's user %q", body.UserID, tokenUser.ID.String(), cookieUser.ID.String())
 }
 
 // TestDatabaseErrorDuringBearerAuthenticationIsInternalError and its
@@ -580,9 +497,7 @@ func TestDatabaseErrorDuringBearerAuthenticationIsInternalError(t *testing.T) {
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	pool.Close()
 
@@ -590,9 +505,7 @@ func TestDatabaseErrorDuringBearerAuthenticationIsInternalError(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 for a database failure, not 401 (indistinguishable from a bad credential); body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusInternalServerError, "status = %d, want 500 for a database failure, not 401 (indistinguishable from a bad credential); body = %s", rec.Code, rec.Body.String())
 }
 
 func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
@@ -605,9 +518,7 @@ func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("IssueSession: %v", err)
-	}
+	assert.Must(t, err == nil, "IssueSession: %v", err)
 
 	pool.Close()
 
@@ -615,7 +526,5 @@ func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 for a database failure, not 401; body = %s", rec.Code, rec.Body.String())
-	}
+	assert.Must(t, rec.Code == http.StatusInternalServerError, "status = %d, want 500 for a database failure, not 401; body = %s", rec.Code, rec.Body.String())
 }

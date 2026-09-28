@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -126,9 +127,7 @@ func (g *game) upload(t *testing.T, filename string, raw []byte) Asset {
 	t.Helper()
 	asset, err := g.views.CreateAsset(context.Background(), g.projectID, Actor{},
 		filename, bytes.NewReader(raw))
-	if err != nil {
-		t.Fatalf("upload %s: %v", filename, err)
-	}
+	assert.Must(t, err == nil, "upload %s: %v", filename, err)
 	return asset
 }
 
@@ -179,9 +178,7 @@ func TestAssetsArea(t *testing.T) {
 
 		// The control: nothing at all is stored by any of the three.
 		assets := listedAssets(t, g)
-		if len(assets) != 0 {
-			t.Fatalf("a refused upload stored %d assets, want none: %v", len(assets), assets)
-		}
+		assert.Must(t, len(assets) == 0, "a refused upload stored %d assets, want none: %v", len(assets), assets)
 	})
 
 	// TestAssetsArea's "the mime is sniffed not trusted" case stores the same
@@ -204,28 +201,18 @@ func TestAssetsArea(t *testing.T) {
 			{"no-extension-at-all", pngBytes(t, 4, 4), MimePNG},
 		} {
 			asset := g.upload(t, tc.filename, tc.raw)
-			if asset.Mime != tc.want {
-				t.Errorf("%s stored as %q, want %q: the mime is read from the bytes",
-					tc.filename, asset.Mime, tc.want)
-			}
+			assert.Should(t, asset.Mime == tc.want, "%s stored as %q, want %q: the mime is read from the bytes",
+				tc.filename, asset.Mime, tc.want)
 			// Off a read rather than off the returned value: the return is
 			// what Go passed to the INSERT, and only a read says what was
 			// stored.
 			stored, err := g.views.ReadAsset(ctx, g.projectID, asset.ID)
-			if err != nil {
-				t.Fatalf("read back %s: %v", tc.filename, err)
-			}
-			if stored.Mime != tc.want {
-				t.Errorf("%s reads back as %q, want %q", tc.filename, stored.Mime, tc.want)
-			}
-			if stored.Filename != tc.filename {
-				t.Errorf("Filename = %q, want %q: the name is stored as prose and read "+
-					"by nothing else", stored.Filename, tc.filename)
-			}
-			if !bytes.Equal(stored.Bytes, tc.raw) {
-				t.Errorf("%s came back with %d bytes, want the %d it was sent",
-					tc.filename, len(stored.Bytes), len(tc.raw))
-			}
+			assert.Must(t, err == nil, "read back %s: %v", tc.filename, err)
+			assert.Should(t, stored.Mime == tc.want, "%s reads back as %q, want %q", tc.filename, stored.Mime, tc.want)
+			assert.Should(t, stored.Filename == tc.filename, "Filename = %q, want %q: the name is stored as prose and read "+
+				"by nothing else", stored.Filename, tc.filename)
+			assert.Should(t, bytes.Equal(stored.Bytes, tc.raw), "%s came back with %d bytes, want the %d it was sent",
+				tc.filename, len(stored.Bytes), len(tc.raw))
 		}
 	})
 
@@ -242,11 +229,9 @@ func TestAssetsArea(t *testing.T) {
 		_, err := g.views.CreateAsset(context.Background(), g.projectID, Actor{},
 			"enormous.png", body)
 		assertRefusedErr(t, err, pointer("bytes"), "is larger than")
-		if body.read > MaxAssetBytes+1 {
-			t.Fatalf("the upload pulled %d bytes off the reader, and the most it may pull "+
-				"is %d: a bound applied after io.ReadAll is a bound that already lost",
-				body.read, MaxAssetBytes+1)
-		}
+		assert.Must(t, body.read <= MaxAssetBytes+1, "the upload pulled %d bytes off the reader, and the most it may pull "+
+			"is %d: a bound applied after io.ReadAll is a bound that already lost",
+			body.read, MaxAssetBytes+1)
 	})
 
 	// TestAssetsArea's "a body one byte past the cap is not stored truncated"
@@ -284,10 +269,8 @@ func TestAssetsArea(t *testing.T) {
 		// And nothing of it was stored, truncated or otherwise: two assets
 		// exist, the one at the cap and the one this test's control uploaded.
 		for _, a := range listedAssets(t, g) {
-			if a.Filename == "one-byte-over.png" {
-				t.Fatalf("an over-cap upload was stored: a bound that reads exactly the " +
-					"cap cannot tell a file of that size from the front of a larger one")
-			}
+			assert.Must(t, a.Filename != "one-byte-over.png", "an over-cap upload was stored: a bound that reads exactly the "+
+				"cap cannot tell a file of that size from the front of a larger one")
 		}
 	})
 
@@ -330,28 +313,18 @@ func TestAssetsArea(t *testing.T) {
 		// answers with and therefore the only surface that proves these
 		// columns are readable at all.
 		assets := listedAssets(t, g)
-		if len(assets) != len(cases) {
-			t.Fatalf("listed %d assets, want %d", len(assets), len(cases))
-		}
+		assert.Must(t, len(assets) == len(cases), "listed %d assets, want %d", len(assets), len(cases))
 		byName := map[string]Asset{}
 		for _, a := range assets {
 			byName[a.Filename] = a
 		}
 		for _, tc := range cases {
 			got, ok := byName[tc.name+".bin"]
-			if !ok {
-				t.Fatalf("%s is not in the listing", tc.name)
-			}
-			if got.Width != tc.width || got.Height != tc.height {
-				t.Errorf("%s is %dx%d, want %dx%d: the size is decoded from the header",
-					tc.name, got.Width, got.Height, tc.width, tc.height)
-			}
-			if got.Mime != tc.mime {
-				t.Errorf("%s stored as %q, want %q", tc.name, got.Mime, tc.mime)
-			}
-			if got.CreatedAt.IsZero() {
-				t.Errorf("%s has no created_at, and the listing is ordered by it", tc.name)
-			}
+			assert.Must(t, ok, "%s is not in the listing", tc.name)
+			assert.Should(t, got.Width == tc.width && got.Height == tc.height, "%s is %dx%d, want %dx%d: the size is decoded from the header",
+				tc.name, got.Width, got.Height, tc.width, tc.height)
+			assert.Should(t, got.Mime == tc.mime, "%s stored as %q, want %q", tc.name, got.Mime, tc.mime)
+			assert.Should(t, !got.CreatedAt.IsZero(), "%s has no created_at, and the listing is ordered by it", tc.name)
 		}
 	})
 
@@ -410,13 +383,9 @@ func TestAssetsArea(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				err := createAsset(t, g, "broken.png", tc.raw)
-				if err == nil {
-					t.Fatalf("bytes that carry no readable size must be refused")
-				}
+				assert.Must(t, err != nil, "bytes that carry no readable size must be refused")
 				var ve *metamodel.ValidationError
-				if !errors.As(err, &ve) {
-					t.Fatalf("want a validation error, got %v", err)
-				}
+				assert.Must(t, errors.As(err, &ve), "want a validation error, got %v", err)
 			})
 		}
 	})
@@ -441,10 +410,8 @@ func TestAssetsArea(t *testing.T) {
 		body := &countingReader{total: 64 << 20}
 		_, err := g.views.CreateAsset(context.Background(), g.projectID, Actor{}, "", body)
 		assertRefusedErr(t, err, pointer("filename"), "is required")
-		if body.read != 0 {
-			t.Fatalf("the body was read (%d bytes) before the filename was judged: the "+
-				"order of the passes is the order a caller can act on them", body.read)
-		}
+		assert.Must(t, body.read == 0, "the body was read (%d bytes) before the filename was judged: the "+
+			"order of the passes is the order a caller can act on them", body.read)
 	})
 
 	// TestAssetsArea's "the uploader is recorded and a foreign token is
@@ -459,18 +426,14 @@ func TestAssetsArea(t *testing.T) {
 		asset, err := azeroth.views.CreateAsset(ctx, azeroth.projectID,
 			Actor{UserID: &user, TokenID: &token}, "map.png",
 			bytes.NewReader(pngBytes(t, 8, 8)))
-		if err != nil {
-			t.Fatalf("upload: %v", err)
-		}
+		assert.Must(t, err == nil, "upload: %v", err)
 		var gotUser, gotToken *uuid.UUID
 		if err := azeroth.pool.QueryRow(ctx,
 			`SELECT created_by_user_id, created_by_token_id FROM view_assets WHERE id = $1`,
 			asset.ID).Scan(&gotUser, &gotToken); err != nil {
 			t.Fatalf("read the audit columns: %v", err)
 		}
-		if gotUser == nil || *gotUser != user || gotToken == nil || *gotToken != token {
-			t.Fatalf("audit columns = (%v, %v), want (%s, %s)", gotUser, gotToken, user, token)
-		}
+		assert.Must(t, gotUser != nil && *gotUser == user && gotToken != nil && *gotToken == token, "audit columns = (%v, %v), want (%s, %s)", gotUser, gotToken, user, token)
 
 		// A token of another game is refused as a scope violation rather
 		// than as a raw 23503 over a generated constraint name, which says
@@ -478,9 +441,7 @@ func TestAssetsArea(t *testing.T) {
 		foreign := newToken(t, outland.pool, outland.projectID)
 		_, err = azeroth.views.CreateAsset(ctx, azeroth.projectID,
 			Actor{TokenID: &foreign}, "map.png", bytes.NewReader(pngBytes(t, 8, 8)))
-		if !errors.Is(err, ErrActorNotInGame) {
-			t.Fatalf("a foreign token must be refused as such, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrActorNotInGame), "a foreign token must be refused as such, got %v", err)
 	})
 
 	// TestAssetsArea's "assets of another game are not listed" case and its
@@ -493,16 +454,12 @@ func TestAssetsArea(t *testing.T) {
 		theirs := outland.upload(t, "outland.png", pngBytes(t, 9, 9))
 
 		assets := listedAssets(t, azeroth)
-		if len(assets) != 1 || assets[0].ID != mine.ID {
-			t.Fatalf("azeroth listed %v, want only its own asset %s", assets, mine.ID)
-		}
+		assert.Must(t, len(assets) == 1 && assets[0].ID == mine.ID, "azeroth listed %v, want only its own asset %s", assets, mine.ID)
 		// The positive control in the same test: the other game's asset is
 		// really there, so the assertion above cannot pass because nothing
 		// was written.
 		others := listedAssets(t, outland)
-		if len(others) != 1 || others[0].ID != theirs.ID {
-			t.Fatalf("outland listed %v, want its own asset %s", others, theirs.ID)
-		}
+		assert.Must(t, len(others) == 1 && others[0].ID == theirs.ID, "outland listed %v, want its own asset %s", others, theirs.ID)
 	})
 
 	// TestAssetsArea's "an asset of another game is not served" case drives
@@ -552,9 +509,7 @@ func TestAssetsArea(t *testing.T) {
 		in := saveable("world", questsOnly)
 		in.Renderer = RendererMap
 		row, err := svc.UpsertView(ctx, g.projectID, in)
-		if err != nil {
-			t.Fatalf("save the view: %v", err)
-		}
+		assert.Must(t, err == nil, "save the view: %v", err)
 
 		viewer := hub.Subscribe(g.projectID, "viewer", false)
 		defer hub.Unsubscribe(viewer)
@@ -572,9 +527,7 @@ func TestAssetsArea(t *testing.T) {
 			}
 			for who, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 				got := receive(t, sub)
-				if got.Kind != "view.background" {
-					t.Fatalf("%s after %s got %q, want view.background", who, step.what, got.Kind)
-				}
+				assert.Must(t, got.Kind == "view.background", "%s after %s got %q, want view.background", who, step.what, got.Kind)
 				// The same payload assertion the position kind gets, and it
 				// is the same claim: identity only, no asset id a client
 				// could render instead of re-reading, and no version — this
@@ -638,19 +591,11 @@ func TestAssetsArea(t *testing.T) {
 		g.backedView(t, "world", asset.ID, 2.5, Point{X: 10, Y: -4})
 
 		got, err := g.views.ViewByKey(ctx, g.projectID, "world")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.BackgroundAssetID == nil || *got.BackgroundAssetID != asset.ID {
-			t.Fatalf("BackgroundAssetID = %v, want %s", got.BackgroundAssetID, asset.ID)
-		}
-		if got.BackgroundScale != 2.5 {
-			t.Errorf("BackgroundScale = %v, want 2.5", got.BackgroundScale)
-		}
-		if string(got.BackgroundOffset) != `{"x": 10, "y": -4}` {
-			t.Errorf("BackgroundOffset = %s, want the object that was written",
-				got.BackgroundOffset)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.BackgroundAssetID != nil && *got.BackgroundAssetID == asset.ID, "BackgroundAssetID = %v, want %s", got.BackgroundAssetID, asset.ID)
+		assert.Should(t, got.BackgroundScale == 2.5, "BackgroundScale = %v, want 2.5", got.BackgroundScale)
+		assert.Should(t, string(got.BackgroundOffset) == `{"x": 10, "y": -4}`, "BackgroundOffset = %s, want the object that was written",
+			got.BackgroundOffset)
 
 		// Clearing it: a nil asset id is a value a caller means, and it is
 		// the only way to remove a background. The two knobs go back to
@@ -661,17 +606,10 @@ func TestAssetsArea(t *testing.T) {
 			t.Fatalf("clear the background: %v", err)
 		}
 		got, err = g.views.ViewByKey(ctx, g.projectID, "world")
-		if err != nil {
-			t.Fatalf("read back after clearing: %v", err)
-		}
-		if got.BackgroundAssetID != nil {
-			t.Errorf("BackgroundAssetID = %v, want nil after a clear", got.BackgroundAssetID)
-		}
-		if got.BackgroundScale != DefaultBackgroundScale ||
-			string(got.BackgroundOffset) != `{"x": 0, "y": 0}` {
-			t.Errorf("clearing left scale %v and offset %s, want the column defaults",
-				got.BackgroundScale, got.BackgroundOffset)
-		}
+		assert.Must(t, err == nil, "read back after clearing: %v", err)
+		assert.Should(t, got.BackgroundAssetID == nil, "BackgroundAssetID = %v, want nil after a clear", got.BackgroundAssetID)
+		assert.Should(t, got.BackgroundScale == DefaultBackgroundScale && string(got.BackgroundOffset) == `{"x": 0, "y": 0}`, "clearing left scale %v and offset %s, want the column defaults",
+			got.BackgroundScale, got.BackgroundOffset)
 	})
 
 	// TestAssetsArea's "setting a background changes nothing else about the
@@ -694,9 +632,7 @@ func TestAssetsArea(t *testing.T) {
 		in.Description = "The whole of Azeroth."
 		in.LayoutMode = LayoutManual
 		before, err := g.views.UpsertView(ctx, g.projectID, in)
-		if err != nil {
-			t.Fatalf("save: %v", err)
-		}
+		assert.Must(t, err == nil, "save: %v", err)
 		asset := g.upload(t, "azeroth.png", pngBytes(t, 8, 8))
 		scale := 3.0
 		if err := g.views.SetBackground(ctx, g.projectID, "world",
@@ -705,25 +641,14 @@ func TestAssetsArea(t *testing.T) {
 		}
 
 		after, err := g.views.ViewByKey(ctx, g.projectID, "world")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if after.Version != before.Version {
-			t.Errorf("Version moved from %d to %d: a background is not an edit of the "+
-				"query document the version guards", before.Version, after.Version)
-		}
-		if string(after.Query) != string(before.Query) {
-			t.Errorf("the stored query changed: the setter writes three columns and no more")
-		}
-		if string(after.RendererParams) != string(before.RendererParams) {
-			t.Errorf("renderer_params = %s, want %s untouched: a setter that writes them "+
-				"without re-checking them against the query is how a stored view becomes "+
-				"undrawable", after.RendererParams, before.RendererParams)
-		}
-		if after.Renderer != before.Renderer || after.Description != before.Description ||
-			after.LayoutMode != before.LayoutMode || after.Name != before.Name {
-			t.Errorf("the setter changed a column it does not own: %+v", after)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Should(t, after.Version == before.Version, "Version moved from %d to %d: a background is not an edit of the "+
+			"query document the version guards", before.Version, after.Version)
+		assert.Should(t, string(after.Query) == string(before.Query), "the stored query changed: the setter writes three columns and no more")
+		assert.Should(t, string(after.RendererParams) == string(before.RendererParams), "renderer_params = %s, want %s untouched: a setter that writes them "+
+			"without re-checking them against the query is how a stored view becomes "+
+			"undrawable", after.RendererParams, before.RendererParams)
+		assert.Should(t, after.Renderer == before.Renderer && after.Description == before.Description && after.LayoutMode == before.LayoutMode && after.Name == before.Name, "the setter changed a column it does not own: %+v", after)
 	})
 
 	// TestAssetsArea's "only a renderer that draws a background accepts one"
@@ -753,9 +678,7 @@ func TestAssetsArea(t *testing.T) {
 				BackgroundInput{AssetID: &asset.ID})
 			switch {
 			case r.ReadsBackground:
-				if err != nil {
-					t.Errorf("%s reads a background and refused one: %v", r.Name, err)
-				}
+				assert.Should(t, err == nil, "%s reads a background and refused one: %v", r.Name, err)
 				accepted++
 			default:
 				assertRefusedErr(t, err, pointer("asset_id"), "which draws none")
@@ -769,10 +692,8 @@ func TestAssetsArea(t *testing.T) {
 				t.Errorf("%s refused a clear: %v", r.Name, err)
 			}
 		}
-		if accepted == 0 || refused == 0 {
-			t.Fatalf("accepted %d and refused %d: a run that goes one way for every "+
-				"renderer cannot tell the rule from its absence", accepted, refused)
-		}
+		assert.Must(t, accepted != 0 && refused != 0, "accepted %d and refused %d: a run that goes one way for every "+
+			"renderer cannot tell the rule from its absence", accepted, refused)
 	})
 
 	// TestAssetsArea's "a background knob with no background is refused" case
@@ -797,9 +718,7 @@ func TestAssetsArea(t *testing.T) {
 		err := g.views.SetBackground(ctx, g.projectID, "world",
 			BackgroundInput{Scale: &scale, Offset: &offset})
 		var ve *metamodel.ValidationError
-		if !errors.As(err, &ve) || len(ve.Fields) != 2 {
-			t.Fatalf("two bad knobs must come back as two problems, got %v", err)
-		}
+		assert.Must(t, errors.As(err, &ve) && len(ve.Fields) == 2, "two bad knobs must come back as two problems, got %v", err)
 
 		// The scale's own bounds, ahead of 0008_views.sql's CHECK, which
 		// answers a caller's own argument with an untyped 23514.
@@ -820,13 +739,9 @@ func TestAssetsArea(t *testing.T) {
 			pointer("offset", "x"), "infinite")
 		// The control: nothing above was stored.
 		got, err := g.views.ViewByKey(ctx, g.projectID, "world")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.BackgroundAssetID != nil || got.BackgroundScale != DefaultBackgroundScale {
-			t.Fatalf("a refused call stored something: %v, %v",
-				got.BackgroundAssetID, got.BackgroundScale)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.BackgroundAssetID == nil && got.BackgroundScale == DefaultBackgroundScale, "a refused call stored something: %v, %v",
+			got.BackgroundAssetID, got.BackgroundScale)
 	})
 
 	// TestAssetsArea's "an asset of another game cannot become this views
@@ -849,17 +764,13 @@ func TestAssetsArea(t *testing.T) {
 		in := saveable("world", questsOnly)
 		in.Renderer = RendererMap
 		view, err := azeroth.views.UpsertView(ctx, azeroth.projectID, in)
-		if err != nil {
-			t.Fatalf("save: %v", err)
-		}
+		assert.Must(t, err == nil, "save: %v", err)
 
 		// Through the service: a not_found naming the asset, because from
 		// inside this game that id names nothing.
 		err = azeroth.views.SetBackground(ctx, azeroth.projectID, "world",
 			BackgroundInput{AssetID: &theirs.ID})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a foreign asset must be not_found, got %v", err)
-		}
+		assert.Must(t, errors.Is(err, ErrNotFound), "a foreign asset must be not_found, got %v", err)
 		// The positive control: this game's own asset is accepted, so the
 		// refusal above is about the game and not about the call.
 		if err := azeroth.views.SetBackground(ctx, azeroth.projectID, "world",
@@ -875,10 +786,8 @@ func TestAssetsArea(t *testing.T) {
 			BackgroundOffset: []byte(`{"x":0,"y":0}`),
 		})
 		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-			t.Fatalf("the composite foreign key must refuse another game's asset with "+
-				"23503, got %v", err)
-		}
+		assert.Must(t, errors.As(err, &pgErr) && pgErr.Code == "23503", "the composite foreign key must refuse another game's asset with "+
+			"23503, got %v", err)
 		// And its control, so the assertion above cannot pass because the
 		// statement refuses everything.
 		if _, err := q.SetViewBackground(ctx, dbq.SetViewBackgroundParams{
@@ -895,10 +804,8 @@ func TestAssetsArea(t *testing.T) {
 			ProjectID: outland.projectID, ID: view.ID,
 			BackgroundScale: 1, BackgroundOffset: []byte(`{"x":0,"y":0}`),
 		})
-		if err != nil || written != 0 {
-			t.Fatalf("outland wrote %d rows of azeroth's view (err %v), want none",
-				written, err)
-		}
+		assert.Must(t, err == nil && written == 0, "outland wrote %d rows of azeroth's view (err %v), want none",
+			written, err)
 	})
 
 	// TestAssetsArea's "deleting an asset nulls the background of every view
@@ -925,30 +832,17 @@ func TestAssetsArea(t *testing.T) {
 		}
 		for _, key := range []string{"world", "routes"} {
 			got, err := g.views.ViewByKey(ctx, g.projectID, key)
-			if err != nil {
-				t.Fatalf("%s must survive its background: %v", key, err)
-			}
-			if got.BackgroundAssetID != nil {
-				t.Errorf("%s still points at %v: 0008_views.sql's ON DELETE SET NULL is "+
-					"what detaches it", key, got.BackgroundAssetID)
-			}
-			if got.BackgroundScale != DefaultBackgroundScale ||
-				string(got.BackgroundOffset) != `{"x": 0, "y": 0}` {
-				t.Errorf("%s kept scale %v and offset %s, which now place an image that "+
-					"is gone — the state SetBackground refuses to create",
-					key, got.BackgroundScale, got.BackgroundOffset)
-			}
+			assert.Must(t, err == nil, "%s must survive its background: %v", key, err)
+			assert.Should(t, got.BackgroundAssetID == nil, "%s still points at %v: 0008_views.sql's ON DELETE SET NULL is "+
+				"what detaches it", key, got.BackgroundAssetID)
+			assert.Should(t, got.BackgroundScale == DefaultBackgroundScale && string(got.BackgroundOffset) == `{"x": 0, "y": 0}`, "%s kept scale %v and offset %s, which now place an image that "+
+				"is gone — the state SetBackground refuses to create",
+				key, got.BackgroundScale, got.BackgroundOffset)
 		}
 		other, err := g.views.ViewByKey(ctx, g.projectID, "elsewhere")
-		if err != nil {
-			t.Fatalf("read the control: %v", err)
-		}
-		if other.BackgroundAssetID == nil || *other.BackgroundAssetID != survivor.ID {
-			t.Errorf("the control lost its background: %v", other.BackgroundAssetID)
-		}
-		if other.BackgroundScale != 3 {
-			t.Errorf("the control's scale is %v, want 3 untouched", other.BackgroundScale)
-		}
+		assert.Must(t, err == nil, "read the control: %v", err)
+		assert.Should(t, other.BackgroundAssetID != nil && *other.BackgroundAssetID == survivor.ID, "the control lost its background: %v", other.BackgroundAssetID)
+		assert.Should(t, other.BackgroundScale == 3, "the control's scale is %v, want 3 untouched", other.BackgroundScale)
 		// The asset itself is gone, and a second removal is not_found rather
 		// than a success a caller could publish an event about.
 		if _, err := g.views.ReadAsset(ctx, g.projectID, doomed.ID); !errors.Is(
@@ -1044,9 +938,7 @@ func TestAssetsArea(t *testing.T) {
 		// it the VP8 row would pass on the refusal alone while a widened
 		// check quietly wrote garbage into view_assets.
 		assets := listedAssets(t, g)
-		if len(assets) != 0 {
-			t.Fatalf("%d assets stored, want none: %v", len(assets), assets)
-		}
+		assert.Must(t, len(assets) == 0, "%d assets stored, want none: %v", len(assets), assets)
 
 		// The positive controls, in the same test, so that no row above can
 		// be passing because uploads are broken: the full-length magic
@@ -1088,13 +980,9 @@ func TestAssetsArea(t *testing.T) {
 
 		// Nothing moved: the refusal is a refusal and not a partial write.
 		got, err := g.views.ViewByKey(ctx, g.projectID, "world")
-		if err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if got.Renderer != RendererMap || got.BackgroundAssetID == nil {
-			t.Fatalf("view = (%s, %v), want the map renderer and its background intact",
-				got.Renderer, got.BackgroundAssetID)
-		}
+		assert.Must(t, err == nil, "read back: %v", err)
+		assert.Must(t, got.Renderer == RendererMap && got.BackgroundAssetID != nil, "view = (%s, %v), want the map renderer and its background intact",
+			got.Renderer, got.BackgroundAssetID)
 
 		// The repair the message names, in order: clear the background, then
 		// change the renderer. Both halves are asserted, because a refusal
@@ -1159,9 +1047,7 @@ func TestAssetsArea(t *testing.T) {
 
 		// And the recovery the message names works: delete one, upload one.
 		page, err := azeroth.views.ListAssets(ctx, azeroth.projectID, AssetFilter{Limit: 1})
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
+		assert.Must(t, err == nil, "list: %v", err)
 		if err := azeroth.views.RemoveAsset(ctx, azeroth.projectID, page.Assets[0].ID); err != nil {
 			t.Fatalf("remove: %v", err)
 		}
@@ -1196,17 +1082,11 @@ func TestAssetsArea(t *testing.T) {
 		var got []uuid.UUID
 		filter := AssetFilter{Limit: 3}
 		for pages := 0; ; pages++ {
-			if pages > 5 {
-				t.Fatal("the listing did not terminate: a cursor is not advancing")
-			}
+			assert.Must(t, pages <= 5, "the listing did not terminate: a cursor is not advancing")
 			page, err := azeroth.views.ListAssets(ctx, azeroth.projectID, filter)
-			if err != nil {
-				t.Fatalf("page %d: %v", pages, err)
-			}
-			if len(page.Assets) > 3 {
-				t.Fatalf("page %d carried %d assets, want the limit of 3 to be applied",
-					pages, len(page.Assets))
-			}
+			assert.Must(t, err == nil, "page %d: %v", pages, err)
+			assert.Must(t, len(page.Assets) <= 3, "page %d carried %d assets, want the limit of 3 to be applied",
+				pages, len(page.Assets))
 			for _, a := range page.Assets {
 				got = append(got, a.ID)
 			}
@@ -1215,9 +1095,7 @@ func TestAssetsArea(t *testing.T) {
 			}
 			filter.Cursor = page.NextCursor
 		}
-		if len(got) != len(want) {
-			t.Fatalf("paging returned %d assets, want %d: %v", len(got), len(want), got)
-		}
+		assert.Must(t, len(got) == len(want), "paging returned %d assets, want %d: %v", len(got), len(want), got)
 		for i := range want {
 			if got[i] != want[i] {
 				t.Fatalf("asset %d of the walk is %s, want %s: the page boundary skipped or "+
@@ -1230,9 +1108,7 @@ func TestAssetsArea(t *testing.T) {
 		// position that means nothing there — the defect internal/paging's
 		// package comment records.
 		first, err := azeroth.views.ListAssets(ctx, azeroth.projectID, AssetFilter{Limit: 3})
-		if err != nil {
-			t.Fatalf("first page: %v", err)
-		}
+		assert.Must(t, err == nil, "first page: %v", err)
 		_, err = outland.views.ListAssets(ctx, outland.projectID,
 			AssetFilter{Cursor: first.NextCursor})
 		assertRefused(t, err, pointer("cursor"), "cursor")
@@ -1245,12 +1121,8 @@ func TestAssetsArea(t *testing.T) {
 			t.Fatalf("save a view: %v", err)
 		}
 		views, err := azeroth.views.ListViews(ctx, azeroth.projectID, ViewFilter{Limit: 1})
-		if err != nil {
-			t.Fatalf("list views: %v", err)
-		}
-		if views.NextCursor == "" {
-			t.Fatal("the view listing returned no cursor, so this half asserts nothing")
-		}
+		assert.Must(t, err == nil, "list views: %v", err)
+		assert.Must(t, views.NextCursor != "", "the view listing returned no cursor, so this half asserts nothing")
 		_, err = azeroth.views.ListAssets(ctx, azeroth.projectID,
 			AssetFilter{Cursor: views.NextCursor})
 		assertRefused(t, err, pointer("cursor"), "cursor")
@@ -1299,9 +1171,7 @@ func (g *game) backedView(t *testing.T, key string, asset uuid.UUID,
 	in := saveable(key, questsOnly)
 	in.Renderer = RendererMap
 	row, err := g.views.UpsertView(ctx, g.projectID, in)
-	if err != nil {
-		t.Fatalf("save %s: %v", key, err)
-	}
+	assert.Must(t, err == nil, "save %s: %v", key, err)
 	if err := g.views.SetBackground(ctx, g.projectID, key, BackgroundInput{
 		AssetID: &asset, Scale: &scale, Offset: &offset,
 	}); err != nil {
@@ -1350,9 +1220,7 @@ func paramsFor(name string) map[string]any {
 func listedAssets(t *testing.T, g *game) []Asset {
 	t.Helper()
 	page, err := g.views.ListAssets(context.Background(), g.projectID, AssetFilter{})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	assert.Must(t, err == nil, "list: %v", err)
 	return page.Assets
 }
 
@@ -1373,9 +1241,7 @@ func assertRefused(t *testing.T, err error, path, want string) {
 func assertRefusedErr(t *testing.T, err error, path, want string) {
 	t.Helper()
 	var ve *metamodel.ValidationError
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected an invalid_input refusal at %s, got %v", path, err)
-	}
+	assert.Must(t, errors.As(err, &ve), "expected an invalid_input refusal at %s, got %v", path, err)
 	for _, f := range ve.Fields {
 		if f.Path == path && strings.Contains(f.Message, want) {
 			return

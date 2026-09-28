@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -32,9 +33,7 @@ import (
 func reserveAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve a free port: %v", err)
-	}
+	assert.Must(t, err == nil, "reserve a free port: %v", err)
 	addr := ln.Addr().String()
 	if err := ln.Close(); err != nil {
 		t.Fatalf("close reserved listener: %v", err)
@@ -90,9 +89,7 @@ func waitForRunningServer(t *testing.T, base string, done chan error, deadline t
 		done <- err
 		t.Fatalf("run() exited during startup instead of serving: %v", err)
 	case err := <-ready:
-		if err != nil {
-			t.Fatalf("server never became healthy: %v", err)
-		}
+		assert.Must(t, err == nil, "server never became healthy: %v", err)
 	}
 }
 
@@ -168,21 +165,13 @@ func loginAdmin(t *testing.T, base string) *http.Cookie {
 		"email":    "admin@example.test",
 		"password": "password12345",
 	})
-	if err != nil {
-		t.Fatalf("marshal login body: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal login body: %v", err)
 	resp, err := http.Post(base+"/api/auth/login", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST /api/auth/login: %v", err)
-	}
+	assert.Must(t, err == nil, "POST /api/auth/login: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("login status = %d, want 200", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusOK, "login status = %d, want 200", resp.StatusCode)
 	cookies := resp.Cookies()
-	if len(cookies) == 0 {
-		t.Fatal("login response set no session cookie")
-	}
+	assert.Must(t, len(cookies) != 0, "login response set no session cookie")
 	return cookies[0]
 }
 
@@ -193,23 +182,15 @@ func loginAdmin(t *testing.T, base string) *http.Cookie {
 func createGame(t *testing.T, base string, session *http.Cookie, slug, name string) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"slug": slug, "name": name})
-	if err != nil {
-		t.Fatalf("marshal create game body: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal create game body: %v", err)
 	req, err := http.NewRequest(http.MethodPost, base+"/api/games", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("NewRequest POST /api/games: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest POST /api/games: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(session)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST /api/games: %v", err)
-	}
+	assert.Must(t, err == nil, "POST /api/games: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create game status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "create game status = %d, want 201", resp.StatusCode)
 	var out struct {
 		ID   string `json:"id"`
 		Slug string `json:"slug"`
@@ -217,9 +198,7 @@ func createGame(t *testing.T, base string, session *http.Cookie, slug, name stri
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode create game response: %v", err)
 	}
-	if out.Slug == "" {
-		t.Fatalf("create game answered no slug, and the slug is the address: %+v", out)
-	}
+	assert.Must(t, out.Slug != "", "create game answered no slug, and the slug is the address: %+v", out)
 	return out.Slug
 }
 
@@ -228,23 +207,15 @@ func createGame(t *testing.T, base string, session *http.Cookie, slug, name stri
 func mintToken(t *testing.T, base string, session *http.Cookie, gameSlug string) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"label": "test-agent"})
-	if err != nil {
-		t.Fatalf("marshal create token body: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal create token body: %v", err)
 	req, err := http.NewRequest(http.MethodPost, base+"/api/games/"+gameSlug+"/tokens", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("NewRequest POST tokens: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest POST tokens: %v", err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(session)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST tokens: %v", err)
-	}
+	assert.Must(t, err == nil, "POST tokens: %v", err)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create token status = %d, want 201", resp.StatusCode)
-	}
+	assert.Must(t, resp.StatusCode == http.StatusCreated, "create token status = %d, want 201", resp.StatusCode)
 	var out struct {
 		Token string `json:"token"`
 	}
@@ -268,9 +239,7 @@ func TestRunServesMigratesAndBootstraps(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatalf("run() returned an error on shutdown: %v", err)
-		}
+		assert.Must(t, err == nil, "run() returned an error on shutdown: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("run() did not return within 10s of ctx being cancelled")
 	}
@@ -311,18 +280,12 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 	// Open one long-lived SSE stream ahead of the burst below, exactly the
 	// shape web.Server.Close exists to end promptly on shutdown.
 	sseReq, err := http.NewRequest(http.MethodGet, base+"/api/games/"+gameSlug+"/events", nil)
-	if err != nil {
-		t.Fatalf("NewRequest GET events: %v", err)
-	}
+	assert.Must(t, err == nil, "NewRequest GET events: %v", err)
 	sseReq.Header.Set("Authorization", "Bearer "+token)
 	sseResp, err := http.DefaultClient.Do(sseReq)
-	if err != nil {
-		t.Fatalf("GET events: %v", err)
-	}
+	assert.Must(t, err == nil, "GET events: %v", err)
 	defer func() { _ = sseResp.Body.Close() }()
-	if sseResp.StatusCode != http.StatusOK {
-		t.Fatalf("events status = %d, want 200", sseResp.StatusCode)
-	}
+	assert.Must(t, sseResp.StatusCode == http.StatusOK, "events status = %d, want 200", sseResp.StatusCode)
 	streamDone := make(chan struct{})
 	go func() {
 		defer close(streamDone)
@@ -343,13 +306,9 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 		"email":    "admin@example.test",
 		"password": "password12345",
 	})
-	if err != nil {
-		t.Fatalf("marshal warm-up login body: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal warm-up login body: %v", err)
 	warmupResp, err := http.Post(base+"/api/auth/login", "application/json", bytes.NewReader(warmupBody))
-	if err != nil {
-		t.Fatalf("warm-up login: %v", err)
-	}
+	assert.Must(t, err == nil, "warm-up login: %v", err)
 	_ = warmupResp.Body.Close()
 	warmupLatency := time.Since(warmupStart)
 
@@ -429,9 +388,7 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 			t.Errorf("login %d: status = %d, want 200", i, statuses[i])
 		}
 	}
-	if failures > 0 {
-		t.Fatalf("%d/%d in-flight logins did not complete cleanly across shutdown", failures, burst)
-	}
+	assert.Must(t, failures <= 0, "%d/%d in-flight logins did not complete cleanly across shutdown", failures, burst)
 
 	select {
 	case <-streamDone:
@@ -441,9 +398,7 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatalf("run() returned an error on shutdown: %v", err)
-		}
+		assert.Must(t, err == nil, "run() returned an error on shutdown: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("run() did not return within 10s of ctx being cancelled")
 	}
@@ -486,9 +441,7 @@ func TestStartPruneLoopSweepsImmediatelyAtStartup(t *testing.T) {
 		DisplayName: "Prune Target",
 		Password:    "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 
 	// A session already expired an hour ago: IssueSession refuses to
 	// mint one like this, so the row is inserted directly.
@@ -522,9 +475,7 @@ func TestStartPruneLoopSweepsImmediatelyAtStartup(t *testing.T) {
 		}
 		return n
 	}
-	if countSessions() != 1 || countInvites() != 1 {
-		t.Fatal("test setup did not actually insert the expired rows")
-	}
+	assert.Must(t, countSessions() == 1 && countInvites() == 1, "test setup did not actually insert the expired rows")
 
 	loopCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -576,23 +527,17 @@ func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 		HTTPClient:           &http.Client{Transport: bearerTransport{token: token}},
 		DisableStandaloneSSE: true,
 	}, nil)
-	if err != nil {
-		t.Fatalf("connect to /mcp: %v", err)
-	}
+	assert.Must(t, err == nil, "connect to /mcp: %v", err)
 	defer func() { _ = mcpSession.Close() }()
 
 	tools, err := mcpSession.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	assert.Must(t, err == nil, "ListTools: %v", err)
 	names := map[string]bool{}
 	for _, tool := range tools.Tools {
 		names[tool.Name] = true
 	}
 	for _, want := range []string{"types.upsert", "entities.upsert", "entities.list", "search"} {
-		if !names[want] {
-			t.Fatalf("the running binary serves no %q tool; the metamodel service is not wired into web.NewServer", want)
-		}
+		assert.Must(t, names[want], "the running binary serves no %q tool; the metamodel service is not wired into web.NewServer", want)
 	}
 
 	for _, call := range []*mcp.CallToolParams{
@@ -604,23 +549,15 @@ func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 		}},
 	} {
 		result, err := mcpSession.CallTool(ctx, call)
-		if err != nil {
-			t.Fatalf("CallTool(%s): %v", call.Name, err)
-		}
-		if result.IsError {
-			t.Fatalf("CallTool(%s) failed against the running binary: %+v", call.Name, result.Content)
-		}
+		assert.Must(t, err == nil, "CallTool(%s): %v", call.Name, err)
+		assert.Must(t, !result.IsError, "CallTool(%s) failed against the running binary: %+v", call.Name, result.Content)
 	}
 
 	found, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{
 		Name: "search", Arguments: map[string]any{"query": "hogger"},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(search): %v", err)
-	}
-	if found.IsError {
-		t.Fatalf("search failed against the running binary: %+v", found.Content)
-	}
+	assert.Must(t, err == nil, "CallTool(search): %v", err)
+	assert.Must(t, !found.IsError, "search failed against the running binary: %+v", found.Content)
 	// The hit's shape as the running binary actually emits it: each hit
 	// is labelled by kind, and an entity's own fields live under
 	// `entity`, since a document hit has none of them.
@@ -633,16 +570,11 @@ func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 		} `json:"items"`
 	}
 	raw, err := json.Marshal(found.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshal search result: %v", err)
-	}
+	assert.Must(t, err == nil, "marshal search result: %v", err)
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("decode search result %s: %v", raw, err)
 	}
-	if len(out.Items) != 1 || out.Items[0].Kind != "entity" ||
-		out.Items[0].Entity == nil || out.Items[0].Entity.Key != "hogger" {
-		t.Fatalf("search found %+v, want the entity just seeded through the same binary", out.Items)
-	}
+	assert.Must(t, len(out.Items) == 1 && out.Items[0].Kind == "entity" && out.Items[0].Entity != nil && out.Items[0].Entity.Key == "hogger", "search found %+v, want the entity just seeded through the same binary", out.Items)
 }
 
 // bearerTransport authenticates every request with an API token.

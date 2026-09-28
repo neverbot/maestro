@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -51,12 +52,8 @@ func TestIsRetryableNamesTheFourContentionStatesAndNothingElse(t *testing.T) {
 		})
 	}
 
-	if metamodel.IsRetryable(nil) {
-		t.Fatal("IsRetryable(nil) must be false")
-	}
-	if metamodel.IsRetryable(errors.New("a plain error")) {
-		t.Fatal("a non-database error must not be retryable")
-	}
+	assert.Must(t, !metamodel.IsRetryable(nil), "IsRetryable(nil) must be false")
+	assert.Must(t, !metamodel.IsRetryable(errors.New("a plain error")), "a non-database error must not be retryable")
 	// A domain refusal is never retryable, however it is wrapped: these
 	// are the codes whose whole meaning is that resending unchanged is
 	// pointless.
@@ -67,8 +64,6 @@ func TestIsRetryableNamesTheFourContentionStatesAndNothingElse(t *testing.T) {
 		metamodel.ErrInvalidInput,
 		&metamodel.VersionConflictError{Current: 3},
 	} {
-		if metamodel.IsRetryable(fmt.Errorf("wrapped: %w", err)) {
-			t.Fatalf("%v must not be retryable", err)
-		}
+		assert.Must(t, !metamodel.IsRetryable(fmt.Errorf("wrapped: %w", err)), "%v must not be retryable", err)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 func TestExecuteArea(t *testing.T) {
@@ -23,45 +25,29 @@ func TestExecuteArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"quests"}]}`),
 		})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		byKey := map[string]Node{}
 		for _, n := range res.Nodes {
 			byKey[n.Key] = n
 		}
 		hogger, ok := byKey["hogger"]
-		if !ok {
-			t.Fatalf("the seeded quest must come back; got %v", keysOf(res.Nodes))
-		}
-		if hogger.Name != "Wanted: Hogger" || hogger.Type != "quest" || hogger.Set != "quests" {
-			t.Fatalf("the node did not carry its identity: %+v", hogger)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("three quests are seeded, got %d: %v", len(res.Nodes), keysOf(res.Nodes))
-		}
-		if res.Stats.Nodes != 3 {
-			t.Fatalf("stats must count what came back, got %+v", res.Stats)
-		}
+		assert.Must(t, ok, "the seeded quest must come back; got %v", keysOf(res.Nodes))
+		assert.Must(t, hogger.Name == "Wanted: Hogger" && hogger.Type == "quest" && hogger.Set == "quests", "the node did not carry its identity: %+v", hogger)
+		assert.Must(t, len(res.Nodes) == 3, "three quests are seeded, got %d: %v", len(res.Nodes), keysOf(res.Nodes))
+		assert.Must(t, res.Stats.Nodes == 3, "stats must count what came back, got %+v", res.Stats)
 	})
 
 	t.Run("a predicate narrows the result and the control proves it", func(t *testing.T) {
 		g, _ := a.games(t)
 		all, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest"}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(all.Nodes) != 3 {
-			t.Fatalf("positive control: three quests, got %d", len(all.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(all.Nodes) == 3, "positive control: three quests, got %d", len(all.Nodes))
 		band, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","where":{"all":[
 				{"field":"min_level","op":"gte","value":20},
 				{"field":"min_level","op":"lte","value":30}]}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(band.Nodes); len(got) != 2 {
 			t.Fatalf("the 20-30 band holds hogger and defias, got %v", got)
 		}
@@ -75,16 +61,10 @@ func TestExecuteArea(t *testing.T) {
 				"traverse":[{"from":"cls","via":"available_to","direction":"in",
 				             "to_type":"quest","as":"reachable"}],
 				"edges":[{"from_step":"reachable"}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Edges) != 3 {
-			t.Fatalf("three quests are available to the mage, got %d edges", len(res.Edges))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Edges) == 3, "three quests are available to the mage, got %d edges", len(res.Edges))
 		for _, e := range res.Edges {
-			if e.Type != "available_to" || e.Source == e.Target {
-				t.Fatalf("an edge must carry its type and two endpoints: %+v", e)
-			}
+			assert.Must(t, e.Type == "available_to" && e.Source != e.Target, "an edge must carry its type and two endpoints: %+v", e)
 		}
 	})
 
@@ -95,18 +75,12 @@ func TestExecuteArea(t *testing.T) {
 		g, other := a.games(t)
 		q := `{"v":1,"from":[{"type":"quest"}]}`
 		mine, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, q)})
-		if err != nil || len(mine.Nodes) != 3 {
-			t.Fatalf("positive control: %v, %d nodes", err, len(mine.Nodes))
-		}
+		assert.Must(t, err == nil && len(mine.Nodes) == 3, "positive control: %v, %d nodes", err, len(mine.Nodes))
 		theirs, err := other.views.Run(t.Context(), other.projectID, RunRequest{Query: mustParse(t, q)})
-		if err != nil {
-			t.Fatalf("run in the other game: %v", err)
-		}
+		assert.Must(t, err == nil, "run in the other game: %v", err)
 		for _, n := range theirs.Nodes {
 			for _, m := range mine.Nodes {
-				if n.ID == m.ID {
-					t.Fatalf("a node of one game came back in the other: %s", n.Key)
-				}
+				assert.Must(t, n.ID != m.ID, "a node of one game came back in the other: %s", n.Key)
 			}
 		}
 	})
@@ -123,18 +97,14 @@ func TestExecuteArea(t *testing.T) {
 			  "where":{"field":"@key","op":"eq","value":{"param":"class_key"}}}]}`
 
 		byDefault, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-		if err != nil {
-			t.Fatalf("run with the default: %v", err)
-		}
+		assert.Must(t, err == nil, "run with the default: %v", err)
 		if got := keysOf(byDefault.Nodes); len(got) != 1 || got[0] != "mage" {
 			t.Fatalf("the declared default selects the mage, got %v", got)
 		}
 
 		bound, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, doc), Params: map[string]any{"class_key": "rogue"}})
-		if err != nil {
-			t.Fatalf("run with a binding: %v", err)
-		}
+		assert.Must(t, err == nil, "run with a binding: %v", err)
 		if got := keysOf(bound.Nodes); len(got) != 1 || got[0] != "rogue" {
 			t.Fatalf("the run's own value must win over the default, got %v", got)
 		}
@@ -169,9 +139,7 @@ func TestExecuteArea(t *testing.T) {
 		// The control: supplying one runs.
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, doc), Params: map[string]any{"class_key": "mage"}})
-		if err != nil || len(res.Nodes) != 1 {
-			t.Fatalf("the control must run: %v, %d nodes", err, len(res.Nodes))
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 1, "the control must run: %v, %d nodes", err, len(res.Nodes))
 	})
 
 	// TestExecuteArea's "a node in two sets comes back once under the first
@@ -189,24 +157,16 @@ func TestExecuteArea(t *testing.T) {
 		g, _ := a.games(t)
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"first"},
 			{"type":"quest","as":"second"}]}`)
-		if !strings.Contains(sql, "ORDER BY 1, 11, 2") {
-			t.Fatalf("the rows must be ordered by kind, then by the declaration rank of the "+
-				"entry that produced them, then by id:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "ORDER BY 1, 11, 2"), "the rows must be ordered by kind, then by the declaration rank of the "+
+			"entry that produced them, then by id:\n%s", sql)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"first"},
 				{"type":"quest","as":"second"}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 3 {
-			t.Fatalf("three quests in two sets are three nodes, got %d: %v",
-				len(res.Nodes), keysOf(res.Nodes))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 3, "three quests in two sets are three nodes, got %d: %v",
+			len(res.Nodes), keysOf(res.Nodes))
 		for _, n := range res.Nodes {
-			if n.Set != "first" {
-				t.Fatalf("the first set declared must claim the node, got %q for %s", n.Set, n.Key)
-			}
+			assert.Must(t, n.Set == "first", "the first set declared must claim the node, got %q for %s", n.Set, n.Key)
 		}
 	})
 
@@ -217,18 +177,14 @@ func TestExecuteArea(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"from":[{"type":"quest","keys":["hogger"]}]}`
 		without, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-		if err != nil || len(without.Nodes) != 1 {
-			t.Fatalf("run: %v, %d nodes", err, len(without.Nodes))
-		}
+		assert.Must(t, err == nil && len(without.Nodes) == 1, "run: %v, %d nodes", err, len(without.Nodes))
 		if without.Nodes[0].Fields != nil {
 			t.Fatalf("a run that did not ask for fields must not carry them: %v",
 				without.Nodes[0].Fields)
 		}
 		with, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, doc), IncludeFields: true})
-		if err != nil || len(with.Nodes) != 1 {
-			t.Fatalf("run: %v, %d nodes", err, len(with.Nodes))
-		}
+		assert.Must(t, err == nil && len(with.Nodes) == 1, "run: %v, %d nodes", err, len(with.Nodes))
 		if got := with.Nodes[0].Fields["min_level"]; got != float64(22) {
 			t.Fatalf("include_fields must carry the declared values, got %#v", with.Nodes[0].Fields)
 		}
@@ -247,18 +203,14 @@ func TestExecuteArea(t *testing.T) {
 		escaped, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 				"where":{"field":"@name","op":"starts_with","value":"50%"}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(escaped.Nodes); len(got) != 1 || got[0] != "half" {
 			t.Fatalf(`"50%%" must match only the name that holds one, got %v`, got)
 		}
 		control, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 				"where":{"field":"@name","op":"starts_with","value":"50"}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(control.Nodes); len(got) != 2 {
 			t.Fatalf("the unescaped prefix matches both, got %v", got)
 		}
@@ -275,9 +227,7 @@ func TestExecuteArea(t *testing.T) {
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 				Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 					"where":{"field":"@key","op":"eq","value":"`+spelling+`"}}]}`)})
-			if err != nil {
-				t.Fatalf("run for %q: %v", spelling, err)
-			}
+			assert.Must(t, err == nil, "run for %q: %v", spelling, err)
 			if got := keysOf(res.Nodes); len(got) != 1 || got[0] != "Deadmines" {
 				t.Fatalf("%q must find the stored key, got %v", spelling, got)
 			}
@@ -285,9 +235,7 @@ func TestExecuteArea(t *testing.T) {
 		// The keys shortcut folds too, and it is a different clause.
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["DEADMINES"]}]}`)})
-		if err != nil || len(res.Nodes) != 1 {
-			t.Fatalf("the keys shortcut folds as well: %v, %v", err, keysOf(res.Nodes))
-		}
+		assert.Must(t, err == nil && len(res.Nodes) == 1, "the keys shortcut folds as well: %v, %v", err, keysOf(res.Nodes))
 	})
 
 	// TestExecuteArea's "a list field answers its own operators" case covers
@@ -310,14 +258,10 @@ func TestExecuteArea(t *testing.T) {
 		} {
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 				Query: mustParse(t, `{"v":1,"from":[{"type":"quest","where":`+c.predicate+`}]}`)})
-			if err != nil {
-				t.Fatalf("run %s: %v", c.predicate, err)
-			}
+			assert.Must(t, err == nil, "run %s: %v", c.predicate, err)
 			got := keysOf(res.Nodes)
 			sort.Strings(got)
-			if strings.Join(got, ",") != strings.Join(c.want, ",") {
-				t.Errorf("%s: want %v, got %v", c.predicate, c.want, got)
-			}
+			assert.Should(t, strings.Join(got, ",") == strings.Join(c.want, ","), "%s: want %v, got %v", c.predicate, c.want, got)
 		}
 	})
 
@@ -339,14 +283,10 @@ func TestExecuteArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"include_invalid":true,"from":[{"type":"quest",
 				"where":{"field":"min_level","op":"gte","value":10}}]}`)})
-		if err != nil {
-			t.Fatalf("a stale value must not fail the view: %v", err)
-		}
+		assert.Must(t, err == nil, "a stale value must not fail the view: %v", err)
 		got := keysOf(res.Nodes)
 		sort.Strings(got)
-		if strings.Join(got, ",") != "defias,hogger" {
-			t.Fatalf("the two numeric rows answer and the stale one does not, got %v", got)
-		}
+		assert.Must(t, strings.Join(got, ",") == "defias,hogger", "the two numeric rows answer and the stale one does not, got %v", got)
 	})
 
 	// TestExecuteArea's "a glob pattern does not leak the per cent it was
@@ -362,9 +302,7 @@ func TestExecuteArea(t *testing.T) {
 		literal, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 				"where":{"field":"@name","op":"matches","value":"50%*"}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(literal.Nodes); len(got) != 1 || got[0] != "half" {
 			t.Fatalf(`matches "50%%*" must match only the name that holds a per-cent, got %v`, got)
 		}
@@ -374,9 +312,7 @@ func TestExecuteArea(t *testing.T) {
 		both, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 				"where":{"field":"@name","op":"matches","value":"50*"}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(both.Nodes); len(got) != 2 {
 			t.Fatalf(`matches "50*" is the control and matches both, got %v`, got)
 		}
@@ -384,9 +320,7 @@ func TestExecuteArea(t *testing.T) {
 		single, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 				"where":{"field":"@name","op":"matches","value":"5?%*"}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(single.Nodes); len(got) != 1 || got[0] != "half" {
 			t.Fatalf(`matches "5?%%*" must map ? and keep the per-cent literal, got %v`, got)
 		}
@@ -404,13 +338,9 @@ func TestExecuteArea(t *testing.T) {
 		numeric := `{"v":1,"from":[{"type":"quest",
 			"where":{"field":"min_level","op":"in","value":[22,28]}}]}`
 		sql, _ := compileOf(t, g, numeric)
-		if !strings.Contains(sql, "::numeric[]") {
-			t.Fatalf("a number list binds as numeric[]:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "::numeric[]"), "a number list binds as numeric[]:\n%s", sql)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, numeric)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(res.Nodes); len(got) != 2 {
 			t.Fatalf("22 and 28 are two of the three quests, got %v", got)
 		}
@@ -419,13 +349,9 @@ func TestExecuteArea(t *testing.T) {
 		textual := `{"v":1,"from":[{"type":"quest",
 			"where":{"field":"@key","op":"in","value":["HOGGER","cook"]}}]}`
 		sql, _ = compileOf(t, g, textual)
-		if !strings.Contains(sql, "::text[]") {
-			t.Fatalf("a text list binds as text[]:\n%s", sql)
-		}
+		assert.Must(t, strings.Contains(sql, "::text[]"), "a text list binds as text[]:\n%s", sql)
 		res, err = g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, textual)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
+		assert.Must(t, err == nil, "run: %v", err)
 		if got := keysOf(res.Nodes); len(got) != 2 {
 			t.Fatalf("a key list folds each element, got %v", got)
 		}
@@ -447,9 +373,7 @@ func TestExecuteArea(t *testing.T) {
 					{"type":"zone","as":"zones"}],
 					"edges":[{"via":"takes_place_in","between":["quests","zones"],
 					          "direction":"`+direction+`"}]}`)})
-			if err != nil {
-				t.Fatalf("run %s: %v", direction, err)
-			}
+			assert.Must(t, err == nil, "run %s: %v", direction, err)
 			return res.Edges
 		}
 		if got := len(run("out")); got != 2 {
@@ -476,22 +400,14 @@ func TestExecuteArea(t *testing.T) {
 				             "to_type":"quest","as":"quests"}],
 				"edges":[{"from_step":"quests"},
 				         {"via":"available_to","between":["quests","cls"]}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Edges) != 3 {
-			t.Fatalf("both entries draw the same three relations, got %d edges", len(res.Edges))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Edges) == 3, "both entries draw the same three relations, got %d edges", len(res.Edges))
 		seen := map[uuid.UUID]bool{}
 		for _, e := range res.Edges {
-			if seen[e.ID] {
-				t.Fatalf("the relation %s came back twice", e.ID)
-			}
+			assert.Must(t, !(seen[e.ID]), "the relation %s came back twice", e.ID)
 			seen[e.ID] = true
 		}
-		if res.Stats.Edges != len(res.Edges) {
-			t.Fatalf("stats count the rows that came back: %d vs %d", res.Stats.Edges, len(res.Edges))
-		}
+		assert.Must(t, res.Stats.Edges == len(res.Edges), "stats count the rows that came back: %d vs %d", res.Stats.Edges, len(res.Edges))
 	})
 
 	// TestExecuteArea's "max depth reached counts the hops that contributed a
@@ -503,12 +419,8 @@ func TestExecuteArea(t *testing.T) {
 		depthOf := func(doc string) int {
 			t.Helper()
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-			if err != nil {
-				t.Fatalf("run: %v", err)
-			}
-			if len(res.Nodes) == 0 {
-				t.Fatalf("a depth read off an empty result would say nothing: %s", doc)
-			}
+			assert.Must(t, err == nil, "run: %v", err)
+			assert.Must(t, len(res.Nodes) != 0, "a depth read off an empty result would say nothing: %s", doc)
 			return res.Stats.MaxDepthReached
 		}
 		if got := depthOf(`{"v":1,"from":[{"type":"quest"}]}`); got != 0 {
@@ -550,20 +462,12 @@ func TestExecuteArea(t *testing.T) {
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 			Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
 				"where":{"field":"@key","op":"eq","value":"no-such-quest"}}]}`)})
-		if err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if len(res.Nodes) != 0 || len(res.Edges) != 0 {
-			t.Fatalf("this query draws nothing: %d nodes, %d edges", len(res.Nodes), len(res.Edges))
-		}
+		assert.Must(t, err == nil, "run: %v", err)
+		assert.Must(t, len(res.Nodes) == 0 && len(res.Edges) == 0, "this query draws nothing: %d nodes, %d edges", len(res.Nodes), len(res.Edges))
 		encoded, err := json.Marshal(res)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
+		assert.Must(t, err == nil, "marshal: %v", err)
 		for _, want := range []string{`"nodes":[]`, `"edges":[]`} {
-			if !strings.Contains(string(encoded), want) {
-				t.Errorf("an empty result carries %s, got %s", want, encoded)
-			}
+			assert.Should(t, strings.Contains(string(encoded), want), "an empty result carries %s, got %s", want, encoded)
 		}
 	})
 
@@ -595,9 +499,7 @@ func TestExecuteArea(t *testing.T) {
 					"traverse":[{"from":"cls","via":"available_to","direction":"in",
 					             "to_type":"quest","as":"reachable"}],
 					"nodes":[{"set":"reachable"}]}`)})
-			if err != nil {
-				t.Fatalf("run: %v", err)
-			}
+			assert.Must(t, err == nil, "run: %v", err)
 			got := keysOf(res.Nodes)
 			sort.Strings(got)
 			return got
@@ -618,14 +520,10 @@ func TestExecuteArea(t *testing.T) {
 				"where":{"field":"@key","op":"eq","value":"mage"}}],
 				"traverse":[{"from":"cls","via":"available_to","direction":"in","as":"reachable"}],
 				"nodes":[{"set":"reachable"}]}`)})
-		if err != nil {
-			t.Fatalf("run without to_type: %v", err)
-		}
+		assert.Must(t, err == nil, "run without to_type: %v", err)
 		got := keysOf(res.Nodes)
 		sort.Strings(got)
-		if strings.Join(got, ",") != "defias,elwynn,hogger" {
-			t.Fatalf("without to_type the zone is reached too, got %v", got)
-		}
+		assert.Must(t, strings.Join(got, ",") == "defias,elwynn,hogger", "without to_type the zone is reached too, got %v", got)
 	})
 
 	// TestExecuteArea's "no arm of a picture draws an edge that no longer
@@ -674,9 +572,7 @@ func TestExecuteArea(t *testing.T) {
 		nodes := func(doc string) string {
 			t.Helper()
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-			if err != nil {
-				t.Fatalf("run %s: %v", doc, err)
-			}
+			assert.Must(t, err == nil, "run %s: %v", doc, err)
 			got := keysOf(res.Nodes)
 			sort.Strings(got)
 			return strings.Join(got, ",")
@@ -684,9 +580,7 @@ func TestExecuteArea(t *testing.T) {
 		edges := func(doc string) int {
 			t.Helper()
 			res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
-			if err != nil {
-				t.Fatalf("run %s: %v", doc, err)
-			}
+			assert.Must(t, err == nil, "run %s: %v", doc, err)
 			return len(res.Edges)
 		}
 
@@ -752,9 +646,7 @@ func TestExecuteArea(t *testing.T) {
 					"nodes":[{"set":"q"}],
 					"project":{"color_by":{"related":{"via":"takes_place_in",
 					  "direction":"out","attr":"@key"}}}}`)})
-			if err != nil {
-				t.Fatalf("run the projection: %v", err)
-			}
+			assert.Must(t, err == nil, "run the projection: %v", err)
 			out := map[string]any{}
 			for _, node := range res.Nodes {
 				out[node.Key] = node.Attrs["color_by"]

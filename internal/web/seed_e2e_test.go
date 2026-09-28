@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/web"
@@ -110,23 +111,15 @@ func seedRacingGame(t *testing.T) *seeded {
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateUser: %v", err)
 	game, err := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
-	if err != nil {
-		t.Fatalf("Create game: %v", err)
-	}
+	assert.Must(t, err == nil, "Create game: %v", err)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
 		ProjectID: game.ID, UserID: user.ID, Label: "seed agent",
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 	caller, err := web.CallerForToken(ctx, ids, token)
-	if err != nil {
-		t.Fatalf("CallerForToken: %v", err)
-	}
+	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	s := &seeded{
 		srv:      srv,
 		deps:     web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
@@ -214,12 +207,8 @@ func (s *seeded) declareTypes(t *testing.T) {
 	}
 	for _, spec := range specs {
 		out, err := web.MCPTypesUpsert(ctx, s.deps, s.caller, s.game, spec)
-		if err != nil {
-			t.Fatalf("declare type %s: %v", spec.Key, err)
-		}
-		if out.Version != 1 {
-			t.Fatalf("type %s landed at version %d, want 1", spec.Key, out.Version)
-		}
+		assert.Must(t, err == nil, "declare type %s: %v", spec.Key, err)
+		assert.Must(t, out.Version == 1, "type %s landed at version %d, want 1", spec.Key, out.Version)
 		s.typeIDs[spec.Key] = out.ID
 	}
 }
@@ -278,12 +267,8 @@ func (s *seeded) declareRelationTypes(t *testing.T) {
 	}
 	for _, spec := range specs {
 		out, err := web.MCPRelationTypesUpsert(ctx, s.deps, s.caller, s.game, spec)
-		if err != nil {
-			t.Fatalf("declare relation type %s: %v", spec.Key, err)
-		}
-		if out.Version != 1 {
-			t.Fatalf("relation type %s landed at version %d, want 1", spec.Key, out.Version)
-		}
+		assert.Must(t, err == nil, "declare relation type %s: %v", spec.Key, err)
+		assert.Must(t, out.Version == 1, "relation type %s landed at version %d, want 1", spec.Key, out.Version)
 	}
 }
 
@@ -291,15 +276,9 @@ func (s *seeded) upsertEntities(t *testing.T, what string, items []web.EntityIte
 	t.Helper()
 	out, err := web.MCPEntitiesUpsert(context.Background(), s.deps, s.caller, s.game,
 		web.EntitiesUpsertInput{Mode: string(metamodel.BulkAtomic), Items: items})
-	if err != nil {
-		t.Fatalf("seed %s: %v", what, err)
-	}
-	if out.Count != len(items) || len(out.Written) != len(items) {
-		t.Fatalf("seed %s: count = %d, written = %d, want %d", what, out.Count, len(out.Written), len(items))
-	}
-	if len(out.Failed) != 0 {
-		t.Fatalf("seed %s: %d failures on an atomic batch that returned no error: %+v", what, len(out.Failed), out.Failed)
-	}
+	assert.Must(t, err == nil, "seed %s: %v", what, err)
+	assert.Must(t, out.Count == len(items) && len(out.Written) == len(items), "seed %s: count = %d, written = %d, want %d", what, out.Count, len(out.Written), len(items))
+	assert.Must(t, len(out.Failed) == 0, "seed %s: %d failures on an atomic batch that returned no error: %+v", what, len(out.Failed), out.Failed)
 	return out.Written
 }
 
@@ -429,16 +408,10 @@ func (s *seeded) upsertRelations(t *testing.T, what string, items []web.Relation
 	t.Helper()
 	out, err := web.MCPRelationsUpsert(context.Background(), s.deps, s.caller, s.game,
 		web.RelationsUpsertInput{Mode: string(metamodel.BulkAtomic), Items: items})
-	if err != nil {
-		t.Fatalf("wire %s: %v", what, err)
-	}
-	if out.Count != len(items) {
-		t.Fatalf("wire %s: count = %d, want %d", what, out.Count, len(items))
-	}
+	assert.Must(t, err == nil, "wire %s: %v", what, err)
+	assert.Must(t, out.Count == len(items), "wire %s: count = %d, want %d", what, out.Count, len(items))
 	for _, w := range out.Written {
-		if w.ID == uuid.Nil || w.SourceID == uuid.Nil || w.TargetID == uuid.Nil {
-			t.Fatalf("wire %s: an edge came back without its ids: %+v", what, w)
-		}
+		assert.Must(t, w.ID != uuid.Nil && w.SourceID != uuid.Nil && w.TargetID != uuid.Nil, "wire %s: an edge came back without its ids: %+v", what, w)
 	}
 }
 
@@ -596,12 +569,8 @@ func (s *seeded) rewriteRaces(t *testing.T, extra map[string]any) {
 	}
 	out, err := web.MCPEntitiesUpsert(context.Background(), s.deps, s.caller, s.game,
 		web.EntitiesUpsertInput{Mode: string(metamodel.BulkPartial), Items: items})
-	if err != nil {
-		t.Fatalf("rewrite races: %v", err)
-	}
-	if out.Count != seedRaces || len(out.Failed) != 0 {
-		t.Fatalf("rewrite races wrote %d and failed %+v", out.Count, out.Failed)
-	}
+	assert.Must(t, err == nil, "rewrite races: %v", err)
+	assert.Must(t, out.Count == seedRaces && len(out.Failed) == 0, "rewrite races wrote %d and failed %+v", out.Count, out.Failed)
 	s.races = out.Written
 }
 
@@ -618,16 +587,10 @@ func (s *seeded) repairRaces(t *testing.T, in web.EntitiesRepairInput) (passes, 
 	t.Helper()
 	ctx := context.Background()
 	for {
-		if passes > 10 {
-			t.Fatalf("the repair loop did not converge after %d passes", passes)
-		}
+		assert.Must(t, passes <= 10, "the repair loop did not converge after %d passes", passes)
 		out, err := web.MCPEntitiesRepair(ctx, s.deps, s.caller, s.game, in)
-		if err != nil {
-			t.Fatalf("entities.repair: %v", err)
-		}
-		if len(out.Failed) != 0 {
-			t.Fatalf("the repair failed rows: %+v", out.Failed)
-		}
+		assert.Must(t, err == nil, "entities.repair: %v", err)
+		assert.Must(t, len(out.Failed) == 0, "the repair failed rows: %+v", out.Failed)
 		passes, repaired = passes+1, repaired+len(out.Repaired)
 		if len(out.Repaired) == 0 {
 			return passes, repaired
@@ -642,18 +605,12 @@ func (s *seeded) listAll(t *testing.T, in web.EntitiesListInput) []web.EntityOut
 	ctx := context.Background()
 	var all []web.EntityOutput
 	for pages := 0; ; pages++ {
-		if pages > 100 {
-			t.Fatalf("a listing did not terminate after %d pages", pages)
-		}
+		assert.Must(t, pages <= 100, "a listing did not terminate after %d pages", pages)
 		page, err := web.MCPEntitiesList(ctx, s.deps, s.caller, s.game, in)
-		if err != nil {
-			t.Fatalf("entities.list: %v", err)
-		}
+		assert.Must(t, err == nil, "entities.list: %v", err)
 		all = append(all, page.Items...)
 		if page.NextCursor == nil {
-			if page.Truncated {
-				t.Fatalf("a page with no cursor still says it is truncated")
-			}
+			assert.Must(t, !page.Truncated, "a page with no cursor still says it is truncated")
 			return all
 		}
 		in.Cursor = *page.NextCursor
@@ -671,15 +628,11 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 
 	t.Run("the seed landed the whole game", func(t *testing.T) {
 		all := s.listAll(t, web.EntitiesListInput{Limit: 500})
-		if len(all) != seedEntities {
-			t.Fatalf("the game holds %d entities, want %d", len(all), seedEntities)
-		}
+		assert.Must(t, len(all) == seedEntities, "the game holds %d entities, want %d", len(all), seedEntities)
 		byType := map[string]int{}
 		for _, e := range all {
 			byType[e.TypeKey]++
-			if e.Invalid {
-				t.Fatalf("%s/%s came out of the seed already invalid", e.TypeKey, e.Key)
-			}
+			assert.Must(t, !e.Invalid, "%s/%s came out of the seed already invalid", e.TypeKey, e.Key)
 		}
 		for key, want := range map[string]int{
 			"circuit": seedCircuits, "car": seedCars, "driver": seedDrivers,
@@ -696,24 +649,16 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// The claim under test: an agent can edit what it just wrote,
 		// using nothing but the batch's own answer. So build the index
 		// from the report, and check every entry against a fresh read.
-		if len(s.races) != seedRaces {
-			t.Fatalf("the race batch reported %d rows, want %d", len(s.races), seedRaces)
-		}
+		assert.Must(t, len(s.races) == seedRaces, "the race batch reported %d rows, want %d", len(s.races), seedRaces)
 		stored := map[string]web.EntityOutput{}
 		for _, e := range s.listAll(t, web.EntitiesListInput{TypeKey: "race", Limit: 500}) {
 			stored[e.Key] = e
 		}
 		for _, w := range s.races {
 			e, ok := stored[w.Key]
-			if !ok {
-				t.Fatalf("the batch reported %q, which no listing returns", w.Key)
-			}
-			if w.ID != e.ID || w.Version != e.Version || w.TypeKey != e.TypeKey {
-				t.Fatalf("the batch reported %+v, the row reads %+v", w, e)
-			}
-			if w.ID == uuid.Nil || w.Version != 1 {
-				t.Fatalf("the batch reported %+v, want a real id at version 1", w)
-			}
+			assert.Must(t, ok, "the batch reported %q, which no listing returns", w.Key)
+			assert.Must(t, w.ID == e.ID && w.Version == e.Version && w.TypeKey == e.TypeKey, "the batch reported %+v, the row reads %+v", w, e)
+			assert.Must(t, w.ID != uuid.Nil && w.Version == 1, "the batch reported %+v, want a real id at version 1", w)
 		}
 	})
 
@@ -721,26 +666,18 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		out, err := web.MCPEntitiesUpsert(ctx, s.deps, s.caller, s.game, web.EntitiesUpsertInput{
 			Mode: string(metamodel.BulkPartial), Items: s.raceItems(),
 		})
-		if err != nil {
-			t.Fatalf("re-seed: %v", err)
-		}
-		if len(out.Failed) != seedRaces || out.Count != 0 {
-			t.Fatalf("a re-seed with no expected_version wrote %d and failed %d, want 0 and %d",
-				out.Count, len(out.Failed), seedRaces)
-		}
+		assert.Must(t, err == nil, "re-seed: %v", err)
+		assert.Must(t, len(out.Failed) == seedRaces && out.Count == 0, "a re-seed with no expected_version wrote %d and failed %d, want 0 and %d",
+			out.Count, len(out.Failed), seedRaces)
 		for _, f := range out.Failed {
-			if f.Code != "version_conflict" {
-				t.Fatalf("re-seed failure %+v, want version_conflict", f)
-			}
+			assert.Must(t, f.Code == "version_conflict", "re-seed failure %+v, want version_conflict", f)
 		}
 		// Idempotent in row identity: same count, same ids, same versions.
 		stored := map[string]web.EntityOutput{}
 		for _, e := range s.listAll(t, web.EntitiesListInput{TypeKey: "race", Limit: 500}) {
 			stored[e.Key] = e
 		}
-		if len(stored) != seedRaces {
-			t.Fatalf("a refused re-seed changed the row count to %d", len(stored))
-		}
+		assert.Must(t, len(stored) == seedRaces, "a refused re-seed changed the row count to %d", len(stored))
 		for _, w := range s.races {
 			if e := stored[w.Key]; e.ID != w.ID || e.Version != w.Version {
 				t.Fatalf("a refused re-seed moved %q: %+v, was %+v", w.Key, e, w)
@@ -778,32 +715,20 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			Key: "race", Label: "Race", LabelPlural: "Races",
 			Schema: withRequired, ExpectedVersion: i32(1),
 		})
-		if err != nil {
-			t.Fatalf("a schema change under 200 rows was refused: %v", err)
-		}
-		if edited.Version != 2 {
-			t.Fatalf("the edited type is at version %d, want 2", edited.Version)
-		}
+		assert.Must(t, err == nil, "a schema change under 200 rows was refused: %v", err)
+		assert.Must(t, edited.Version == 2, "the edited type is at version %d, want 2", edited.Version)
 
 		flagged := s.listAll(t, web.EntitiesListInput{TypeKey: "race", Invalid: boolp(true), Limit: 500})
-		if len(flagged) != seedRaces {
-			t.Fatalf("%d races were flagged, want all %d", len(flagged), seedRaces)
-		}
+		assert.Must(t, len(flagged) == seedRaces, "%d races were flagged, want all %d", len(flagged), seedRaces)
 		// Not back-filled: the rows still hold exactly what was written.
 		one, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
 			web.EntitiesGetInput{TypeKey: "race", Key: "race-000"})
-		if err != nil {
-			t.Fatalf("entities.get: %v", err)
-		}
-		if !one.Invalid {
-			t.Fatalf("race-000 reads valid after the schema change")
-		}
+		assert.Must(t, err == nil, "entities.get: %v", err)
+		assert.Must(t, one.Invalid, "race-000 reads valid after the schema change")
 		if _, present := one.Fields["tyre_rules"]; present {
 			t.Fatalf("the schema change back-filled a value: %+v", one.Fields)
 		}
-		if one.Fields["laps"] == nil || one.Fields["night"] != false {
-			t.Fatalf("the schema change disturbed the stored values: %+v", one.Fields)
-		}
+		assert.Must(t, one.Fields["laps"] != nil && one.Fields["night"] == false, "the schema change disturbed the stored values: %+v", one.Fields)
 		// And the flag is not an edit: the row's version did not move.
 		if want := versionOf(t, s.races, "race-000"); one.Version != want {
 			t.Fatalf("flagging moved race-000 to version %d, want %d", one.Version, want)
@@ -832,10 +757,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		passes, repaired := s.repairRaces(t, web.EntitiesRepairInput{
 			TypeKey: "race", Set: map[string]any{"tyre_rules": "open"},
 		})
-		if repaired != seedRaces {
-			t.Fatalf("the repair fixed %d races over %d passes, want all %d",
-				repaired, passes, seedRaces)
-		}
+		assert.Must(t, repaired == seedRaces, "the repair fixed %d races over %d passes, want all %d",
+			repaired, passes, seedRaces)
 		if flagged := s.listAll(t, web.EntitiesListInput{
 			TypeKey: "race", Invalid: boolp(true), Limit: 500,
 		}); len(flagged) != 0 {
@@ -845,12 +768,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// they did not name.
 		fixed, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
 			web.EntitiesGetInput{TypeKey: "race", Key: "race-100"})
-		if err != nil {
-			t.Fatalf("entities.get: %v", err)
-		}
-		if fixed.Fields["tyre_rules"] != "open" || fixed.Fields["laps"] == nil {
-			t.Fatalf("repaired fields = %+v", fixed.Fields)
-		}
+		assert.Must(t, err == nil, "entities.get: %v", err)
+		assert.Must(t, fixed.Fields["tyre_rules"] == "open" && fixed.Fields["laps"] != nil, "repaired fields = %+v", fixed.Fields)
 		if body, ok := fixed.Fields["briefing"].(string); !ok || len(body) < 1000 {
 			t.Fatalf("the repair dropped a value it was not asked about: %+v", fixed.Fields)
 		}
@@ -879,10 +798,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		passes, repaired = s.repairRaces(t, web.EntitiesRepairInput{
 			TypeKey: "race", DropUnknown: true,
 		})
-		if repaired != seedRaces {
-			t.Fatalf("the drop pass fixed %d races over %d passes, want all %d",
-				repaired, passes, seedRaces)
-		}
+		assert.Must(t, repaired == seedRaces, "the drop pass fixed %d races over %d passes, want all %d",
+			repaired, passes, seedRaces)
 		if flagged := s.listAll(t, web.EntitiesListInput{
 			TypeKey: "race", Invalid: boolp(true), Limit: 500,
 		}); len(flagged) != 0 {
@@ -890,9 +807,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		}
 		back, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
 			web.EntitiesGetInput{TypeKey: "race", Key: "race-100"})
-		if err != nil {
-			t.Fatalf("entities.get: %v", err)
-		}
+		assert.Must(t, err == nil, "entities.get: %v", err)
 		if _, present := back.Fields["tyre_rules"]; present {
 			t.Fatalf("the dropped value is still stored: %+v", back.Fields)
 		}
@@ -912,43 +827,29 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 	t.Run("search finds what a designer would search for", func(t *testing.T) {
 		// A name.
 		hits := s.search(t, "Sarthe", "")
-		if len(hits) == 0 || hits[0].Entity.Key != "circuit-000" || !hits[0].NameMatch {
-			t.Fatalf("searching a name did not find the circuit: %+v", hits)
-		}
+		assert.Must(t, len(hits) != 0 && hits[0].Entity.Key == "circuit-000" && hits[0].NameMatch, "searching a name did not find the circuit: %+v", hits)
 		// A tag in a list<text>.
 		hits = s.search(t, "rainmaster", "")
-		if len(hits) != 1 || hits[0].Entity.Key != "driver-007" {
-			t.Fatalf("searching a list<text> tag found %+v", hits)
-		}
+		assert.Must(t, len(hits) == 1 && hits[0].Entity.Key == "driver-007", "searching a list<text> tag found %+v", hits)
 		if hits[0].NameMatch {
 			t.Fatalf("a tag match is reported as a name match: %+v", hits[0])
 		}
 		// A word in the middle of a long description.
 		hits = s.search(t, "kerbstone", "")
-		if len(hits) != 1 || hits[0].Entity.Key != "race-100" {
-			t.Fatalf("searching inside a long description found %+v", hits)
-		}
+		assert.Must(t, len(hits) == 1 && hits[0].Entity.Key == "race-100", "searching inside a long description found %+v", hits)
 		// A name match outranks a body match, even one that repeats the
 		// word forty times.
 		hits = s.search(t, "Mulsanne", "")
-		if len(hits) < 2 {
-			t.Fatalf("Mulsanne found %d rows, want the named one and the ones that mention it", len(hits))
-		}
-		if hits[0].Entity.Key != "race-042" || !hits[0].NameMatch {
-			t.Fatalf("the row named Mulsanne is not first: %+v", hits)
-		}
+		assert.Must(t, len(hits) >= 2, "Mulsanne found %d rows, want the named one and the ones that mention it", len(hits))
+		assert.Must(t, hits[0].Entity.Key == "race-042" && hits[0].NameMatch, "the row named Mulsanne is not first: %+v", hits)
 		var sawBody bool
 		for _, h := range hits[1:] {
-			if h.NameMatch {
-				t.Fatalf("a name match sorted below a body match: %+v", hits)
-			}
+			assert.Must(t, !h.NameMatch, "a name match sorted below a body match: %+v", hits)
 			if h.Entity.Key == "race-043" {
 				sawBody = true
 			}
 		}
-		if !sawBody {
-			t.Fatalf("the row that mentions Mulsanne forty times was not found at all: %+v", hits)
-		}
+		assert.Must(t, sawBody, "the row that mentions Mulsanne forty times was not found at all: %+v", hits)
 		// Narrowing by type is the same query over one catalogue.
 		if hits := s.search(t, "Mulsanne", "circuit"); len(hits) != 1 || hits[0].Entity.Key != "circuit-000" {
 			t.Fatalf("a type-narrowed search found %+v", hits)
@@ -960,9 +861,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// find nothing, so the only recovery was knowing to reach for
 		// entities.get instead.
 		hits = s.search(t, "circuit-000", "")
-		if len(hits) != 1 || hits[0].Entity.Key != "circuit-000" {
-			t.Fatalf("searching a row's key found %+v", hits)
-		}
+		assert.Must(t, len(hits) == 1 && hits[0].Entity.Key == "circuit-000", "searching a row's key found %+v", hits)
 		// And it does not claim to be a name match: the key is indexed
 		// at label C so that "a row the query names outranks a row that
 		// mentions the words" stays a guarantee. This game is exactly
@@ -973,14 +872,10 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("a hit found by its key alone claims name_match: %+v", hits[0])
 		}
 		named := s.search(t, "race", "")
-		if len(named) == 0 {
-			t.Fatalf("the word race found nothing at all")
-		}
+		assert.Must(t, len(named) != 0, "the word race found nothing at all")
 		for _, h := range named {
-			if h.NameMatch && !strings.Contains(strings.ToLower(h.Entity.Name), "race") {
-				t.Fatalf("row %q claims a name match on \"race\" with the name %q — the key "+
-					"has leaked into the A weight", h.Entity.Key, h.Entity.Name)
-			}
+			assert.Must(t, !h.NameMatch || strings.Contains(strings.ToLower(h.Entity.Name), "race"), "row %q claims a name match on \"race\" with the name %q — the key "+
+				"has leaked into the A weight", h.Entity.Key, h.Entity.Name)
 		}
 	})
 
@@ -996,13 +891,9 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Helper()
 			out, err := web.MCPSearch(ctx, s.deps, s.caller, s.game,
 				web.SearchInput{Query: query, Limit: 200, Verbose: verbose})
-			if err != nil {
-				t.Fatalf("search %q (verbose %v): %v", query, verbose, err)
-			}
+			assert.Must(t, err == nil, "search %q (verbose %v): %v", query, verbose, err)
 			raw, err := json.Marshal(out)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
+			assert.Must(t, err == nil, "marshal: %v", err)
 			return out, raw
 		}
 
@@ -1010,42 +901,30 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// answer the flag exists for. Not one hit carries a fields key,
 		// and every one keeps the identity a caller needs to pick from.
 		broad, broadRaw := search(t, "race", false)
-		if len(broad.Items) < seedRaces {
-			t.Fatalf("the word race found %d rows, want at least the %d races",
-				len(broad.Items), seedRaces)
-		}
+		assert.Must(t, len(broad.Items) >= seedRaces, "the word race found %d rows, want at least the %d races",
+			len(broad.Items), seedRaces)
 		for _, hit := range broad.Items {
-			if hit.Entity.Fields != nil {
-				t.Fatalf("a search nobody asked to be verbose carried fields: %+v", hit.Entity)
-			}
-			if hit.Entity.Key == "" || hit.Entity.Name == "" || hit.Entity.TypeKey == "" {
-				t.Fatalf("a slim hit lost part of its identity: %+v", hit.Entity)
-			}
+			assert.Must(t, hit.Entity.Fields == nil, "a search nobody asked to be verbose carried fields: %+v", hit.Entity)
+			assert.Must(t, hit.Entity.Key != "" && hit.Entity.Name != "" && hit.Entity.TypeKey != "", "a slim hit lost part of its identity: %+v", hit.Entity)
 		}
 		_, broadVerboseRaw := search(t, "race", true)
-		if len(broadVerboseRaw) <= len(broadRaw) {
-			t.Fatalf("verbose over %d hits answered with %d bytes against %d slim",
-				len(broad.Items), len(broadVerboseRaw), len(broadRaw))
-		}
+		assert.Must(t, len(broadVerboseRaw) > len(broadRaw), "verbose over %d hits answered with %d bytes against %d slim",
+			len(broad.Items), len(broadVerboseRaw), len(broadRaw))
 
 		// The measured case, and the one Task 9 wrote down: a row carrying
 		// a long briefing. That is where the 1.6 MB came from — one
 		// longtext per hit, multiplied by the hits — and it is what the
 		// flag actually withholds.
 		lore, loreRaw := search(t, "stint", false)
-		if len(lore.Items) != 1 || lore.Items[0].Entity.Key != "race-100" {
-			t.Fatalf("searching inside a long briefing found %+v", lore.Items)
-		}
+		assert.Must(t, len(lore.Items) == 1 && lore.Items[0].Entity.Key == "race-100", "searching inside a long briefing found %+v", lore.Items)
 		loreVerbose, loreVerboseRaw := search(t, "stint", true)
 		body, ok := loreVerbose.Items[0].Entity.Fields["briefing"].(string)
 		if !ok || len(body) < 4000 {
 			t.Fatalf("a verbose hit did not carry the whole briefing: %+v", loreVerbose.Items[0])
 		}
-		if len(loreVerboseRaw) < 10*len(loreRaw) {
-			t.Fatalf("the verbose answer is %.1fx the slim one; the flag is not withholding "+
-				"what it was added to withhold (%d against %d bytes)",
-				float64(len(loreVerboseRaw))/float64(len(loreRaw)), len(loreVerboseRaw), len(loreRaw))
-		}
+		assert.Must(t, len(loreVerboseRaw) >= 10*len(loreRaw), "the verbose answer is %.1fx the slim one; the flag is not withholding "+
+			"what it was added to withhold (%d against %d bytes)",
+			float64(len(loreVerboseRaw))/float64(len(loreRaw)), len(loreVerboseRaw), len(loreRaw))
 		t.Logf("one %d-hit search over %d rows: %d bytes slim, %d verbose; "+
 			"one hit carrying a briefing: %d slim, %d verbose",
 			len(broad.Items), seedEntities, len(broadRaw), len(broadVerboseRaw),
@@ -1066,17 +945,11 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		}
 		seen := map[string]bool{}
 		for _, e := range s.listAll(t, in) {
-			if seen[e.Key] {
-				t.Fatalf("the traversal returned %q twice", e.Key)
-			}
+			assert.Must(t, !(seen[e.Key]), "the traversal returned %q twice", e.Key)
 			seen[e.Key] = true
-			if e.TypeKey != "race" {
-				t.Fatalf("the traversal returned a %s", e.TypeKey)
-			}
+			assert.Must(t, e.TypeKey == "race", "the traversal returned a %s", e.TypeKey)
 		}
-		if len(seen) != seedHubRaces {
-			t.Fatalf("the hub's neighbourhood came back as %d rows, want %d", len(seen), seedHubRaces)
-		}
+		assert.Must(t, len(seen) == seedHubRaces, "the hub's neighbourhood came back as %d rows, want %d", len(seen), seedHubRaces)
 		// The other direction of the same edge from one of those races.
 		in = web.EntitiesListInput{RelatedTo: &web.RelatedToInput{
 			RelationTypeKey: "takes_place_in", EntityTypeKey: "race",
@@ -1112,20 +985,12 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// false, which is the case a value-based "is it set" rule loses.
 		car, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
 			web.EntitiesGetInput{TypeKey: "car", Key: "car-000"})
-		if err != nil {
-			t.Fatalf("entities.get car-000: %v", err)
-		}
-		if car.Fields["hybrid"] != false {
-			t.Fatalf("the declared default of false did not land: %+v", car.Fields)
-		}
+		assert.Must(t, err == nil, "entities.get car-000: %v", err)
+		assert.Must(t, car.Fields["hybrid"] == false, "the declared default of false did not land: %+v", car.Fields)
 		circuit, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
 			web.EntitiesGetInput{TypeKey: "circuit", Key: "circuit-001"})
-		if err != nil {
-			t.Fatalf("entities.get circuit-001: %v", err)
-		}
-		if circuit.Fields["surface"] != "tarmac" {
-			t.Fatalf("the declared enum default did not land: %+v", circuit.Fields)
-		}
+		assert.Must(t, err == nil, "entities.get circuit-001: %v", err)
+		assert.Must(t, circuit.Fields["surface"] == "tarmac", "the declared enum default did not land: %+v", circuit.Fields)
 		if _, present := circuit.Fields["notes"]; present {
 			t.Fatalf("an absent optional field was zero-filled: %+v", circuit.Fields)
 		}
@@ -1152,16 +1017,10 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 					Fields: map[string]any{"country": "FR"}},
 			},
 		})
-		if err != nil {
-			t.Fatalf("partial batch: %v", err)
-		}
-		if out.Count != 1 || len(out.Failed) != 4 {
-			t.Fatalf("the partial batch wrote %d and failed %d, want 1 and 4", out.Count, len(out.Failed))
-		}
+		assert.Must(t, err == nil, "partial batch: %v", err)
+		assert.Must(t, out.Count == 1 && len(out.Failed) == 4, "the partial batch wrote %d and failed %d, want 1 and 4", out.Count, len(out.Failed))
 		for _, f := range out.Failed {
-			if f.Code != "schema_violation" {
-				t.Fatalf("%+v, want schema_violation", f)
-			}
+			assert.Must(t, f.Code == "schema_violation", "%+v, want schema_violation", f)
 		}
 		// Clean up the one row that landed so the counts below stand.
 		if _, err := web.MCPEntitiesRemove(ctx, s.deps, s.caller, s.game,
@@ -1181,12 +1040,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 					Fields: map[string]any{"seat": "spectator"}},
 			},
 		})
-		if err != nil {
-			t.Fatalf("bad-edge batch: %v", err)
-		}
-		if len(bad.Failed) != 2 {
-			t.Fatalf("the bad-edge batch failed %d items, want 2: %+v", len(bad.Failed), bad.Failed)
-		}
+		assert.Must(t, err == nil, "bad-edge batch: %v", err)
+		assert.Must(t, len(bad.Failed) == 2, "the bad-edge batch failed %d items, want 2: %+v", len(bad.Failed), bad.Failed)
 		if bad.Failed[0].Code != "endpoint_type_mismatch" {
 			t.Fatalf("a driver at a race endpoint gave %+v", bad.Failed[0])
 		}
@@ -1198,16 +1053,10 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// one, and the listing names both endpoints by ref.
 		edges, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
 			web.RelationsListInput{TypeKey: "mentions", Limit: 50})
-		if err != nil {
-			t.Fatalf("relations.list: %v", err)
-		}
-		if len(edges.Items) != 21 {
-			t.Fatalf("mentions holds %d edges, want 21", len(edges.Items))
-		}
+		assert.Must(t, err == nil, "relations.list: %v", err)
+		assert.Must(t, len(edges.Items) == 21, "mentions holds %d edges, want 21", len(edges.Items))
 		for _, e := range edges.Items {
-			if e.Source == nil || e.Target == nil || e.Source.Name == "" {
-				t.Fatalf("an edge came back without resolved endpoints: %+v", e)
-			}
+			assert.Must(t, e.Source != nil && e.Target != nil && e.Source.Name != "", "an edge came back without resolved endpoints: %+v", e)
 		}
 	})
 
@@ -1229,12 +1078,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			Source:  web.RefInput{TypeKey: "driver", Key: "driver-000"},
 			Target:  web.RefInput{TypeKey: "car", Key: "car-000"},
 		})
-		if err != nil {
-			t.Fatalf("relations.get: %v", err)
-		}
-		if edge.Fields["seat"] != "reserve" || edge.Fields["season"] != float64(2014) {
-			t.Fatalf("edge fields = %v, want the seat and season the seed wrote", edge.Fields)
-		}
+		assert.Must(t, err == nil, "relations.get: %v", err)
+		assert.Must(t, edge.Fields["seat"] == "reserve" && edge.Fields["season"] == float64(2014), "edge fields = %v, want the seat and season the seed wrote", edge.Fields)
 		// driver-001 took the default seat, which is the other half of
 		// the same contract: a defaulted value is stored on the row and
 		// reads back like any other.
@@ -1243,41 +1088,25 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			Source:  web.RefInput{TypeKey: "driver", Key: "driver-001"},
 			Target:  web.RefInput{TypeKey: "car", Key: "car-001"},
 		})
-		if err != nil {
-			t.Fatalf("relations.get: %v", err)
-		}
-		if defaulted.Fields["seat"] != "race" || defaulted.Fields["season"] != float64(2015) {
-			t.Fatalf("edge fields = %v, want the defaulted seat and the written season",
-				defaulted.Fields)
-		}
+		assert.Must(t, err == nil, "relations.get: %v", err)
+		assert.Must(t, defaulted.Fields["seat"] == "race" && defaulted.Fields["season"] == float64(2015), "edge fields = %v, want the defaulted seat and the written season",
+			defaulted.Fields)
 
 		// And the listing, which is what a view renders from: off by
 		// default, because a page of edges with their values is most of
 		// the game in one answer, and complete when asked for.
 		plain, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
 			web.RelationsListInput{TypeKey: "drives", Limit: 5})
-		if err != nil {
-			t.Fatalf("relations.list: %v", err)
-		}
-		if len(plain.Items) != 5 {
-			t.Fatalf("no drives edges: %+v", plain.Items)
-		}
+		assert.Must(t, err == nil, "relations.list: %v", err)
+		assert.Must(t, len(plain.Items) == 5, "no drives edges: %+v", plain.Items)
 		raw, err := json.Marshal(plain.Items[0])
-		if err != nil {
-			t.Fatalf("marshal edge: %v", err)
-		}
-		if strings.Contains(string(raw), "season") || strings.Contains(string(raw), "seat") {
-			t.Fatalf("a listing nobody asked to be verbose carried an edge's fields: %s", raw)
-		}
+		assert.Must(t, err == nil, "marshal edge: %v", err)
+		assert.Must(t, !strings.Contains(string(raw), "season") && !strings.Contains(string(raw), "seat"), "a listing nobody asked to be verbose carried an edge's fields: %s", raw)
 		verbose, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
 			web.RelationsListInput{TypeKey: "drives", Limit: 5, Verbose: true})
-		if err != nil {
-			t.Fatalf("relations.list verbose: %v", err)
-		}
+		assert.Must(t, err == nil, "relations.list verbose: %v", err)
 		for _, item := range verbose.Items {
-			if item.Fields["season"] == nil {
-				t.Fatalf("a verbose listing left an edge's values out: %+v", item)
-			}
+			assert.Must(t, item.Fields["season"] != nil, "a verbose listing left an edge's values out: %+v", item)
 		}
 	})
 
@@ -1298,23 +1127,15 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// the races, while the game home page had the number the whole
 		// time. One call now, and it answers for every type at once.
 		counts, err := web.MCPGameCounts(ctx, s.deps, s.caller, s.game, web.GameCountsInput{})
-		if err != nil {
-			t.Fatalf("games.counts: %v", err)
-		}
+		assert.Must(t, err == nil, "games.counts: %v", err)
 		byType := map[string]int64{}
 		for _, row := range counts.EntityTypes {
 			byType[row.Key] = row.EntityCount
-			if row.InvalidCount != 0 {
-				t.Fatalf("%s carries %d invalid rows", row.Key, row.InvalidCount)
-			}
+			assert.Must(t, row.InvalidCount == 0, "%s carries %d invalid rows", row.Key, row.InvalidCount)
 		}
-		if byType["race"] != seedRaces || byType["driver"] != seedDrivers {
-			t.Fatalf("games.counts read %+v", byType)
-		}
-		if counts.Totals.Entities != seedEntities {
-			t.Fatalf("games.counts totals %d entities, want %d",
-				counts.Totals.Entities, seedEntities)
-		}
+		assert.Must(t, byType["race"] == seedRaces && byType["driver"] == seedDrivers, "games.counts read %+v", byType)
+		assert.Must(t, counts.Totals.Entities == seedEntities, "games.counts totals %d entities, want %d",
+			counts.Totals.Entities, seedEntities)
 		// The relation half is counted too, which is the "carry the rule
 		// one step along" half: a count that answered for entities alone
 		// would answer half the game.
@@ -1322,19 +1143,15 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		for _, row := range counts.RelationTypes {
 			edges[row.Key] = row.RelationCount
 		}
-		if edges["takes_place_in"] != seedRaces || edges["mentions"] != 21 {
-			t.Fatalf("games.counts read %+v for edges", edges)
-		}
+		assert.Must(t, edges["takes_place_in"] == seedRaces && edges["mentions"] == 21, "games.counts read %+v for edges", edges)
 		// And the number the page shows is the number the tool gives,
 		// because both come out of one assembly.
 		var totals int64
 		for _, row := range counts.RelationTypes {
 			totals += row.RelationCount
 		}
-		if totals != counts.Totals.Relations {
-			t.Fatalf("the per-type edge counts sum to %d and the total says %d",
-				totals, counts.Totals.Relations)
-		}
+		assert.Must(t, totals == counts.Totals.Relations, "the per-type edge counts sum to %d and the total says %d",
+			totals, counts.Totals.Relations)
 
 		// 2. **Four tools and two filters addressed rows by uuid**, so an
 		// agent holding the (type key, key) every other tool speaks paid
@@ -1344,17 +1161,11 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			web.RelationsListInput{
 				Source: &web.RefInput{TypeKey: "race", Key: "race-000"}, Limit: 50,
 			})
-		if err != nil {
-			t.Fatalf("relations.list by source: %v", err)
-		}
-		if len(out.Items) != 3 {
-			t.Fatalf("race-000 has %d outgoing edges, want 3", len(out.Items))
-		}
+		assert.Must(t, err == nil, "relations.list by source: %v", err)
+		assert.Must(t, len(out.Items) == 3, "race-000 has %d outgoing edges, want 3", len(out.Items))
 		// The ids are still on the wire — they are just not the address.
 		for _, item := range out.Items {
-			if item.SourceID == uuid.Nil || item.Source == nil {
-				t.Fatalf("an edge lost half of its endpoint identity: %+v", item)
-			}
+			assert.Must(t, item.SourceID != uuid.Nil && item.Source != nil, "an edge lost half of its endpoint identity: %+v", item)
 		}
 		// A ref that names no entity is not_found, not an empty page: an
 		// empty page is what a mistyped key used to produce.
@@ -1373,13 +1184,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		// again.
 		detail, err := web.MCPRelationTypesGet(ctx, s.deps, s.caller, s.game,
 			web.RelationTypesGetInput{Key: "takes_place_in"})
-		if err != nil {
-			t.Fatalf("relation_types.get: %v", err)
-		}
-		if len(detail.SourceTypeKeys) != 1 || detail.SourceTypeKeys[0] != "race" ||
-			len(detail.TargetTypeKeys) != 1 || detail.TargetTypeKeys[0] != "circuit" {
-			t.Fatalf("endpoint rules read back as %+v", detail)
-		}
+		assert.Must(t, err == nil, "relation_types.get: %v", err)
+		assert.Must(t, len(detail.SourceTypeKeys) == 1 && detail.SourceTypeKeys[0] == "race" && len(detail.TargetTypeKeys) == 1 && detail.TargetTypeKeys[0] == "circuit", "endpoint rules read back as %+v", detail)
 		// The schema is left out deliberately: this is about the endpoint
 		// rules travelling out and back, and takes_place_in declares no
 		// fields, so re-sending it without one changes nothing.
@@ -1425,12 +1231,8 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 				Fields: map[string]any{"laps": float64(10)},
 			}},
 		})
-		if err != nil {
-			t.Fatalf("re-seed race-000: %v", err)
-		}
-		if len(back.Written) != 1 || back.Written[0].Version != 1 {
-			t.Fatalf("the re-seeded race landed as %+v, want a fresh row at version 1", back.Written)
-		}
+		assert.Must(t, err == nil, "re-seed race-000: %v", err)
+		assert.Must(t, len(back.Written) == 1 && back.Written[0].Version == 1, "the re-seeded race landed as %+v, want a fresh row at version 1", back.Written)
 		if _, err := web.MCPRelationsUpsert(ctx, s.deps, s.caller, s.game, web.RelationsUpsertInput{
 			Mode: string(metamodel.BulkAtomic),
 			Items: []web.RelationItemInput{
@@ -1451,37 +1253,23 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 
 	t.Run("the game home page renders this game", func(t *testing.T) {
 		rec := s.get(t, "/api/games/"+s.gameSlug+"/summary")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
-		}
+		assert.Must(t, rec.Code == http.StatusOK, "summary = %d: %s", rec.Code, rec.Body.String())
 		var summary web.GameSummaryOutput
 		decodeBody(t, rec, &summary)
 
-		if len(summary.EntityTypes) != 7 || len(summary.RelationTypes) != 8 {
-			t.Fatalf("the summary lists %d entity types and %d relation types, want 7 and 8",
-				len(summary.EntityTypes), len(summary.RelationTypes))
-		}
-		if summary.Totals.Entities != seedEntities {
-			t.Fatalf("the summary counts %d entities, want %d", summary.Totals.Entities, seedEntities)
-		}
-		if summary.Totals.Invalid != 0 {
-			t.Fatalf("the summary counts %d invalid rows on a game with none", summary.Totals.Invalid)
-		}
+		assert.Must(t, len(summary.EntityTypes) == 7 && len(summary.RelationTypes) == 8, "the summary lists %d entity types and %d relation types, want 7 and 8",
+			len(summary.EntityTypes), len(summary.RelationTypes))
+		assert.Must(t, summary.Totals.Entities == seedEntities, "the summary counts %d entities, want %d", summary.Totals.Entities, seedEntities)
+		assert.Must(t, summary.Totals.Invalid == 0, "the summary counts %d invalid rows on a game with none", summary.Totals.Invalid)
 		wantEdges := int64(seedRaces + seedRaces + seedDrivers + 2*seedCars + seedRaces +
 			(seedLicences - 1) + seedDrivers + 21)
-		if summary.Totals.Relations != wantEdges {
-			t.Fatalf("the summary counts %d relations, want %d", summary.Totals.Relations, wantEdges)
-		}
+		assert.Must(t, summary.Totals.Relations == wantEdges, "the summary counts %d relations, want %d", summary.Totals.Relations, wantEdges)
 		counts := map[string]int64{}
 		for _, row := range summary.EntityTypes {
 			counts[row.Key] = row.EntityCount
-			if row.InvalidCount != 0 {
-				t.Fatalf("%s carries %d invalid rows", row.Key, row.InvalidCount)
-			}
+			assert.Must(t, row.InvalidCount == 0, "%s carries %d invalid rows", row.Key, row.InvalidCount)
 		}
-		if counts["sponsor"] != seedSponsors || counts["race"] != seedRaces {
-			t.Fatalf("the per-type counts read %+v", counts)
-		}
+		assert.Must(t, counts["sponsor"] == seedSponsors && counts["race"] == seedRaces, "the per-type counts read %+v", counts)
 
 		// The page itself: the real app.js, rendering this game's real
 		// summary rather than a hand-written fixture.
@@ -1500,13 +1288,9 @@ func (s *seeded) search(t *testing.T, query, typeKey string) []web.SearchHit {
 	t.Helper()
 	out, err := web.MCPSearch(context.Background(), s.deps, s.caller, s.game,
 		web.SearchInput{Query: query, TypeKey: typeKey, Limit: 50})
-	if err != nil {
-		t.Fatalf("search %q: %v", query, err)
-	}
+	assert.Must(t, err == nil, "search %q: %v", query, err)
 	for i, hit := range out.Items {
-		if hit.Kind != "entity" || hit.Entity == nil || hit.Document != nil {
-			t.Fatalf("hit %d of %q is %+v, want a labelled entity hit", i, query, hit)
-		}
+		assert.Must(t, hit.Kind == "entity" && hit.Entity != nil && hit.Document == nil, "hit %d of %q is %+v, want a labelled entity hit", i, query, hit)
 	}
 	return out.Items
 }
@@ -1541,9 +1325,7 @@ func renderSummaryInBrowserStub(t *testing.T, summary []byte) {
 	}
 	cmd := exec.Command("node", "jstest/seeded_game_page_test.mjs", path)
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("seeded_game_page_test.mjs failed: %v\n%s", err, out)
-	}
+	assert.Must(t, err == nil, "seeded_game_page_test.mjs failed: %v\n%s", err, out)
 	t.Log(string(out))
 }
 

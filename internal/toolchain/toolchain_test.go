@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 // root is the repository, two directories up from this package.
@@ -74,16 +76,12 @@ func TestTheToolsAreInstallableWithThisProjectsGo(t *testing.T) {
 	declared := read(t, "go.mod", goDirective)
 
 	body, err := os.ReadFile(filepath.Join(root, "Makefile"))
-	if err != nil {
-		t.Fatalf("read Makefile: %v", err)
-	}
+	assert.Must(t, err == nil, "read Makefile: %v", err)
 	// The pins live in the Makefile, once, and CI reaches them through
 	// `make tools` rather than spelling them a second time.
 	pins := regexp.MustCompile(`(?m)^(GOLANGCI_LINT_VERSION|SQLC_VERSION)\s*\?=\s*(\S+)`)
 	found := pins.FindAllStringSubmatch(string(body), -1)
-	if len(found) != 2 {
-		t.Fatalf("found %d tool pin(s) in the Makefile, want 2: this guard reads them by name", len(found))
-	}
+	assert.Must(t, len(found) == 2, "found %d tool pin(s) in the Makefile, want 2: this guard reads them by name", len(found))
 	for _, pin := range found {
 		if !strings.HasPrefix(pin[2], "v") {
 			t.Errorf("%s = %q, which is not a version: a pin that is not a version is not a pin",
@@ -93,30 +91,20 @@ func TestTheToolsAreInstallableWithThisProjectsGo(t *testing.T) {
 
 	// And the workflow no longer spells either of them itself.
 	workflow, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
-	if err != nil {
-		t.Fatalf("read ci.yml: %v", err)
-	}
+	assert.Must(t, err == nil, "read ci.yml: %v", err)
 	for _, tool := range []string{"golangci-lint@", "sqlc@"} {
-		if strings.Contains(string(workflow), tool) {
-			t.Errorf("ci.yml pins %s itself: the pins are the Makefile's, and two spellings of one "+
-				"version is how sqlc came to be @latest on a machine and @v1.31.1 on the runner", tool)
-		}
+		assert.Should(t, !strings.Contains(string(workflow), tool), "ci.yml pins %s itself: the pins are the Makefile's, and two spellings of one "+
+			"version is how sqlc came to be @latest on a machine and @v1.31.1 on the runner", tool)
 	}
 
-	if declared == "" {
-		t.Fatal("go.mod declares no Go version")
-	}
+	assert.Must(t, declared != "", "go.mod declares no Go version")
 }
 
 func read(t *testing.T, name string, pattern *regexp.Regexp) string {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join(root, name))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
+	assert.Must(t, err == nil, "read %s: %v", name, err)
 	found := pattern.FindStringSubmatch(string(body))
-	if found == nil {
-		t.Fatalf("%s does not name a version in the shape this guard reads", name)
-	}
+	assert.Must(t, found != nil, "%s does not name a version in the shape this guard reads", name)
 	return found[1]
 }

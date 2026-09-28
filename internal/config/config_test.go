@@ -4,17 +4,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/neverbot/maestro/internal/assert"
 )
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
 	env := map[string]string{}
 	_, err := Load(func(k string) string { return env[k] })
-	if err == nil {
-		t.Fatal("expected an error when DATABASE_URL is unset")
-	}
-	if !strings.Contains(err.Error(), "DATABASE_URL") {
-		t.Fatalf("error = %q, want it to mention DATABASE_URL", err)
-	}
+	assert.Must(t, err != nil, "expected an error when DATABASE_URL is unset")
+	assert.Must(t, strings.Contains(err.Error(), "DATABASE_URL"), "error = %q, want it to mention DATABASE_URL", err)
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -22,27 +20,13 @@ func TestLoadDefaults(t *testing.T) {
 		"DATABASE_URL": "postgres://localhost/maestro",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Addr != ":8080" {
-		t.Fatalf("Addr = %q, want :8080", cfg.Addr)
-	}
-	if cfg.RegistrationMode != RegistrationInviteOnly {
-		t.Fatalf("RegistrationMode = %q, want invite_only", cfg.RegistrationMode)
-	}
-	if len(cfg.AllowedEmailDomains) != 0 {
-		t.Fatalf("AllowedEmailDomains = %v, want empty", cfg.AllowedEmailDomains)
-	}
-	if cfg.SessionTTL != 720*time.Hour {
-		t.Fatalf("SessionTTL = %v, want 720h", cfg.SessionTTL)
-	}
-	if cfg.InviteTTL != 14*24*time.Hour {
-		t.Fatalf("InviteTTL = %v, want 336h", cfg.InviteTTL)
-	}
-	if cfg.TrustedProxyCount != 0 {
-		t.Fatalf("TrustedProxyCount = %d, want 0 (a directly exposed instance by default)", cfg.TrustedProxyCount)
-	}
+	assert.Must(t, err == nil, "Load: %v", err)
+	assert.Must(t, cfg.Addr == ":8080", "Addr = %q, want :8080", cfg.Addr)
+	assert.Must(t, cfg.RegistrationMode == RegistrationInviteOnly, "RegistrationMode = %q, want invite_only", cfg.RegistrationMode)
+	assert.Must(t, len(cfg.AllowedEmailDomains) == 0, "AllowedEmailDomains = %v, want empty", cfg.AllowedEmailDomains)
+	assert.Must(t, cfg.SessionTTL == 720*time.Hour, "SessionTTL = %v, want 720h", cfg.SessionTTL)
+	assert.Must(t, cfg.InviteTTL == 14*24*time.Hour, "InviteTTL = %v, want 336h", cfg.InviteTTL)
+	assert.Must(t, cfg.TrustedProxyCount == 0, "TrustedProxyCount = %d, want 0 (a directly exposed instance by default)", cfg.TrustedProxyCount)
 }
 
 func TestLoadParsesTrustedProxyCount(t *testing.T) {
@@ -51,12 +35,8 @@ func TestLoadParsesTrustedProxyCount(t *testing.T) {
 		"TRUSTED_PROXY_COUNT": "1",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.TrustedProxyCount != 1 {
-		t.Fatalf("TrustedProxyCount = %d, want 1", cfg.TrustedProxyCount)
-	}
+	assert.Must(t, err == nil, "Load: %v", err)
+	assert.Must(t, cfg.TrustedProxyCount == 1, "TrustedProxyCount = %d, want 1", cfg.TrustedProxyCount)
 }
 
 func TestLoadRejectsInvalidTrustedProxyCount(t *testing.T) {
@@ -66,9 +46,7 @@ func TestLoadRejectsInvalidTrustedProxyCount(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT") {
-		t.Fatalf("error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT"), "error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
 }
 
 func TestLoadRejectsNegativeTrustedProxyCount(t *testing.T) {
@@ -78,9 +56,7 @@ func TestLoadRejectsNegativeTrustedProxyCount(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT") {
-		t.Fatalf("error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT"), "error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
 }
 
 func TestLoadParsesSessionTTL(t *testing.T) {
@@ -89,12 +65,8 @@ func TestLoadParsesSessionTTL(t *testing.T) {
 		"SESSION_TTL":  "168h",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.SessionTTL != 168*time.Hour {
-		t.Fatalf("SessionTTL = %v, want 168h", cfg.SessionTTL)
-	}
+	assert.Must(t, err == nil, "Load: %v", err)
+	assert.Must(t, cfg.SessionTTL == 168*time.Hour, "SessionTTL = %v, want 168h", cfg.SessionTTL)
 }
 
 func TestLoadRejectsInvalidSessionTTL(t *testing.T) {
@@ -104,9 +76,7 @@ func TestLoadRejectsInvalidSessionTTL(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "SESSION_TTL") {
-		t.Fatalf("error = %q, want it to mention SESSION_TTL", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "SESSION_TTL"), "error = %q, want it to mention SESSION_TTL", err)
 }
 
 func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
@@ -117,9 +87,7 @@ func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
 		}
 		cfg, err := Load(func(k string) string { return env[k] })
 		err = mustErr(t, cfg, err)
-		if !strings.Contains(err.Error(), "SESSION_TTL") {
-			t.Fatalf("SESSION_TTL=%q: error = %q, want it to mention SESSION_TTL", raw, err)
-		}
+		assert.Must(t, strings.Contains(err.Error(), "SESSION_TTL"), "SESSION_TTL=%q: error = %q, want it to mention SESSION_TTL", raw, err)
 	}
 }
 
@@ -129,12 +97,8 @@ func TestLoadParsesInviteTTL(t *testing.T) {
 		"INVITE_TTL":   "48h",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.InviteTTL != 48*time.Hour {
-		t.Fatalf("InviteTTL = %v, want 48h", cfg.InviteTTL)
-	}
+	assert.Must(t, err == nil, "Load: %v", err)
+	assert.Must(t, cfg.InviteTTL == 48*time.Hour, "InviteTTL = %v, want 48h", cfg.InviteTTL)
 }
 
 func TestLoadRejectsInvalidInviteTTL(t *testing.T) {
@@ -144,9 +108,7 @@ func TestLoadRejectsInvalidInviteTTL(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "INVITE_TTL") {
-		t.Fatalf("error = %q, want it to mention INVITE_TTL", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "INVITE_TTL"), "error = %q, want it to mention INVITE_TTL", err)
 }
 
 func TestLoadRejectsNonPositiveInviteTTL(t *testing.T) {
@@ -157,9 +119,7 @@ func TestLoadRejectsNonPositiveInviteTTL(t *testing.T) {
 		}
 		cfg, err := Load(func(k string) string { return env[k] })
 		err = mustErr(t, cfg, err)
-		if !strings.Contains(err.Error(), "INVITE_TTL") {
-			t.Fatalf("INVITE_TTL=%q: error = %q, want it to mention INVITE_TTL", raw, err)
-		}
+		assert.Must(t, strings.Contains(err.Error(), "INVITE_TTL"), "INVITE_TTL=%q: error = %q, want it to mention INVITE_TTL", raw, err)
 	}
 }
 
@@ -170,9 +130,7 @@ func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "INVITE_TTL") {
-		t.Fatalf("error = %q, want it to mention INVITE_TTL", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "INVITE_TTL"), "error = %q, want it to mention INVITE_TTL", err)
 }
 
 func TestLoadParsesDomainsAndMode(t *testing.T) {
@@ -182,21 +140,15 @@ func TestLoadParsesDomainsAndMode(t *testing.T) {
 		"REGISTRATION_MODE":     "domain_open",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	assert.Must(t, err == nil, "Load: %v", err)
 	want := []string{"example.test", "partner.test"}
-	if len(cfg.AllowedEmailDomains) != len(want) {
-		t.Fatalf("domains = %v, want %v", cfg.AllowedEmailDomains, want)
-	}
+	assert.Must(t, len(cfg.AllowedEmailDomains) == len(want), "domains = %v, want %v", cfg.AllowedEmailDomains, want)
 	for i := range want {
 		if cfg.AllowedEmailDomains[i] != want[i] {
 			t.Fatalf("domains[%d] = %q, want %q", i, cfg.AllowedEmailDomains[i], want[i])
 		}
 	}
-	if cfg.RegistrationMode != RegistrationDomainOpen {
-		t.Fatalf("RegistrationMode = %q, want domain_open", cfg.RegistrationMode)
-	}
+	assert.Must(t, cfg.RegistrationMode == RegistrationDomainOpen, "RegistrationMode = %q, want domain_open", cfg.RegistrationMode)
 }
 
 func TestLoadRejectsUnknownRegistrationMode(t *testing.T) {
@@ -216,9 +168,7 @@ func TestLoadRejectsDomainOpenWithoutDomains(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "ALLOWED_EMAIL_DOMAINS") {
-		t.Fatalf("error = %q, want it to mention ALLOWED_EMAIL_DOMAINS", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "ALLOWED_EMAIL_DOMAINS"), "error = %q, want it to mention ALLOWED_EMAIL_DOMAINS", err)
 }
 
 func TestLoadRejectsInvalidDomainEntry(t *testing.T) {
@@ -241,19 +191,13 @@ func TestLoadRejectsInvalidAddr(t *testing.T) {
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "MAESTRO_ADDR") {
-		t.Fatalf("error = %q, want it to mention MAESTRO_ADDR", err)
-	}
+	assert.Must(t, strings.Contains(err.Error(), "MAESTRO_ADDR"), "error = %q, want it to mention MAESTRO_ADDR", err)
 }
 
 func TestEmailAllowed(t *testing.T) {
 	unrestricted := Config{}
-	if !unrestricted.EmailAllowed("anyone@anywhere.test") {
-		t.Error("empty domain list must allow everything")
-	}
-	if unrestricted.EmailAllowed("not-an-email") {
-		t.Error("an address without @ must never be allowed, even unrestricted")
-	}
+	assert.Should(t, unrestricted.EmailAllowed("anyone@anywhere.test"), "empty domain list must allow everything")
+	assert.Should(t, !unrestricted.EmailAllowed("not-an-email"), "an address without @ must never be allowed, even unrestricted")
 
 	restricted := Config{AllowedEmailDomains: []string{"example.test"}}
 	cases := map[string]bool{
@@ -270,16 +214,12 @@ func TestEmailAllowed(t *testing.T) {
 	}
 
 	mixedCase := Config{AllowedEmailDomains: []string{"Example.test"}}
-	if !mixedCase.EmailAllowed("designer@example.test") {
-		t.Error("EmailAllowed must compare case-insensitively even against a mixed-case literal")
-	}
+	assert.Should(t, mixedCase.EmailAllowed("designer@example.test"), "EmailAllowed must compare case-insensitively even against a mixed-case literal")
 }
 
 func mustErr(t *testing.T, cfg Config, err error) error {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("Load: expected an error, got cfg = %+v", cfg)
-	}
+	assert.Must(t, err != nil, "Load: expected an error, got cfg = %+v", cfg)
 	return err
 }
 
@@ -288,12 +228,8 @@ func TestLoadDefaultsFirstAdminPasswordResetToFalse(t *testing.T) {
 		"DATABASE_URL": "postgres://localhost/maestro",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.FirstAdminPasswordReset {
-		t.Fatal("FirstAdminPasswordReset = true, want false when FIRST_ADMIN_PASSWORD_RESET is unset")
-	}
+	assert.Must(t, err == nil, "Load: %v", err)
+	assert.Must(t, !cfg.FirstAdminPasswordReset, "FirstAdminPasswordReset = true, want false when FIRST_ADMIN_PASSWORD_RESET is unset")
 }
 
 func TestLoadParsesFirstAdminPasswordReset(t *testing.T) {
@@ -303,12 +239,8 @@ func TestLoadParsesFirstAdminPasswordReset(t *testing.T) {
 			"FIRST_ADMIN_PASSWORD_RESET": raw,
 		}
 		cfg, err := Load(func(k string) string { return env[k] })
-		if err != nil {
-			t.Fatalf("Load(%q): %v", raw, err)
-		}
-		if !cfg.FirstAdminPasswordReset {
-			t.Fatalf("FIRST_ADMIN_PASSWORD_RESET=%q gave FirstAdminPasswordReset = false, want true", raw)
-		}
+		assert.Must(t, err == nil, "Load(%q): %v", raw, err)
+		assert.Must(t, cfg.FirstAdminPasswordReset, "FIRST_ADMIN_PASSWORD_RESET=%q gave FirstAdminPasswordReset = false, want true", raw)
 	}
 	for _, raw := range []string{"false", "FALSE", "0", "f"} {
 		env := map[string]string{
@@ -316,12 +248,8 @@ func TestLoadParsesFirstAdminPasswordReset(t *testing.T) {
 			"FIRST_ADMIN_PASSWORD_RESET": raw,
 		}
 		cfg, err := Load(func(k string) string { return env[k] })
-		if err != nil {
-			t.Fatalf("Load(%q): %v", raw, err)
-		}
-		if cfg.FirstAdminPasswordReset {
-			t.Fatalf("FIRST_ADMIN_PASSWORD_RESET=%q gave FirstAdminPasswordReset = true, want false", raw)
-		}
+		assert.Must(t, err == nil, "Load(%q): %v", raw, err)
+		assert.Must(t, !cfg.FirstAdminPasswordReset, "FIRST_ADMIN_PASSWORD_RESET=%q gave FirstAdminPasswordReset = true, want false", raw)
 	}
 }
 
@@ -331,10 +259,6 @@ func TestLoadRejectsInvalidFirstAdminPasswordReset(t *testing.T) {
 		"FIRST_ADMIN_PASSWORD_RESET": "yes please",
 	}
 	_, err := Load(func(k string) string { return env[k] })
-	if err == nil {
-		t.Fatal("expected an error for an unparseable FIRST_ADMIN_PASSWORD_RESET")
-	}
-	if !strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD_RESET") {
-		t.Fatalf("error = %q, want it to mention FIRST_ADMIN_PASSWORD_RESET", err)
-	}
+	assert.Must(t, err != nil, "expected an error for an unparseable FIRST_ADMIN_PASSWORD_RESET")
+	assert.Must(t, strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD_RESET"), "error = %q, want it to mention FIRST_ADMIN_PASSWORD_RESET", err)
 }

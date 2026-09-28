@@ -118,15 +118,6 @@ func TestValidateKeepsAWellFormedListAsStrings(t *testing.T) {
 	}
 }
 
-func TestValidateAppliesDefaults(t *testing.T) {
-	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: true}}
-	out, err := schema.Validate(map[string]any{})
-	assert.Must(t, err == nil, "Validate: %v", err)
-	if out["repeatable"] != true {
-		t.Fatalf("repeatable = %v, want the declared default", out["repeatable"])
-	}
-}
-
 func TestValidateReportsEveryProblemAtOnce(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"difficulty": "impossible", "nonsense": 1})
 	assert.Must(t, err != nil, "expected errors")
@@ -151,18 +142,6 @@ func TestValidateRejectsFieldWithNoType(t *testing.T) {
 	_, err := schema.Validate(map[string]any{"colour": "red"})
 	assert.Must(t, err != nil, "a value for a field with no declared type must be an error")
 	assert.Must(t, strings.Contains(err.Error(), "declares no type"), "error = %q, want a message distinct from the unknown-type one", err)
-}
-
-func TestValidateAppliesADeclaredZeroValuedDefault(t *testing.T) {
-	// HasDefault, not the value of Default, decides whether a default was
-	// declared. false is an ordinary thing for a game to declare as a
-	// default, and must be applied like any other declared default.
-	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
-	out, err := schema.Validate(map[string]any{})
-	assert.Must(t, err == nil, "Validate: %v", err)
-	if v, present := out["repeatable"]; !present || v != false {
-		t.Fatalf("out = %v, want the declared false default to be applied", out)
-	}
 }
 
 func TestValidateAcceptsIntegerNumbers(t *testing.T) {
@@ -548,15 +527,6 @@ func TestValidateRejectsANonTextValueInATextField(t *testing.T) {
 	}
 }
 
-func TestValidateKeepsTextExactly(t *testing.T) {
-	schema := Schema{{Key: "summary", Type: FieldText}}
-	out, err := schema.Validate(map[string]any{"summary": "  Kill twelve boars.  "})
-	assert.Must(t, err == nil, "Validate: %v", err)
-	if out["summary"] != "  Kill twelve boars.  " {
-		t.Fatalf("summary = %q, want the string stored verbatim, untrimmed", out["summary"])
-	}
-}
-
 func TestValidateRejectsANonBoolValueInABoolField(t *testing.T) {
 	for name, tc := range map[string]struct {
 		value any
@@ -819,6 +789,37 @@ func TestCheckRefusesASchemaAndSaysWhy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			msg := checkProblems(t, tc.schema)
 			assert.Must(t, strings.Contains(msg, tc.says), "error = %q, want it to say %q", msg, tc.says)
+		})
+	}
+}
+
+// What Validate puts in the row it returns: a declared default when the
+// field is absent — including a false one, which an "is it set?" check
+// would drop — and a text value exactly as it was given, untrimmed.
+func TestValidateReturnsTheRowItPromises(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		schema Schema
+		values map[string]any
+		key    string
+		want   any
+	}{
+		{"a declared default for an absent field",
+			Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: true}},
+			map[string]any{}, "repeatable", true},
+		{"a declared false default, which is not the same as absent",
+			Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}},
+			map[string]any{}, "repeatable", false},
+		{"text kept verbatim, untrimmed",
+			Schema{{Key: "summary", Type: FieldText}},
+			map[string]any{"summary": "  Kill twelve boars.  "}, "summary", "  Kill twelve boars.  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.schema.Validate(tc.values)
+			assert.NoErr(t, err, "Validate")
+			got, present := out[tc.key]
+			assert.Must(t, present, "%s is absent from the row, want %v", tc.key, tc.want)
+			assert.Must(t, got == tc.want, "%s = %#v, want %#v", tc.key, got, tc.want)
 		})
 	}
 }

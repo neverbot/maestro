@@ -47,27 +47,6 @@ func TestParseClock(t *testing.T) {
 	}
 }
 
-func TestNextFire_LaterToday(t *testing.T) {
-	now := time.Date(2026, 6, 7, 1, 30, 0, 0, time.Local)
-	got := nextFire(now, 3, 0)
-	want := time.Date(2026, 6, 7, 3, 0, 0, 0, time.Local)
-	assert.Should(t, got.Equal(want), "nextFire(01:30, 03:00) = %v, want %v", got, want)
-}
-
-func TestNextFire_EarlierToday_RollsToTomorrow(t *testing.T) {
-	now := time.Date(2026, 6, 7, 4, 30, 0, 0, time.Local)
-	got := nextFire(now, 3, 0)
-	want := time.Date(2026, 6, 8, 3, 0, 0, 0, time.Local)
-	assert.Should(t, got.Equal(want), "nextFire(04:30, 03:00) = %v, want %v", got, want)
-}
-
-func TestNextFire_ExactlyNow_RollsToTomorrow(t *testing.T) {
-	now := time.Date(2026, 6, 7, 3, 0, 0, 0, time.Local)
-	got := nextFire(now, 3, 0)
-	want := time.Date(2026, 6, 8, 3, 0, 0, 0, time.Local)
-	assert.Should(t, got.Equal(want), "nextFire(equal-now) = %v, want %v", got, want)
-}
-
 func TestPruneOldDumps_DeletesOldKeepsNew(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.Local)
@@ -242,5 +221,25 @@ func TestPruneOldDumps_RemovesOrphanTempFiles(t *testing.T) {
 		if _, err := os.Stat(keep); err != nil {
 			t.Errorf("%s should have been kept: %v", filepath.Base(keep), err)
 		}
+	}
+}
+
+// When the next dump is due, relative to now. The slot is local time, and
+// a slot already past today is tomorrow's — including the slot that is
+// exactly now, which must not fire twice.
+func TestNextFireIsTheNextSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		want time.Time
+	}{
+		{"later today", time.Date(2026, 6, 7, 1, 30, 0, 0, time.Local), time.Date(2026, 6, 7, 3, 0, 0, 0, time.Local)},
+		{"already past, so tomorrow", time.Date(2026, 6, 7, 4, 30, 0, 0, time.Local), time.Date(2026, 6, 8, 3, 0, 0, 0, time.Local)},
+		{"exactly now, so tomorrow", time.Date(2026, 6, 7, 3, 0, 0, 0, time.Local), time.Date(2026, 6, 8, 3, 0, 0, 0, time.Local)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextFire(tc.now, 3, 0)
+			assert.Must(t, got.Equal(tc.want), "nextFire(%v, 03:00) = %v, want %v", tc.now, got, tc.want)
+		})
 	}
 }

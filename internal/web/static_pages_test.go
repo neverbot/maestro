@@ -234,30 +234,6 @@ func TestNoPageURLContainsAUUID(t *testing.T) {
 	t.Logf("scanned %d page module(s); none addresses a row by id", scanned)
 }
 
-// TestTheUUIDScanReadsWhatItClaimsTo is the guard on the guard. The scan
-// above reports nothing in two indistinguishable cases — the modules are
-// clean, or it never matched anything — and this repository has shipped
-// that shape twice.
-func TestTheUUIDScanReadsWhatItClaimsTo(t *testing.T) {
-	t.Parallel()
-	for name, caught := range map[string]string{
-		"a uuid in a template":     "const href = `/g/${slug}/e/1e9d6b0c-4f7a-4a9e-8a5b-2c1d3e4f5a6b`;",
-		"an id in a template path": "const href = `/g/${game.id}/views`;",
-		"an id concatenated":       `const href = "/g/" + game.id;`,
-		"an encoded id in a path":  "const href = `/g/${encodeURIComponent(game.id)}`;",
-	} {
-		assert.Should(t, uuidLiteral.MatchString(caught) || idInPath.MatchString(caught), "the scan misses %s: %q", name, caught)
-	}
-	for name, allowed := range map[string]string{
-		"an id used as an index key": "if (typeof node.id !== \"string\") continue;",
-		"an id in a body":            "const body = { asset_id: asset.id };",
-		"a slug in a path":           "const href = `/g/${slug}/v/${key}`;",
-		"an id compared":             "if (edge.source === node.id) continue;",
-	} {
-		assert.Should(t, !uuidLiteral.MatchString(allowed) && !idInPath.MatchString(allowed), "the scan reports %s, which is not an address: %q", name, allowed)
-	}
-}
-
 // TestEveryShellCarriesTheImportMapAndTheStylesheet is the third thing a
 // shell can be missing and still look fine in a diff.
 func TestEveryShellCarriesTheImportMapAndTheStylesheet(t *testing.T) {

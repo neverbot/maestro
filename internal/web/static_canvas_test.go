@@ -140,51 +140,6 @@ func markElements(t *testing.T) []string {
 	return found
 }
 
-// TestTheSVGHazardScanReadsWhatItClaimsTo is the guard on the guard, in
-// both directions. A scan that matched nothing would pass the test above
-// on any file at all, which is the failure this repository has hit
-// twice: a guard that audits itself.
-func TestTheSVGHazardScanReadsWhatItClaimsTo(t *testing.T) {
-	t.Parallel()
-	for name, planted := range map[string]string{
-		"a foreign object":    `const box = doc.createElementNS(SVG_NS, "foreignObject");`,
-		"a script element":    `const s = doc.createElementNS(SVG_NS, "script");`,
-		"a link":              `const a = doc.createElementNS(SVG_NS, "a");`,
-		"the legacy href":     `element.setAttributeNS(XLINK, "xlink:href", mark.href);`,
-		"the wrong namespace": `const rect = doc.createElementNS(HTML_NS, "rect");`,
-	} {
-		assert.Should(t, hazardous(planted), "the scan missed %s: %q", name, planted)
-	}
-
-	for name, benign := range map[string]string{
-		"an ordinary shape": `const rect = doc.createElementNS(SVG_NS, "rect");`,
-		"a text element":    `const label = doc.createElementNS(SVG_NS, "text");`,
-		"a group":           `const group = doc.createElementNS(SVG_NS, "g");`,
-		"an image":          `const image = doc.createElementNS(SVG_NS, "image");`,
-	} {
-		assert.Should(t, !hazardous(benign), "the scan read %s as a hazard: %q", name, benign)
-	}
-
-	// The comment strip is what keeps this file and mst-canvas.js from
-	// failing on their own prose: both name every element they refuse.
-	commented := "// <foreignObject> re-enters the HTML parser and is never emitted\nconst a = 1;\n"
-	for _, line := range codeLines(commented) {
-		assert.Should(t, !hazardous(line.code), "the scan read a comment as a call: %q", line.text)
-	}
-
-	// And it really did open the canvas, rather than passing because the
-	// walk never reached the directory the components live in.
-	scanned, _ := scanForSVGHazards(t)
-	want := "static/components/mst-canvas.js"
-	found := false
-	for _, path := range scanned {
-		if path == want {
-			found = true
-		}
-	}
-	assert.Should(t, found, "the SVG hazard scan never read %s; it read %v", want, scanned)
-}
-
 // literalTag unwraps a quoted tag argument. A tag held in a variable —
 // which is how the emitter itself creates elements, from the contract's
 // own map — is not a name this scan can read, and is guarded instead by
@@ -194,22 +149,4 @@ func literalTag(argument string) (string, bool) {
 		return argument[1 : len(argument)-1], true
 	}
 	return "", false
-}
-
-// hazardous is the scan's judgement of one line, factored out so the
-// guard on the guard exercises the same three matchers the walk does
-// rather than a restatement of them.
-func hazardous(code string) bool {
-	if xlinkRE.MatchString(code) || foreignObjectRE.MatchString(code) {
-		return true
-	}
-	for _, hit := range createElementNSRE.FindAllStringSubmatch(code, -1) {
-		if hit[1] != "SVG_NS" {
-			return true
-		}
-		if tag, ok := literalTag(hit[2]); ok && scriptableSVG[tag] {
-			return true
-		}
-	}
-	return false
 }

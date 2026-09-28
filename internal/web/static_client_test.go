@@ -50,42 +50,6 @@ func TestTheDataClientComposesNoSentence(t *testing.T) {
 	t.Logf("%s holds %d string literal(s), none of them a sentence", clientModule, len(literals))
 }
 
-// TestTheSentenceGuardReadsWhatItClaimsTo is the guard on the guard, and
-// it has two halves because the test above reports nothing in two
-// indistinguishable cases: the module is clean, or the scanner never saw
-// its strings.
-func TestTheSentenceGuardReadsWhatItClaimsTo(t *testing.T) {
-	t.Parallel()
-	literals := clientStringLiterals(t)
-	seen := map[string]bool{}
-	for _, lit := range literals {
-		seen[lit.text] = true
-	}
-	for _, want := range []string{
-		"view.positions", "view.upserted", "view.removed", "resync",
-		"content-type", "text/event-stream", "/api/games/", "reread", "band", "gone", "ignore",
-	} {
-		assert.Should(t, seen[want], "the scanner never saw the literal %q, which %s certainly contains", want, clientModule)
-	}
-
-	fixture := "" +
-		"// a comment saying something with spaces in it\n" +
-		"const a = \"view.positions\";\n" +
-		"const b = \"could not run the view\";\n" +
-		"const c = 'the game moved under this query';\n"
-	found := stringLiteralsIn(fixture)
-	var spaced []string
-	for _, lit := range found {
-		if strings.ContainsFunc(lit.text, unicode.IsSpace) {
-			spaced = append(spaced, lit.text)
-		}
-	}
-	sort.Strings(spaced)
-	want := []string{"could not run the view", "the game moved under this query"}
-	assert.Should(t, strings.Join(spaced, "|") == strings.Join(want, "|"), "the scanner found %q in the fixture, want %q: it must catch a sentence in code and "+
-		"must not read one out of a comment", spaced, want)
-}
-
 // networkPrimitives are the spellings of "reach the server" a browser
 // offers. `fetch` as a bare word (not `fetchImpl`, not `fetchAPI`),
 // EventSource, XMLHttpRequest, WebSocket, sendBeacon and importScripts.

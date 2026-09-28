@@ -39,26 +39,6 @@ func TestLoadParsesTrustedProxyCount(t *testing.T) {
 	assert.Must(t, cfg.TrustedProxyCount == 1, "TrustedProxyCount = %d, want 1", cfg.TrustedProxyCount)
 }
 
-func TestLoadRejectsInvalidTrustedProxyCount(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":        "postgres://localhost/maestro",
-		"TRUSTED_PROXY_COUNT": "not-a-number",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT"), "error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
-}
-
-func TestLoadRejectsNegativeTrustedProxyCount(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":        "postgres://localhost/maestro",
-		"TRUSTED_PROXY_COUNT": "-1",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT"), "error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
-}
-
 func TestLoadParsesSessionTTL(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
@@ -69,28 +49,6 @@ func TestLoadParsesSessionTTL(t *testing.T) {
 	assert.Must(t, cfg.SessionTTL == 168*time.Hour, "SessionTTL = %v, want 168h", cfg.SessionTTL)
 }
 
-func TestLoadRejectsInvalidSessionTTL(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_TTL":  "not-a-duration",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "SESSION_TTL"), "error = %q, want it to mention SESSION_TTL", err)
-}
-
-func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
-	for _, raw := range []string{"0h", "-1h"} {
-		env := map[string]string{
-			"DATABASE_URL": "postgres://localhost/maestro",
-			"SESSION_TTL":  raw,
-		}
-		cfg, err := Load(func(k string) string { return env[k] })
-		err = mustErr(t, cfg, err)
-		assert.Must(t, strings.Contains(err.Error(), "SESSION_TTL"), "SESSION_TTL=%q: error = %q, want it to mention SESSION_TTL", raw, err)
-	}
-}
-
 func TestLoadParsesInviteTTL(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
@@ -99,38 +57,6 @@ func TestLoadParsesInviteTTL(t *testing.T) {
 	cfg, err := Load(func(k string) string { return env[k] })
 	assert.Must(t, err == nil, "Load: %v", err)
 	assert.Must(t, cfg.InviteTTL == 48*time.Hour, "InviteTTL = %v, want 48h", cfg.InviteTTL)
-}
-
-func TestLoadRejectsInvalidInviteTTL(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"INVITE_TTL":   "not-a-duration",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "INVITE_TTL"), "error = %q, want it to mention INVITE_TTL", err)
-}
-
-func TestLoadRejectsNonPositiveInviteTTL(t *testing.T) {
-	for _, raw := range []string{"0h", "-1h"} {
-		env := map[string]string{
-			"DATABASE_URL": "postgres://localhost/maestro",
-			"INVITE_TTL":   raw,
-		}
-		cfg, err := Load(func(k string) string { return env[k] })
-		err = mustErr(t, cfg, err)
-		assert.Must(t, strings.Contains(err.Error(), "INVITE_TTL"), "INVITE_TTL=%q: error = %q, want it to mention INVITE_TTL", raw, err)
-	}
-}
-
-func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"INVITE_TTL":   "4320h", // 180 days, above the 90-day maximum
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "INVITE_TTL"), "error = %q, want it to mention INVITE_TTL", err)
 }
 
 func TestLoadParsesDomainsAndMode(t *testing.T) {
@@ -149,49 +75,6 @@ func TestLoadParsesDomainsAndMode(t *testing.T) {
 		}
 	}
 	assert.Must(t, cfg.RegistrationMode == RegistrationDomainOpen, "RegistrationMode = %q, want domain_open", cfg.RegistrationMode)
-}
-
-func TestLoadRejectsUnknownRegistrationMode(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":      "postgres://localhost/maestro",
-		"REGISTRATION_MODE": "open_bar",
-	}
-	if _, err := Load(func(k string) string { return env[k] }); err == nil {
-		t.Fatal("expected an error for an unknown registration mode")
-	}
-}
-
-func TestLoadRejectsDomainOpenWithoutDomains(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":      "postgres://localhost/maestro",
-		"REGISTRATION_MODE": "domain_open",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "ALLOWED_EMAIL_DOMAINS"), "error = %q, want it to mention ALLOWED_EMAIL_DOMAINS", err)
-}
-
-func TestLoadRejectsInvalidDomainEntry(t *testing.T) {
-	cases := []string{"@example.test", "https://example.test", "stu dio.com"}
-	for _, entry := range cases {
-		env := map[string]string{
-			"DATABASE_URL":          "postgres://localhost/maestro",
-			"ALLOWED_EMAIL_DOMAINS": entry,
-		}
-		if _, err := Load(func(k string) string { return env[k] }); err == nil {
-			t.Errorf("entry %q: expected an error, got none", entry)
-		}
-	}
-}
-
-func TestLoadRejectsInvalidAddr(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"MAESTRO_ADDR": "8080",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	assert.Must(t, strings.Contains(err.Error(), "MAESTRO_ADDR"), "error = %q, want it to mention MAESTRO_ADDR", err)
 }
 
 func TestEmailAllowed(t *testing.T) {
@@ -215,12 +98,6 @@ func TestEmailAllowed(t *testing.T) {
 
 	mixedCase := Config{AllowedEmailDomains: []string{"Example.test"}}
 	assert.Should(t, mixedCase.EmailAllowed("designer@example.test"), "EmailAllowed must compare case-insensitively even against a mixed-case literal")
-}
-
-func mustErr(t *testing.T, cfg Config, err error) error {
-	t.Helper()
-	assert.Must(t, err != nil, "Load: expected an error, got cfg = %+v", cfg)
-	return err
 }
 
 func TestLoadDefaultsFirstAdminPasswordResetToFalse(t *testing.T) {
@@ -253,12 +130,33 @@ func TestLoadParsesFirstAdminPasswordReset(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidFirstAdminPasswordReset(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":               "postgres://localhost/maestro",
-		"FIRST_ADMIN_PASSWORD_RESET": "yes please",
+// Every setting Load refuses, and the name it must put in the refusal so
+// an operator knows which line of their compose file to look at.
+func TestLoadRefusesASettingAndNamesIt(t *testing.T) {
+	for _, tc := range []struct{ key, value, mentions string }{
+		{"TRUSTED_PROXY_COUNT", "not-a-number", "TRUSTED_PROXY_COUNT"},
+		{"TRUSTED_PROXY_COUNT", "-1", "TRUSTED_PROXY_COUNT"},
+		{"SESSION_TTL", "not-a-duration", "SESSION_TTL"},
+		{"SESSION_TTL", "0h", "SESSION_TTL"},
+		{"SESSION_TTL", "-1h", "SESSION_TTL"},
+		{"INVITE_TTL", "not-a-duration", "INVITE_TTL"},
+		{"INVITE_TTL", "0h", "INVITE_TTL"},
+		{"INVITE_TTL", "-1h", "INVITE_TTL"},
+		{"INVITE_TTL", "4320h", "INVITE_TTL"}, // 180 days, above the 90-day maximum
+		{"REGISTRATION_MODE", "open_bar", ""},
+		{"REGISTRATION_MODE", "domain_open", "ALLOWED_EMAIL_DOMAINS"},
+		{"ALLOWED_EMAIL_DOMAINS", "@example.test", ""},
+		{"ALLOWED_EMAIL_DOMAINS", "https://example.test", ""},
+		{"ALLOWED_EMAIL_DOMAINS", "stu dio.com", ""},
+		{"MAESTRO_ADDR", "8080", "MAESTRO_ADDR"},
+		{"FIRST_ADMIN_PASSWORD_RESET", "yes please", "FIRST_ADMIN_PASSWORD_RESET"},
+	} {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			env := map[string]string{"DATABASE_URL": "postgres://localhost/maestro", tc.key: tc.value}
+			_, err := Load(func(k string) string { return env[k] })
+			assert.Must(t, err != nil, "%s=%q was accepted", tc.key, tc.value)
+			assert.Must(t, tc.mentions == "" || strings.Contains(err.Error(), tc.mentions),
+				"error = %q, want it to mention %s", err, tc.mentions)
+		})
 	}
-	_, err := Load(func(k string) string { return env[k] })
-	assert.Must(t, err != nil, "expected an error for an unparseable FIRST_ADMIN_PASSWORD_RESET")
-	assert.Must(t, strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD_RESET"), "error = %q, want it to mention FIRST_ADMIN_PASSWORD_RESET", err)
 }

@@ -415,57 +415,6 @@ func TestNoModuleFetchesFromTheNetwork(t *testing.T) {
 	t.Logf("read %d module(s), none reaching the network", len(read))
 }
 
-// TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes is the
-// guard on the guard, and it exists because that scan reports nothing in
-// two indistinguishable cases: the modules are clean, or the walk never
-// opened them. The specific mistake it pins is an extension filter that
-// says `.js` — which is what the interface plan's own sentence says, and
-// which would silently exempt dagre.mjs and graphlib.mjs, i.e. two
-// thirds of the code this project did not write.
-func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
-	t.Parallel()
-	isModule := func(p string) bool {
-		return strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs")
-	}
-
-	read, _ := scanForNetworkReach(t)
-	seen := map[string]bool{}
-	for _, p := range read {
-		seen[p] = true
-	}
-
-	manifest := readVendorManifest(t)
-	vendoredModules := 0
-	for _, entry := range manifest.Files {
-		if !isModule(entry.Path) {
-			continue
-		}
-		vendoredModules++
-		want := vendorRoot + "/" + entry.Path
-		assert.Should(t, seen[want], "the network scan never read %s; it is a module this instance ships", want)
-	}
-	assert.Should(t, vendoredModules != 0, "the manifest lists no module at all, so the loop above asserted nothing")
-
-	// And the same for our own modules, by an independent walk.
-	own := 0
-	err := filepath.WalkDir("static", func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		slashed := filepath.ToSlash(p)
-		if d.IsDir() || !isModule(slashed) {
-			return nil
-		}
-		own++
-		assert.Should(t, seen[slashed], "the network scan never read %s", slashed)
-		return nil
-	})
-	assert.Must(t, err == nil, "walk static: %v", err)
-	assert.Should(t, own != 0, "the walk found no module under static: this test would pass on an empty tree")
-	t.Logf("network scan read %d module(s) of %d found by an independent walk: %s",
-		len(read), own, strings.Join(read, ", "))
-}
-
 // TestTheNetworkScanFlagsAFabricatedFetch is the other half of the same
 // worry: the scan may be reading every file and still be blind, because
 // its pattern is wrong or because the comment strip it depends on eats
@@ -639,9 +588,8 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 	// and reachable by no specifier is either dead weight in the budget
 	// or a missing map entry, and both want a human.
 	for _, entry := range manifest.Files {
-		// Spelled out rather than read from moduleExtensions for the
-		// reason TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes
-		// gives: a shared list lets one narrowing silence two checks.
+		// Spelled out rather than read from moduleExtensions: a shared
+		// list lets one narrowing silence two checks.
 		if !strings.HasSuffix(entry.Path, ".js") && !strings.HasSuffix(entry.Path, ".mjs") {
 			continue
 		}

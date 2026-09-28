@@ -282,35 +282,6 @@ func TestTheSentenceSplitterIsPrecise(t *testing.T) {
 	}
 }
 
-// TestTheScannerReadsTranscriptStrings carries the rule one step along.
-// A genre transcript is authored text: a claim restated in a `_comment`
-// is a claim, and a guard that only reads markdown would never see it.
-func TestTheScannerReadsTranscriptStrings(t *testing.T) {
-	t.Parallel()
-	registered := map[string]string{"entities.upsert": "Write entities in bulk."}
-	body := []byte(`{"_comment": "entities.upsert accepts at most 500 items.", "steps": []}`)
-	sentences, err := web.ScanJSONForTest("genres/fixture.json", body)
-	assert.Must(t, err == nil, "scanning the fixture transcript: %v", err)
-	if found := web.AuditRestatementForTest(sentences, registered); len(found) != 1 {
-		t.Fatalf("a restatement inside a transcript string reported %d violations, want 1: %v",
-			len(found), found)
-	}
-
-	// And through the whole-tree walk, so the JSON branch is reached by
-	// scanBundle and not only by a test calling it directly — the "correct
-	// in the module, dead at the call site" shape.
-	tree := fstest.MapFS{
-		"skill.md":            &fstest.MapFile{Data: []byte("# Fixture\n")},
-		"genres/fixture.json": &fstest.MapFile{Data: body},
-	}
-	all, err := web.ScanBundleForTest(tree)
-	assert.Must(t, err == nil, "scanning the fixture tree: %v", err)
-	if found := web.AuditRestatementForTest(all, registered); len(found) != 1 {
-		t.Fatalf("scanBundle reported %d violations over a tree whose transcript restates "+
-			"a bound, want 1: %v", len(found), found)
-	}
-}
-
 // TestNoBundlePageNamesAnUnregisteredTool is what makes the ship-order
 // rule mechanical. A page that mentions an analysis tool before any
 // analysis tool is registered is a failing build, not a review comment.

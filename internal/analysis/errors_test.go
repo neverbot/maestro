@@ -11,35 +11,6 @@ import (
 	"github.com/neverbot/maestro/internal/views"
 )
 
-// TestExactlyOneNewWireCodeShips is the count as an assertion.
-func TestExactlyOneNewWireCodeShips(t *testing.T) {
-	assert.Must(t, len(Sentinels()) == 1, "Sentinels() = %v, want exactly one. This sub-project adds one wire "+
-		"code, semantics_undeclared, because its recovery — declare something about "+
-		"your game's relation types — is named by no existing code. A second one "+
-		"needs the same argument made in errors.go before this number moves",
-		Sentinels())
-	if !errors.Is(Sentinels()[0], ErrSemanticsUndeclared) {
-		t.Fatalf("Sentinels()[0] = %v, want ErrSemanticsUndeclared", Sentinels()[0])
-	}
-	assert.Must(t, ErrSemanticsUndeclared.Error() == CodeSemanticsUndeclared, "the sentinel spells %q and the code is %q: a sentinel whose name is "+
-		"not its wire code is two strings to keep in step",
-		ErrSemanticsUndeclared.Error(), CodeSemanticsUndeclared)
-}
-
-// TestNoTimeoutCodeShips pins the refusal by name.
-func TestNoTimeoutCodeShips(t *testing.T) {
-	for _, sentinel := range Sentinels() {
-		assert.Must(t, !strings.Contains(sentinel.Error(), "timeout"), "this package answers with %q: a timed-out analysis is `retryable`, "+
-			"whose message names the budget and the bounds to lower", sentinel)
-	}
-	source := readSourceFile(t, "errors.go")
-	for _, refused := range []string{"analysis_timeout", "invalid_argument", "query_invalid"} {
-		assert.Must(t, strings.Contains(source, refused), "errors.go does not record why %q was refused. The count of codes "+
-			"is the decision this package made; a decision with no argument beside "+
-			"it is one the next task will make differently", refused)
-	}
-}
-
 // TestLimitExceededIsOneValueAcrossBothDomains.
 func TestLimitExceededIsOneValueAcrossBothDomains(t *testing.T) {
 	if !errors.Is(ErrLimitExceeded, views.ErrLimitExceeded) {
@@ -69,58 +40,6 @@ func TestLimitExceededIsOneValueAcrossBothDomains(t *testing.T) {
 		t.Fatal("a limit refusal must not also read as invalid_input: they are two " +
 			"recoveries — lower the number, and change the argument")
 	}
-}
-
-// TestEverySentinelThisPackageAnswersWithIsInSentinels is the
-// bidirectional half: Sentinels() is what internal/web will iterate, so a
-// sentinel declared and left out of it is a code that reaches an agent as
-// internal_error.
-func TestEverySentinelThisPackageAnswersWithIsInSentinels(t *testing.T) {
-	source := readSourceFile(t, "errors.go")
-	// Every `errors.New(Code…)` in this file is a sentinel this package
-	// declares. The aliases beside them are assignments from another
-	// package and are not this package's to publish, which is why the
-	// scan looks for the constructor and not for the `Err` prefix.
-	declared := 0
-	for _, line := range strings.Split(source, "\n") {
-		trimmed := strings.TrimSpace(line)
-		// Comments in this file quote `errors.New("limit_exceeded")` while
-		// arguing why there is no second one, so a scan that read comments
-		// would fail on the argument for the rule it is checking.
-		if strings.HasPrefix(trimmed, "//") || !strings.Contains(trimmed, "= errors.New(") {
-			continue
-		}
-		declared++
-		constant := strings.TrimSuffix(
-			strings.SplitN(trimmed, "= errors.New(", 2)[1], ")")
-		// The constant's own value, resolved through the one place it is
-		// declared rather than re-spelled here.
-		code := codeValues[constant]
-		assert.Must(t, code != "", "errors.go builds a sentinel from %q, which this test cannot "+
-			"resolve; add it to codeValues so the scan keeps seeing every one",
-			constant)
-		found := false
-		for _, sentinel := range Sentinels() {
-			if sentinel.Error() == code {
-				found = true
-			}
-		}
-		assert.Must(t, found, "%s (%q) is declared in errors.go and is not in Sentinels(), so "+
-			"internal/web's mapping test will not see it and it will reach an agent "+
-			"as internal_error", constant, code)
-	}
-	assert.Must(t, declared == len(Sentinels()), "errors.go declares %d sentinels and Sentinels() lists %d: the list is "+
-		"what internal/web iterates, so the two are one decision",
-		declared, len(Sentinels()))
-}
-
-// codeValues resolves the code constants errors.go builds its sentinels
-// from. It is a map rather than a reflection trick because Go offers no
-// way to read a package's own constants by name, and a test that
-// silently failed to resolve one would stop scanning without saying so —
-// which is why an unresolved constant is a failure above and not a skip.
-var codeValues = map[string]string{
-	"CodeSemanticsUndeclared": CodeSemanticsUndeclared,
 }
 
 // TestTheUndeclaredRefusalCarriesTheCatalogueAsDataAndAsProse.

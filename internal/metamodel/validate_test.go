@@ -184,41 +184,6 @@ func TestValidateReportsEveryProblemAtOnce(t *testing.T) {
 	}
 }
 
-func TestSchemaRejectsDuplicateKeys(t *testing.T) {
-	schema := Schema{{Key: "a", Type: FieldText}, {Key: "a", Type: FieldNumber}}
-	if err := schema.Check(); err == nil {
-		t.Fatal("a schema with duplicate keys must be rejected")
-	}
-}
-
-func TestSchemaRejectsEnumWithoutOptions(t *testing.T) {
-	schema := Schema{{Key: "difficulty", Type: FieldEnum}}
-	if err := schema.Check(); err == nil {
-		t.Fatal("an enum field with no options must be rejected")
-	}
-}
-
-func TestSchemaRejectsMissingType(t *testing.T) {
-	schema := Schema{{Key: "difficulty"}}
-	err := schema.Check()
-	assert.Must(t, err != nil, "a field with no declared type must be rejected")
-	assert.Must(t, strings.Contains(err.Error(), "type is required"), "error = %q, want it to say the type is missing", err)
-}
-
-func TestSchemaRejectsUnknownType(t *testing.T) {
-	schema := Schema{{Key: "colour", Type: FieldType("rgb")}}
-	err := schema.Check()
-	assert.Must(t, err != nil, "a field with an unknown type must be rejected")
-	assert.Must(t, strings.Contains(err.Error(), "unknown type rgb"), "error = %q, want it to name the unknown type", err)
-}
-
-func TestSchemaRejectsEmptyKey(t *testing.T) {
-	schema := Schema{{Type: FieldText}}
-	err := schema.Check()
-	assert.Must(t, err != nil, "a field with no key must be rejected")
-	assert.Must(t, strings.Contains(err.Error(), "key is required"), "error = %q, want it to say the key is missing", err)
-}
-
 // A schema that never went through Check can still reach Validate. An unknown
 // type and a missing type must each fail loudly there too, and say different
 // things, rather than falling through the switch and storing the value.
@@ -310,41 +275,6 @@ func TestSchemaRoundTripPreservesADeclaredZeroValuedDefault(t *testing.T) {
 	assert.Must(t, err == nil, "Validate: %v", err)
 	if v, present := out["repeatable"]; !present || v != false {
 		t.Fatalf("out = %v, want the declared false default to survive the round trip and be applied", out)
-	}
-}
-
-func TestSchemaRejectsADefaultOfTheWrongType(t *testing.T) {
-	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: "yes"}}
-	err := schema.Check()
-	assert.Must(t, err != nil, "a default of the wrong type must be rejected")
-	assert.Must(t, strings.Contains(err.Error(), "field_schema[0]"), "error = %q, want the field_schema path", err)
-}
-
-func TestSchemaRejectsADefaultOutsideItsBounds(t *testing.T) {
-	schema := Schema{{Key: "min_level", Type: FieldNumber, Max: ptrFloat(70), HasDefault: true, Default: float64(200)}}
-	if err := schema.Check(); err == nil {
-		t.Fatal("a default above max must be rejected")
-	}
-}
-
-func TestSchemaRejectsADefaultNotInEnumOptions(t *testing.T) {
-	schema := Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"trivial", "normal"}, HasDefault: true, Default: "impossible"}}
-	if err := schema.Check(); err == nil {
-		t.Fatal("a default outside the enum options must be rejected")
-	}
-}
-
-func TestSchemaRejectsANonTextElementInAListTextDefault(t *testing.T) {
-	schema := Schema{{Key: "tags", Type: FieldListText, HasDefault: true, Default: []any{"ok", 3}}}
-	if err := schema.Check(); err == nil {
-		t.Fatal("a non-text element in a list<text> default must be rejected")
-	}
-}
-
-func TestSchemaAcceptsAWellFormedDefault(t *testing.T) {
-	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
-	if err := schema.Check(); err != nil {
-		t.Fatalf("Check: %v", err)
 	}
 }
 
@@ -571,14 +501,6 @@ func TestSchemaRejectsAnOverlongKey(t *testing.T) {
 func TestSchemaRejectsAMinimumAboveItsMaximum(t *testing.T) {
 	msg := checkProblems(t, Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(70), Max: ptrFloat(1)}})
 	assert.Must(t, strings.Contains(msg, "min 70 is above max 1"), "error = %q, want it to name both bounds", msg)
-}
-
-func TestSchemaAcceptsAMinimumEqualToItsMaximum(t *testing.T) {
-	// A single legal value is a narrow declaration, not a contradictory one.
-	schema := Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(7), Max: ptrFloat(7)}}
-	if err := schema.Check(); err != nil {
-		t.Fatalf("Check: %v", err)
-	}
 }
 
 func TestSchemaRejectsBoundsOnANonNumberField(t *testing.T) {
@@ -917,4 +839,31 @@ func TestSchemaRejectsABadDefaultWithTheDefaultPrefix(t *testing.T) {
 	schema := Schema{{Key: "a", Type: FieldBool, HasDefault: true, Default: "yes"}}
 	msg := checkProblems(t, schema)
 	assert.Must(t, strings.Contains(msg, "default: "), "error = %q, want the \"default: \" prefix", msg)
+}
+
+// What Schema.Check admits and what it refuses. One field per case, so a
+// failure names the shape rather than the line.
+func TestSchemaCheckAdmitsAndRefuses(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		schema Schema
+		ok     bool
+	}{
+		{"duplicate keys", Schema{{Key: "a", Type: FieldText}, {Key: "a", Type: FieldNumber}}, false},
+		{"enum without options", Schema{{Key: "difficulty", Type: FieldEnum}}, false},
+		{"missing type", Schema{{Key: "difficulty"}}, false},
+		{"unknown type", Schema{{Key: "colour", Type: FieldType("rgb")}}, false},
+		{"empty key", Schema{{Type: FieldText}}, false},
+		{"default of the wrong type", Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: "yes"}}, false},
+		{"default outside its bounds", Schema{{Key: "min_level", Type: FieldNumber, Max: ptrFloat(70), HasDefault: true, Default: float64(200)}}, false},
+		{"default not in the enum options", Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"trivial", "normal"}, HasDefault: true, Default: "impossible"}}, false},
+		{"non-text element in a list_text default", Schema{{Key: "tags", Type: FieldListText, HasDefault: true, Default: []any{"ok", 3}}}, false},
+		{"a well-formed default", Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}, true},
+		{"a minimum equal to its maximum", Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(7), Max: ptrFloat(7)}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.schema.Check()
+			assert.Must(t, (err == nil) == tc.ok, "Check() = %v, want ok=%v", err, tc.ok)
+		})
+	}
 }

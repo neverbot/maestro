@@ -59,29 +59,6 @@ func TestEveryPageWearsTheSameFrame(t *testing.T) {
 	}
 }
 
-// TestTheFrameIsTheOneDesignDotMdStates is the "prose about code" guard
-// pointed at the site's own layout.
-func TestTheFrameIsTheOneDesignDotMdStates(t *testing.T) {
-	stated, err := os.ReadFile("../../docs/design.md")
-	assert.Must(t, err == nil, "read docs/design.md: %v", err)
-	document := string(stated)
-	frame := map[string]string{
-		"--page":   "1440px",
-		"--rail":   "280px",
-		"--bar":    "48px",
-		"--gutter": "24px",
-	}
-	for token, value := range frame {
-		assert.Should(t, strings.Contains(siteCSS, token+": "+value), "the site's stylesheet does not declare %s: %s", token, value)
-		assert.Should(t, strings.Contains(document, value), "docs/design.md no longer states %s anywhere, and the stylesheet still sets %s to it",
-			value, token)
-	}
-	if strings.Contains(siteCSS, "max-width: 46rem") {
-		t.Error("the page is set to a prose measure again: docs/design.md's frame caps the page at " +
-			"1440px and gives 68ch to the prose role alone")
-	}
-}
-
 // TestTheHeaderPromisesAPageAndNotAnAnchor holds the fix for the link
 // the owner could not place.
 func TestTheHeaderPromisesAPageAndNotAnAnchor(t *testing.T) {

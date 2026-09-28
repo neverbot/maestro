@@ -2,13 +2,6 @@
 // system: docs/design.md's frontmatter (the normative token layer) and
 // docs/design-tokens.json (the sidecar: canonical OKLCH, shadows, motion,
 // component snippets, named rules).
-//
-// The page is a committed artefact, and it is generated rather than
-// hand-written for the reason a generated artefact usually is: a hand-kept
-// copy of a token table goes stale silently, and nothing anywhere turns
-// red. Change a token in docs/design.md, run this, commit both.
-//
-// Usage: node docs/design-system.mjs
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -149,11 +142,6 @@ const scales = (obj) =>
 // navigation. What it keeps is its body, which is a specimen sheet and
 // should look like one; what it loses is the chrome, which is the site's
 // and is stated once, in cmd/maestro-docs.
-//
-// The two markers are the contract between this generator and that one.
-// cmd/maestro-docs reads between them and refuses to build without them,
-// so a rename here fails a build rather than publishing a page with the
-// wrong frame.
 const BODY_START = "<!-- site:body -->";
 const BODY_END = "<!-- /site:body -->";
 

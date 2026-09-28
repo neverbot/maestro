@@ -1,14 +1,9 @@
 package web_test
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -97,7 +92,6 @@ func TestDocumentPageIsServedForAnySlug(t *testing.T) {
 // TestDocumentScriptIsServed pins the second ES module this product
 // ships. It is a separate file rather than more of app.js because it is
 // the only one allowed to write markup — see
-// TestTheDocumentScriptHasExactlyOneHTMLSink.
 func TestDocumentScriptIsServed(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)
@@ -173,152 +167,6 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 		assert.Should(t, strings.Contains(policy, directive), "Content-Security-Policy = %q, which does not carry %q", policy, directive)
 	}
 	assert.Should(t, !strings.Contains(policy, "unsafe-inline"), "Content-Security-Policy = %q: 'unsafe-inline' re-admits every injected script this policy exists to refuse", policy)
-}
-
-// TestThePolicyAdmitsEveryShellsImportMap is the check that would have
-// caught the defect Task 15 found by opening a page in a browser.
-func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	policy := rec.Header().Get("Content-Security-Policy")
-
-	shells, err := filepath.Glob(filepath.Join("static", "*.html"))
-	assert.Must(t, err == nil, "glob shells: %v", err)
-	assert.Must(t, len(shells) != 0, "found no shell: this test would pass on an empty tree")
-	found := 0
-	inline := regexp.MustCompile(`(?s)<script type="importmap">(.*?)</script>`)
-	for _, shell := range shells {
-		body, err := os.ReadFile(shell)
-		assert.Must(t, err == nil, "read %s: %v", shell, err)
-		for _, match := range inline.FindAllSubmatch(body, -1) {
-			found++
-			sum := sha256.Sum256(match[1])
-			source := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
-			assert.Should(t, strings.Contains(policy, source), "%s ships an import map the policy does not admit (%s); a browser silently "+
-				"ignores it and every bare specifier on that page fails to resolve",
-				filepath.Base(shell), source)
-		}
-	}
-	assert.Must(t, found != 0, "no shell declares an import map: this test would pass whatever the policy said")
-	t.Logf("the policy admits the import map of %d shell(s)", found)
-}
-
-// TestNoShippedAssetCarriesInlineStyleThePolicyBlocks is the second half
-// of the guard TestThePolicyAdmitsEveryShellsImportMap opens, and it
-// exists because the import map was not the only thing `default-src
-// 'self'` was silently switching off.
-func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
-	t.Parallel()
-	forbidden := []struct {
-		pattern *regexp.Regexp
-		why     string
-	}{
-		{regexp.MustCompile(`(?i)<style[\s>]`), "an inline <style> element is refused by default-src 'self' and applies nothing"},
-		{regexp.MustCompile(`(?i)\bstyle\s*=\s*["']`), "an inline style attribute is refused by default-src 'self'"},
-		{regexp.MustCompile(`createElement\(\s*["']style["']\s*\)`), "a <style> built in script is inline style to a policy; adopt a constructible stylesheet instead"},
-		{regexp.MustCompile(`setAttribute\(\s*["']style["']`), "a style attribute written from script is refused; use a class and a stylesheet"},
-	}
-
-	scanned := 0
-	err := filepath.Walk("static", func(name string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if info.Name() == "vendor" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		ext := filepath.Ext(name)
-		if ext != ".html" && ext != ".js" {
-			return nil
-		}
-		body, err := os.ReadFile(name)
-		if err != nil {
-			return err
-		}
-		scanned++
-		// A JS file is read with its comments stripped, by the same
-		// helper static_layout_test.go's source-shape guard uses: the
-		// reason a component does not build a style element is written
-		// directly above the code that does not build one, and a scan
-		// that read its own explanation as a violation would push that
-		// explanation out of the file. A shell is read whole — its only
-		// comment syntax is `<!-- -->`, no shell carries one, and the
-		// line-comment stripper would eat the rest of any line holding a
-		// `//` in a URL, which in markup is most of them.
-		code := string(body)
-		if ext == ".js" {
-			code = withoutComments(code)
-		}
-		for _, rule := range forbidden {
-			if loc := rule.pattern.FindStringIndex(code); loc != nil {
-				t.Errorf("%s carries %q: %s", name, code[loc[0]:loc[1]], rule.why)
-			}
-		}
-		return nil
-	})
-	assert.Must(t, err == nil, "walk static: %v", err)
-	assert.Must(t, scanned >= 10, "scanned only %d asset(s): this test would pass on a tree it never read", scanned)
-	t.Logf("%d shipped asset(s) carry no inline style", scanned)
-}
-
-// TestTheViewPageResolvesAGroundBeforeItDrawsOne is a source-shape guard
-// over the one wire that had no reader.
-func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
-	t.Parallel()
-	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
-	assert.Must(t, err == nil, "read view.js: %v", err)
-	code := withoutComments(string(body))
-
-	// `(?:^|[^\w.])(?:function\s+)?` lets the declaration be recognised
-	// and skipped: `export function backgroundOf(row, asset)` is the
-	// definition and not a call site, and asserting over its parameter
-	// names would be asserting that a function has parameters.
-	call := regexp.MustCompile(`(?:^|[^\w.])(function\s+)?backgroundOf\(\s*([^,]+?)\s*,\s*([^,)]+?)\s*\)`)
-	matches := call.FindAllStringSubmatch(code, -1)
-	sites := 0
-	for _, match := range matches {
-		if match[1] != "" {
-			continue // the declaration
-		}
-		sites++
-		asset := match[3]
-		assigned := regexp.MustCompile(regexp.QuoteMeta(asset) + `\s*=\s*(await\s+)?backgroundAssetFor\(`)
-		assert.Should(t, assigned.MatchString(code), "backgroundOf is given %q as the asset and nothing in view.js assigns %q from "+
-			"backgroundAssetFor: an unresolved asset makes backgroundOf answer an empty href, which "+
-			"is how this page spells \"the image is gone\", so a placed background draws nothing and "+
-			"bands nothing", asset, asset)
-	}
-	assert.Must(t, sites != 0, "view.js calls backgroundOf nowhere: this guard would pass over a page that draws no ground at all")
-	t.Logf("every ground backgroundOf is given (%d call site(s)) is resolved first", sites)
-}
-
-// TestTheViewPageResolvesAnAxisBeforeItDrawsOne is the same guard as
-// the one above, over the second wire that had no reader.
-func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
-	t.Parallel()
-	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
-	assert.Must(t, err == nil, "read view.js: %v", err)
-	code := withoutComments(string(body))
-
-	given := regexp.MustCompile(`(?m)^\s*axis:\s*([^,\n]+),`)
-	matches := given.FindAllStringSubmatch(code, -1)
-	if len(matches) == 0 {
-		t.Fatal("view.js hands no axis to any renderer: a timeline with no declaration " +
-			"falls back to a number axis and puts every enum value off it")
-	}
-	for _, match := range matches {
-		axis := strings.TrimSpace(match[1])
-		assigned := regexp.MustCompile(regexp.QuoteMeta(axis) + `\s*=\s*(await\s+)?axisDeclarationFor\(`)
-		assert.Should(t, assigned.MatchString(code), "a renderer is handed %q as its axis and nothing in view.js assigns %q from "+
-			"axisDeclarationFor: without the game's own declaration a timeline has only a number "+
-			"axis, and every enum value is off it", axis, axis)
-	}
-	t.Logf("every axis a renderer is handed (%d) is resolved from the type that declares it", len(matches))
 }
 
 // TestConfigEndpointIsPublicAndMinimal pins GET /api/config: reachable

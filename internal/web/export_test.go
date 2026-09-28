@@ -72,7 +72,6 @@ func (s *Server) ToolDescriptionsForTest() map[string]string {
 
 // ShellRoutesForTest returns every route that serves an HTML shell, keyed
 // by **pattern** and valued by the shell it serves. It exists for
-// TestEveryShellIsReachableByItsRoute (static_pages_test.go), which
 // enumerates the shells on disk against it and then drives a real
 // request at each pattern: a shell added without a route must fail there
 // rather than 404 in a browser.

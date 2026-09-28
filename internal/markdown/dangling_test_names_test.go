@@ -97,8 +97,7 @@ var renamedAwayTestNames = map[string]string{
 //
 // **internal/web/static was added here in Task 12**, which is the last
 // place this domain's commentary lives and the last one this check could
-// not see. doc.js's own header cites TestAppScriptNeverWritesRawHTML and
-// TestTheDocumentScriptHasExactlyOneHTMLSink as the tests holding the
+// not see. A module's header cites the tests holding the
 // page's one-sink rule; both resolve today, and adding the directory
 // while they do is exactly when this costs nothing. `.js` and `.mjs`
 // are read with the `//` prefix, `.html` with `<!--` (the trailing

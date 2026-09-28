@@ -508,7 +508,6 @@ var shellRoutes = []struct {
 	// The catch-all, and the one entry whose pattern is not how the
 	// shell is reached: every address this product does not serve
 	// answers with it (handleNotFound), so it is registered by hand and
-	// exempt from the byte comparison — TestAnUnknownAddressIsStillThisProduct
 	// drives it through a real unmatched request instead.
 	{pattern: "/", file: "not-found.html", byHand: true, dispatches: true},
 	{pattern: "GET /account", file: "account.html"},

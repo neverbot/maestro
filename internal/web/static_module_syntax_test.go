@@ -3,6 +3,7 @@ package web_test
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,4 +27,34 @@ func TestEveryModuleParsesAsAModule(t *testing.T) {
 			t.Errorf("%s does not parse as a module:\n%s", module, out)
 		}
 	}
+}
+
+// vendorDir is the one subtree of internal/web/static that is not ours.
+const vendorDir = "static/vendor"
+
+// ownModules lists every JavaScript file this project ships, vendored
+// ones excluded.
+func ownModules(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir("static", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		slashed := filepath.ToSlash(path)
+		if d.IsDir() {
+			if slashed == vendorDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch filepath.Ext(path) {
+		case ".js", ".mjs":
+			out = append(out, slashed)
+		}
+		return nil
+	})
+	assert.Must(t, err == nil, "walk static: %v", err)
+	assert.Must(t, len(out) != 0, "found no own module under internal/web/static: this test would pass on an empty tree")
+	return out
 }

@@ -39,20 +39,6 @@ func TestFrontmatterIsSplitOffAndTheBodyIsWhatWasWrittenAfterIt(t *testing.T) {
 	}
 }
 
-func TestTheTitleFallsBackToThePath(t *testing.T) {
-	got, err := markdown.SplitContent("lore/duskwood/history", "Just prose, no heading.\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Title == "lore/duskwood/history", "Title = %q, want the path", got.Title)
-}
-
-func TestTheSummaryIsEmptyWhenTheBodyOffersNoGist(t *testing.T) {
-	// A heading and nothing else: inventing a summary would put words in
-	// the author's mouth in a listing.
-	got, err := markdown.SplitContent("lore/duskwood", "# Duskwood\n\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Summary == "", "Summary = %q, want the empty string", got.Summary)
-}
-
 func TestADerivedTitleAndSummaryAreTruncatedByRune(t *testing.T) {
 	// The two derived columns truncate instead of refusing: the caller
 	// did not choose them, Maestro did, so a refusal would blame a
@@ -255,13 +241,6 @@ func TestAClosingFenceIsTheEarliestOneAndNotTheFirstShapeTried(t *testing.T) {
 	assert.Must(t, got.Title == "X", "Title = %q, want %q", got.Title, "X")
 }
 
-func TestACRLFFrontmatterBlockIsSplitLikeAnLFOne(t *testing.T) {
-	got, err := markdown.SplitContent("p", "---\r\ntitle: Duskwood\r\n---\r\nprose\r\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Title == "Duskwood", "Title = %q, want %q", got.Title, "Duskwood")
-	assert.Must(t, got.Body == "prose\r\n", "Body = %q, want %q byte for byte", got.Body, "prose\r\n")
-}
-
 func TestAFenceTerminatedByEndOfFileClosesTheBlock(t *testing.T) {
 	// Every tool this convention is borrowed from — Jekyll, Hugo,
 	// goldmark's own extension — accepts an EOF-terminated block, and a
@@ -330,14 +309,6 @@ func TestABlankFrontmatterBlockIsAnEmptyObjectAndNeverJSONNull(t *testing.T) {
 	assert.Must(t, got.Frontmatter != nil, "Frontmatter is nil, want an empty map")
 }
 
-func TestAWhitespaceOnlyFrontmatterTitleFallsThroughToTheNextRule(t *testing.T) {
-	// stringValue's empty-after-trim rule: a key holding only spaces does
-	// not supply the derivation, so the heading does.
-	got, err := markdown.SplitContent("p", "---\ntitle: \"   \"\n---\n# Duskwood\n\nprose\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Title == "Duskwood", "Title = %q, want the heading", got.Title)
-}
-
 func TestAFrontmatterBlockExactlyAtTheBoundIsAccepted(t *testing.T) {
 	// The bound is inclusive, the same way MaxBodyBytes is, and the block
 	// measured is the bytes between the fences including the newline that
@@ -379,33 +350,6 @@ func TestAScalarFrontmatterBlockIsNamedAsASingleValue(t *testing.T) {
 	assert.Must(t, strings.Contains(message, "a single value"), "message = %q, want it to say a single value", message)
 }
 
-func TestAHeadingInsideAFencedCodeBlockIsNotTheTitle(t *testing.T) {
-	// A code fence is markdown the derivation has to know about: the
-	// sample inside it is not the document's own heading, and taking it
-	// puts a line of someone's example in a listing column.
-	got, err := markdown.SplitContent("p", "```\n# not a title\n```\nreal prose\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Title == "p", "Title = %q, want the path: the heading is inside a code block", got.Title)
-	assert.Must(t, got.Summary == "real prose", "Summary = %q, want the first prose line outside the block", got.Summary)
-}
-
-func TestAHeadingAfterAClosedCodeBlockIsStillTheTitle(t *testing.T) {
-	// The skip is of the block, not of everything after it.
-	got, err := markdown.SplitContent("p", "~~~yaml\n# sample\n~~~\n\n# Duskwood\n\nprose\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Title == "Duskwood", "Title = %q, want the real heading", got.Title)
-	assert.Must(t, got.Summary == "prose", "Summary = %q, want %q", got.Summary, "prose")
-}
-
-func TestALineThatMerelyStartsWithAHashIsAValidSummary(t *testing.T) {
-	// `#1 rule of Duskwood` is not an ATX heading — a heading needs a
-	// space after its hashes — and skipping it made the only line in the
-	// document invisible to the summary.
-	got, err := markdown.SplitContent("p", "#1 rule of Duskwood: do not go out at dusk.\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, got.Summary == "#1 rule of Duskwood: do not go out at dusk.", "Summary = %q, want the line: it is not a heading", got.Summary)
-}
-
 func TestAControlCharacterInAFrontmatterTitleOrSummaryIsRefused(t *testing.T) {
 	// A body may carry newlines; a title may not. Both derived columns
 	// are rendered as one line — a page title, a listing row — which is
@@ -419,6 +363,38 @@ func TestAControlCharacterInAFrontmatterTitleOrSummaryIsRefused(t *testing.T) {
 			assert.Must(t, strings.Contains(problem.Message, key), "message = %q, want it to name the %s key", problem.Message, key)
 			assert.Must(t, strings.Contains(problem.Message, "one line"), "message = %q, want it to say the value is one line",
 				problem.Message)
+		})
+	}
+}
+
+// Where a document's title and summary come from, in the order the rules
+// are tried: the frontmatter, then the first heading, then the path.
+func TestTheTitleAndSummaryAreDerivedInOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+		title, summary   string
+	}{
+		{"no heading, so the path is the title", "lore/duskwood/history",
+			"Just prose, no heading.\n", "lore/duskwood/history", "Just prose, no heading."},
+		{"a heading and nothing after it leaves no summary", "lore/duskwood",
+			"# Duskwood\n\n", "Duskwood", ""},
+		{"CRLF frontmatter is split like LF", "p",
+			"---\r\ntitle: Duskwood\r\n---\r\nprose\r\n", "Duskwood", "prose"},
+		{"a whitespace-only frontmatter title falls through to the heading", "p",
+			"---\ntitle: \"   \"\n---\n# Duskwood\n\nprose\n", "Duskwood", "prose"},
+		{"a heading inside a fenced block is not the title", "p",
+			"```\n# not a title\n```\nreal prose\n", "p", "real prose"},
+		{"a heading after a closed fence still is", "p",
+			"~~~yaml\n# sample\n~~~\n\n# Duskwood\n\nprose\n", "Duskwood", "prose"},
+		{"a line merely starting with a hash is a summary", "p",
+			"#1 rule of Duskwood: do not go out at dusk.\n",
+			"p", "#1 rule of Duskwood: do not go out at dusk."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := markdown.SplitContent(tc.path, tc.body)
+			assert.NoErr(t, err, "SplitContent")
+			assert.Must(t, got.Title == tc.title, "Title = %q, want %q", got.Title, tc.title)
+			assert.Must(t, got.Summary == tc.summary, "Summary = %q, want %q", got.Summary, tc.summary)
 		})
 	}
 }

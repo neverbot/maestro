@@ -53,28 +53,6 @@ func TestValidateLeavesAnUndeclaredOptionalFieldAbsent(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsUnknownField(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": float64(1), "min_lvl": float64(3)})
-	assert.Must(t, err != nil, "an unknown field must be an error, never silently dropped")
-	assert.Must(t, strings.Contains(err.Error(), "min_lvl"), "the error must name the offending field, got %q", err)
-}
-
-func TestValidateRejectsMissingRequiredField(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"summary": "no level given"})
-	assert.Must(t, err != nil, "a missing required field must be an error")
-	assert.Must(t, strings.Contains(err.Error(), "min_level"), "error = %q, want it to name min_level", err)
-}
-
-func TestValidateRejectsWrongType(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": "veinte"})
-	assert.Must(t, err != nil, "a string in a number field must be an error")
-	assert.Must(t, strings.Contains(err.Error(), "fields.min_level"), "error = %q, want the field path", err)
-	// Assert on the type complaint, not merely on "some error": min_level also
-	// carries a minimum, and a validator that skipped the type check entirely
-	// would still reject "veinte" for being below it.
-	assert.Must(t, strings.Contains(err.Error(), "expected number"), "error = %q, want it to report the type mismatch", err)
-}
-
 func TestValidateEnforcesRange(t *testing.T) {
 	// Each case asserts the exact message, not merely that something failed.
 	// min_level is bounded on both sides, so "some error" is satisfied by a
@@ -106,19 +84,6 @@ func TestValidateAcceptsTheBoundsThemselves(t *testing.T) {
 	}
 }
 
-func TestValidateEnforcesEnumOptions(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "difficulty": "impossible"})
-	assert.Must(t, err != nil, "a value outside the enum options must be an error")
-	want := `schema_violation: fields.difficulty: "impossible" is not one of [trivial normal elite]`
-	assert.Must(t, err.Error() == want, "error = %q, want %q", err, want)
-}
-
-func TestValidateRejectsANonTextValueInAnEnumField(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "difficulty": 3})
-	assert.Must(t, err != nil, "a number in an enum field must be an error")
-	assert.Must(t, strings.Contains(err.Error(), "fields.difficulty: expected one of [trivial normal elite], got int"), "error = %q, want the enum type message naming the options", err)
-}
-
 // L5: enum matching compares exact bytes. Neither case nor Unicode
 // normalisation is folded, and that is the intended behaviour: an option is
 // a token a game declared, and Maestro does not second-guess a game's
@@ -142,19 +107,6 @@ func TestValidateMatchesEnumOptionsByExactBytes(t *testing.T) {
 	if _, err := schema.Validate(map[string]any{"difficulty": "élite"}); err != nil {
 		t.Fatalf("the exact NFC option must be accepted: %v", err)
 	}
-}
-
-func TestValidateChecksListElements(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": []any{"ok", 3}})
-	assert.Must(t, err != nil, "a non-text element in a list<text> must be an error")
-	want := "schema_violation: fields.tags: element 1 is int, expected text"
-	assert.Must(t, err.Error() == want, "error = %q, want %q; the index and the offending type both matter to whoever fixes it", err, want)
-}
-
-func TestValidateRejectsANonListInAListField(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": "starter"})
-	assert.Must(t, err != nil, "a bare string in a list<text> field must be an error")
-	assert.Must(t, strings.Contains(err.Error(), "fields.tags: expected a list of text, got string"), "error = %q, want the list type message", err)
 }
 
 func TestValidateKeepsAWellFormedListAsStrings(t *testing.T) {
@@ -199,12 +151,6 @@ func TestValidateRejectsFieldWithNoType(t *testing.T) {
 	_, err := schema.Validate(map[string]any{"colour": "red"})
 	assert.Must(t, err != nil, "a value for a field with no declared type must be an error")
 	assert.Must(t, strings.Contains(err.Error(), "declares no type"), "error = %q, want a message distinct from the unknown-type one", err)
-}
-
-func TestValidateTreatsNullAsAbsent(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": nil})
-	assert.Must(t, err != nil, "an explicit null in a required field must be an error")
-	assert.Must(t, strings.Contains(err.Error(), "fields.min_level: is required"), "error = %q, want the required-field message", err)
 }
 
 func TestValidateAppliesADeclaredZeroValuedDefault(t *testing.T) {
@@ -661,13 +607,6 @@ func TestValidateRejectsANonBoolValueInABoolField(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsAnUnknownFieldWithTheExactMessage(t *testing.T) {
-	_, err := questSchema().Validate(map[string]any{"min_level": float64(1), "min_lvl": float64(3)})
-	assert.Must(t, err != nil, "an unknown field must be an error")
-	want := "schema_violation: fields.min_lvl: unknown field for this type"
-	assert.Must(t, err.Error() == want, "error = %q, want %q", err, want)
-}
-
 // --- CheckValues: re-validate stored rows without touching them ----------
 
 func TestCheckValuesReportsTheSameProblemsAsValidate(t *testing.T) {
@@ -864,6 +803,42 @@ func TestSchemaCheckAdmitsAndRefuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.schema.Check()
 			assert.Must(t, (err == nil) == tc.ok, "Check() = %v, want ok=%v", err, tc.ok)
+		})
+	}
+}
+
+// Every row Validate refuses against the quest schema, and the sentence
+// it refuses with. The message is the half a designer reads, so each
+// case pins the text and not merely the fact that something failed.
+func TestValidateRefusesARowAndSaysWhy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values map[string]any
+		says   string
+	}{
+		{"an unknown field", map[string]any{"min_level": float64(1), "min_lvl": float64(3)},
+			"schema_violation: fields.min_lvl: unknown field for this type"},
+		{"a missing required field", map[string]any{"summary": "no level given"},
+			"fields.min_level"},
+		{"a string in a number field", map[string]any{"min_level": "veinte"},
+			"fields.min_level: expected number"},
+		{"a value outside the enum options", map[string]any{"min_level": float64(5), "difficulty": "impossible"},
+			`schema_violation: fields.difficulty: "impossible" is not one of [trivial normal elite]`},
+		{"a number in an enum field", map[string]any{"min_level": float64(5), "difficulty": 3},
+			"fields.difficulty: expected one of [trivial normal elite], got int"},
+		{"a non-text element in a list", map[string]any{"min_level": float64(5), "tags": []any{"ok", 3}},
+			"schema_violation: fields.tags: element 1 is int, expected text"},
+		{"a bare string where a list belongs", map[string]any{"min_level": float64(5), "tags": "starter"},
+			"fields.tags: expected a list of text, got string"},
+		{"an explicit null in a required field", map[string]any{"min_level": nil},
+			"fields.min_level: is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := questSchema().Validate(tc.values)
+			assert.Must(t, err != nil, "the row was accepted")
+			assert.Must(t, strings.Contains(err.Error(), tc.says), "error = %q, want it to say %q", err, tc.says)
+			assert.Must(t, errors.Is(err, ErrSchemaViolation), "a refused row is not a schema violation: %v", err)
+			assert.Must(t, !errors.Is(err, ErrInvalidSchema), "a bad row was reported as a bad schema: %v", err)
 		})
 	}
 }

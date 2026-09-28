@@ -35,13 +35,6 @@ func TestHashIsSalted(t *testing.T) {
 	assert.Must(t, a != b, "two hashes of the same password are identical; the salt is not random")
 }
 
-func TestVerifyRejectsMalformedHash(t *testing.T) {
-	t.Parallel()
-	if _, err := VerifyPassword("x", "not-a-hash"); err == nil {
-		t.Fatal("expected an error for a malformed hash")
-	}
-}
-
 // TestVerifyRejectsZeroCostParameters guards against a panic: argon2.IDKey
 // panics if time or threads is less than 1, so a corrupted or maliciously
 // crafted hash string must never reach it with either at zero.
@@ -56,110 +49,6 @@ func TestVerifyRejectsZeroCostParameters(t *testing.T) {
 			t.Fatalf("VerifyPassword(%q): expected an error, got nil", encoded)
 		}
 	}
-}
-
-// TestVerifyRejectsExcessiveMemory guards against a resource-exhaustion
-// vector: without a ceiling, a crafted "m=" value would make VerifyPassword
-// allocate an unbounded amount of memory before any comparison happens.
-func TestVerifyRejectsExcessiveMemory(t *testing.T) {
-	t.Parallel()
-	encoded := "$argon2id$v=19$m=4294967295,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	if _, err := VerifyPassword("x", encoded); err == nil {
-		t.Fatal("expected an error for an excessive memory parameter")
-	}
-}
-
-// TestVerifyRejectsUnsupportedVersion guards against silently comparing
-// against a different argon2 version than this package produces.
-func TestVerifyRejectsUnsupportedVersion(t *testing.T) {
-	t.Parallel()
-	encoded := "$argon2id$v=16$m=8192,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	if _, err := VerifyPassword("x", encoded); err == nil {
-		t.Fatal("expected an error for an unsupported argon2 version")
-	}
-}
-
-// TestVerifyRejectsEmptyKey guards against an authentication bypass: without
-// this check, a hash string ending in "$<salt>$" decodes to a zero-length
-// key, argon2.IDKey with keyLen=0 returns a zero-length slice, and
-// subtle.ConstantTimeCompare reports two zero-length slices as equal, so
-// every password would verify against such a row.
-func TestVerifyRejectsEmptyKey(t *testing.T) {
-	t.Parallel()
-	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
-	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$"
-
-	ok, err := VerifyPassword("literally anything", encoded)
-	assert.Must(t, err != nil, "expected an error for an empty key")
-	assert.Must(t, !ok, "a password verified against a hash with an empty key")
-}
-
-// TestVerifyRejectsEmptySalt guards against the same class of malformed
-// input on the salt field, for symmetry with the empty-key check.
-func TestVerifyRejectsEmptySalt(t *testing.T) {
-	t.Parallel()
-	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
-	encoded := "$argon2id$v=19$m=8192,t=1,p=1$$" + key
-
-	if _, err := VerifyPassword("x", encoded); err == nil {
-		t.Fatal("expected an error for an empty salt")
-	}
-}
-
-// TestVerifyRejectsOversizedSalt and TestVerifyRejectsOversizedKey guard
-// against a resource-exhaustion vector on the two axes adjacent to the "m="
-// check: without a ceiling, a crafted hash with an oversized base64 salt or
-// key field forces a correspondingly large allocation before any comparison
-// happens (the key length in particular is passed straight through as
-// argon2.IDKey's keyLen).
-func TestVerifyRejectsOversizedSalt(t *testing.T) {
-	t.Parallel()
-	salt := base64.RawStdEncoding.EncodeToString(make([]byte, maxDecodedSaltLen+1))
-	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
-	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
-
-	if _, err := VerifyPassword("x", encoded); err == nil {
-		t.Fatal("expected an error for an oversized salt")
-	}
-}
-
-func TestVerifyRejectsOversizedKey(t *testing.T) {
-	t.Parallel()
-	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
-	key := base64.RawStdEncoding.EncodeToString(make([]byte, maxDecodedKeyLen+1))
-	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
-
-	if _, err := VerifyPassword("x", encoded); err == nil {
-		t.Fatal("expected an error for an oversized key")
-	}
-}
-
-// TestVerifyRejectsUndersizedSalt and TestVerifyRejectsUndersizedKey guard
-// against a partial authentication bypass, the same class as the empty-key
-// bypass above but non-total: a key or salt shorter than the minimum still
-// narrows the comparison enough for a wrong password to match by chance
-// (a 1-byte key matches roughly 1 wrong password in 256), which is an
-// authentication weakness rather than a mere robustness gap.
-func TestVerifyRejectsUndersizedSalt(t *testing.T) {
-	t.Parallel()
-	salt := base64.RawStdEncoding.EncodeToString(make([]byte, minDecodedSaltLen-1))
-	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
-	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
-
-	if _, err := VerifyPassword("x", encoded); err == nil {
-		t.Fatal("expected an error for an undersized salt")
-	}
-}
-
-func TestVerifyRejectsUndersizedKey(t *testing.T) {
-	t.Parallel()
-	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
-	key := base64.RawStdEncoding.EncodeToString(make([]byte, minDecodedKeyLen-1))
-	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
-
-	ok, err := VerifyPassword("x", encoded)
-	assert.Must(t, err != nil, "expected an error for an undersized key")
-	assert.Must(t, !ok, "a password verified against a hash with an undersized key")
 }
 
 // TestVerifyRejectsMalformedParameterField guards the parser's totality:
@@ -291,4 +180,34 @@ func FuzzVerifyPassword(f *testing.F) {
 			assert.Must(t, ok == want, "VerifyPassword(%q, hash-of-%q) = %v, want %v", password, correctPassword, ok, want)
 		}
 	})
+}
+
+// Every encoded hash VerifyPassword refuses. None of them may verify a
+// password: a hash this function cannot parse must never be an answer of
+// "yes", whatever was supplied against it.
+func TestVerifyRefusesAMalformedHash(t *testing.T) {
+	t.Parallel()
+	b64 := func(n int) string { return base64.RawStdEncoding.EncodeToString(make([]byte, n)) }
+	hash := func(salt, key string) string {
+		return "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
+	}
+	for _, tc := range []struct{ name, encoded string }{
+		{"not a hash at all", "not-a-hash"},
+		{"an excessive memory parameter",
+			"$argon2id$v=19$m=4294967295,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+		{"an unsupported argon2 version",
+			"$argon2id$v=16$m=8192,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+		{"an empty key", hash(b64(16), "")},
+		{"an empty salt", hash("", b64(32))},
+		{"an oversized salt", hash(b64(maxDecodedSaltLen+1), b64(32))},
+		{"an oversized key", hash(b64(16), b64(maxDecodedKeyLen+1))},
+		{"an undersized salt", hash(b64(minDecodedSaltLen-1), b64(32))},
+		{"an undersized key", hash(b64(16), b64(minDecodedKeyLen-1))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, err := VerifyPassword("literally anything", tc.encoded)
+			assert.Must(t, err != nil, "the hash was accepted")
+			assert.Must(t, !ok, "a password verified against a hash this function cannot parse")
+		})
+	}
 }

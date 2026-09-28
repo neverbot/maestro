@@ -29,36 +29,6 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Must(t, cfg.TrustedProxyCount == 0, "TrustedProxyCount = %d, want 0 (a directly exposed instance by default)", cfg.TrustedProxyCount)
 }
 
-func TestLoadParsesTrustedProxyCount(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":        "postgres://localhost/maestro",
-		"TRUSTED_PROXY_COUNT": "1",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	assert.Must(t, err == nil, "Load: %v", err)
-	assert.Must(t, cfg.TrustedProxyCount == 1, "TrustedProxyCount = %d, want 1", cfg.TrustedProxyCount)
-}
-
-func TestLoadParsesSessionTTL(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_TTL":  "168h",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	assert.Must(t, err == nil, "Load: %v", err)
-	assert.Must(t, cfg.SessionTTL == 168*time.Hour, "SessionTTL = %v, want 168h", cfg.SessionTTL)
-}
-
-func TestLoadParsesInviteTTL(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"INVITE_TTL":   "48h",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	assert.Must(t, err == nil, "Load: %v", err)
-	assert.Must(t, cfg.InviteTTL == 48*time.Hour, "InviteTTL = %v, want 48h", cfg.InviteTTL)
-}
-
 func TestLoadParsesDomainsAndMode(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":          "postgres://localhost/maestro",
@@ -98,15 +68,6 @@ func TestEmailAllowed(t *testing.T) {
 
 	mixedCase := Config{AllowedEmailDomains: []string{"Example.test"}}
 	assert.Should(t, mixedCase.EmailAllowed("designer@example.test"), "EmailAllowed must compare case-insensitively even against a mixed-case literal")
-}
-
-func TestLoadDefaultsFirstAdminPasswordResetToFalse(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	assert.Must(t, err == nil, "Load: %v", err)
-	assert.Must(t, !cfg.FirstAdminPasswordReset, "FirstAdminPasswordReset = true, want false when FIRST_ADMIN_PASSWORD_RESET is unset")
 }
 
 func TestLoadParsesFirstAdminPasswordReset(t *testing.T) {
@@ -157,6 +118,35 @@ func TestLoadRefusesASettingAndNamesIt(t *testing.T) {
 			assert.Must(t, err != nil, "%s=%q was accepted", tc.key, tc.value)
 			assert.Must(t, tc.mentions == "" || strings.Contains(err.Error(), tc.mentions),
 				"error = %q, want it to mention %s", err, tc.mentions)
+		})
+	}
+}
+
+// What Load makes of a setting it accepts, and what it leaves when the
+// setting is absent.
+func TestLoadReadsASetting(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, value string
+		want             func(Config) (any, any)
+	}{
+		{"a proxy count", "TRUSTED_PROXY_COUNT", "1",
+			func(c Config) (any, any) { return c.TrustedProxyCount, 1 }},
+		{"a session lifetime", "SESSION_TTL", "168h",
+			func(c Config) (any, any) { return c.SessionTTL, 168 * time.Hour }},
+		{"an invitation lifetime", "INVITE_TTL", "48h",
+			func(c Config) (any, any) { return c.InviteTTL, 48 * time.Hour }},
+		{"no first-admin reset, which is the default", "", "",
+			func(c Config) (any, any) { return c.FirstAdminPasswordReset, false }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := map[string]string{"DATABASE_URL": "postgres://localhost/maestro"}
+			if tc.key != "" {
+				env[tc.key] = tc.value
+			}
+			cfg, err := Load(func(k string) string { return env[k] })
+			assert.NoErr(t, err, "Load")
+			got, want := tc.want(cfg)
+			assert.Must(t, got == want, "%s = %v, want %v", tc.key, got, want)
 		})
 	}
 }

@@ -128,13 +128,6 @@ func TestAnUnterminatedFrontmatterFenceIsBody(t *testing.T) {
 	assert.Must(t, string(got.FrontmatterJSON) == "{}", "FrontmatterJSON = %s, want {}", got.FrontmatterJSON)
 }
 
-func TestAnEmptyFrontmatterBlockIsAnEmptyObjectAndNotAFailure(t *testing.T) {
-	got, err := markdown.SplitContent("p", "---\n---\nbody\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, string(got.FrontmatterJSON) == "{}", "FrontmatterJSON = %s, want {}: never null", got.FrontmatterJSON)
-	assert.Must(t, got.Body == "body\n", "Body = %q, want %q", got.Body, "body\n")
-}
-
 func TestOnlyALineThatIsExactlyThreeHyphensClosesTheBlock(t *testing.T) {
 	// "----" is a horizontal rule, not a closing fence. With nothing
 	// else below it there is no closing fence at all, so the whole
@@ -239,13 +232,6 @@ func TestAFenceTerminatedByEndOfFileClosesTheBlock(t *testing.T) {
 	}
 }
 
-func TestAnEmptyBlockClosedByEndOfFileIsAnEmptyObject(t *testing.T) {
-	got, err := markdown.SplitContent("p", "---\n---")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, string(got.FrontmatterJSON) == "{}", "FrontmatterJSON = %s, want {}", got.FrontmatterJSON)
-	assert.Must(t, got.Body == "", "Body = %q, want it empty", got.Body)
-}
-
 func TestALeadingByteOrderMarkIsRefusedByName(t *testing.T) {
 	// U+FEFF is Cf, not Cc, so the control scan passes it and the opening
 	// CutPrefix then fails: the whole document including the mark becomes
@@ -263,16 +249,6 @@ func TestAByteOrderMarkInsideTheBodyIsNotRefused(t *testing.T) {
 	if _, err := markdown.SplitContent("p", "prose\ufeffmore prose\n"); err != nil {
 		t.Fatalf("a mark inside the body is not a problem: %v", err)
 	}
-}
-
-func TestABlankFrontmatterBlockIsAnEmptyObjectAndNeverJSONNull(t *testing.T) {
-	// A block of blank lines decodes to a nil map, and a nil map marshals
-	// to JSON `null` — headed for a NOT NULL DEFAULT '{}' column, and
-	// breaking the "never empty, never null" promise Content states.
-	got, err := markdown.SplitContent("p", "---\n\n   \n\n---\nbody\n")
-	assert.Must(t, err == nil, "SplitContent: %v", err)
-	assert.Must(t, string(got.FrontmatterJSON) == "{}", "FrontmatterJSON = %s, want {}: never null", got.FrontmatterJSON)
-	assert.Must(t, got.Frontmatter != nil, "Frontmatter is nil, want an empty map")
 }
 
 func TestAFrontmatterBlockExactlyAtTheBoundIsAccepted(t *testing.T) {
@@ -379,6 +355,25 @@ func TestSplitContentRefusesABodyAndSaysWhy(t *testing.T) {
 			err := mustFail(t, tc.body)
 			got := fieldProblem(t, err).Message
 			assert.Must(t, strings.Contains(got, tc.says), "message = %q, want it to say %q", got, tc.says)
+		})
+	}
+}
+
+// An empty frontmatter block is an empty object and never JSON null: the
+// column is jsonb and a null there reads back as "no frontmatter at all",
+// which is a different fact from "a block with nothing in it".
+func TestAnEmptyFrontmatterBlockIsAnEmptyObject(t *testing.T) {
+	for _, tc := range []struct{ name, body, wantBody string }{
+		{"an empty block", "---\n---\nbody\n", "body\n"},
+		{"an empty block closed by end of file", "---\n---", ""},
+		{"a block of only blank lines", "---\n\n   \n\n---\nbody\n", "body\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := markdown.SplitContent("p", tc.body)
+			assert.NoErr(t, err, "SplitContent")
+			assert.Must(t, string(got.FrontmatterJSON) == "{}", "FrontmatterJSON = %s, want {}", got.FrontmatterJSON)
+			assert.Must(t, got.Frontmatter != nil, "Frontmatter is nil, want an empty map")
+			assert.Must(t, got.Body == tc.wantBody, "Body = %q, want %q", got.Body, tc.wantBody)
 		})
 	}
 }

@@ -40,43 +40,6 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-// TestVersionRequiresAuthentication pins /version's auth gate: unlike
-// /healthz, it hands back the exact commit an instance is running, which is
-// fingerprinting material for an attacker matching the SHA against known
-// patches, not a health signal — see the doc comment on ServeHTTP. The
-// success path (a real caller getting the version back) needs a
-// DB-backed identity service and lives in auth_test.go's
-// TestVersionReturnsBuildVersionToAnAuthenticatedCaller instead.
-func TestVersionRequiresAuthentication(t *testing.T) {
-	t.Parallel()
-	srv := NewServer(stubOptions("test-build"))
-	req := httptest.NewRequest(http.MethodGet, "/version", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
-}
-
-func TestNotFound(t *testing.T) {
-	t.Parallel()
-	srv := NewServer(stubOptions(""))
-	req := httptest.NewRequest(http.MethodGet, "/nope", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusNotFound, "status = %d, want 404", rec.Code)
-}
-
-func TestHealthzMethodNotAllowed(t *testing.T) {
-	t.Parallel()
-	srv := NewServer(stubOptions(""))
-	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusMethodNotAllowed, "status = %d, want 405", rec.Code)
-}
-
 // TestNewServerPanicsWithoutIdentity pins the construction guard directly:
 // a misconfigured server must refuse to start, not serve /healthz
 // successfully right up until the first request that dereferences a nil
@@ -205,5 +168,25 @@ func TestStatusForCodeDefaultsToUnprocessable(t *testing.T) {
 		if got := statusForCode(code); got != want {
 			t.Errorf("statusForCode(%q) = %d, want %d", code, got, want)
 		}
+	}
+}
+
+// What the bare mux answers a request carrying nothing.
+func TestTheMuxAnswersAnUncredentialedRequest(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, method, path string
+		status             int
+	}{
+		{"the version, which is not public", http.MethodGet, "/version", http.StatusUnauthorized},
+		{"an address nobody serves", http.MethodGet, "/nope", http.StatusNotFound},
+		{"a write to the health check", http.MethodPost, "/healthz", http.StatusMethodNotAllowed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := NewServer(stubOptions(""))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+			assert.Must(t, rec.Code == tc.status, "status = %d, want %d", rec.Code, tc.status)
+		})
 	}
 }

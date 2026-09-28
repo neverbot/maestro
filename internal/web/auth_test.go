@@ -116,16 +116,6 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 	assert.Must(t, !body.IsAdmin, "is_admin = true, want false for a non-admin user's token")
 }
 
-func TestMissingCredentialsAreUnauthorized(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401", rec.Code)
-}
-
 func TestInvalidBearerTokenIsUnauthorized(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := newTestServer(t)
@@ -261,32 +251,10 @@ func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
 	assert.Must(t, rec.Code == http.StatusUnauthorized, "status = %d, want 401: an invalid bearer must not fall back to a valid cookie", rec.Code)
 }
 
-func TestHealthzStaysPublic(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	assert.Must(t, rec.Code == http.StatusOK, "/healthz: status = %d, want 200 with no credentials", rec.Code)
-}
-
-func TestVersionRejectsAnonymousRequests(t *testing.T) {
-	t.Parallel()
-	srv, _, _ := newTestServer(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/version", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	assert.Must(t, rec.Code == http.StatusUnauthorized, "/version: status = %d, want 401 with no credentials", rec.Code)
-}
-
 // TestVersionReturnsBuildVersionToAnAuthenticatedCaller is /version's
-// success path: any authenticated caller (no admin requirement) can read
-// the build version once past the gate TestVersionRejectsAnonymousRequests
-// pins. The unauthenticated case doesn't need a database, so it lives in
-// server_test.go's TestVersionRequiresAuthentication instead; this one
-// needs a real session, hence the DB-backed newTestServer here.
+// success path: any authenticated caller, with no admin requirement,
+// reads the build version once past the gate. It needs a real session,
+// hence the DB-backed newTestServer here.
 func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 	t.Parallel()
 	srv, ids, _ := newTestServer(t)
@@ -508,4 +476,25 @@ func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	assert.Must(t, rec.Code == http.StatusInternalServerError, "status = %d, want 500 for a database failure, not 401; body = %s", rec.Code, rec.Body.String())
+}
+
+// Which routes an anonymous caller reaches, on a real server: the health
+// check and nothing else.
+func TestAnAnonymousCallerReachesOnlyTheHealthCheck(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := newTestServer(t)
+	for _, tc := range []struct {
+		name, path string
+		status     int
+	}{
+		{"the health check stays public", "/healthz", http.StatusOK},
+		{"who am I", "/api/me", http.StatusUnauthorized},
+		{"the version", "/version", http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			assert.Must(t, rec.Code == tc.status, "%s: status = %d, want %d with no credentials", tc.path, rec.Code, tc.status)
+		})
+	}
 }

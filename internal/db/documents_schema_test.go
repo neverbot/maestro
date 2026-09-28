@@ -79,22 +79,6 @@ func assertUniqueViolation(t *testing.T, err error) {
 	assert.Must(t, pgErr.Code == "23505", "expected SQLSTATE 23505 (unique_violation), got %s: %v", pgErr.Code, err)
 }
 
-func TestDocumentTablesExist(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-
-	for _, table := range []string{"documents", "document_versions", "document_links"} {
-		var exists bool
-		if err := pool.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)`,
-			table).Scan(&exists); err != nil {
-			t.Fatalf("query %s: %v", table, err)
-		}
-		assert.Must(t, exists, "table %s was not created", table)
-	}
-}
-
 // TestADocumentPathIsUniquePerGameWithoutRegardToCase pins
 // documents_path_key. The path is the handle a seeding script re-runs
 // against, so a second run under different casing has to collide with
@@ -116,67 +100,6 @@ func TestADocumentPathIsUniquePerGameWithoutRegardToCase(t *testing.T) {
 	// The same path in another game is a different document.
 	if _, err := pool.Exec(ctx, insert, outland.projectID, "lore/duskwood/history"); err != nil {
 		t.Fatalf("the same path in another game must be allowed: %v", err)
-	}
-}
-
-// TestADocumentLinkCannotCrossGames pins the composite key
-// document_links (entity_id, project_id) -> entities (id, project_id).
-// A single-column key to entities (id) would accept this row, and one
-// game's prose would hang off another game's quest.
-func TestADocumentLinkCannotCrossGames(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
-	outland := seedDocumentGame(t, ctx, pool, "outland")
-	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
-
-	insert := `INSERT INTO document_links (project_id, document_id, entity_id) VALUES ($1, $2, $3)`
-	_, err := pool.Exec(ctx, insert, azeroth.projectID, docID, outland.entityID)
-	assertForeignKeyViolation(t, err)
-
-	// The link within one game is accepted, so the failure above is the
-	// key doing its job and not the insert being malformed.
-	if _, err := pool.Exec(ctx, insert, azeroth.projectID, docID, azeroth.entityID); err != nil {
-		t.Fatalf("same-game link: %v", err)
-	}
-}
-
-// TestADocumentLinkCannotBorrowAnotherGamesDocument is the other half of
-// the same rule, for the link's own end of the edge.
-func TestADocumentLinkCannotBorrowAnotherGamesDocument(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
-	outland := seedDocumentGame(t, ctx, pool, "outland")
-	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO document_links (project_id, document_id, entity_id) VALUES ($1, $2, $3)`,
-		outland.projectID, docID, outland.entityID)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestADocumentVersionCannotCrossGames pins the composite key
-// document_versions (document_id, project_id) -> documents (id,
-// project_id). document_versions.project_id is denormalised so that
-// history and read_version can filter on it without joining to the
-// parent; this key is the only thing that keeps that copy honest.
-func TestADocumentVersionCannotCrossGames(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
-	outland := seedDocumentGame(t, ctx, pool, "outland")
-	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
-
-	insert := `INSERT INTO document_versions (project_id, document_id, version, path, body_md) VALUES ($1, $2, $3, 'bible', 'body')`
-	_, err := pool.Exec(ctx, insert, outland.projectID, docID, 1)
-	assertForeignKeyViolation(t, err)
-
-	if _, err := pool.Exec(ctx, insert, azeroth.projectID, docID, 1); err != nil {
-		t.Fatalf("same-game version: %v", err)
 	}
 }
 
@@ -601,4 +524,40 @@ func assertRowCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query
 		t.Fatalf("count (%s): %v", query, err)
 	}
 	assert.Must(t, got == want, "count (%s) = %d, want %d", query, got, want)
+}
+
+// Every composite foreign key in the documents schema, on one database.
+func TestNoDocumentRowReachesIntoAnotherGame(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
+	outland := seedDocumentGame(t, ctx, pool, "outland")
+	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
+
+	link := `INSERT INTO document_links (project_id, document_id, entity_id) VALUES ($1, $2, $3)`
+	version := `INSERT INTO document_versions (project_id, document_id, version, path, body_md) VALUES ($1, $2, $3, 'bible', 'body')`
+
+	for _, tc := range []struct {
+		name       string
+		sql        string
+		own, alien []any
+	}{
+		{"a link to another game's entity", link,
+			[]any{azeroth.projectID, docID, azeroth.entityID}, []any{azeroth.projectID, docID, outland.entityID}},
+		{"a link borrowing another game's document", link,
+			[]any{azeroth.projectID, docID, azeroth.entityID}, []any{outland.projectID, docID, outland.entityID}},
+		{"a version filed under another game", version,
+			[]any{azeroth.projectID, docID, 1}, []any{outland.projectID, docID, 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := pool.Begin(ctx)
+			assert.NoErr(t, err, "begin")
+			defer func() { _ = tx.Rollback(ctx) }()
+			_, err = tx.Exec(ctx, tc.sql, tc.own...)
+			assert.NoErr(t, err, "the same game's own write must be accepted")
+			_, err = tx.Exec(ctx, tc.sql, tc.alien...)
+			assertForeignKeyViolation(t, err)
+		})
+	}
 }

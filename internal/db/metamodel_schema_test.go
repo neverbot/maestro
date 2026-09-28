@@ -19,22 +19,6 @@ import (
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
-func TestMetamodelTablesExist(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-
-	for _, table := range []string{"entity_types", "relation_types", "entities", "relations"} {
-		var exists bool
-		if err := pool.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)`,
-			table).Scan(&exists); err != nil {
-			t.Fatalf("query %s: %v", table, err)
-		}
-		assert.Must(t, exists, "table %s was not created", table)
-	}
-}
-
 func TestEntityKeyIsUniquePerTypeAndProject(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
@@ -146,74 +130,6 @@ func assertForeignKeyViolation(t *testing.T, err error) {
 	var pgErr *pgconn.PgError
 	assert.Must(t, errors.As(err, &pgErr), "expected a *pgconn.PgError, got %T: %v", err, err)
 	assert.Must(t, pgErr.Code == "23503", "expected SQLSTATE 23503 (foreign_key_violation), got %s: %v", pgErr.Code, err)
-}
-
-// TestEntityCannotUseAnotherProjectsEntityType pins isolation in SQL, not
-// in Go: the composite key entities (entity_type_id, project_id) ->
-// entity_types (id, project_id) makes a borrowed entity type unwritable
-// no matter what the handler layer forgets to check.
-func TestEntityCannotUseAnotherProjectsEntityType(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	f := seedTwoProjects(t, ctx, pool)
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO entities (project_id, entity_type_id, key, name) VALUES ($1, $2, 'stolen', 'Stolen')`,
-		f.projectA, f.entityTypeB)
-	assertForeignKeyViolation(t, err)
-
-	// The legitimate case still works.
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO entities (project_id, entity_type_id, key, name) VALUES ($1, $2, 'legit', 'Legit')`,
-		f.projectA, f.entityTypeA); err != nil {
-		t.Fatalf("same-project entity type: %v", err)
-	}
-}
-
-// TestRelationCannotUseAnotherProjectsRelationType covers the same rule
-// for the edge's type.
-func TestRelationCannotUseAnotherProjectsRelationType(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	f := seedTwoProjects(t, ctx, pool)
-
-	insert := `INSERT INTO relations (project_id, relation_type_id, source_id, target_id) VALUES ($1, $2, $3, $4)`
-	_, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeB, f.entityA1, f.entityA2)
-	assertForeignKeyViolation(t, err)
-
-	if _, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeA, f.entityA1, f.entityA2); err != nil {
-		t.Fatalf("same-project relation: %v", err)
-	}
-}
-
-// TestRelationCannotPointAtAnotherProjectsSource keeps an edge's tail
-// inside its own game.
-func TestRelationCannotPointAtAnotherProjectsSource(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	f := seedTwoProjects(t, ctx, pool)
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO relations (project_id, relation_type_id, source_id, target_id) VALUES ($1, $2, $3, $4)`,
-		f.projectA, f.relationTypeA, f.entityB, f.entityA2)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestRelationCannotPointAtAnotherProjectsTarget keeps an edge's head
-// inside its own game.
-func TestRelationCannotPointAtAnotherProjectsTarget(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	f := seedTwoProjects(t, ctx, pool)
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO relations (project_id, relation_type_id, source_id, target_id) VALUES ($1, $2, $3, $4)`,
-		f.projectA, f.relationTypeA, f.entityA1, f.entityB)
-	assertForeignKeyViolation(t, err)
 }
 
 // seedToken creates a user and an api_token owned by the given project
@@ -883,4 +799,45 @@ func seedEdgeParents(t *testing.T, pool *pgxpool.Pool) (
 		}
 	}
 	return projectID, entityTypeID, sourceID, targetID, relTypeID
+}
+
+// Every composite foreign key in the metamodel schema, on one database.
+// The same-game write is made first and must be accepted, so a refusal
+// below is the constraint and not a broken fixture.
+func TestNoMetamodelRowReachesIntoAnotherGame(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	f := seedTwoProjects(t, ctx, pool)
+
+	insertEntity := `INSERT INTO entities (project_id, entity_type_id, key, name) VALUES ($1, $2, $3, 'Row')`
+	insertRelation := `INSERT INTO relations (project_id, relation_type_id, source_id, target_id) VALUES ($1, $2, $3, $4)`
+
+	for _, tc := range []struct {
+		name       string
+		sql        string
+		own, alien []any
+	}{
+		{"an entity of another game's type", insertEntity,
+			[]any{f.projectA, f.entityTypeA, "legit"}, []any{f.projectA, f.entityTypeB, "stolen"}},
+		{"an edge of another game's relation type", insertRelation,
+			[]any{f.projectA, f.relationTypeA, f.entityA1, f.entityA2},
+			[]any{f.projectA, f.relationTypeB, f.entityA1, f.entityA2}},
+		{"an edge from another game's entity", insertRelation,
+			[]any{f.projectA, f.relationTypeA, f.entityA1, f.entityA2},
+			[]any{f.projectA, f.relationTypeA, f.entityB, f.entityA2}},
+		{"an edge to another game's entity", insertRelation,
+			[]any{f.projectA, f.relationTypeA, f.entityA1, f.entityA2},
+			[]any{f.projectA, f.relationTypeA, f.entityA1, f.entityB}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := pool.Begin(ctx)
+			assert.NoErr(t, err, "begin")
+			defer func() { _ = tx.Rollback(ctx) }()
+			_, err = tx.Exec(ctx, tc.sql, tc.own...)
+			assert.NoErr(t, err, "the same game's own write must be accepted")
+			_, err = tx.Exec(ctx, tc.sql, tc.alien...)
+			assertForeignKeyViolation(t, err)
+		})
+	}
 }

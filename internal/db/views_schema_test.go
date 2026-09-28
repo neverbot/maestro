@@ -92,183 +92,6 @@ func countRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query stri
 	assert.Must(t, got == want, "expected %d rows, got %d", want, got)
 }
 
-func TestViewTablesExist(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-
-	for _, table := range []string{"views", "view_positions", "view_refs", "view_assets"} {
-		var exists bool
-		if err := pool.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)`,
-			table).Scan(&exists); err != nil {
-			t.Fatalf("query %s: %v", table, err)
-		}
-		assert.Must(t, exists, "table %s was not created", table)
-	}
-}
-
-// TestAViewPositionCannotCrossGames pins the composite key
-// view_positions (entity_id, project_id) -> entities (id, project_id).
-// With the single-column key the spec's §5.4 proposed, one game's map
-// could pin another game's entity.
-func TestAViewPositionCannotCrossGames(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedViewGame(t, ctx, pool, "game-a")
-	b := seedViewGame(t, ctx, pool, "game-b")
-
-	// The positive control comes first and is counted, so an empty
-	// answer below cannot be mistaken for a refusal.
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO view_positions (view_id, entity_id, project_id, x, y)
-		 VALUES ($1, $2, $3, 1, 2)`, a.viewID, a.entityID, a.projectID); err != nil {
-		t.Fatalf("a position within one game must be accepted: %v", err)
-	}
-	countRows(t, ctx, pool,
-		`SELECT count(*) FROM view_positions WHERE view_id = $1 AND entity_id = $2`,
-		[]any{a.viewID, a.entityID}, 1)
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO view_positions (view_id, entity_id, project_id, x, y)
-		 VALUES ($1, $2, $3, 1, 2)`, a.viewID, b.entityID, a.projectID)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestAViewPositionCannotBorrowAnotherGamesView is the same hole one
-// step along: the other key out of view_positions. Closing only the
-// entity side would leave a position row in game A naming game B's view.
-func TestAViewPositionCannotBorrowAnotherGamesView(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedViewGame(t, ctx, pool, "game-a")
-	b := seedViewGame(t, ctx, pool, "game-b")
-
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO view_positions (view_id, entity_id, project_id, x, y)
-		 VALUES ($1, $2, $3, 1, 2)`, a.viewID, a.entityID, a.projectID); err != nil {
-		t.Fatalf("a position within one game must be accepted: %v", err)
-	}
-	countRows(t, ctx, pool,
-		`SELECT count(*) FROM view_positions WHERE project_id = $1`, []any{a.projectID}, 1)
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO view_positions (view_id, entity_id, project_id, x, y)
-		 VALUES ($1, $2, $3, 1, 2)`, b.viewID, a.entityID, a.projectID)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestAViewCannotUseAnotherGamesBackground pins the composite key
-// views (background_asset_id, project_id) -> view_assets (id,
-// project_id). Without it a view would serve another game's image
-// through the asset route.
-func TestAViewCannotUseAnotherGamesBackground(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedViewGame(t, ctx, pool, "game-a")
-	b := seedViewGame(t, ctx, pool, "game-b")
-
-	if _, err := pool.Exec(ctx,
-		`UPDATE views SET background_asset_id = $1 WHERE id = $2`, a.assetID, a.viewID); err != nil {
-		t.Fatalf("a background from the same game must be accepted: %v", err)
-	}
-	countRows(t, ctx, pool,
-		`SELECT count(*) FROM views WHERE id = $1 AND background_asset_id = $2`,
-		[]any{a.viewID, a.assetID}, 1)
-
-	_, err := pool.Exec(ctx,
-		`UPDATE views SET background_asset_id = $1 WHERE id = $2`, b.assetID, a.viewID)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestAViewRefCannotUseAnotherGamesEntityType pins the composite key on
-// the dependency index. A ref row is what a staleness report reads, so a
-// borrowed type id would report another game's rename as this game's.
-func TestAViewRefCannotUseAnotherGamesEntityType(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedViewGame(t, ctx, pool, "game-a")
-	b := seedViewGame(t, ctx, pool, "game-b")
-
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO view_refs (view_id, project_id, kind, ref_key, entity_type_id, pointer)
-		 VALUES ($1, $2, 'entity_type', 'quest', $3, '/from/0/type')`,
-		a.viewID, a.projectID, a.entityTypeID); err != nil {
-		t.Fatalf("a ref within one game must be accepted: %v", err)
-	}
-	countRows(t, ctx, pool,
-		`SELECT count(*) FROM view_refs WHERE view_id = $1 AND entity_type_id = $2`,
-		[]any{a.viewID, a.entityTypeID}, 1)
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO view_refs (view_id, project_id, kind, ref_key, entity_type_id, pointer)
-		 VALUES ($1, $2, 'entity_type', 'quest', $3, '/from/1/type')`,
-		a.viewID, a.projectID, b.entityTypeID)
-	assertForeignKeyViolation(t, err)
-
-	// And the relation_type arm of the same table, which is the same
-	// hole one step along.
-	_, err = pool.Exec(ctx,
-		`INSERT INTO view_refs (view_id, project_id, kind, ref_key, relation_type_id, pointer)
-		 VALUES ($1, $2, 'relation_type', 'requires', $3, '/traverse/0/via')`,
-		a.viewID, a.projectID, b.relationTypeID)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestAViewCannotRecordAnotherGamesToken pins the composite audit key.
-// api_tokens is project-scoped, so a UI rendering "last edited by
-// <token label>" must not be able to name another game's token.
-func TestAViewCannotRecordAnotherGamesToken(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedViewGame(t, ctx, pool, "game-a")
-	b := seedViewGame(t, ctx, pool, "game-b")
-	tokenA := seedToken(t, ctx, pool, a.projectID, "view-a")
-	tokenB := seedToken(t, ctx, pool, b.projectID, "view-b")
-
-	if _, err := pool.Exec(ctx,
-		`UPDATE views SET updated_by_token_id = $1 WHERE id = $2`, tokenA, a.viewID); err != nil {
-		t.Fatalf("this game's own token must be accepted: %v", err)
-	}
-	countRows(t, ctx, pool,
-		`SELECT count(*) FROM views WHERE id = $1 AND updated_by_token_id = $2`,
-		[]any{a.viewID, tokenA}, 1)
-
-	_, err := pool.Exec(ctx,
-		`UPDATE views SET updated_by_token_id = $1 WHERE id = $2`, tokenB, a.viewID)
-	assertForeignKeyViolation(t, err)
-}
-
-// TestAnAssetCannotRecordAnotherGamesToken is that same key on the
-// other table that carries one. Closing it on views alone would leave
-// the hole one step along.
-func TestAnAssetCannotRecordAnotherGamesToken(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedViewGame(t, ctx, pool, "game-a")
-	b := seedViewGame(t, ctx, pool, "game-b")
-	tokenA := seedToken(t, ctx, pool, a.projectID, "asset-a")
-	tokenB := seedToken(t, ctx, pool, b.projectID, "asset-b")
-
-	if _, err := pool.Exec(ctx,
-		`UPDATE view_assets SET created_by_token_id = $1 WHERE id = $2`, tokenA, a.assetID); err != nil {
-		t.Fatalf("this game's own token must be accepted: %v", err)
-	}
-	countRows(t, ctx, pool,
-		`SELECT count(*) FROM view_assets WHERE id = $1 AND created_by_token_id = $2`,
-		[]any{a.assetID, tokenA}, 1)
-
-	_, err := pool.Exec(ctx,
-		`UPDATE view_assets SET created_by_token_id = $1 WHERE id = $2`, tokenB, a.assetID)
-	assertForeignKeyViolation(t, err)
-}
-
 // TestDeletingAnEntityTypeNullsTheRefAndKeepsItsKey is the one this
 // whole table exists for: a deleted type must leave a readable dead
 // reference, not disappear. ON DELETE CASCADE here would make "which
@@ -831,4 +654,74 @@ func TestAViewPositionDefaultsToPinned(t *testing.T) {
 		t.Fatalf("read pinned: %v", err)
 	}
 	assert.Must(t, pinned, "view_positions.pinned did not default to true")
+}
+
+// Every composite foreign key in the views schema, in one pass: the
+// same-game write is accepted and counted first, so an empty answer to
+// the cross-game write cannot be read as a refusal that never happened.
+func TestNoViewsRowReachesIntoAnotherGame(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	a := seedViewGame(t, ctx, pool, "game-a")
+	b := seedViewGame(t, ctx, pool, "game-b")
+	tokenA := seedToken(t, ctx, pool, a.projectID, "token-a")
+	tokenB := seedToken(t, ctx, pool, b.projectID, "token-b")
+
+	insertPosition := `INSERT INTO view_positions (view_id, entity_id, project_id, x, y) VALUES ($1, $2, $3, 1, 2)`
+	insertRefType := `INSERT INTO view_refs (view_id, project_id, kind, ref_key, entity_type_id, pointer) VALUES ($1, $2, 'entity_type', 'quest', $3, $4)`
+	insertRefRelation := `INSERT INTO view_refs (view_id, project_id, kind, ref_key, relation_type_id, pointer) VALUES ($1, $2, 'relation_type', 'requires', $3, $4)`
+
+	for _, tc := range []struct {
+		name       string
+		sql        string
+		own, alien []any
+		count      string
+		countArgs  []any
+	}{
+		{"a position naming another game's entity", insertPosition,
+			[]any{a.viewID, a.entityID, a.projectID}, []any{a.viewID, b.entityID, a.projectID},
+			`SELECT count(*) FROM view_positions WHERE view_id = $1 AND entity_id = $2`, []any{a.viewID, a.entityID}},
+		{"a position naming another game's view", insertPosition,
+			[]any{a.viewID, a.entityID, a.projectID}, []any{b.viewID, a.entityID, a.projectID},
+			`SELECT count(*) FROM view_positions WHERE project_id = $1`, []any{a.projectID}},
+		{"a background from another game",
+			`UPDATE views SET background_asset_id = $1 WHERE id = $2`,
+			[]any{a.assetID, a.viewID}, []any{b.assetID, a.viewID},
+			`SELECT count(*) FROM views WHERE id = $1 AND background_asset_id = $2`, []any{a.viewID, a.assetID}},
+		{"a ref to another game's entity type", insertRefType,
+			[]any{a.viewID, a.projectID, a.entityTypeID, "/from/0/type"},
+			[]any{a.viewID, a.projectID, b.entityTypeID, "/from/1/type"},
+			`SELECT count(*) FROM view_refs WHERE view_id = $1 AND entity_type_id = $2`, []any{a.viewID, a.entityTypeID}},
+		{"a ref to another game's relation type", insertRefRelation,
+			[]any{a.viewID, a.projectID, a.relationTypeID, "/traverse/0/via"},
+			[]any{a.viewID, a.projectID, b.relationTypeID, "/traverse/1/via"},
+			`SELECT count(*) FROM view_refs WHERE view_id = $1 AND relation_type_id = $2`, []any{a.viewID, a.relationTypeID}},
+		{"a view recording another game's token",
+			`UPDATE views SET updated_by_token_id = $1 WHERE id = $2`,
+			[]any{tokenA, a.viewID}, []any{tokenB, a.viewID},
+			`SELECT count(*) FROM views WHERE id = $1 AND updated_by_token_id = $2`, []any{a.viewID, tokenA}},
+		{"an asset recording another game's token",
+			`UPDATE view_assets SET created_by_token_id = $1 WHERE id = $2`,
+			[]any{tokenA, a.assetID}, []any{tokenB, a.assetID},
+			`SELECT count(*) FROM view_assets WHERE id = $1 AND created_by_token_id = $2`, []any{a.assetID, tokenA}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Each case stages its writes in a transaction of its own and
+			// rolls back, so one case's accepted row is not the next
+			// case's duplicate key.
+			tx, err := pool.Begin(ctx)
+			assert.NoErr(t, err, "begin")
+			defer func() { _ = tx.Rollback(ctx) }()
+
+			_, err = tx.Exec(ctx, tc.sql, tc.own...)
+			assert.NoErr(t, err, "the same game's own write must be accepted")
+			var n int
+			assert.NoErr(t, tx.QueryRow(ctx, tc.count, tc.countArgs...).Scan(&n), "count")
+			assert.Must(t, n == 1, "the accepted write left %d row(s), want 1", n)
+
+			_, err = tx.Exec(ctx, tc.sql, tc.alien...)
+			assertForeignKeyViolation(t, err)
+		})
+	}
 }

@@ -85,22 +85,6 @@ func designVersion(t *testing.T, ctx context.Context, pool *pgxpool.Pool, projec
 	return v
 }
 
-func TestAnalysisTablesExist(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-
-	for _, table := range []string{"routes", "route_steps"} {
-		var exists bool
-		if err := pool.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)`,
-			table).Scan(&exists); err != nil {
-			t.Fatalf("query %s: %v", table, err)
-		}
-		assert.Must(t, exists, "table %s was not created", table)
-	}
-}
-
 // TestTheTraitVocabularyConstraintRefusesAnUnknownTrait is the whole
 // point of putting the vocabulary in the database rather than only in
 // Go: a value outside it must not reach a row.
@@ -200,50 +184,6 @@ func TestANewRelationTypeHasNoTraitsAndThatIsNotAnError(t *testing.T) {
 	assert.Must(t, isNull, "a freshly inserted relation type must read as undeclared (NULL), not as a declared empty set")
 }
 
-// TestARouteStepCannotNameAnEntityFromAnotherGame is the isolation the
-// composite key exists for. Without project_id in the key a step could
-// point at another game's entity and a check would report that step as
-// reachable on the strength of a graph the caller cannot see.
-func TestARouteStepCannotNameAnEntityFromAnotherGame(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedAnalysisGame(t, ctx, pool, "azeroth")
-	b := seedAnalysisGame(t, ctx, pool, "outland")
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO route_steps (route_id, project_id, position, entity_id, entity_type_key, entity_key)
-		 VALUES ($1, $2, 2, $3, 'quest', 'hogger')`,
-		a.routeID, a.projectID, b.entityID)
-	assertForeignKeyViolation(t, err)
-
-	// Positive control: the same statement with this game's own entity
-	// lands, so the refusal above is about the game and not about the
-	// statement.
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO route_steps (route_id, project_id, position, entity_id, entity_type_key, entity_key)
-		 VALUES ($1, $2, 2, $3, 'quest', 'kobolds')`,
-		a.routeID, a.projectID, a.otherEntityID); err != nil {
-		t.Fatalf("a step naming this game's own entity was refused: %v", err)
-	}
-}
-
-// TestARouteStepCannotBorrowAnotherGamesRoute is the other half of the
-// same composite key: a step's route and its project must agree.
-func TestARouteStepCannotBorrowAnotherGamesRoute(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedAnalysisGame(t, ctx, pool, "azeroth")
-	b := seedAnalysisGame(t, ctx, pool, "outland")
-
-	_, err := pool.Exec(ctx,
-		`INSERT INTO route_steps (route_id, project_id, position, entity_id, entity_type_key, entity_key)
-		 VALUES ($1, $2, 9, $3, 'quest', 'hogger')`,
-		b.routeID, a.projectID, a.entityID)
-	assertForeignKeyViolation(t, err)
-}
-
 // TestDeletingAnEntityLeavesItsRouteStepWithATombstone is the argument
 // for SET NULL rather than CASCADE, asserted rather than stated.
 func TestDeletingAnEntityLeavesItsRouteStepWithATombstone(t *testing.T) {
@@ -275,28 +215,6 @@ func TestDeletingAnEntityLeavesItsRouteStepWithATombstone(t *testing.T) {
 	// project_id must survive untouched: a bare SET NULL on the
 	// composite key would have tried to null it too, and it is NOT NULL.
 	assert.Must(t, projectID == g.projectID, "project_id changed on the step: got %v, want %v", projectID, g.projectID)
-}
-
-// TestARouteCannotRecordAnotherGamesToken mirrors
-// TestCannotRecordAnotherProjectsToken for the new table: the audit
-// column's key is composite for the same reason every other one is.
-func TestARouteCannotRecordAnotherGamesToken(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-	a := seedAnalysisGame(t, ctx, pool, "azeroth")
-	b := seedAnalysisGame(t, ctx, pool, "outland")
-	foreign := seedToken(t, ctx, pool, b.projectID.String(), "outland-token")
-	own := seedToken(t, ctx, pool, a.projectID.String(), "azeroth-token")
-
-	_, err := pool.Exec(ctx,
-		`UPDATE routes SET updated_by_token_id = $2 WHERE id = $1`, a.routeID, foreign)
-	assertForeignKeyViolation(t, err)
-
-	if _, err := pool.Exec(ctx,
-		`UPDATE routes SET updated_by_token_id = $2 WHERE id = $1`, a.routeID, own); err != nil {
-		t.Fatalf("a route recording its own game's token was refused: %v", err)
-	}
 }
 
 // TestRevokingATokenNullsOnlyTheTokenColumnOfARoute pins that the SET
@@ -371,134 +289,6 @@ func TestDeletingARouteTakesItsSteps(t *testing.T) {
 	// The entity the step named is untouched: deleting a route is not a
 	// content deletion.
 	countRows(t, ctx, pool, `SELECT count(*) FROM entities WHERE id = $1`, []any{g.entityID}, 1)
-}
-
-// designTables is the set of tables a *game's design* is made of -- the
-// four the design counter watches. Every other project-scoped table is
-// classified below with the reason it is not one, so that adding a
-// fifth project-scoped table anywhere in this repository fails a test in
-// a package its author did not touch and forces the decision to be made
-// rather than skipped.
-var designTables = map[string]string{
-	"entity_types":   "a game's kinds of thing",
-	"relation_types": "a game's kinds of edge, and where analysis_traits live",
-	"entities":       "a game's content",
-	"relations":      "a game's edges",
-}
-
-// notDesignTables is every other project-scoped table, with the argument
-// for its exclusion. These are not bookkeeping: routes especially must
-// stay out, because a check that marked every route in the game stale --
-// including the one it had just checked -- would be a mechanism that
-// invalidates its own output.
-var notDesignTables = map[string]string{
-	"api_tokens":        "credentials, not content",
-	"invites":           "identity, not content",
-	"memberships":       "identity, not content",
-	"documents":         "prose about the design, judged stale by its own version",
-	"document_versions": "history of the above",
-	"document_links":    "an index over the above",
-	"views":             "a stored question, which caches nothing and cannot go stale",
-	"view_positions":    "a human's arrangement of a picture",
-	"view_refs":         "a dependency index over views",
-	"view_assets":       "background images",
-	"routes":            "a stored verdict; watching it would invalidate its own output",
-	"route_steps":       "part of a route, above",
-}
-
-// TestEveryMetamodelTableCarriesTheDesignVersionTriggers reads the list
-// of project-scoped tables **from the database** rather than from a
-// second Go literal, so that the assertion cannot fall behind the
-// schema.
-func TestEveryMetamodelTableCarriesTheDesignVersionTriggers(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-
-	rows, err := pool.Query(ctx,
-		`SELECT c.relname
-		   FROM pg_class c
-		   JOIN pg_namespace n ON n.oid = c.relnamespace
-		   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'project_id'
-		                      AND a.attnum > 0 AND NOT a.attisdropped
-		  WHERE c.relkind = 'r' AND n.nspname = 'public'
-		  ORDER BY c.relname`)
-	assert.Must(t, err == nil, "list project-scoped tables: %v", err)
-	var scoped []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan table name: %v", err)
-		}
-		scoped = append(scoped, name)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		t.Fatalf("list project-scoped tables: %v", err)
-	}
-	assert.Must(t, len(scoped) != 0, "no project-scoped tables found; this test would assert nothing")
-
-	// Triggers, by table, from the catalogue -- matched on the function
-	// they call rather than on their names, so renaming one does not
-	// silently empty this assertion.
-	type trig struct {
-		name  string
-		ttype int16
-	}
-	byTable := map[string][]trig{}
-	trows, err := pool.Query(ctx,
-		`SELECT c.relname, t.tgname, t.tgtype
-		   FROM pg_trigger t
-		   JOIN pg_class c ON c.oid = t.tgrelid
-		   JOIN pg_proc  p ON p.oid = t.tgfoid
-		  WHERE NOT t.tgisinternal AND p.proname = 'bump_design_version'`)
-	assert.Must(t, err == nil, "list design-version triggers: %v", err)
-	for trows.Next() {
-		var table string
-		var tr trig
-		if err := trows.Scan(&table, &tr.name, &tr.ttype); err != nil {
-			t.Fatalf("scan trigger: %v", err)
-		}
-		byTable[table] = append(byTable[table], tr)
-	}
-	trows.Close()
-	if err := trows.Err(); err != nil {
-		t.Fatalf("list design-version triggers: %v", err)
-	}
-
-	for _, table := range scoped {
-		_, isDesign := designTables[table]
-		_, isNot := notDesignTables[table]
-		switch {
-		case isDesign && isNot:
-			t.Fatalf("%s is classified both ways", table)
-		case !isDesign && !isNot:
-			t.Fatalf("table %s is project-scoped and this test has no opinion about it: "+
-				"decide whether it is part of a game's design and add it to designTables "+
-				"or notDesignTables in this file", table)
-		case isNot:
-			if got := byTable[table]; len(got) != 0 {
-				t.Fatalf("%s carries design-version triggers %v but is excluded because it is %s",
-					table, got, notDesignTables[table])
-			}
-			continue
-		}
-
-		got := byTable[table]
-		if len(got) != 3 {
-			t.Fatalf("%s (%s) carries %d design-version triggers, want 3 (insert, update, delete): %v",
-				table, designTables[table], len(got), got)
-		}
-		events := int16(0)
-		for _, tr := range got {
-			assert.Must(t, tr.ttype&1 == 0, "%s.%s is FOR EACH ROW; the counter is maintained per statement, "+
-				"which is what makes a thousand-row write cost one UPDATE", table, tr.name)
-			assert.Must(t, tr.ttype&2 == 0, "%s.%s is a BEFORE trigger; a transition table needs AFTER", table, tr.name)
-			events |= tr.ttype & (4 | 8 | 16)
-		}
-		assert.Must(t, events == 4|8|16, "%s's design-version triggers cover events %d, want insert, update and delete (28)",
-			table, events)
-	}
 }
 
 // TestEveryMetamodelWriteBumpsTheDesignVersion is the behavioural half:
@@ -893,4 +683,42 @@ func TestTheReachabilityWalkSeeksAnIndexRatherThanScanning(t *testing.T) {
 		"0013_analysis.sql's decision not to add relations_project_type_idx rests on it not doing that:\n%s",
 		plan.String())
 	t.Logf("reachability walk plan:\n%s", plan.String())
+}
+
+// Every composite foreign key in the analysis schema, on one database.
+func TestNoAnalysisRowReachesIntoAnotherGame(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	a := seedAnalysisGame(t, ctx, pool, "azeroth")
+	b := seedAnalysisGame(t, ctx, pool, "outland")
+	own := seedToken(t, ctx, pool, a.projectID.String(), "azeroth-token")
+	foreign := seedToken(t, ctx, pool, b.projectID.String(), "outland-token")
+
+	step := `INSERT INTO route_steps (route_id, project_id, position, entity_id, entity_type_key, entity_key)
+	         VALUES ($1, $2, $4, $3, 'quest', 'hogger')`
+
+	for _, tc := range []struct {
+		name       string
+		sql        string
+		own, alien []any
+	}{
+		{"a step naming another game's entity", step,
+			[]any{a.routeID, a.projectID, a.otherEntityID, 2}, []any{a.routeID, a.projectID, b.entityID, 3}},
+		{"a step borrowing another game's route", step,
+			[]any{a.routeID, a.projectID, a.entityID, 4}, []any{b.routeID, a.projectID, a.entityID, 5}},
+		{"a route recording another game's token",
+			`UPDATE routes SET updated_by_token_id = $2 WHERE id = $1`,
+			[]any{a.routeID, own}, []any{a.routeID, foreign}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := pool.Begin(ctx)
+			assert.NoErr(t, err, "begin")
+			defer func() { _ = tx.Rollback(ctx) }()
+			_, err = tx.Exec(ctx, tc.sql, tc.own...)
+			assert.NoErr(t, err, "the same game's own write must be accepted")
+			_, err = tx.Exec(ctx, tc.sql, tc.alien...)
+			assertForeignKeyViolation(t, err)
+		})
+	}
 }

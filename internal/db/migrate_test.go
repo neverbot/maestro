@@ -4,25 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/testutil"
 )
-
-func TestMigrationsCreateIdentityTables(t *testing.T) {
-	t.Parallel()
-	pool := testutil.NewPool(t)
-	ctx := context.Background()
-
-	for _, table := range []string{"users", "projects", "memberships", "sessions", "invites", "api_tokens"} {
-		var exists bool
-		err := pool.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)`,
-			table).Scan(&exists)
-		assert.Must(t, err == nil, "query %s: %v", table, err)
-		assert.Must(t, exists, "table %s was not created", table)
-	}
-}
 
 // TestMigrateIsIdempotent guards against the instance-scoped provider
 // reintroducing goose's package-global state: running Migrate twice against

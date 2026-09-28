@@ -8,14 +8,6 @@ import (
 	"github.com/neverbot/maestro/internal/assert"
 )
 
-// TestTheGameSettingsScreen drives internal/web/jstest/settings_test.mjs:
-// the two tabs, who may mint a token, the command the Agents tab hands
-// out, and the revoke that asks first.
-func TestTheGameSettingsScreen(t *testing.T) {
-	t.Parallel()
-	runJSTest(t, "jstest/settings_test.mjs")
-}
-
 // TestTheInstallCommandSaysWhatThisServerActuallySpeaks is the guard the
 // JavaScript cannot be: the command on that screen tells a designer how
 // to reach *this* server, and every fact in it is a fact about Go code

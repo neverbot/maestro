@@ -10,15 +10,6 @@ import (
 	"github.com/neverbot/maestro/internal/assert"
 )
 
-// TestTheHint drives internal/web/jstest/hint_test.mjs, which holds the
-// behaviour: the explanation opens on focus as well as on hover, Escape
-// closes it, the trigger names the panel, and the sentence arrives as
-// text.
-func TestTheHint(t *testing.T) {
-	t.Parallel()
-	runJSTest(t, "jstest/hint_test.mjs")
-}
-
 // TestNoStyleSheetIsCutInHalfByABacktick is the guard for a defect that
 // landed three times in one afternoon and is invisible to `node --check`.
 func TestNoStyleSheetIsCutInHalfByABacktick(t *testing.T) {

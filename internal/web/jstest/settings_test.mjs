@@ -159,8 +159,21 @@ const settings = await import("../static/pages/settings.js");
 
 // --- The one paste ----------------------------------------------------
 
+check("theCommandNamesItsEntryAfterTheGame", () => {
+  const ashfall = settings.installCommand(ORIGIN, TOKEN, "ashfall");
+  const duskwood = settings.installCommand(ORIGIN, TOKEN, "duskwood");
+  assert(ashfall.startsWith("claude mcp add maestro-ashfall "), `the entry is not named after the game: ${ashfall}`);
+  assert(
+    ashfall.split("\n")[0] !== duskwood.split("\n")[0],
+    "two games print the same entry name, so installing the second replaces the first",
+  );
+  // A game whose slug never arrived keeps the bare name rather than
+  // printing `maestro-`.
+  assertEqual(settings.serverName(""), "maestro", "an absent slug leaves a trailing separator");
+});
+
 check("theCommandCarriesThisInstanceAndPutsTheTokenInAHeader", () => {
-  const command = settings.installCommand(ORIGIN, TOKEN);
+  const command = settings.installCommand(ORIGIN, TOKEN, "ashfall");
   assert(command.includes(ORIGIN + "/mcp"), `the command does not name this instance's MCP address: ${command}`);
   assert(command.includes("--transport http"), `the command does not say the transport: ${command}`);
   assert(
@@ -217,7 +230,7 @@ check("theTokenIsShownInADialogTheReaderCanClose", () => {
   assertEqual(dialog.titleEl.textContent, settings.TOKEN_ISSUED_TITLE, "the dialog does not say what it is");
   const said = dialog.bodyEl.textContent;
   assert(said.includes(TOKEN), "the token is not in the dialog");
-  assert(said.includes(settings.installCommand(ORIGIN, TOKEN)), "the command is not in the dialog");
+  assert(said.includes(settings.installCommand(ORIGIN, TOKEN, "ashfall")), "the command is not in the dialog");
   assert(said.includes("only time"), "nothing says this is the only time the token is shown");
   assert(said.includes("fetches Maestro's instructions"), "nothing says the agent fetches its own instructions");
 });
@@ -261,7 +274,7 @@ check("copyingPutsTheTokenAndTheCommandOnTheClipboard", async () => {
   assertEqual(world.copied[0], TOKEN, "the token did not reach the clipboard");
   assertEqual(
     world.copied[1],
-    settings.installCommand(ORIGIN, TOKEN),
+    settings.installCommand(ORIGIN, TOKEN, "ashfall"),
     "the command did not reach the clipboard",
   );
   assertEqual(buttons[0].textContent, settings.COPIED, "the button said nothing back");

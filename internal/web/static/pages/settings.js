@@ -490,9 +490,22 @@ export const MCP_PATH = "/mcp";
 // that is the address their agent will reach it at too — which is true
 // on localhost, over a VPN and behind a proxy alike, and is the one
 // thing a configured `PUBLIC_URL` would keep getting wrong for somebody.
-export function installCommand(origin, token) {
+// SERVER_PREFIX names the entry this command creates. **It carries the
+// game's slug**, and it did not: every game printed `claude mcp add
+// maestro`, so a designer working on two games ran the second command
+// and silently replaced the first game's entry with the second's. One
+// key is one game, so two games are two entries, and the name is the
+// only thing keeping them apart.
+export const SERVER_PREFIX = "maestro";
+
+export function serverName(slug) {
+  const named = String(slug || "").trim();
+  return named === "" ? SERVER_PREFIX : SERVER_PREFIX + "-" + named;
+}
+
+export function installCommand(origin, token, slug) {
   return (
-    "claude mcp add maestro " + String(origin || "") + MCP_PATH + " \\\n" +
+    "claude mcp add " + serverName(slug) + " " + String(origin || "") + MCP_PATH + " \\\n" +
     "  --transport http \\\n" +
     '  --header "Authorization: Bearer ' + String(token || "") + '" \\\n' +
     "  --scope local"
@@ -771,7 +784,7 @@ export function showIssuedToken(opened, token) {
   const origin = opened.origin || (globalThis.window && globalThis.window.location
     ? globalThis.window.location.origin
     : "");
-  const command = installCommand(origin, token);
+  const command = installCommand(origin, token, opened.slug);
 
   const note = doc.createElement("p");
   note.className = "note";

@@ -549,8 +549,13 @@ One component, three shapes, always in the content column, never in a
 box, never with a stripe, capped at 62ch.
 
 - **Empty:** a bold `ink` line naming what is absent, one `muted`
-  sentence saying who would put it there, at most one link. Never a
-  tutorial: a person reading it has no API.
+  sentence saying who would put it there, at most one link.
+  **The exception is an empty state whose filling is inside the
+  product**, which may carry the steps and one line to copy. This used
+  to read "never a tutorial: a person reading it has no API", which was
+  true until Game settings grew an Agents tab. What the rule left behind
+  was a game's first page telling a new designer that nothing on it
+  would ever change, which is where they stop.
 - **Loading:** the same shape, rendered only after 200ms so a fast
   answer never flashes.
 - **Refused:** the bold line in Alarm, the reason in plain words, one

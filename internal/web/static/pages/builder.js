@@ -176,9 +176,9 @@ export async function builderPage(opened) {
   setBreadcrumb(doc, [
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_VIEWS, href: viewsURL(opened.slug) },
-    { label: "New view" },
+    { label: "New overview" },
   ]);
-  doc.title = "New view · Maestro";
+  doc.title = "New overview · Maestro";
   say(doc.getElementById("builder-boundary"), BOUNDARY);
 
   const summary = await opened.client.summary();

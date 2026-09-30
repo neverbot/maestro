@@ -1,5 +1,5 @@
-// The game home: three lanes, **Views · Catalogue · Prose**, in that
-// order.
+// The game home: three bands a reader goes down, **what this game is
+// made of · saved to look at · writing**.
 
 import {
   REREAD,
@@ -16,6 +16,7 @@ import {
   fill,
   fillState,
   negativeState,
+  copyLine,
   onboarding,
   openGame,
   row,
@@ -35,7 +36,7 @@ import { goToLogin } from "../app.js";
 // What the two role-dependent empty states are about, in the words the
 // sentence needs. They are arguments to one function rather than two
 // functions, because "who may do this" is one rule with two subjects.
-export const DECLARES_TYPES = "declares them";
+export const DECLARES_TYPES = "names them";
 export const WRITES_DOCUMENTS = "writes them";
 
 // The three negative states the home's lanes can be in. They live here
@@ -43,18 +44,18 @@ export const WRITES_DOCUMENTS = "writes them";
 // here rather than keeping a second wording of the same state: the
 // catalogue destination shows the same two catalogues this lane does,
 // and two wordings of one state is one of them going stale.
-export const NO_TYPES_HEADING = "No types yet";
+export const NO_TYPES_HEADING = "This game has not said what it is made of";
 export const NO_TYPES_SENTENCE =
-  "A game declares its own — Quest, Zone and Class for one game, Driver, Car and Circuit for " +
-  "another.";
-export const NO_RELATION_TYPES_HEADING = "No connections yet";
+  "Every game names its own kinds of things: missions, places and classes in one, drivers, cars " +
+  "and circuits in another. Yours has named none yet.";
+export const NO_RELATION_TYPES_HEADING = "Nothing connects to anything yet";
 export const NO_RELATION_TYPES_SENTENCE =
-  "A relation type is a kind of edge between entities — takes_place_in, requires, unlocks — and " +
-  "is declared the same way an entity type is.";
-export const NO_PROSE_HEADING = "No prose yet";
+  "A connection is a kind of link between two things: a mission happens in a place, a mission " +
+  "needs another one first, a reward unlocks a class.";
+export const NO_PROSE_HEADING = "Nothing written yet";
 export const NO_PROSE_SENTENCE =
-  "A document is writing addressed by a path inside this game, such as lore/duskwood, kept " +
-  "version by version.";
+  "This is where the words go: the lore of a place, the brief for a mission, the lines a " +
+  "character says. Every piece keeps its older versions.";
 
 // describeTotals is the one line under the game's name. An empty game
 // says so in words rather than showing three zeros, which reads as a
@@ -64,12 +65,12 @@ export function describeTotals(totals) {
   const entities = Number(counts.entities ?? 0);
   const relations = Number(counts.relations ?? 0);
   const invalid = Number(counts.invalid ?? 0);
-  if (entities === 0 && relations === 0) return "No content yet.";
-  const parts = [countLabel(entities, "entity", "entities"), countLabel(relations, "relation", "relations")];
+  if (entities === 0 && relations === 0) return "Nothing in this game yet.";
+  const parts = [countLabel(entities, "thing", "things"), countLabel(relations, "connection", "connections")];
   // Only when there are any: a permanent "0 no longer fit" would train a
   // designer to ignore the one number on this page that ever asks them
   // to do something.
-  if (invalid > 0) parts.push(`${invalid} no longer fit their type`);
+  if (invalid > 0) parts.push(`${invalid} no longer fit what they are`);
   return parts.join(" · ");
 }
 
@@ -94,9 +95,23 @@ export function describeDocKinds(body) {
 // describeView is the second column of a views row: what it draws and
 // whether the game has moved under it. `stale` is the server's own flag
 // and is the only thing on this lane that ever asks for attention.
+// DRAWN_AS turns a renderer's name into what a reader will actually see.
+// A designer has no idea what "layered" or "nested" mean, and does not
+// need to: the row says how the thing is drawn, in the words they would
+// use for it themselves.
+export const DRAWN_AS = {
+  graph: "as a web",
+  layered: "in steps",
+  nested: "as a tree",
+  map: "on a map",
+  timeline: "in order",
+  table: "as a list",
+};
+
 export function describeView(view) {
   const from = view && typeof view === "object" ? view : {};
-  return String(from.renderer ?? "");
+  const renderer = String(from.renderer ?? "");
+  return DRAWN_AS[renderer] ?? renderer;
 }
 
 // --- The page --------------------------------------------------------
@@ -149,7 +164,7 @@ export async function home(opened) {
   // In lane order. The catalogue's call is also the one that carries the
   // caller's role, which two of the three lanes word an empty state
   // from, so it is awaited before the sentences that need it.
-  const summary = await catalogueLane(doc, slug, client, summaryEl);
+  const summary = await catalogueLane(doc, slug, client, summaryEl, opened.game.name);
   // A summary that never answered is the page's failure and not one
   // lane's: the totals line carries the server's sentence and the lanes
   // stay hidden, because two empty catalogues under a message read as a
@@ -177,9 +192,12 @@ export async function home(opened) {
   client.connect(onEvent);
 
   const content = doc.getElementById("home");
-  // Revealed only now, with every lane already filled, so the page never
-  // flashes three empty lists on its way to the real ones.
-  if (content) content.hidden = false;
+  // Revealed only now, with every band already filled, so the page never
+  // flashes three empty lists on its way to the real ones. A game with
+  // nothing in it keeps them hidden: the band above has just said what
+  // this game will hold and what to do about it, and three more "nothing
+  // yet" underneath say the same thing worse.
+  if (content) content.hidden = isEmptyGame(summary.raw);
   // The listener is handed back as well as registered, because "the
   // prose lane re-reads on a moved document" is a property of *this*
   // function and a harness that could only reach it through a live
@@ -191,7 +209,7 @@ export async function home(opened) {
 // type catalogues, and the role the other two lanes word their empty
 // states from. **One call**, and the test that says so is the reason
 // this function takes no per-type argument to fetch with.
-async function catalogueLane(doc, slug, client, summaryEl) {
+async function catalogueLane(doc, slug, client, summaryEl, gameName) {
   const answer = await client.summary();
   if (!answer.ok) {
     if (expired(answer)) {
@@ -216,8 +234,10 @@ async function catalogueLane(doc, slug, client, summaryEl) {
   const summary = answer.result;
   const entityTypes = Array.isArray(summary.entity_types) ? summary.entity_types : [];
   const relationTypes = Array.isArray(summary.relation_types) ? summary.relation_types : [];
-  say(summaryEl, describeTotals(summary.totals));
-  offerToConnectAnAgent(doc, slug, summary);
+  const empty = isEmptyGame(summary);
+  say(summaryEl, empty ? "" : describeTotals(summary.totals));
+  if (summaryEl) summaryEl.hidden = empty;
+  offerToConnectAnAgent(doc, slug, summary, gameName);
   fillState(doc, "types-empty", {
     heading: NO_TYPES_HEADING,
     sentence: NO_TYPES_SENTENCE + " " + whoWrites(summary.role, DECLARES_TYPES),
@@ -259,7 +279,7 @@ async function catalogueLane(doc, slug, client, summaryEl) {
       }),
     ),
   );
-  return { role: String(summary.role ?? ""), ok: true };
+  return { role: String(summary.role ?? ""), ok: true, raw: summary };
 }
 
 // SETTINGS_LABEL is the link, and every member of the game gets it.
@@ -280,11 +300,27 @@ export function offerSettings(doc, slug, role) {
 
 // --- The empty game ----------------------------------------------------
 
-export const CONNECT_HEADING = "Nothing here yet, and nothing on this page will change that";
+export const CONNECT_HEADING = "Nothing in this game yet";
 export const CONNECT_SENTENCE =
-  "A game's content is written by agents, over MCP. Give one a token for this game and it can " +
-  "start declaring what this game is made of.";
-export const CONNECT_LABEL = "Connect an agent";
+  "Maestro holds what your game is made of: its missions, its places, its classes, whatever " +
+  "your game calls them, how they connect, and the writing about them. You do not type any of " +
+  "it in here. Your AI assistant writes it, and you read it, judge it and correct it.";
+export const CONNECT_LABEL = "Make a key for this game";
+export const CONNECT_STEPS = [
+  ", and give it to your assistant. The command to paste is on that screen.",
+  "Ask your assistant to read the Maestro guide for this game.",
+  "Then ask it to start. Something like this:",
+];
+// The sentence a designer copies. It is the one thing on this page that
+// turns understanding into a game with something in it, and it names
+// this game rather than a placeholder, because a line somebody has to
+// edit before using is a line they get wrong.
+export function startingPrompt(name) {
+  return (
+    "Read the Maestro skill for " + name + ", then declare the kinds of things this game is " +
+    "made of and add the first ten of them."
+  );
+}
 
 // isEmptyGame reads the same totals the line under the title is built
 // from, rather than counting the lanes: a game can declare types and
@@ -309,7 +345,7 @@ export function isEmptyGame(summary) {
 // telling a viewer to connect an agent would be sending them to a form
 // the server refuses. A viewer of an empty game keeps the three lanes'
 // own sentences, which are true for them.
-export function offerToConnectAnAgent(doc, slug, summary) {
+export function offerToConnectAnAgent(doc, slug, summary, name) {
   const host = doc.getElementById("connect-agent");
   if (!host) return null;
   const role = String(summary?.role ?? "");
@@ -319,12 +355,37 @@ export function offerToConnectAnAgent(doc, slug, summary) {
     host.hidden = true;
     return null;
   }
+  // No action of its own: the way in is step one, where a reader is
+  // already looking. It was both, and a page that offers the same link
+  // twice in four lines reads as two different things to do.
   const state = negativeState(doc, {
     kind: STATE_EMPTY,
     heading: CONNECT_HEADING,
     sentence: CONNECT_SENTENCE,
-    action: { href: settingsURL(slug) + TAB_AGENTS, label: CONNECT_LABEL },
   });
+
+  // **The steps, and the sentence to copy.** design.md used to forbid
+  // this ("never a tutorial: a person reading it has no API"), which was
+  // true when nothing here could hand a person a key. Game settings has
+  // an Agents tab now, so the rule's premise is gone and what it left
+  // behind was a page telling a new designer their situation was
+  // hopeless.
+  const steps = doc.createElement("ol");
+  steps.className = "steps";
+  CONNECT_STEPS.forEach((text, at) => {
+    const step = doc.createElement("li");
+    if (at === 0) {
+      const way = doc.createElement("a");
+      way.href = settingsURL(slug) + TAB_AGENTS;
+      way.textContent = CONNECT_LABEL;
+      step.append(way);
+    }
+    step.append(doc.createTextNode(text));
+    steps.append(step);
+  });
+  state.append(steps);
+  state.append(copyLine(doc, startingPrompt(name), "Copy this"));
+
   host.replaceChildren(state);
   host.hidden = false;
   return state;
@@ -360,7 +421,7 @@ async function viewsLane(doc, slug, client, role) {
     ),
   );
   if (onboardingEl) {
-    onboardingEl.replaceChildren(...(items.length === 0 ? [onboarding(doc, role)] : []));
+    onboardingEl.replaceChildren(...(items.length === 0 ? [onboarding(doc, role, slug)] : []));
     onboardingEl.hidden = items.length > 0;
   }
 }

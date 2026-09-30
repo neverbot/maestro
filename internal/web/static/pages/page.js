@@ -40,9 +40,9 @@ export const SEGMENT_ROUTES = "/analysis/routes";
 // added to the home cannot be missing from the strip on every other
 // page — which is exactly how a fourth destination would arrive
 // half-built.
-export const DESTINATION_VIEWS = "Views";
-export const DESTINATION_CATALOGUE = "Catalogue";
-export const DESTINATION_PROSE = "Prose";
+export const DESTINATION_VIEWS = "Overviews";
+export const DESTINATION_CATALOGUE = "Content";
+export const DESTINATION_PROSE = "Writing";
 // Images is a destination because it is a screen. It was not one, and
 // /g/{slug}/assets therefore had no place of its own to mark: it marked
 // **Views**, so a reader saw the wrong tab in bold and a screen reader
@@ -54,20 +54,22 @@ export const DESTINATION_IMAGES = "Images";
 // destinations and shipped four, because "a destination pointing at
 // nothing is worse than one that is missing"; these are the screens it
 // was waiting for.
-export const DESTINATION_ANALYSIS = "Analysis";
-export const DESTINATIONS = [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATION_PROSE];
+export const DESTINATION_ANALYSIS = "Checks";
+export const DESTINATIONS = [DESTINATION_CATALOGUE, DESTINATION_VIEWS, DESTINATION_PROSE];
 
-// The sentence a game with no views at all reads, and the one piece of
-// onboarding in this product (the plan's O1).
-export const NO_VIEWS_HEADING = "No saved views yet";
-export const NO_VIEWS_SENTENCE = "A view is a saved query plus a renderer.";
+// What a game with nothing saved to look at reads. It names the thing by
+// what a reader would get out of it, never by how it is stored.
+export const NO_VIEWS_HEADING = "Nothing saved to look at yet";
+export const NO_VIEWS_SENTENCE =
+  "An overview is a saved way of seeing part of this game: how its missions unlock each other, " +
+  "where its places sit, what happens in what order.";
 export const NO_VIEWS_COMPOSE =
-  "The builder composes the half of the query language a sentence can hold; an agent writes the " +
-  "rest.";
+  "You can put a simple one together here. Your assistant writes the ones that ask a harder " +
+  "question.";
 export const NO_VIEWS_VIEWER =
-  "Your role in this game is viewer, so this instance will refuse a write from you: an editor or " +
-  "a game manager composes one.";
-export const SKILL_BUNDLE_LABEL = "How an agent writes one";
+  "You can read this game but not change it, so somebody with an editor's or a manager's role " +
+  "saves these.";
+export const SKILL_BUNDLE_LABEL = "Connect an assistant";
 
 // The one line in this front end that names an address outside this
 // instance, and it is a **hyperlink a human may click** rather than
@@ -423,21 +425,44 @@ export const ROLE_VIEWER = "viewer";
 export function whoWrites(role, what) {
   if (role === ROLE_VIEWER) {
     return (
-      "Your role in this game is viewer, so this instance will refuse a write from you: " +
-      `an editor or a game manager ${what}.`
+      "You can read this game but not change it, so somebody with an editor's or a manager's " +
+      `role ${what}.`
     );
   }
-  // **The reader is a game designer, and the sentence told them to use an
-  // API they do not have.** "You do it through this instance's API,
-  // either from an agent over MCP or over the game's content routes" was
-  // three lines of developer vocabulary in a 200px lane, aimed at
-  // somebody whose whole reason for being here is that they do not write
-  // code. What is true and useful is who does it, not over what
-  // transport.
-  return `An agent ${what}; nothing on this page does.`;
+  // Who does it, not over what transport. The reader is a game designer
+  // and the sentence used to send them to an API they do not have.
+  return `Your assistant ${what}.`;
 }
 
 // --- A secret shown once, and when an invitation stops working --------
+// copyLine is one string a reader is meant to take away, with the way to
+// take it beside it. `label` names what is being copied, because "Copy"
+// alone on a page with two of them says nothing.
+export function copyLine(doc, text, label) {
+  const line = doc.createElement("div");
+  line.className = "secret-line";
+
+  const code = doc.createElement("code");
+  code.className = "mono";
+  code.textContent = text;
+  line.append(code);
+
+  const copy = doc.createElement("button");
+  copy.type = "button";
+  copy.className = "ghost";
+  copy.textContent = label;
+  copy.addEventListener("click", async () => {
+    try {
+      await globalThis.navigator.clipboard.writeText(text);
+      copy.textContent = "Copied";
+    } catch {
+      copy.textContent = "Select it and copy";
+    }
+  });
+  line.append(copy);
+  return line;
+}
+
 export function inviteLink(doc, href) {
   const line = doc.createElement("div");
   line.className = "secret-line";
@@ -520,11 +545,17 @@ export { STATE_EMPTY, STATE_LOADING, STATE_REFUSED, negativeState, fillState } f
 // the product's one piece of onboarding in it rather than a component of
 // its own. It kept its name; what it lost is the box and the 3px
 // coloured left stripe, which the identity bans by name.
-export function onboarding(doc, role) {
+export function onboarding(doc, role, slug) {
+  const viewer = role === ROLE_VIEWER;
   return negativeState(doc, {
     kind: STATE_EMPTY,
     heading: NO_VIEWS_HEADING,
-    sentence: NO_VIEWS_SENTENCE + " " + (role === ROLE_VIEWER ? NO_VIEWS_VIEWER : NO_VIEWS_COMPOSE),
-    action: { href: SKILL_BUNDLE_HREF, label: SKILL_BUNDLE_LABEL },
+    sentence: NO_VIEWS_SENTENCE + " " + (viewer ? NO_VIEWS_VIEWER : NO_VIEWS_COMPOSE),
+    // Inside the product, never out to a code forge. This pointed at a
+    // README on GitHub, which is where the one person this product is
+    // for stops reading.
+    action: viewer || !slug
+      ? null
+      : { href: settingsURL(slug) + TAB_AGENTS, label: SKILL_BUNDLE_LABEL },
   });
 }

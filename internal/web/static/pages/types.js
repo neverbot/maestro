@@ -54,7 +54,7 @@ export async function typesPage(opened) {
   ]);
   // The game first: a person with three games open read three tabs
   // called "Catalogue".
-  doc.title = opened.game.name + " \u00b7 Catalogue \u00b7 Maestro";
+  doc.title = opened.game.name + " \u00b7 Content \u00b7 Maestro";
 
   const answer = await opened.client.summary();
   if (!answer.ok) {

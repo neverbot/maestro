@@ -497,7 +497,7 @@ export async function analysisPage(opened) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_ANALYSIS },
   ]);
-  doc.title = opened.game.name + " · Analysis · Maestro";
+  doc.title = opened.game.name + " · Checks · Maestro";
   const noteEl = el(doc, "analysis-note");
   say(noteEl, NOTE_ON_DEMAND);
   // It said "nothing below has been checked yet" under three finished

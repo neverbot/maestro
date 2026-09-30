@@ -397,21 +397,21 @@ check("theHomeMakesOneSummaryCall", async () => {
   }
 });
 
-check("theHomeLanesAreViewsCatalogueProseInThatOrder", async () => {
+check("theHomeBandsAreContentOverviewsWritingInThatOrder", async () => {
   const { DESTINATIONS, DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATION_PROSE } = await load("page");
   assertEqual(
     DESTINATIONS.join("|"),
-    [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATION_PROSE].join("|"),
-    "the three destinations are not Views, Catalogue and Prose",
+    [DESTINATION_CATALOGUE, DESTINATION_VIEWS, DESTINATION_PROSE].join("|"),
+    "the three destinations are not Content, Overviews and Writing",
   );
   // And the shell puts its lanes in that order, which is the half a
   // constant cannot hold: the order a reader meets them in is the order
   // of the sections in game.html.
   const { readFileSync } = await import("node:fs");
   const shell = readFileSync(path.join(HERE, "..", "static", "game.html"), "utf8");
-  const order = ["lane-views", "lane-catalogue", "prose"].map((id) => shell.indexOf(`id="${id}"`));
-  for (const at of order) assert(at > 0, "game.html is missing one of the three lanes");
-  assert(order[0] < order[1] && order[1] < order[2], `the lanes are not in destination order: ${order}`);
+  const order = ["lane-catalogue", "lane-views", "prose"].map((id) => shell.indexOf(`id="${id}"`));
+  for (const at of order) assert(at > 0, "game.html is missing one of the three bands");
+  assert(order[0] < order[1] && order[1] < order[2], `the bands are not in destination order: ${order}`);
 });
 
 // **A sentence and a link, and no button.** Nothing in this interface
@@ -423,7 +423,7 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
     pathname: "/g/azeroth",
     routes: [[(url) => url === base + "/summary", { body: summaryOf() }], noKinds, noDocs, noViews, events],
   });
-  const { NO_VIEWS_HEADING, NO_VIEWS_SENTENCE, SKILL_BUNDLE_HREF, SKILL_BUNDLE_LABEL } = await load("page");
+  const { NO_VIEWS_HEADING, NO_VIEWS_SENTENCE, SKILL_BUNDLE_LABEL } = await load("page");
   await load("home");
   const lane = dom.elements["views-onboarding"];
   const rendered = text(lane);
@@ -431,7 +431,9 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
   assert(rendered.includes(NO_VIEWS_SENTENCE), `the onboarding sentence is missing: ${JSON.stringify(rendered)}`);
   const anchors = links(lane);
   assertEqual(anchors.length, 1, "the onboarding is not exactly one link");
-  assertEqual(anchors[0].href, SKILL_BUNDLE_HREF, "the link does not point at the skill bundle's documentation");
+  // **Inside this instance.** It pointed at a README on GitHub, which is
+  // where the one person this product is for stops reading.
+  assertEqual(anchors[0].href, "/g/azeroth/settings#agents", "the way in leaves the product");
   assertEqual(anchors[0].textContent, SKILL_BUNDLE_LABEL, "the link is not labelled");
   assert(!lane.hidden, "the onboarding is hidden on a game with no views");
 
@@ -515,13 +517,13 @@ check("emptyStateActionsFollowTheRole", async () => {
     "a viewer and an editor read the same sentence about composing a view",
   );
   assert(
-    sentences.editor.views.includes("builder"),
-    `the editor's views sentence does not name the builder: ${JSON.stringify(sentences.editor.views)}`,
+    sentences.editor.views.includes("put a simple one together here"),
+    `the editor's sentence does not say they can make one: ${JSON.stringify(sentences.editor.views)}`,
   );
   for (const what of ["types", "docs", "views"]) {
     assert(
-      sentences.viewer[what].includes("will refuse a write from you"),
-      `the viewer's ${what} sentence does not say the instance will refuse the write`,
+      sentences.viewer[what].includes("read this game but not change it"),
+      `the viewer's ${what} sentence does not say they cannot change the game`,
     );
   }
 });
@@ -899,7 +901,7 @@ check("theTrailNamesTheGameTheSectionAndWhereYouAre", async () => {
   const crumbs = dom.elements["crumbs"].children.filter((node) => tag(node) !== "SPAN");
   assertEqual(
     crumbs.map((node) => node.textContent).join(" / "),
-    "Azeroth / Catalogue / Quests",
+    "Azeroth / Content / Quests",
     "the trail does not name the game, the section and this page",
   );
   assertEqual(tag(crumbs[0]), "A", "the game is not a link back to the game");
@@ -1483,7 +1485,8 @@ check("anEmptyGameGetsItsEmptyStatesAndNotTwoBlankLists", async () => {
     ],
   });
   await load("home");
-  assertEqual(dom.elements["game-summary"].textContent, "No content yet.", "an empty game shows three zeros");
+  assertEqual(dom.elements["game-summary"].textContent, "", "the totals line repeats what the band below says");
+  assert(dom.elements["game-summary"].hidden, "the empty totals line is left occupying a line");
   assert(!dom.elements["types-empty"].hidden, "the entity-types empty state is hidden on an empty game");
   assert(!dom.elements["relation-types-empty"].hidden, "the relation-types empty state is hidden on an empty game");
   assert(dom.elements["doc-kinds"].hidden, "the kind line shows on a game with no kinds");

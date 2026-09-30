@@ -38,7 +38,7 @@ export async function viewsPage(opened) {
   ]);
   // The game first: a person with three games open read three tabs
   // called "Views".
-  doc.title = opened.game.name + " \u00b7 Views \u00b7 Maestro";
+  doc.title = opened.game.name + " \u00b7 Overviews \u00b7 Maestro";
   const role = await opened.client.summary();
   // **The way in to the builder, where the read-only notice used to be
   // the whole of what this screen could say.** A viewer still gets the
@@ -49,7 +49,7 @@ export async function viewsPage(opened) {
     const compose = doc.createElement("a");
     compose.className = "button";
     compose.href = builderURL(opened.slug);
-    compose.textContent = "New view";
+    compose.textContent = "New overview";
     actions.replaceChildren(compose);
   } else if (role.ok) {
     setReadOnly(doc, role.result.role, "writes these views");
@@ -99,10 +99,10 @@ export async function viewsPage(opened) {
     rendered += items.length;
     emptyOrRows(listEl, null, rendered);
     if (onboardingEl) {
-      onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc, role.ok ? role.result.role : "")] : []));
+      onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc, role.ok ? role.result.role : "", opened.slug)] : []));
       onboardingEl.hidden = rendered > 0;
     }
-    say(noteEl, rendered === 0 ? "" : countLabel(rendered, "view", "views"));
+    say(noteEl, rendered === 0 ? "" : countLabel(rendered, "overview", "overviews"));
     cursor = nextCursorOf(body);
     if (moreEl) {
       moreEl.hidden = cursor === null || rendered === 0;

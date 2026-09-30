@@ -44,60 +44,57 @@
      every game that already has content. -->
 <div id="connect-agent" hidden></div>
 
-<!-- Three lanes, in this order, and the order is the product's map:
-     **Views · Catalogue · Prose**. The metamodel has four primitives
-     (entity types, entities, relation types, relations) and the product
-     has three surfaces over them — the pictures a designer reads, the
-     vocabulary the game declared, and the prose beside it — so a
-     designer holds the whole tool in their head on day one instead of
-     discovering a fourth place things live in.
+<!-- **Bands, not columns.** These were three columns named after the
+     three tables the product stores things in: views, types, documents.
+     A designer's model of their own game is its missions, its places,
+     its classes and the writing about them, so the page is now one
+     column a reader goes down: what this game is made of, then the ways
+     somebody saved to look at it, then the writing.
 
-     The lane order is asserted rather than left to this file: pages/
-     page.js declares DESTINATIONS and pages/home.js renders in that
-     order, so a reordered home is a failing check and not a surprise. -->
+     Three columns also failed both states this page has. Empty, they
+     tripled the same bad news and buried the one action above them.
+     Full, they were three lanes competing for one glance and a long list
+     had a third of the window to sit in.
+
+     The order is asserted rather than left to this file: pages/page.js
+     declares DESTINATIONS and pages/home.js renders in that order. -->
 <div id="home" class="lanes" hidden>
-  <section class="lane" id="lane-views" aria-labelledby="lane-views-heading">
-    <h2 id="lane-views-heading">Views</h2>
-    <ul class="catalogue" id="views" hidden></ul>
-    <!-- The one piece of onboarding in this product: a sentence and a
-         link, never a *New view* button. pages/page.js carries both. -->
-    <div id="views-onboarding" hidden></div>
-    <p class="error" id="views-error" hidden></p>
-  </section>
-
   <section class="lane" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
-    <h2 id="lane-catalogue-heading">Catalogue</h2>
+    <h2 id="lane-catalogue-heading">What this game is made of</h2>
     <ul class="catalogue" id="types"></ul>
-    <!-- The shared negative state, the shape every empty, loading and
-         refused answer in the product wears. The second line depends on
-         who is reading: an editor can declare a type, a viewer cannot,
-         and telling a viewer to do what the server will refuse is worse
-         than telling them nothing. pages/home.js fills it from the
-         caller's own role, which GET /summary carries. -->
     <!-- The hole; pages/home.js carries the words, including the half
-         that depends on who is reading. -->
-<div id="types-empty" hidden></div>
+         that depends on who is reading: an editor can have a type
+         declared, a viewer cannot, and telling a viewer to do what the
+         server will refuse is worse than telling them nothing. -->
+    <div id="types-empty" hidden></div>
 
-    <h3>Relation types</h3>
+    <h3>How they connect</h3>
     <ul class="catalogue" id="relation-types"></ul>
     <div id="relation-types-empty" hidden></div>
   </section>
 
+  <section class="lane" id="lane-views" aria-labelledby="lane-views-heading">
+    <h2 id="lane-views-heading">Saved to look at</h2>
+    <ul class="catalogue" id="views" hidden></ul>
+    <!-- A sentence and a way in, never a *New view* button: this page is
+         read, and the one thing a reader of an empty game needs is the
+         way to get an assistant writing. pages/page.js carries both. -->
+    <div id="views-onboarding" hidden></div>
+    <p class="error" id="views-error" hidden></p>
+  </section>
+
   <section class="lane" id="prose" aria-labelledby="lane-prose-heading">
-    <h2 id="lane-prose-heading">Prose</h2>
-    <!-- The kind vocabulary, above the documents it describes. A kind is
-         free text this game invented, so nothing but this line can tell a
-         designer what vocabulary their own prose is using; it is the prose
-         half of the entity-type catalogue beside it. Hidden until there is
-         a kind to show, because "no kinds" is not a fact worth a line. -->
+    <h2 id="lane-prose-heading">Writing</h2>
+    <!-- The kinds this game invented, above the documents they describe.
+         Maestro ships no vocabulary of them, so nothing but this line
+         tells a designer which words their own writing is using. Hidden
+         until there is one, because "no kinds" is not a fact worth a
+         line. -->
     <p class="muted" id="doc-kinds" hidden></p>
     <ul class="catalogue" id="docs"></ul>
-    <!-- Same rule as the types empty state above: the second line depends
-         on who is reading, and a viewer must not be told to do what the
-         server will refuse. -->
     <div id="docs-empty" hidden></div>
     <p class="error" id="docs-error" hidden></p>
-    <button type="button" class="link-button" id="docs-more" hidden>Show more documents</button>
+    <button type="button" class="link-button" id="docs-more" hidden>Show more</button>
   </section>
 </div>
 

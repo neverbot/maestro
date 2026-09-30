@@ -3,7 +3,10 @@
 
 import {
   REREAD,
+  TARGET_CONTENT,
+  TARGET_EVERYTHING,
   TARGET_PROSE,
+  TARGET_VIEW,
 } from "../client.js";
 import {
   STATE_EMPTY,
@@ -16,6 +19,7 @@ import {
   fill,
   fillState,
   negativeState,
+  coalesce,
   copyLine,
   onboarding,
   openGame,
@@ -183,21 +187,56 @@ export async function home(opened) {
   // The stream, last: the page has just read everything, so the first
   // connection schedules nothing and only a later event asks for a
   // re-read.
+  // **Every band re-reads, and the page leaves the empty state on its
+  // own.** This listened for one target and reloaded one band, so an
+  // agent declaring a game's first type wrote three hundred rows into a
+  // screen still showing "nothing in this game yet".
+  //
+  // `resync` is the server saying a subscription's buffer overflowed and
+  // events were lost. It arrives as TARGET_EVERYTHING and was dropped
+  // here, which made the one signal about the stream's own gaps the one
+  // signal this page ignored.
+  const role = summary.role;
+  const rereadContent = coalesce(async () => {
+    const again = await catalogueLane(doc, slug, client, summaryEl, opened.game.name);
+    // The crossing this page never made: a game that was empty when it
+    // loaded and is not any more stops showing the three steps and
+    // starts showing what it holds, without a reload.
+    if (again.ok) showBands(doc, again.empty);
+  });
+  const rereadViews = coalesce(() => viewsLane(doc, slug, client, role));
+  const rereadProse = coalesce(() => prose.load(role));
+  const rereadAll = coalesce(async () => {
+    const again = await catalogueLane(doc, slug, client, summaryEl, opened.game.name);
+    if (!again.ok) return;
+    await viewsLane(doc, slug, client, again.role);
+    await prose.load(again.role);
+    showBands(doc, again.empty);
+  });
+
   const onEvent = (verdict) => {
-    if (verdict.decision === REREAD && verdict.target === TARGET_PROSE) {
-      return prose.load(summary.role);
+    if (verdict.decision !== REREAD) return null;
+    switch (verdict.target) {
+      case TARGET_EVERYTHING:
+        return rereadAll();
+      case TARGET_CONTENT:
+        return rereadContent();
+      case TARGET_VIEW:
+        return rereadViews();
+      case TARGET_PROSE:
+        return rereadProse();
+      default:
+        return null;
     }
-    return null;
   };
   client.connect(onEvent);
 
-  const content = doc.getElementById("home");
   // Revealed only now, with every band already filled, so the page never
   // flashes three empty lists on its way to the real ones. A game with
   // nothing in it keeps them hidden: the band above has just said what
   // this game will hold and what to do about it, and three more "nothing
   // yet" underneath say the same thing worse.
-  if (content) content.hidden = isEmptyGame(summary.raw);
+  showBands(doc, summary.empty);
   // The listener is handed back as well as registered, because "the
   // prose lane re-reads on a moved document" is a property of *this*
   // function and a harness that could only reach it through a live
@@ -238,6 +277,7 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
   say(summaryEl, empty ? "" : describeTotals(summary.totals));
   if (summaryEl) summaryEl.hidden = empty;
   offerToConnectAnAgent(doc, slug, summary, gameName);
+
   fillState(doc, "types-empty", {
     heading: NO_TYPES_HEADING,
     sentence: NO_TYPES_SENTENCE + " " + whoWrites(summary.role, DECLARES_TYPES),
@@ -254,7 +294,7 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
       row(doc, {
         label: type.label_plural || type.label || type.key,
         key: type.key,
-        count: countLabel(Number(type.entity_count ?? 0), "entity", "entities"),
+        count: String(Number(type.entity_count ?? 0)),
         flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
         href: typeURL(slug, type.key),
       }),
@@ -267,7 +307,7 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
       row(doc, {
         label: type.label || type.key,
         key: type.key,
-        count: countLabel(Number(type.relation_count ?? 0), "relation", "relations"),
+        count: String(Number(type.relation_count ?? 0)),
         // Since migration 0009 an edge is judged against its relation
         // type's field schema too, so a relation type can hold rows a
         // designer has to go and fix.
@@ -279,7 +319,15 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
       }),
     ),
   );
-  return { role: String(summary.role ?? ""), ok: true, raw: summary };
+  return { role: String(summary.role ?? ""), ok: true, empty };
+}
+
+// showBands is the one place that decides whether this page is the empty
+// one or the full one.
+export function showBands(doc, empty) {
+  const bands = doc.getElementById("home");
+  if (bands) bands.hidden = Boolean(empty);
+  return bands;
 }
 
 // SETTINGS_LABEL is the link, and every member of the game gets it.

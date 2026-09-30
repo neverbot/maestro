@@ -2,6 +2,7 @@
 
 import {
   DESTINATION_VIEWS,
+  coalesce,
   countLabel,
   destinations,
   emptyOrRows,
@@ -18,6 +19,7 @@ import {
   viewURL,
 } from "./page.js";
 import { headerRow, nextCursorOf } from "../rows.js";
+import { REREAD, TARGET_EVERYTHING, TARGET_VIEW } from "../client.js";
 import { goToLogin } from "../app.js";
 
 export async function viewsPage(opened) {
@@ -112,7 +114,23 @@ export async function viewsPage(opened) {
 
   if (moreEl) moreEl.addEventListener("click", () => page());
   await page();
-  return opened;
+
+  // **This list listened to nothing.** An assistant saving an overview
+  // left the page showing the ones it found on load, and a designer
+  // watching it work saw nothing happen.
+  const reread = coalesce(async () => {
+    cursor = null;
+    rendered = 0;
+    if (listEl) listEl.replaceChildren();
+    await page();
+  });
+  const onEvent = (verdict) => {
+    if (verdict.decision !== REREAD) return null;
+    if (verdict.target === TARGET_VIEW || verdict.target === TARGET_EVERYTHING) return reread();
+    return null;
+  };
+  opened.client.connect(onEvent);
+  return { ...opened, onEvent };
 }
 
 if (globalThis.document && globalThis.document.getElementById("view-list-note")) {

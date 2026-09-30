@@ -56,6 +56,10 @@ export const IGNORE = "ignore";
 export const TARGET_PICTURE = "picture";
 export const TARGET_VIEW = "view";
 export const TARGET_PROSE = "prose";
+// What a game is made of: its kinds of things, its links, and the rows
+// of both. One target, because the catalogue's rows carry counts that a
+// single entity changes.
+export const TARGET_CONTENT = "content";
 export const TARGET_EVERYTHING = "everything";
 export const TARGET_NOTHING = "nothing";
 
@@ -85,10 +89,29 @@ export function applyEvent(state, event) {
     // The query changed. The picture is *not* swapped under the
     // designer, for any role: a band says so and they choose.
     case "view.upserted":
-      return forView(state, kind, data, BAND, TARGET_PICTURE, "query.changed");
+      return forView(state, kind, data, BAND, TARGET_PICTURE, "query.changed", true);
     // A sentence and a link back. Nothing is auto-navigated.
     case "view.removed":
-      return forView(state, kind, data, GONE, TARGET_PICTURE, "view.removed");
+      return forView(state, kind, data, GONE, TARGET_PICTURE, "view.removed", true);
+    // **What a game is made of, changing under a page that lists it.**
+    // These were unhandled, so an agent declaring a type and writing
+    // three hundred rows left every screen showing the game it found on
+    // load. A list re-reads; nothing a designer is reading is swapped.
+    case "type.upserted":
+    case "type.removed":
+    case "relation_type.upserted":
+    case "relation_type.removed":
+    case "entity.upserted":
+    case "entity.removed":
+    case "relation.upserted":
+    case "relation.removed":
+      return decision(kind, REREAD, TARGET_CONTENT, "content.changed");
+    // The writing, on the same rule.
+    case "document.written":
+    case "document.deleted":
+    case "document.reverted":
+    case "document.linked":
+      return decision(kind, REREAD, TARGET_PROSE, "prose.changed");
     // The game renamed a type or a relation type. Re-read the view row
     // only: what a run of it now reports may be a staleness diagnostic,
     // and discovering that by silently re-running is how a designer
@@ -114,10 +137,15 @@ export function applyEvent(state, event) {
 // forView applies a view-keyed rule, ignoring an event about a view this
 // client does not have open — the picture on screen is unaffected by a
 // drag somebody made on another one.
-function forView(state, kind, data, verdict, target, reason) {
+// `whenClosed` is what a client with that view *not* open should do.
+// A drag on another view changes no list, so it stays ignored; a view
+// created, renamed or removed changes every list of them.
+function forView(state, kind, data, verdict, target, reason, whenClosed) {
   const key = typeof data.key === "string" ? data.key : "";
   if (!isOpen(state, key)) {
-    return decision(kind, IGNORE, TARGET_NOTHING, "view.notopen");
+    return whenClosed
+      ? decision(kind, REREAD, TARGET_VIEW, "listing.changed")
+      : decision(kind, IGNORE, TARGET_NOTHING, "view.notopen");
   }
   const out = decision(kind, verdict, target, reason);
   out.key = key;

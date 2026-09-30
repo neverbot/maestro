@@ -155,8 +155,9 @@ for (const row of summary.entity_types) {
   if (!rendered.includes(row.label_plural)) {
     fail(`the type ${row.key} is missing from the page`);
   }
-  const noun = row.entity_count === 1 ? "entity" : "entities";
-  if (!rendered.includes(`${row.entity_count} ${noun}`)) {
+  // The count carries no unit: the row's own label says what these are,
+  // in the game's word, and a unit here could only be the model's.
+  if (!rendered.includes(String(row.entity_count))) {
     fail(`the ${row.key} row does not carry its count of ${row.entity_count}: ${JSON.stringify(rendered)}`);
   }
 }
@@ -166,8 +167,7 @@ for (const row of summary.relation_types) {
   if (!relations.includes(row.label)) {
     fail(`the relation type ${row.key} is missing from the page`);
   }
-  const noun = row.relation_count === 1 ? "relation" : "relations";
-  if (!relations.includes(`${row.relation_count} ${noun}`)) {
+  if (!relations.includes(String(row.relation_count))) {
     fail(`the ${row.key} row does not carry its count of ${row.relation_count}: ${JSON.stringify(relations)}`);
   }
 }

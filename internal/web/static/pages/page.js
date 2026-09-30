@@ -8,7 +8,7 @@ import { fetchGames, fetchMe, goToLogin, rememberGame, renderHeader } from "../a
 // through this module, so the element is defined wherever the notice can
 // appear rather than by each page remembering to ask for it.
 import "../components/mst-hint.js";
-import { client } from "../client.js";
+import { REREAD_DEBOUNCE_MS, client } from "../client.js";
 // countLabel is *imported* here and not only re-exported below: a
 // re-export forwards a name to this module's consumers and never binds
 // it in this module's own scope, so expiry() calling it threw
@@ -533,6 +533,48 @@ export function setReadOnly(doc, role, what) {
   if (!host) return null;
   host.replaceChildren(readOnlyNotice(doc, role, what));
   return host;
+}
+
+// --- Re-reading on the stream -----------------------------------------
+
+// coalesce turns a burst of events into one re-read. A bulk write emits
+// one event per row, and three hundred of them would otherwise be three
+// hundred listings fetched. The window is the client's own
+// REREAD_DEBOUNCE_MS, so the whole product waits the same amount.
+let rereadWindow = REREAD_DEBOUNCE_MS;
+
+// setRereadWindow exists for a harness, which cannot wait three quarters
+// of a second per event and must still drive the real path.
+export function setRereadWindow(ms) {
+  rereadWindow = Number(ms);
+}
+
+export function coalesce(run) {
+  let timer = null;
+  let pending = null;
+  return () => {
+    if (pending === null) {
+      let settle = () => {};
+      const promise = new Promise((resolve) => {
+        settle = resolve;
+      });
+      pending = { promise, settle };
+    }
+    const current = pending;
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(async () => {
+      timer = null;
+      pending = null;
+      try {
+        await run();
+      } finally {
+        current.settle();
+      }
+    }, rereadWindow);
+    // Returned so a caller can await the re-read this burst produces. A
+    // browser discards it; a harness awaits it.
+    return current.promise;
+  };
 }
 
 // --- The three negative states, in one shape --------------------------

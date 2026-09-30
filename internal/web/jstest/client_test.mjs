@@ -14,6 +14,7 @@ import {
   TARGET_EVERYTHING,
   TARGET_NOTHING,
   TARGET_PICTURE,
+  TARGET_CONTENT,
   TARGET_PROSE,
   TARGET_VIEW,
   applyEvent,
@@ -248,7 +249,7 @@ check("theFourOutcomesEachHaveACaseOnlyTheyProduce", () => {
     [{ kind: "view.positions", data: { id: "u1", key: "world" } }, REREAD, TARGET_PICTURE],
     [{ kind: "view.upserted", data: { id: "u1", key: "world", version: 4 } }, BAND, TARGET_PICTURE],
     [{ kind: "view.removed", data: { id: "u1", key: "world", version: 4 } }, GONE, TARGET_PICTURE],
-    [{ kind: "entity.upserted", data: { id: "u1" } }, IGNORE, TARGET_NOTHING],
+    [{ kind: "member.updated", data: { id: "u1" } }, IGNORE, TARGET_NOTHING],
   ];
   const seen = new Set();
   for (const [event, want, target] of cases) {
@@ -329,9 +330,44 @@ check("theClientNeverPatchesFromAPayload", () => {
   }
 });
 
+// **The events a game's content actually produces.** These were all
+// unhandled, so an agent declaring a type and writing three hundred rows
+// left every list showing the game it found on load.
+check("contentEventsAskEveryListOfItToReRead", () => {
+  const state = openState();
+  for (const kind of [
+    "type.upserted", "type.removed",
+    "relation_type.upserted", "relation_type.removed",
+    "entity.upserted", "entity.removed",
+    "relation.upserted", "relation.removed",
+  ]) {
+    const verdict = applyEvent(state, { kind, data: {} });
+    assertEqual(verdict.decision, REREAD, `decision for ${kind}`);
+    assertEqual(verdict.target, TARGET_CONTENT, `target for ${kind}`);
+  }
+  for (const kind of ["document.written", "document.deleted", "document.reverted", "document.linked"]) {
+    const verdict = applyEvent(state, { kind, data: {} });
+    assertEqual(verdict.decision, REREAD, `decision for ${kind}`);
+    assertEqual(verdict.target, TARGET_PROSE, `target for ${kind}`);
+  }
+});
+
+// A view this client does not have open still changes every listing of
+// views. A drag on one does not.
+check("aViewThisClientDoesNotHoldStillChangesTheListing", () => {
+  const state = openState();
+  for (const kind of ["view.upserted", "view.removed"]) {
+    const verdict = applyEvent(state, { kind, data: { key: "somebody-elses", version: 2 } });
+    assertEqual(verdict.decision, REREAD, `decision for ${kind}`);
+    assertEqual(verdict.target, TARGET_VIEW, `target for ${kind}`);
+  }
+  const dragged = applyEvent(state, { kind: "view.positions", data: { key: "somebody-elses" } });
+  assertEqual(dragged.decision, IGNORE, "a drag on another view asks a list to re-read");
+});
+
 check("unknownEventKindsAreIgnoredAndRecorded", () => {
   const state = openState();
-  for (const kind of ["entity.upserted", "relation.removed", "member.updated", ""]) {
+  for (const kind of ["member.updated", "invite.created", "route.upserted", ""]) {
     const verdict = applyEvent(state, { kind, data: {} });
     assertEqual(verdict.decision, IGNORE, `decision for ${kind}`);
     assertEqual(verdict.kind, kind, "the kind is recorded rather than dropped");

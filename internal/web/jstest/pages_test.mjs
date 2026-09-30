@@ -196,6 +196,7 @@ const SHELL_IDS = [
   "game-name",
   "game-summary",
   "home",
+  "connect-agent",
   "views",
   "views-error",
   "views-onboarding",
@@ -272,6 +273,13 @@ function mount({ ids, pathname, search = "", routes = [], games = [GAME] }) {
     body,
     hidden: false,
     createElement: (tag) => fakeElement(tag),
+    // A text node is an element with only text as far as this stub is
+    // concerned: what an assertion reads is textContent either way.
+    createTextNode: (text) => {
+      const node = fakeElement("#text");
+      node.textContent = String(text);
+      return node;
+    },
     createComment: () => ({}),
     createTreeWalker: () => ({ nextNode: () => null }),
     head: {},
@@ -360,6 +368,7 @@ const HOME_IDS = [
   "game-name",
   "game-summary",
   "home",
+  "connect-agent",
   "views",
   "views-error",
   "views-onboarding",
@@ -589,7 +598,11 @@ check("aMovedDocumentIsFollowedNotCached", async () => {
     ],
   });
   const { home } = await load("home");
-  const { openGame } = await import("../static/pages/page.js");
+  const { openGame, setRereadWindow } = await import("../static/pages/page.js");
+  // A burst of events is coalesced into one re-read. The window is the
+  // product's; a harness cannot wait three quarters of a second per
+  // event and still drives the same path.
+  setRereadWindow(0);
   const { applyEvent, REREAD, TARGET_PROSE } = await import("../static/client.js");
 
   const surface = await home(await openGame());
@@ -1428,11 +1441,15 @@ check("aCraftedLabelReachesTheHomeAsText", async () => {
     rendered.includes("<img src=x onerror=alert(1)>Quests"),
     "a crafted label did not reach the page as characters",
   );
-  assert(rendered.includes("400 entities"), "the row lost its count");
+  assert(rendered.includes("400"), "the row lost its count");
   assert(rendered.includes("3 invalid"), "the row lost its invalid flag");
 });
 
-check("aCountOfOneIsSpelledInTheSingular", async () => {
+// **A count carries no unit.** The row beside it already says what these
+// are, in the game's own word: "Deidades 27". A unit here could only be
+// the model's ("27 entities"), which is the vocabulary this interface is
+// getting rid of.
+check("aCountOnACatalogueRowIsANumberAndNotAModelWord", async () => {
   const dom = mount({
     ids: HOME_IDS,
     pathname: "/g/azeroth",
@@ -1440,7 +1457,10 @@ check("aCountOfOneIsSpelledInTheSingular", async () => {
   });
   await load("home");
   const rendered = text(dom.elements.types);
-  assert(rendered.includes("1 entity") && !rendered.includes("1 entities"), `got: ${JSON.stringify(rendered)}`);
+  assert(rendered.includes("400"), `the row lost its count: ${JSON.stringify(rendered)}`);
+  for (const word of ["entity", "entities", "relation", "relations"]) {
+    assert(!rendered.includes(word), `the catalogue says "${word}" to a game designer`);
+  }
 });
 
 check("aFailedSummaryLeavesTheServersMessageAndNoCatalogue", async () => {
@@ -1467,6 +1487,59 @@ check("aFailedSummaryLeavesTheServersMessageAndNoCatalogue", async () => {
   const lanes = dom.elements.home;
   assert(lanes.hiddenWrites > 0, "nothing under test wrote .hidden, so this would be an assertion on the stub");
   assert(lanes.hidden, "a failed summary revealed an empty catalogue, which reads like a game with no content");
+});
+
+// **The crossing this page never made.** A designer opens a new game,
+// pastes the command, and the agent starts writing. Every one of those
+// writes was ignored here: the page went on showing the three steps and
+// the bands stayed hidden until somebody reloaded, which is the moment a
+// person decides the thing does not work.
+check("aGameThatFillsUpLeavesItsEmptyStateOnItsOwn", async () => {
+  let asked = 0;
+  const dom = mount({
+    ids: HOME_IDS.filter((id) => id !== "game-name"),
+    pathname: "/g/azeroth",
+    routes: [
+      [
+        (url) => url === base + "/summary",
+        () => {
+          asked += 1;
+          // Empty on the first read, and holding a type on the second:
+          // the agent wrote between them.
+          return {
+            body: asked === 1
+              ? summaryOf({ entity_types: [], relation_types: [], totals: { entities: 0, relations: 0, invalid: 0 } })
+              : summaryOf(),
+          };
+        },
+      ],
+      noKinds,
+      noDocs,
+      noViews,
+      events,
+    ],
+  });
+  const { home } = await load("home");
+  const { openGame, setRereadWindow } = await import("../static/pages/page.js");
+  const { applyEvent, REREAD, TARGET_CONTENT } = await import("../static/client.js");
+  setRereadWindow(0);
+
+  const surface = await home(await openGame());
+  assert(dom.elements.home.hidden, "the bands show on a game with nothing in it");
+  assert(!dom.elements["connect-agent"].hidden, "the steps are hidden on a game with nothing in it");
+
+  // The decision is the real reducer's over the real event.
+  const verdict = applyEvent({ views: {} }, { kind: "entity.upserted", data: { id: "e1" } });
+  assertEqual(verdict.decision, REREAD, "a written entity is not a re-read");
+  assertEqual(verdict.target, TARGET_CONTENT, "a written entity does not re-read the content");
+
+  await surface.onEvent(verdict);
+  assert(!dom.elements.home.hidden, "the bands stayed hidden after the game filled up");
+  assert(dom.elements["connect-agent"].hidden, "the three steps stayed on a game that now has content");
+  assert(
+    text(dom.elements.types).includes("Quests"),
+    `the catalogue did not re-read: ${JSON.stringify(text(dom.elements.types))}`,
+  );
 });
 
 check("anEmptyGameGetsItsEmptyStatesAndNotTwoBlankLists", async () => {

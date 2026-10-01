@@ -432,7 +432,7 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
     pathname: "/g/azeroth",
     routes: [[(url) => url === base + "/summary", { body: summaryOf() }], noKinds, noDocs, noViews, events],
   });
-  const { NO_VIEWS_HEADING, NO_VIEWS_SENTENCE, SKILL_BUNDLE_LABEL } = await load("page");
+  const { NO_VIEWS_HEADING, NO_VIEWS_SENTENCE, COMPOSE_LABEL } = await load("page");
   await load("home");
   const lane = dom.elements["views-onboarding"];
   const rendered = text(lane);
@@ -440,10 +440,11 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
   assert(rendered.includes(NO_VIEWS_SENTENCE), `the onboarding sentence is missing: ${JSON.stringify(rendered)}`);
   const anchors = links(lane);
   assertEqual(anchors.length, 1, "the onboarding is not exactly one link");
-  // **Inside this instance.** It pointed at a README on GitHub, which is
-  // where the one person this product is for stops reading.
-  assertEqual(anchors[0].href, "/g/azeroth/settings#agents", "the way in leaves the product");
-  assertEqual(anchors[0].textContent, SKILL_BUNDLE_LABEL, "the link is not labelled");
+  // **The way out answers what this game already has.** This game holds
+  // four hundred quests, so what it needs is the way to compose the
+  // first overview, not an assistant it already has writing into it.
+  assertEqual(anchors[0].href, "/g/azeroth/views/new", "a game full of content is told to go and connect an assistant");
+  assertEqual(anchors[0].textContent, COMPOSE_LABEL, "the link is not labelled");
   assert(!lane.hidden, "the onboarding is hidden on a game with no views");
 
   // And nothing anywhere on the page offers to create one. A verb is
@@ -452,6 +453,31 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
   for (const verb of ["new view", "create", "add view", "save as"]) {
     assert(!everything.includes(verb), `the views lane offers "${verb}" on a page that cannot create a view`);
   }
+});
+
+// The other arm: nothing in the game yet, so the way out is the
+// assistant, and it stays inside this instance. It pointed at a README
+// on GitHub, which is where the one person this product is for stops
+// reading.
+check("aGameWithNothingInItIsSentToConnectAnAssistant", async () => {
+  const dom = mount({
+    ids: HOME_IDS,
+    pathname: "/g/azeroth",
+    routes: [
+      [
+        (url) => url === base + "/summary",
+        { body: summaryOf({ entity_types: [], relation_types: [], totals: { entities: 0, relations: 0, invalid: 0 } }) },
+      ],
+      noKinds,
+      noDocs,
+      noViews,
+      events,
+    ],
+  });
+  await load("home");
+  const anchors = links(dom.elements["views-onboarding"]);
+  assertEqual(anchors.length, 1, "the empty state offers no way out");
+  assertEqual(anchors[0].href, "/g/azeroth/settings#agents", "the way in leaves the product");
 });
 
 check("aGameWithViewsGetsNoOnboarding", async () => {
@@ -1539,6 +1565,39 @@ check("aGameThatFillsUpLeavesItsEmptyStateOnItsOwn", async () => {
   assert(
     text(dom.elements.types).includes("Quests"),
     `the catalogue did not re-read: ${JSON.stringify(text(dom.elements.types))}`,
+  );
+});
+
+// **A game that is only writing is still a game.** "Empty" was a fact
+// about the metamodel alone, so a game holding one document and no types
+// hid every band, showed the three steps for connecting an assistant,
+// and said "Nothing in this game yet" with the document rendered inside
+// the hidden band. Reported from a real instance.
+check("aGameWithOnlyWritingIsNotAnEmptyGame", async () => {
+  const dom = mount({
+    ids: HOME_IDS,
+    pathname: "/g/azeroth",
+    routes: [
+      [
+        (url) => url === base + "/summary",
+        { body: summaryOf({ entity_types: [], relation_types: [], totals: { entities: 0, relations: 0, invalid: 0 } }) },
+      ],
+      [(url) => url === base + "/docs/kinds", { body: { kinds: [{ kind: "lore", document_count: 1 }], unkinded: 0 } }],
+      [(url) => url.startsWith(base + "/docs"), { body: { items: [{ id: "d1", path: "general.md", title: "General" }] } }],
+      noViews,
+      events,
+    ],
+  });
+  await load("home");
+  assert(!dom.elements.home.hidden, "the bands are hidden on a game that holds a document");
+  assert(dom.elements["connect-agent"].hidden, "a game with writing in it was told to connect an assistant");
+  assert(
+    text(dom.elements.docs).includes("general.md"),
+    `the document is not on the page: ${JSON.stringify(text(dom.elements.docs))}`,
+  );
+  assert(
+    dom.elements["game-summary"].textContent.includes("1 piece of writing"),
+    `the line above the bands does not count the writing: ${JSON.stringify(dom.elements["game-summary"].textContent)}`,
   );
 });
 

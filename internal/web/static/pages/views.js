@@ -3,6 +3,7 @@
 import {
   DESTINATION_VIEWS,
   coalesce,
+  isEmptyGame,
   countLabel,
   destinations,
   emptyOrRows,
@@ -46,6 +47,10 @@ export async function viewsPage(opened) {
   // the whole of what this screen could say.** A viewer still gets the
   // notice: the server would refuse the save, and a control that cannot
   // succeed is worse than a sentence saying so.
+  // Whether this game holds anything to draw yet, which decides what the
+  // empty state offers: an assistant to connect, or the way to compose
+  // the first overview.
+  const hasContent = role.ok && !isEmptyGame(role.result);
   const actions = doc.getElementById("page-actions");
   if (role.ok && role.result.role !== ROLE_VIEWER && actions) {
     const compose = doc.createElement("a");
@@ -101,7 +106,7 @@ export async function viewsPage(opened) {
     rendered += items.length;
     emptyOrRows(listEl, null, rendered);
     if (onboardingEl) {
-      onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc, role.ok ? role.result.role : "", opened.slug)] : []));
+      onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc, role.ok ? role.result.role : "", opened.slug, hasContent)] : []));
       onboardingEl.hidden = rendered > 0;
     }
     say(noteEl, rendered === 0 ? "" : countLabel(rendered, "overview", "overviews"));

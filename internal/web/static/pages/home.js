@@ -19,6 +19,7 @@ import {
   fill,
   fillState,
   negativeState,
+  isEmptyGame,
   coalesce,
   copyLine,
   onboarding,
@@ -64,13 +65,22 @@ export const NO_PROSE_SENTENCE =
 // describeTotals is the one line under the game's name. An empty game
 // says so in words rather than showing three zeros, which reads as a
 // broken page rather than a new one.
-export function describeTotals(totals) {
+export function describeTotals(totals, written) {
   const counts = totals && typeof totals === "object" ? totals : {};
   const entities = Number(counts.entities ?? 0);
   const relations = Number(counts.relations ?? 0);
   const invalid = Number(counts.invalid ?? 0);
-  if (entities === 0 && relations === 0) return "Nothing in this game yet.";
-  const parts = [countLabel(entities, "thing", "things"), countLabel(relations, "connection", "connections")];
+  const documents = Number(written ?? 0);
+  if (entities === 0 && relations === 0 && documents === 0) return "Nothing in this game yet.";
+  const parts = [];
+  // **A game that is only writing is still a game.** This counted the
+  // metamodel and nothing else, so a game holding a document and no
+  // types read "Nothing in this game yet" with the document on screen
+  // underneath it.
+  if (entities > 0 || relations > 0) {
+    parts.push(countLabel(entities, "thing", "things"), countLabel(relations, "connection", "connections"));
+  }
+  if (documents > 0) parts.push(countLabel(documents, "piece of writing", "pieces of writing"));
   // Only when there are any: a permanent "0 no longer fit" would train a
   // designer to ignore the one number on this page that ever asks them
   // to do something.
@@ -85,6 +95,17 @@ export function describeTotals(totals) {
 // a game with none, and the caller hides the line rather than printing
 // "no kinds", which reads as a fault on a page whose documents are
 // underneath it.
+// countDocuments is the whole of this game's writing, from the same
+// answer the kinds line is built from. The listing itself is paged and
+// carries no total, so this is the only exact number the page has.
+export function countDocuments(body) {
+  const from = body && typeof body === "object" ? body : {};
+  const kinds = Array.isArray(from.kinds) ? from.kinds : [];
+  let total = Number(from.unkinded ?? 0);
+  for (const k of kinds) total += Number(k.document_count ?? 0);
+  return total;
+}
+
 export function describeDocKinds(body) {
   const from = body && typeof body === "object" ? body : {};
   const kinds = Array.isArray(from.kinds) ? from.kinds : [];
@@ -168,13 +189,13 @@ export async function home(opened) {
   // In lane order. The catalogue's call is also the one that carries the
   // caller's role, which two of the three lanes word an empty state
   // from, so it is awaited before the sentences that need it.
-  const summary = await catalogueLane(doc, slug, client, summaryEl, opened.game.name);
+  const summary = await catalogueLane(doc, slug, client);
   // A summary that never answered is the page's failure and not one
   // lane's: the totals line carries the server's sentence and the lanes
   // stay hidden, because two empty catalogues under a message read as a
   // game with nothing in it.
   if (!summary.ok) return { ...opened, onEvent: null };
-  await viewsLane(doc, slug, client, summary.role);
+  const viewCount = await viewsLane(doc, slug, client, summary.role, !summary.empty);
   setReadOnly(doc, summary.role, "writes this game's content");
   // **The way into the one screen that changes a game rather than its
   // content**, and it is here because the frame's five destinations are
@@ -182,7 +203,7 @@ export async function home(opened) {
   // from the game it belongs to. Only an owner sees it, because only an
   // owner can save anything there.
   offerSettings(doc, slug, summary.role);
-  await prose.load(summary.role);
+  const written = await prose.load(summary.role);
 
   // The stream, last: the page has just read everything, so the first
   // connection schedules nothing and only a later event asks for a
@@ -197,21 +218,51 @@ export async function home(opened) {
   // here, which made the one signal about the stream's own gaps the one
   // signal this page ignored.
   const role = summary.role;
+  // What each band last reported, so "is this game empty" is a fact
+  // about the whole page.
+  const held = {
+    catalogue: summary.empty,
+    views: viewCount,
+    documents: written,
+    totals: summary.summary.totals,
+    raw: summary.summary,
+  };
+  const settle = () => {
+    const nothing = emptyPage(held);
+    say(summaryEl, nothing ? "" : describeTotals(held.totals, held.documents));
+    if (summaryEl) summaryEl.hidden = nothing;
+    offerToConnectAnAgent(doc, slug, held.raw, opened.game.name, nothing);
+    showBands(doc, nothing);
+  };
+
   const rereadContent = coalesce(async () => {
-    const again = await catalogueLane(doc, slug, client, summaryEl, opened.game.name);
+    const again = await catalogueLane(doc, slug, client);
     // The crossing this page never made: a game that was empty when it
     // loaded and is not any more stops showing the three steps and
     // starts showing what it holds, without a reload.
-    if (again.ok) showBands(doc, again.empty);
-  });
-  const rereadViews = coalesce(() => viewsLane(doc, slug, client, role));
-  const rereadProse = coalesce(() => prose.load(role));
-  const rereadAll = coalesce(async () => {
-    const again = await catalogueLane(doc, slug, client, summaryEl, opened.game.name);
     if (!again.ok) return;
-    await viewsLane(doc, slug, client, again.role);
-    await prose.load(again.role);
-    showBands(doc, again.empty);
+    held.catalogue = again.empty;
+    held.totals = again.summary.totals;
+    held.raw = again.summary;
+    settle();
+  });
+  const rereadViews = coalesce(async () => {
+    held.views = await viewsLane(doc, slug, client, role, !held.catalogue);
+    settle();
+  });
+  const rereadProse = coalesce(async () => {
+    held.documents = await prose.load(role);
+    settle();
+  });
+  const rereadAll = coalesce(async () => {
+    const again = await catalogueLane(doc, slug, client);
+    if (!again.ok) return;
+    held.catalogue = again.empty;
+    held.totals = again.summary.totals;
+    held.raw = again.summary;
+    held.views = await viewsLane(doc, slug, client, again.role, !again.empty);
+    held.documents = await prose.load(again.role);
+    settle();
   });
 
   const onEvent = (verdict) => {
@@ -236,7 +287,7 @@ export async function home(opened) {
   // nothing in it keeps them hidden: the band above has just said what
   // this game will hold and what to do about it, and three more "nothing
   // yet" underneath say the same thing worse.
-  showBands(doc, summary.empty);
+  settle();
   // The listener is handed back as well as registered, because "the
   // prose lane re-reads on a moved document" is a property of *this*
   // function and a harness that could only reach it through a live
@@ -248,7 +299,7 @@ export async function home(opened) {
 // type catalogues, and the role the other two lanes word their empty
 // states from. **One call**, and the test that says so is the reason
 // this function takes no per-type argument to fetch with.
-async function catalogueLane(doc, slug, client, summaryEl, gameName) {
+async function catalogueLane(doc, slug, client) {
   const answer = await client.summary();
   if (!answer.ok) {
     if (expired(answer)) {
@@ -259,7 +310,7 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
     // catalogue hidden: a page that says what went wrong beats one that
     // silently shows an empty catalogue, which is indistinguishable from
     // a game with nothing in it.
-    say(summaryEl, answer.error.message);
+    say(doc.getElementById("game-summary"), answer.error.message);
     // Hidden here rather than left alone. game.html ships #home hidden
     // and this arm never reveals it, so the two are the same pixels —
     // but "the failure path hides the lanes" is then a property of the
@@ -274,9 +325,6 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
   const entityTypes = Array.isArray(summary.entity_types) ? summary.entity_types : [];
   const relationTypes = Array.isArray(summary.relation_types) ? summary.relation_types : [];
   const empty = isEmptyGame(summary);
-  say(summaryEl, empty ? "" : describeTotals(summary.totals));
-  if (summaryEl) summaryEl.hidden = empty;
-  offerToConnectAnAgent(doc, slug, summary, gameName);
 
   fillState(doc, "types-empty", {
     heading: NO_TYPES_HEADING,
@@ -319,11 +367,18 @@ async function catalogueLane(doc, slug, client, summaryEl, gameName) {
       }),
     ),
   );
-  return { role: String(summary.role ?? ""), ok: true, empty };
+  return { role: String(summary.role ?? ""), ok: true, empty, summary };
 }
 
 // showBands is the one place that decides whether this page is the empty
 // one or the full one.
+// held is what the three bands last reported. "Empty" is a fact about
+// the whole page: a game with one document and no types is not empty,
+// and hiding its band is how that document became invisible.
+export function emptyPage(held) {
+  return Boolean(held.catalogue) && Number(held.views ?? 0) === 0 && Number(held.documents ?? 0) === 0;
+}
+
 export function showBands(doc, empty) {
   const bands = doc.getElementById("home");
   if (bands) bands.hidden = Boolean(empty);
@@ -370,34 +425,20 @@ export function startingPrompt(name) {
   );
 }
 
-// isEmptyGame reads the same totals the line under the title is built
-// from, rather than counting the lanes: a game can declare types and
-// hold no entities, and that is not an empty game — somebody has already
-// been here.
-export function isEmptyGame(summary) {
-  const totals = summary && typeof summary.totals === "object" && summary.totals !== null
-    ? summary.totals
-    : {};
-  const types = Array.isArray(summary?.entity_types) ? summary.entity_types.length : 0;
-  const relationTypes = Array.isArray(summary?.relation_types) ? summary.relation_types.length : 0;
-  return (
-    Number(totals.entities ?? 0) === 0 &&
-    Number(totals.relations ?? 0) === 0 &&
-    types === 0 &&
-    relationTypes === 0
-  );
-}
-
 // offerToConnectAnAgent is the crossing, and it is offered **only to
 // somebody who can make it**: minting is an editor's or the owner's, so
 // telling a viewer to connect an agent would be sending them to a form
 // the server refuses. A viewer of an empty game keeps the three lanes'
 // own sentences, which are true for them.
-export function offerToConnectAnAgent(doc, slug, summary, name) {
+export function offerToConnectAnAgent(doc, slug, summary, name, empty) {
   const host = doc.getElementById("connect-agent");
   if (!host) return null;
   const role = String(summary?.role ?? "");
-  const show = isEmptyGame(summary) && (role === OWNER || role === EDITOR);
+  // **Empty is the whole page's fact**, handed in: a game holding one
+  // document and no types is not a game to show three steps to, and it
+  // used to get them with the document on screen underneath.
+  const nothing = empty === undefined ? isEmptyGame(summary) : Boolean(empty);
+  const show = nothing && (role === OWNER || role === EDITOR);
   if (!show) {
     host.replaceChildren();
     host.hidden = true;
@@ -441,7 +482,7 @@ export function offerToConnectAnAgent(doc, slug, summary, name) {
 
 // viewsLane lists the saved views, and answers a game that has none with
 // the product's one piece of onboarding.
-async function viewsLane(doc, slug, client, role) {
+async function viewsLane(doc, slug, client, role, hasContent) {
   const listEl = doc.getElementById("views");
   const errorEl = doc.getElementById("views-error");
   const onboardingEl = doc.getElementById("views-onboarding");
@@ -469,9 +510,10 @@ async function viewsLane(doc, slug, client, role) {
     ),
   );
   if (onboardingEl) {
-    onboardingEl.replaceChildren(...(items.length === 0 ? [onboarding(doc, role, slug)] : []));
+    onboardingEl.replaceChildren(...(items.length === 0 ? [onboarding(doc, role, slug, hasContent)] : []));
     onboardingEl.hidden = items.length > 0;
   }
+  return items.length;
 }
 
 // proseLane is the documents and the vocabulary above them, and it is
@@ -543,6 +585,7 @@ function proseLane(doc, slug, client) {
     // summary above them is a smaller lie than a stale one.
     const kinds = await client.docKinds();
     say(kindsEl, kinds.ok ? describeDocKinds(kinds.result) : "");
+    const written = kinds.ok ? countDocuments(kinds.result) : 0;
     cursor = null;
     rendered = 0;
     if (listEl) listEl.replaceChildren();
@@ -555,6 +598,7 @@ function proseLane(doc, slug, client) {
       wired = true;
     }
     await page();
+    return written;
   }
 
   return { load };

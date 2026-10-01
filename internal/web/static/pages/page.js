@@ -70,6 +70,7 @@ export const NO_VIEWS_VIEWER =
   "You can read this game but not change it, so somebody with an editor's or a manager's role " +
   "saves these.";
 export const SKILL_BUNDLE_LABEL = "Connect an assistant";
+export const COMPOSE_LABEL = "Put one together";
 
 // The one line in this front end that names an address outside this
 // instance, and it is a **hyperlink a human may click** rather than
@@ -535,6 +536,24 @@ export function setReadOnly(doc, role, what) {
   return host;
 }
 
+// isEmptyGame reads the same totals the line under the title is built
+// from, rather than counting the lanes: a game can declare types and
+// hold no entities, and that is not an empty game — somebody has already
+// been here.
+export function isEmptyGame(summary) {
+  const totals = summary && typeof summary.totals === "object" && summary.totals !== null
+    ? summary.totals
+    : {};
+  const types = Array.isArray(summary?.entity_types) ? summary.entity_types.length : 0;
+  const relationTypes = Array.isArray(summary?.relation_types) ? summary.relation_types.length : 0;
+  return (
+    Number(totals.entities ?? 0) === 0 &&
+    Number(totals.relations ?? 0) === 0 &&
+    types === 0 &&
+    relationTypes === 0
+  );
+}
+
 // --- Re-reading on the stream -----------------------------------------
 
 // coalesce turns a burst of events into one re-read. A bulk write emits
@@ -587,17 +606,24 @@ export { STATE_EMPTY, STATE_LOADING, STATE_REFUSED, negativeState, fillState } f
 // the product's one piece of onboarding in it rather than a component of
 // its own. It kept its name; what it lost is the box and the 3px
 // coloured left stripe, which the identity bans by name.
-export function onboarding(doc, role, slug) {
+// `hasContent` is whether this game holds anything to look at yet. It
+// decides the way out: a game with nothing in it needs an assistant
+// connected, and a game already full of missions needs the way to make
+// the first overview. Offering the first to somebody whose assistant is
+// already writing is the product telling them to do what they have
+// done.
+export function onboarding(doc, role, slug, hasContent) {
   const viewer = role === ROLE_VIEWER;
+  const way = hasContent
+    ? { href: builderURL(slug), label: COMPOSE_LABEL }
+    // Inside the product, never out to a code forge. This pointed at a
+    // README on GitHub, which is where the one person this product is
+    // for stops reading.
+    : { href: settingsURL(slug) + TAB_AGENTS, label: SKILL_BUNDLE_LABEL };
   return negativeState(doc, {
     kind: STATE_EMPTY,
     heading: NO_VIEWS_HEADING,
     sentence: NO_VIEWS_SENTENCE + " " + (viewer ? NO_VIEWS_VIEWER : NO_VIEWS_COMPOSE),
-    // Inside the product, never out to a code forge. This pointed at a
-    // README on GitHub, which is where the one person this product is
-    // for stops reading.
-    action: viewer || !slug
-      ? null
-      : { href: settingsURL(slug) + TAB_AGENTS, label: SKILL_BUNDLE_LABEL },
+    action: viewer || !slug ? null : way,
   });
 }

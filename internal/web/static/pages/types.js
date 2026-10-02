@@ -27,6 +27,7 @@ import {
   NO_TYPES_SENTENCE,
   describeTotals,
 } from "./home.js";
+import { byWeight } from "../rows.js";
 import { goToLogin } from "../app.js";
 import { REREAD, TARGET_CONTENT, TARGET_EVERYTHING } from "../client.js";
 
@@ -85,27 +86,38 @@ export async function typesPage(opened) {
       sentence: NO_RELATION_TYPES_SENTENCE,
     });
 
+    // Ordered by how much of the game each one is, and without the key:
+    // the same two decisions the home's bands carry, because two
+    // spellings of one catalogue is one of them going stale.
+    const things = byWeight(
+      Array.isArray(summary.entity_types) ? summary.entity_types : [],
+      (t) => Number(t.entity_count ?? 0),
+    );
     fill(
       doc.getElementById("types"),
       doc.getElementById("types-empty"),
-      (Array.isArray(summary.entity_types) ? summary.entity_types : []).map((type) =>
+      things.sorted.map((type) =>
         row(doc, {
           label: type.label_plural || type.label || type.key,
-          key: type.key,
           count: String(Number(type.entity_count ?? 0)),
+          share: { value: Number(type.entity_count ?? 0), of: things.total },
           flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
           href: typeURL(opened.slug, type.key),
         }),
       ),
     );
+    const links = byWeight(
+      Array.isArray(summary.relation_types) ? summary.relation_types : [],
+      (t) => Number(t.relation_count ?? 0),
+    );
     fill(
       doc.getElementById("relation-types"),
       doc.getElementById("relation-types-empty"),
-      (Array.isArray(summary.relation_types) ? summary.relation_types : []).map((type) =>
+      links.sorted.map((type) =>
         row(doc, {
           label: type.label || type.key,
-          key: type.key,
           count: String(Number(type.relation_count ?? 0)),
+          share: { value: Number(type.relation_count ?? 0), of: links.total },
           flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
           // **It goes somewhere now.** These rows hovered like links and
           // led nowhere, which is the worse half of the two ways to fix

@@ -275,6 +275,10 @@ function mount({ ids, pathname, search = "", routes = [], games = [GAME] }) {
     createElement: (tag) => fakeElement(tag),
     // A text node is an element with only text as far as this stub is
     // concerned: what an assertion reads is textContent either way.
+    // An SVG element is created in its namespace; the stub records the
+    // tag and the attributes, which is what the catalogue's share bar is
+    // asserted on.
+    createElementNS: (_ns, tag) => fakeElement(tag),
     createTextNode: (text) => {
       const node = fakeElement("#text");
       node.textContent = String(text);
@@ -1475,6 +1479,55 @@ check("aCraftedLabelReachesTheHomeAsText", async () => {
 // are, in the game's own word: "Deidades 27". A unit here could only be
 // the model's ("27 entities"), which is the vocabulary this interface is
 // getting rid of.
+// **A catalogue says how much of the game a row is, not only how many.**
+// Ordered alphabetically, RL-Aeternum's heaviest connection (45 of 95,
+// nearly half the graph) sat ninth of twelve, and the key spent a whole
+// column on the word an assistant uses.
+check("aCatalogueIsOrderedByWeightAndDrawsTheShare", async () => {
+  const dom = mount({
+    ids: HOME_IDS,
+    pathname: "/g/azeroth",
+    routes: [
+      [
+        (url) => url === base + "/summary",
+        // Deliberately the wrong way round in the payload: the server
+        // sends what it sends, and the order on screen is this page's.
+        {
+          body: summaryOf({
+            entity_types: [
+              { id: "b", key: "zone", label: "Zone", label_plural: "Zones", entity_count: 1, invalid_count: 0 },
+              { id: "a", key: "quest", label: "Quest", label_plural: "Quests", entity_count: 400, invalid_count: 3 },
+            ],
+          }),
+        },
+      ],
+      noKinds,
+      noDocs,
+      noViews,
+      events,
+    ],
+  });
+  await load("home");
+
+  const rows = dom.elements.types.children;
+  const names = rows.map((li) => li.children[0].textContent);
+  assertEqual(names[0], "Quests", `the heaviest kind is not first: ${JSON.stringify(names)}`);
+
+  const shown = text(dom.elements.types);
+  assert(shown.includes("100%"), `the share is not written: ${JSON.stringify(shown)}`);
+  // The key is gone: a designer reads the game's own word here and meets
+  // the key on the thing's own page.
+  assert(!shown.includes("quest"), "the catalogue still spends a column on the key");
+
+  // The bar is SVG because `default-src 'self'` drops an inline style,
+  // and its width is a geometry attribute rather than CSS.
+  const bar = rows[0].children.flatMap((c) => c.children || []).find((c) => c.tagName === "svg");
+  assert(bar, "the row draws no share bar");
+  const fill = (bar.children || []).find((r) => r.getAttribute("class") === "share-fill");
+  assert(fill, "the bar has no fill");
+  assert(Number(fill.getAttribute("width")) > 0, "the fill has no width");
+});
+
 check("aCountOnACatalogueRowIsANumberAndNotAModelWord", async () => {
   const dom = mount({
     ids: HOME_IDS,

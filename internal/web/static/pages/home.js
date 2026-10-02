@@ -35,7 +35,7 @@ import {
   viewsURL,
   whoWrites,
 } from "./page.js";
-import { nextCursorOf } from "../rows.js";
+import { byWeight, nextCursorOf } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // What the two role-dependent empty states are about, in the words the
@@ -138,6 +138,7 @@ export function describeView(view) {
   const renderer = String(from.renderer ?? "");
   return DRAWN_AS[renderer] ?? renderer;
 }
+
 
 // --- The page --------------------------------------------------------
 
@@ -335,27 +336,33 @@ async function catalogueLane(doc, slug, client) {
     sentence: NO_RELATION_TYPES_SENTENCE,
   });
 
+  // **No key column.** `Deidades  deity  27` spent a whole column, on
+  // every row, on the word an assistant uses. A designer reads the
+  // game's own word here and meets the key on the thing's own page,
+  // where they would copy it.
+  const things = byWeight(entityTypes, (t) => Number(t.entity_count ?? 0));
   fill(
     doc.getElementById("types"),
     doc.getElementById("types-empty"),
-    entityTypes.map((type) =>
+    things.sorted.map((type) =>
       row(doc, {
         label: type.label_plural || type.label || type.key,
-        key: type.key,
         count: String(Number(type.entity_count ?? 0)),
+        share: { value: Number(type.entity_count ?? 0), of: things.total },
         flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
         href: typeURL(slug, type.key),
       }),
     ),
   );
+  const links = byWeight(relationTypes, (t) => Number(t.relation_count ?? 0));
   fill(
     doc.getElementById("relation-types"),
     doc.getElementById("relation-types-empty"),
-    relationTypes.map((type) =>
+    links.sorted.map((type) =>
       row(doc, {
         label: type.label || type.key,
-        key: type.key,
         count: String(Number(type.relation_count ?? 0)),
+        share: { value: Number(type.relation_count ?? 0), of: links.total },
         // Since migration 0009 an edge is judged against its relation
         // type's field schema too, so a relation type can hold rows a
         // designer has to go and fix.

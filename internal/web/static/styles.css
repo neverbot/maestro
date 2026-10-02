@@ -1562,7 +1562,10 @@ ul.catalogue {
      every column is the width of what is in it, the row still spans the
      list, and the remainder is bare paper. Rows append six cells; the
      seventh track is never filled by anything. */
-  grid-template-columns: fit-content(44rem) auto auto auto auto auto minmax(0, 1fr);
+  /* Eight tracks now: the seventh is the share bar, between the count it
+     restates and the spacer that eats the slack. A row that draws no
+     share leaves it empty and an empty `auto` track collapses. */
+  grid-template-columns: fit-content(44rem) auto auto auto auto auto auto minmax(0, 1fr);
   gap: 0;
   min-width: 0;
   background: var(--paper);
@@ -1776,7 +1779,46 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   font-style: italic;
 }
 
-.catalogue-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.catalogue-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  /* design.md: numbers are right-aligned. This was `start`, so a column
+     of 1/2/45/13 had a ragged right edge in the one place a reader is
+     comparing magnitudes. */
+  text-align: right;
+}
+
+/* **How much of this game one row is.** The catalogue answered "how
+   many" and never "how much", and the order answered "which is biggest"
+   without saying by how much: `worships` is 45 of 95, half of
+   RL-Aeternum's connections, and nothing on the page said so.
+   Drawn in a data hue by decision (design.md §Data): the eight were a
+   diagram's vocabulary and one of them is now a catalogue's too, for
+   this one meaning and no other. */
+.catalogue-share {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.catalogue-share .share-pct { min-width: 2.5rem; text-align: right; }
+.catalogue-share .share-bar { width: 10rem; height: 6px; }
+.catalogue-share .share-track { fill: var(--line); }
+.catalogue-share .share-fill { fill: var(--data-1); }
+
+/* **A band's table is as wide as what is in it.** `ul.catalogue` spans
+   its container, which is right for the entity catalogue's many columns
+   and wrong for a band of three: five kinds of thing took 1392px to say
+   a name, a number and a share, and the rest was bare paper pretending
+   to be a table. The cap keeps it from growing past the measure on a
+   very wide window. */
+.lane ul.catalogue,
+.page > ul.catalogue {
+  width: max-content;
+  max-width: min(100%, 60rem);
+}
 
 /* The one thing on this page that asks a designer to do something: rows
    a schema edit stopped fitting. Given --danger, the same token the

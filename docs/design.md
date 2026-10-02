@@ -245,8 +245,12 @@ like it came out of the same material as the page.
 
 ### Data
 
-Eight categorical hues, assigned by hashing a value's text, used **only
-inside a diagram or a legend** and never in the chrome. Chosen by search
+Eight categorical hues, assigned by hashing a value's text, used inside
+a diagram or a legend and never in the chrome. **One exception, decided
+deliberately:** `data-1` fills the share bar on a catalogue row, which
+says how much of a game one kind of thing or one kind of link is. It is
+not categorical there and it is not hashed; it is one meaning, one hue,
+and a catalogue draws no other colour. Chosen by search
 under four simultaneous constraints: at least 3:1 against the ground, at
 least 28 degrees apart on the hue wheel, pairwise separable under both
 deuteranopia and protanopia, and **at least 4.5:1 against the tone a

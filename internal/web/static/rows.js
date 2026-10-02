@@ -1,6 +1,21 @@
 // The row every list in this product is made of.
 export const CATALOGUE_CELLS = 3;
 
+// The namespace an SVG element has to be created in; a createElement
+// gives an HTMLUnknownElement that renders nothing.
+export const SVG_NS = "http://www.w3.org/2000/svg";
+
+// byWeight orders a catalogue by how much of the game each row is, and
+// shares out the proportion. Alphabetical order hid the shape: in
+// RL-Aeternum `rinde culto a` is 45 of 95 connections, nearly half the
+// game's graph, and it sat ninth of twelve under the Spanish alphabet.
+export function byWeight(rows, count) {
+  const sorted = [...rows].sort((a, b) => Number(count(b)) - Number(count(a)));
+  const total = sorted.reduce((n, r) => n + Number(count(r)), 0);
+  return { sorted, total };
+}
+
+
 // nextCursorOf reads a listing answer's cursor, and is the one place
 // this front end decides what "there is more" means.
 export function nextCursorOf(body) {
@@ -90,6 +105,62 @@ export function row(doc, spec) {
   tally.setAttribute("role", "cell");
   tally.textContent = spec.count ?? "";
   item.append(tally);
+
+  // **The share of the whole, drawn.** A catalogue of counts answers
+  // "how many" and never "how much of this game", which is the question
+  // a designer opens the page with: `worships` is 45, and 45 is half of
+  // RL-Aeternum's connections. The number alone does not say that and
+  // the order alone does not say by how much.
+  //
+  // An SVG rect and not a styled div: `default-src 'self'` admits no
+  // inline style attribute, so a width written as CSS would be dropped
+  // by the browser without a word. A geometry attribute is not CSS.
+  if (spec.share && Number(spec.share.of) > 0) {
+    // The share and the bar are one cell, after the count: a percentage
+    // printed before the number it is derived from reads as a different
+    // measurement rather than the same one said twice.
+    const cell = doc.createElement("span");
+    cell.className = "catalogue-share";
+    cell.setAttribute("role", "cell");
+
+    const part = Math.max(0, Math.min(1, Number(spec.share.value) / Number(spec.share.of)));
+    const pct = doc.createElement("span");
+    pct.className = "share-pct";
+    pct.textContent = part > 0 && part < 0.01 ? "<1%" : Math.round(part * 100) + "%";
+    cell.append(pct);
+
+    // An SVG rect and not a styled div: `default-src 'self'` admits no
+    // inline style attribute, so a width written as CSS would be dropped
+    // by the browser without a word. A geometry attribute is not CSS.
+    const bar = doc.createElementNS(SVG_NS, "svg");
+    bar.setAttribute("class", "share-bar");
+    bar.setAttribute("viewBox", "0 0 100 6");
+    bar.setAttribute("preserveAspectRatio", "none");
+    bar.setAttribute("aria-hidden", "true");
+
+    const track = doc.createElementNS(SVG_NS, "rect");
+    track.setAttribute("class", "share-track");
+    track.setAttribute("x", "0");
+    track.setAttribute("y", "0");
+    track.setAttribute("width", "100");
+    track.setAttribute("height", "6");
+    track.setAttribute("rx", "3");
+    bar.append(track);
+
+    const fill = doc.createElementNS(SVG_NS, "rect");
+    fill.setAttribute("class", "share-fill");
+    fill.setAttribute("x", "0");
+    fill.setAttribute("y", "0");
+    // A row that is one of ninety-five still draws something: a bar that
+    // rounds to nothing reads as a missing value rather than a small one.
+    fill.setAttribute("width", String(Math.max(part * 100, part > 0 ? 1.5 : 0)));
+    fill.setAttribute("height", "6");
+    fill.setAttribute("rx", "3");
+    bar.append(fill);
+
+    cell.append(bar);
+    item.append(cell);
+  }
 
   if (spec.flag) {
     const flag = doc.createElement("span");

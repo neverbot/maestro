@@ -98,6 +98,9 @@ globalThis.document = {
   title: "",
   body,
   createElement: (tag) => fakeElement(tag),
+  // The share bar on a catalogue row is SVG, which has to be created in
+  // its namespace or a browser renders nothing.
+  createElementNS: (_ns, tag) => fakeElement(tag),
   getElementById(id) {
     return Object.prototype.hasOwnProperty.call(elements, id) ? elements[id] : null;
   },

@@ -13,6 +13,7 @@ import {
   writeParams,
 } from "../client.js";
 import { TOO_MUCH, roundTrips } from "../query/compose.js";
+import { t } from "../i18n.js";
 import { frameFor } from "../render/scene.js";
 import { graphLayoutRequest, graphScene, RENDERER as RENDERER_GRAPH } from "../render/graph.js";
 import { layeredLayoutRequest, layeredScene, RENDERER as RENDERER_LAYERED } from "../render/layered.js";
@@ -69,12 +70,11 @@ export const WORKER_URL = "/static/layout/worker.js";
 // The band a *failed* layout wears, and the one thing on this page that
 // is neither the server's sentence nor the frame's.
 export const BANNER_LAYOUT_FAILED = "layout_failed";
-export const LAYOUT_FAILED_HEADING = "The layout engine failed; nodes are arranged in a grid.";
+export const LAYOUT_FAILED_HEADING = t("view.layoutFailed");
 
 // The two notices the stream produces that no other surface owns.
-export const NOTICE_QUERY_CHANGED =
-  "Somebody changed this view's query. What is on screen is the answer to the old one; reload to run the new one.";
-export const NOTICE_VIEW_REMOVED = "This view has been deleted. What is on screen is the last answer it gave.";
+export const NOTICE_QUERY_CHANGED = t("view.queryChanged");
+export const NOTICE_VIEW_REMOVED = t("view.removed");
 export const NOTICES = {
   "query.changed": NOTICE_QUERY_CHANGED,
   "view.removed": NOTICE_VIEW_REMOVED,
@@ -293,7 +293,7 @@ export async function viewPage(opened, options = {}) {
   const panelEl = doc.getElementById("entity-panel");
 
   if (opened.game === null) {
-    say(errorEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(errorEl, opened.failure ?? t("error.noAccessToGame"));
     return null;
   }
   setBreadcrumb(doc, [
@@ -307,7 +307,7 @@ export async function viewPage(opened, options = {}) {
 
   const key = viewKeyOf(opened.location.pathname);
   if (key === "") {
-    say(errorEl, "This address names no view.");
+    say(errorEl, t("view.noSuchView"));
     return null;
   }
 
@@ -393,7 +393,7 @@ export function sayBuilderDoor(doc, slug, row) {
 // OPEN_IN_BUILDER says what it opens and, by being a link rather than a
 // button, says it is a place: the builder has an address, and a middle
 // click belongs to the reader.
-export const OPEN_IN_BUILDER = "Open in the builder";
+export const OPEN_IN_BUILDER = t("view.openInBuilder");
 
 // mount builds the frame, the canvas, the table painter and the ground
 // panel, and returns the one object every wired event calls into.
@@ -512,7 +512,7 @@ export function sayOutside(state) {
   const counted = canvas.outside();
   const text = counted.hidden === 0
     ? ""
-    : counted.hidden + " of " + countLabel(counted.total, "node", "nodes") + " are outside the view.";
+    : t("view.outside", { hidden: counted.hidden, all: countLabel(counted.total, t("unit.node"), t("unit.nodes")) });
   say(state.outsideEl, text);
   return text;
 }
@@ -635,10 +635,7 @@ async function drawPicture(state, envelope, error, options) {
 export const NARROW_QUERY = "(max-width: 47.99rem)";
 
 // What the page says while it is not drawing.
-export const NOTICE_TOO_NARROW =
-  "This window is too narrow to draw the picture, so this view is shown as its " +
-  "table below. The table is the same answer. Arranging the picture is off " +
-  "until the window is wider.";
+export const NOTICE_TOO_NARROW = t("view.tooNarrow");
 
 // **A renderer that draws no picture takes nothing away at a narrow
 // width**, so the sentence above would be describing a loss that did not
@@ -887,7 +884,7 @@ export function wire(doc, panelEl, slug, client, state) {
     if (destructive && (armed === null || armed.button !== button)) {
       disarm();
       armed = { button, label: button.textContent, timer: setTimeout(disarm, 4000) };
-      button.textContent = button.textContent + " — click again";
+      button.textContent = t("action.clickAgain", { label: button.textContent });
       button.dataset.armed = "true";
       return;
     }
@@ -1054,7 +1051,7 @@ export async function openPanel(doc, panelEl, slug, client, address) {
   heading.textContent = model.entity.name || model.entity.key;
   const full = doc.createElement("a");
   full.href = entityURL(slug, typeKey, key);
-  full.textContent = "Open the full page";
+  full.textContent = t("view.openFullPage");
   panelEl.replaceChildren(heading, full, entityBody(doc, slug, model));
   panelEl.hidden = false;
   return panelEl;

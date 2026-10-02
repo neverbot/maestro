@@ -66,11 +66,8 @@ export const DESTINATIONS = [DESTINATION_CATALOGUE, DESTINATION_VIEWS, DESTINATI
 // what a reader would get out of it, never by how it is stored.
 export const NO_VIEWS_HEADING = t("overviews.empty.heading");
 export const NO_VIEWS_SENTENCE = t("overviews.empty.sentence");
-  "where its places sit, what happens in what order.";
 export const NO_VIEWS_COMPOSE = t("overviews.empty.compose");
-  "question.";
 export const NO_VIEWS_VIEWER = t("overviews.empty.viewer");
-  "saves these.";
 export const SKILL_BUNDLE_LABEL = t("overviews.connect");
 export const COMPOSE_LABEL = t("overviews.compose");
 
@@ -334,7 +331,7 @@ export function destinations(doc, slug, current) {
   const nav = doc.createElement("nav");
   nav.className = "destinations";
   // Two navigations on most screens, and only one of them was named.
-  nav.setAttribute("aria-label", "Sections of this game");
+  nav.setAttribute("aria-label", t("nav.sections"));
   // Prose has no listing page of its own: the home's third lane is the
   // whole of it, so this link is the home anchored at that lane rather
   // than a fourth shell nobody would have anything else to put on.
@@ -455,9 +452,9 @@ export function copyLine(doc, text, label) {
   copy.addEventListener("click", async () => {
     try {
       await globalThis.navigator.clipboard.writeText(text);
-      copy.textContent = "Copied";
+      copy.textContent = t("settings.copied");
     } catch {
-      copy.textContent = "Select it and copy";
+      copy.textContent = t("action.selectAndCopy");
     }
   });
   line.append(copy);
@@ -476,13 +473,13 @@ export function inviteLink(doc, href) {
   const copy = doc.createElement("button");
   copy.type = "button";
   copy.className = "ghost";
-  copy.textContent = "Copy the link";
+  copy.textContent = t("action.copyLink");
   copy.addEventListener("click", async () => {
     try {
       await globalThis.navigator.clipboard.writeText(href);
-      copy.textContent = "Copied";
+      copy.textContent = t("settings.copied");
     } catch {
-      copy.textContent = "Select it and copy";
+      copy.textContent = t("action.selectAndCopy");
     }
   });
   line.append(copy);
@@ -494,11 +491,11 @@ export function inviteLink(doc, href) {
 // "expired" is a different fact from "expires in three days".
 export function expiry(value) {
   const when = new Date(String(value ?? ""));
-  if (Number.isNaN(when.getTime())) return "no expiry recorded";
+  if (Number.isNaN(when.getTime())) return t("invite.noExpiry");
   const days = Math.round((when.getTime() - Date.now()) / 86400000);
-  if (days < 0) return "expired";
-  if (days === 0) return "expires today";
-  return "expires in " + countLabel(days, "day", "days");
+  if (days < 0) return t("invite.expired");
+  if (days === 0) return t("invite.expiresToday");
+  return t("invite.expiresIn", { when: countLabel(days, t("unit.day"), t("unit.days")) });
 }
 // --- The read-only notice ---------------------------------------------
 

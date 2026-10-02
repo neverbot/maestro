@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // The data palette: the pure half of "every hue on screen belongs to the
 // game" (interface design spec §2.5).
 export const DATA_SLOTS = 8;
@@ -49,7 +50,7 @@ export function hueFor(jsonText) {
 // string* are two different answers and get two different rows. Folding
 // them together would throw away a guarantee the server went out of its
 // way to provide.
-export const UNSET_LABEL = "not set";
+export const UNSET_LABEL = t("value.notSet");
 
 // legendFor turns the nodes' values for one slot into the legend.
 export function legendFor(nodes, slot) {

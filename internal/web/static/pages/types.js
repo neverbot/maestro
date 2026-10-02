@@ -28,6 +28,7 @@ import {
   describeTotals,
 } from "./home.js";
 import { byWeight } from "../rows.js";
+import { t } from "../i18n.js";
 import { goToLogin } from "../app.js";
 import { REREAD, TARGET_CONTENT, TARGET_EVERYTHING } from "../client.js";
 
@@ -48,7 +49,7 @@ export async function typesPage(opened) {
   const errorEl = doc.getElementById("catalogue-error");
 
   if (opened.game === null) {
-    say(noteEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(noteEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
   setBreadcrumb(doc, [
@@ -57,7 +58,7 @@ export async function typesPage(opened) {
   ]);
   // The game first: a person with three games open read three tabs
   // called "Catalogue".
-  doc.title = opened.game.name + " \u00b7 Content \u00b7 Maestro";
+  doc.title = opened.game.name + " \u00b7 " + t("nav.content") + " \u00b7 Maestro";
 
   // One read, in a function, so an event can run it again. This page
   // fetched once on load and listened to nothing: a game being written

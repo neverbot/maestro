@@ -2,6 +2,7 @@
 // of it, and the prose attached to it.
 
 import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
+import { t } from "../i18n.js";
 import { CATALOGUE_CELLS, row } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
@@ -39,8 +40,8 @@ export const FIELD_LIST_TEXT = "list<text>";
 // What a boolean reads as. "yes"/"no" and not "true"/"false": a designer
 // declaring `repeatable` is asking a question about the game, not about
 // a JSON literal.
-export const BOOL_TRUE = "yes";
-export const BOOL_FALSE = "no";
+export const BOOL_TRUE = t("entity.bool.yes");
+export const BOOL_FALSE = t("entity.bool.no");
 
 // The separator a list of text is joined with.
 export const LIST_SEPARATOR = ", ";
@@ -53,7 +54,7 @@ export const DIRECTION_IN = "in";
 // The line the catalogue page and this one both need: an entity that no
 // longer fits its type is kept and marked, never deleted, and this is
 // where a designer meets that fact about one row.
-export const INVALID_NOTE = "This entity no longer fits its type's field schema.";
+export const INVALID_NOTE = t("entity.invalid");
 
 // --- The model -------------------------------------------------------
 
@@ -256,7 +257,7 @@ export function relationList(doc, slug, groups) {
 
     const tally = doc.createElement("span");
     tally.className = "catalogue-count";
-    tally.textContent = countLabel(group.rows.length, "relation", "relations");
+    tally.textContent = countLabel(group.rows.length, t("unit.relation"), t("unit.relations"));
     head.append(tally);
     list.append(head);
 
@@ -266,7 +267,7 @@ export function relationList(doc, slug, groups) {
       // flag — into a list whose grid has six tracks, so the rows of one
       // group did not line up with the rows of the next.
       const item = row(doc, {
-        label: edge.far === null ? "This end is no longer in the game" : edge.far.name || edge.far.key,
+        label: edge.far === null ? t("entity.endGone") : edge.far.name || edge.far.key,
         key: edge.far === null ? "" : edge.far.type + "/" + edge.far.key,
         cells: edge.fields.map((field) => ({ text: field.key + " " + field.cell.text })),
         count: "",
@@ -295,7 +296,7 @@ export function entityBody(doc, slug, model) {
   const rows = fieldRows(model.schema, model.entity);
   const fields = doc.createElement("section");
   const fieldsHeading = doc.createElement("h2");
-  fieldsHeading.textContent = "Fields";
+  fieldsHeading.textContent = t("entity.fields");
   fields.append(fieldsHeading);
   if (rows.length === 0) {
     // **The shared negative state, not a muted sentence.** This page
@@ -308,8 +309,8 @@ export function entityBody(doc, slug, model) {
     // which the muted lines had dropped.
     fields.append(negativeState(doc, {
       kind: STATE_EMPTY,
-      heading: "No fields",
-      sentence: "This type declares no fields.",
+      heading: t("entity.noFields.heading"),
+      sentence: t("entity.noFields.sentence"),
     }));
   } else {
     const list = fieldList(doc, rows);
@@ -325,8 +326,8 @@ export function entityBody(doc, slug, model) {
   root.append(fields);
 
   for (const [direction, heading, relations] of [
-    [DIRECTION_OUT, "Leading out of this", model.out],
-    [DIRECTION_IN, "Pointing at this", model.in],
+    [DIRECTION_OUT, t("entity.leadingOut"), model.out],
+    [DIRECTION_IN, t("entity.pointingAt"), model.in],
   ]) {
     const section = doc.createElement("section");
     const title = doc.createElement("h2");
@@ -336,10 +337,10 @@ export function entityBody(doc, slug, model) {
     if (groups.length === 0) {
       section.append(negativeState(doc, {
         kind: STATE_EMPTY,
-        heading: direction === DIRECTION_OUT ? "Nothing leads out" : "Nothing leads in",
+        heading: direction === DIRECTION_OUT ? t("entity.nothingOut.heading") : t("entity.nothingIn.heading"),
         sentence: direction === DIRECTION_OUT
-          ? "No relation starts here. An agent writes relations over MCP; nothing on this page does."
-          : "No relation points at this. An agent writes relations over MCP; nothing on this page does.",
+          ? t("entity.nothingOut.sentence")
+          : t("entity.nothingIn.sentence"),
       }));
     } else {
       section.append(relationList(doc, slug, groups));
@@ -349,15 +350,15 @@ export function entityBody(doc, slug, model) {
 
   const docs = doc.createElement("section");
   const docsHeading = doc.createElement("h2");
-  docsHeading.textContent = "Documents";
+  docsHeading.textContent = t("entity.documents");
   docs.append(docsHeading);
   if (model.documents.length === 0) {
     docs.append(negativeState(doc, {
       kind: STATE_EMPTY,
-      heading: "No prose attached",
+      heading: t("entity.noProse.heading"),
       // The half the muted line dropped: who would put one here. It is
       // the sentence the shell had been carrying and nobody ever saw.
-      sentence: "No document is attached to this entity. An agent attaches one over MCP; nothing on this page attaches one.",
+      sentence: t("entity.noProse.sentence"),
     }));
   } else {
     const list = doc.createElement("ul");
@@ -388,11 +389,11 @@ export function entityBody(doc, slug, model) {
 // --- The one write a person makes here --------------------------------
 
 // --- Writing a field value -------------------------------------------
-export const EDIT_LABEL = "Edit";
-export const SAVE_LABEL = "Save";
-export const CANCEL_LABEL = "Cancel";
-export const CLEAR_HINT = "Leave it empty to remove the value.";
-export const NOT_A_NUMBER = "This field takes a number.";
+export const EDIT_LABEL = t("entity.edit");
+export const SAVE_LABEL = t("entity.save");
+export const CANCEL_LABEL = t("entity.cancel");
+export const CLEAR_HINT = t("entity.clearHint");
+export const NOT_A_NUMBER = t("entity.notANumber");
 
 // controlFor builds the control one declared type deserves, already
 // carrying the value the row holds.
@@ -415,7 +416,7 @@ export function controlFor(doc, field, value) {
       // rendering fault.
       const none = doc.createElement("option");
       none.value = "";
-      none.textContent = "— none —";
+      none.textContent = t("value.none");
       el.append(none);
       for (const option of Array.isArray(field.options) ? field.options : []) {
         const item = doc.createElement("option");
@@ -596,7 +597,7 @@ function editable(doc, opened, cell, field, hooks) {
       return;
     }
     error.textContent = "";
-    setFormBusy(form, true, "Saving…");
+    setFormBusy(form, true, t("action.saving"));
     const entity = hooks.current();
     const answer = await opened.client.writeEntity(entity, {
       fields: fieldsWith(entity.fields, field.key, read),
@@ -733,7 +734,7 @@ export function wireRename(doc, opened, model) {
   const open = doc.createElement("button");
   open.type = "button";
   open.className = "ghost";
-  open.textContent = "Rename";
+  open.textContent = t("entity.rename");
   actions.replaceChildren(open);
 
   const show = (showing) => {
@@ -794,11 +795,11 @@ export function wireRename(doc, opened, model) {
     event.preventDefault();
     const typed = field.value.trim();
     if (typed === "") {
-      say(errorEl, "A name is what this screen is for; it cannot be empty.");
+      say(errorEl, t("entity.nameRequired"));
       return;
     }
     say(errorEl, "");
-    setFormBusy(form, true, "Saving…");
+    setFormBusy(form, true, t("action.saving"));
     const answer = await write(typed);
     setFormBusy(form, false);
     if (answer.done) return;
@@ -877,15 +878,15 @@ export async function entityPage(opened) {
   const contentEl = doc.getElementById("entity-content");
 
   if (opened.game === null) {
-    say(nameEl, "Game not found");
-    say(errorEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(nameEl, t("error.gameNotFound"));
+    say(errorEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
 
   const [typeKey, key] = segmentsOf(opened.location.pathname).slice(1);
   if (!typeKey || !key) {
-    say(nameEl, "No entity asked for");
-    fail(errorEl, contentEl, "This address names no entity.");
+    say(nameEl, t("entity.noneAsked"));
+    fail(errorEl, contentEl, t("entity.noSuchEntity"));
     return opened;
   }
 
@@ -895,7 +896,7 @@ export async function entityPage(opened) {
       goToLogin();
       return opened;
     }
-    say(nameEl, "Could not read this entity");
+    say(nameEl, t("entity.unreadable"));
     fail(errorEl, contentEl, model.error.message);
     return opened;
   }

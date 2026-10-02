@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Administration · Maestro</title>
+<title data-i18n="title.admin"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -44,8 +44,7 @@
 <section class="setting">
   <div class="setting-head">
     <h2 data-i18n="admin.invitations"></h2>
-    <p class="muted">A link that makes one account. Nothing is sent anywhere: this
-      instance delivers no email, so you pass the link on yourself.</p>
+    <p class="muted" data-i18n="admin.invite.about"></p>
   </div>
   <div class="setting-body">
 <!-- **Not `id="invite"`.** app.js binds the sign-in shell's own
@@ -54,10 +53,10 @@
      POST /api/invites and once to POST /api/auth/register, and the
      second refusal overwrote the first success on screen. -->
 <form id="new-invite">
-  <label for="new-invite-email">Email</label>
-  <input id="new-invite-email" type="email" name="email" placeholder="them@example.test" autocomplete="off" required>
+  <label for="new-invite-email" data-i18n="form.email"></label>
+  <input id="new-invite-email" type="email" name="email" data-i18n-attr="placeholder:placeholder.theirEmail" autocomplete="off" required>
   <p class="error" id="new-invite-error" role="alert" aria-live="assertive"></p>
-  <button type="submit">Create invitation</button>
+  <button type="submit" data-i18n="admin.createInvite"></button>
 </form>
 
 <!-- The secret, once. POST /api/invites answers with the token and the
@@ -71,7 +70,7 @@
      `role="status"` because it appears without anybody navigating to
      it. -->
 <div class="secret" id="new-invite-made" role="status" aria-live="polite" hidden>
-  <b>Send this link. It is shown once.</b>
+  <b data-i18n="invite.sendLink"></b>
   <div id="new-invite-links"></div>
 </div>
 
@@ -91,10 +90,7 @@
          own prose: the server offered no endpoint that listed users, so
          the screen had a field to type an address into and no way to
          show whose address it was. GET /api/users answers it now. -->
-    <p class="muted">Everybody who can sign in to this instance. An account's address is
-      how they sign in and their name is what everybody else sees; both are yours to
-      correct. An administrator can do everything on this page — administering is
-      about this Maestro, never about one game's content.</p>
+    <p class="muted" data-i18n="admin.accounts.about"></p>
   </div>
   <div class="setting-body">
 <!-- Not a `catalogue`: a catalogue is a table whose rows are links, and
@@ -106,7 +102,7 @@
 <!-- The hole; pages/admin.js carries the words. -->
 <div id="users-empty" hidden></div>
 <p class="error" id="users-error" hidden></p>
-<button type="button" class="ghost" id="users-more" hidden>Show more</button>
+<button type="button" class="ghost" id="users-more" hidden data-i18n="ui.showMore"></button>
   </div>
 </section>
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Routes · Maestro</title>
+<title data-i18n="title.routes"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -27,7 +27,7 @@
 </noscript>
 
 <main class="page">
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
 <h1 data-i18n="checks.routes"></h1>
@@ -40,7 +40,7 @@
 <!-- The hole; pages/routes.js carries the words. -->
 <div id="routes-empty" hidden></div>
 <p class="error" id="routes-error" hidden></p>
-<button type="button" class="btn-more" id="routes-more" hidden>Show 50 more</button>
+<button type="button" class="btn-more" id="routes-more" hidden data-i18n="ui.show50More"></button>
 </main>
 
 <script type="module" src="/static/pages/routes.js"></script>

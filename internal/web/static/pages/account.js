@@ -3,7 +3,7 @@
 import { fetchMe, markRefused, renderHeader, sendJSON, setFormBusy } from "../app.js";
 import { goToLogin } from "../app.js";
 import { say } from "./page.js";
-import { remember, t } from "../i18n.js";
+import { remember, locale, t } from "../i18n.js";
 
 // The date a person reads, not the one a machine sorts by. The product
 // renders `06/09/2026, 16:30:11` elsewhere and it is ambiguous in half
@@ -12,7 +12,7 @@ import { remember, t } from "../i18n.js";
 export function since(value) {
   const when = new Date(String(value ?? ""));
   if (Number.isNaN(when.getTime())) return "";
-  return when.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return when.toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric" });
 }
 
 // The theme radios read and write through the same three functions the
@@ -39,7 +39,7 @@ export function wireTheme(doc, themeAPI, matchMedia) {
   const query = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
   const sayWhich = () => {
     if (!systemLabel || query === null) return;
-    systemLabel.textContent = query.matches ? " (dark right now)" : " (light right now)";
+    systemLabel.textContent = query.matches ? t("account.theme.nowDark") : t("account.theme.nowLight");
   };
   sayWhich();
   if (query !== null && typeof query.addEventListener === "function") {
@@ -92,16 +92,16 @@ export function showWho(doc, me) {
   // a blank beside "Email" cannot be told from a value that failed to
   // load, which is the rule this product states by name.
   if (name) {
-    name.textContent = me.display_name || "no name on this account";
+    name.textContent = me.display_name || t("account.noName");
     name.className = me.display_name ? "" : "muted";
   }
   if (email) {
-    email.textContent = me.email || "no address on this account";
+    email.textContent = me.email || t("account.noEmail");
     email.className = me.email ? "" : "muted";
   }
   if (created) {
     const when = since(me.created_at);
-    created.textContent = when || "not recorded";
+    created.textContent = when || t("value.notRecorded");
     created.className = when ? "" : "muted";
   }
   if (admin) admin.hidden = me.is_admin !== true;
@@ -119,7 +119,7 @@ export function wirePassword(doc) {
     event.preventDefault();
     if (errorEl) errorEl.textContent = "";
     if (doneEl) doneEl.hidden = true;
-    setFormBusy(form, true, "Changing…");
+    setFormBusy(form, true, t("account.changing"));
     const answer = await sendJSON("PATCH", "/api/me/password", {
       current_password: currentEl ? currentEl.value : "",
       new_password: newEl ? newEl.value : "",
@@ -135,7 +135,7 @@ export function wirePassword(doc) {
       // being gone: this endpoint answers 401 for a failed guess. The
       // field is marked, the focus moves to it and its text is selected,
       // which is what the sign-in screen already does for the same fact.
-      markRefused(form, currentEl, errorEl, answer.message || "That is not your current password.");
+      markRefused(form, currentEl, errorEl, answer.message || t("account.wrongPassword"));
       return;
     }
     say(errorEl, answer.message);

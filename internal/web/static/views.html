@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Overviews · Maestro</title>
+<title data-i18n="title.overviews"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -31,7 +31,7 @@
      looking at. It replaced this shell's back link: a trail says where you
      are as well as where you came from, in one component instead of four
      spellings across five screens. -->
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
 <h1 id="view-list-title" data-i18n="nav.overviews"></h1>
@@ -39,7 +39,7 @@
        pages/page.js setReadOnly fills it. -->
   <span class="page-actions" id="page-actions"></span>
 </div>
-<p class="muted" id="view-list-note" aria-live="polite">Loading this game&#39;s views…</p>
+<p class="muted" id="view-list-note" aria-live="polite" data-i18n="overviews.loading"></p>
 
 <!-- **The scroller, so a row is a row at any width.** Without it a long
      view name wrapped this list to 41px at 500px, against the stated
@@ -55,7 +55,7 @@
      the home lane says the same thing and two copies of it would drift. -->
 <div id="views-onboarding" hidden></div>
 <p class="error" id="views-error" hidden></p>
-<button type="button" class="link-button" id="views-more" hidden>Show more views</button>
+<button type="button" class="link-button" id="views-more" hidden data-i18n="overviews.showMore"></button>
 
 </main>
 

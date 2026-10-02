@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entities · Maestro</title>
+<title data-i18n="title.type"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -31,7 +31,7 @@
      looking at. It replaced this shell's back link: a trail says where you
      are as well as where you came from, in one component instead of four
      spellings across five screens. -->
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
 <h1 id="type-name" data-i18n="frame.loading"></h1>
@@ -51,8 +51,8 @@
      the server indexes a row's key alongside its name — so the handle a
      designer meets in every error message is the one that works here. -->
 <div class="tools">
-  <input id="entities-search" type="search" placeholder="Find by name or key…"
-         autocomplete="off" aria-label="Find an entity of this type">
+  <input id="entities-search" type="search" data-i18n-attr="placeholder:type.placeholder.find,aria-label:type.find"
+         autocomplete="off">
   <!-- **The one filter a person can compose.** Search answers the fifty
        best matches for a word and cannot be paged past them; this narrows
        the listing itself, so a thousand entities become the ones whose
@@ -60,13 +60,12 @@
        by the pager underneath. The listing's order is by name, so the
        server answers it by walking a contiguous stretch of the order it
        was already walking. -->
-  <label class="tools-label" for="entities-prefix">Starting with</label>
-  <input id="entities-prefix" type="text" placeholder="Th" autocomplete="off" size="8"
-         aria-label="Show only the entities whose name starts with">
+  <label class="tools-label" for="entities-prefix" data-i18n="catalogue.startingWith"></label>
+  <input id="entities-prefix" type="text" data-i18n-attr="placeholder:type.placeholder.prefix,aria-label:type.startsWith" autocomplete="off" size="8">
   <!-- A row a schema edit stopped fitting is work a designer has to do,
        and until now the only way to find those rows was to scroll a
        thousand of them looking for the flag. -->
-  <label class="tools-check"><input id="entities-invalid" type="checkbox"> Only the ones that no longer fit</label>
+  <label class="tools-check"><input id="entities-invalid" type="checkbox"><span data-i18n="catalogue.onlyMisfits"></span></label>
   <span class="tools-note muted" id="entities-scope" aria-live="polite"></span>
 </div>
 
@@ -92,7 +91,7 @@
      entities is the page contradicting itself three lines apart. -->
 <div id="entities-miss" hidden></div>
 <p class="error" id="entities-error" hidden></p>
-<button type="button" class="btn-more" id="entities-more" hidden>Show more</button>
+<button type="button" class="btn-more" id="entities-more" hidden data-i18n="ui.showMore"></button>
 
 </main>
 

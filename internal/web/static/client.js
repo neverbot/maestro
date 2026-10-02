@@ -16,6 +16,11 @@
 // literal in this file contains a space, because a sentence has spaces
 // and a protocol token does not.
 //
+// Translating a refusal is not composing one: `serverSays` looks the
+// server's own sentence up in the reader's catalogue and hands back the
+// server's words when the catalogue has none. No wording lives here
+// either way.
+//
 // **The reducer never patches state from a payload.** Publication order
 // is not commit order (internal/views/events.go argues it at length), so
 // a payload value can be older than what this client already holds.
@@ -34,6 +39,7 @@
 // instance, which is what lets a self-hosted Maestro with no outbound
 // route work completely (static_vendor_test.go's own network scan).
 
+import { serverSays } from "./i18n.js";
 // --- The decisions ---------------------------------------------------
 
 // The four things a received event can cause, and the two coordinates a
@@ -1050,7 +1056,7 @@ function errorFrom(status, payload) {
   const details = body.details && typeof body.details === "object" ? body.details : null;
   return {
     code: typeof body.error === "string" ? body.error : "",
-    message: typeof body.message === "string" ? body.message : "",
+    message: typeof body.message === "string" ? serverSays(body.message) : "",
     pointer: pointerFrom(details),
     details,
     status,

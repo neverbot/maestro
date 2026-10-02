@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Maestro</title>
+<title data-i18n="title.document"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -32,7 +32,7 @@
      looking at. It replaced this shell's back link: a trail says where you
      are as well as where you came from, in one component instead of four
      spellings across five screens. -->
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
 <h1 id="doc-title" data-i18n="frame.loading"></h1>
@@ -40,7 +40,7 @@
        pages/page.js setReadOnly fills it. -->
   <span class="page-actions" id="page-actions"></span>
 </div>
-<p class="muted" id="doc-meta" aria-live="polite">Loading this document…</p>
+<p class="muted" id="doc-meta" aria-live="polite" data-i18n="document.loading"></p>
 <!-- Every failure on this page lands here, and nothing else renders
      behind it: a document that could not be read must not look like a
      document with nothing in it. -->
@@ -55,15 +55,14 @@
      reversible, so the editor opens from GET /docs/one, which answers
      with the markdown the document is stored as. -->
 <form id="doc-edit" hidden>
-  <label for="doc-edit-body">Text</label>
+  <label for="doc-edit-body" data-i18n="document.text"></label>
   <textarea id="doc-edit-body" rows="18" spellcheck="true"></textarea>
-  <label for="doc-edit-message">What changed</label>
+  <label for="doc-edit-message" data-i18n="document.whatChanged"></label>
   <input id="doc-edit-message" type="text" autocomplete="off"
-         placeholder="Rewrote the second paragraph">
-  <p class="muted field-note">Every version in the history carries this line. It is what the next
-    reader has to go on.</p>
-  <button type="submit">Save</button>
-  <button type="button" class="ghost" id="doc-edit-cancel">Cancel</button>
+         data-i18n-attr="placeholder:document.placeholder.whatChanged">
+  <p class="muted field-note" data-i18n="document.whatChanged.about"></p>
+  <button type="submit" data-i18n="ui.save"></button>
+  <button type="button" class="ghost" id="doc-edit-cancel" data-i18n="ui.cancel"></button>
   <p class="error" id="doc-edit-error" role="alert" aria-live="assertive"></p>
 </form>
 
@@ -76,16 +75,16 @@
   <h2 data-i18n="document.history"></h2>
   <ul class="history" id="doc-history"></ul>
   <p class="error" id="doc-history-error" hidden></p>
-  <button type="button" class="link-button" id="doc-history-more" hidden>Show older versions</button>
+  <button type="button" class="link-button" id="doc-history-more" hidden data-i18n="document.showOlder"></button>
   <p class="muted" id="doc-revert-note" hidden></p>
 
   <h2 data-i18n="document.compare"></h2>
   <form id="compare-form">
-    <label for="compare-from">From version</label>
+    <label for="compare-from" data-i18n="document.fromVersion"></label>
     <select id="compare-from" name="from_version"></select>
-    <label for="compare-to">To version</label>
+    <label for="compare-to" data-i18n="document.toVersion"></label>
     <select id="compare-to" name="to_version"></select>
-    <button type="submit">Compare</button>
+    <button type="submit" data-i18n="document.compare"></button>
   </form>
   <p class="error" id="compare-error" hidden></p>
   <!-- compare-note is not compare-error. A comparison that says "these

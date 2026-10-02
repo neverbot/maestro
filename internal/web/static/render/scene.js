@@ -4,7 +4,9 @@
 // content of *every* view (spec §8.1) and a frame that could be built
 // without one is a frame that eventually is.
 
+import { countLabel } from "../rows.js";
 import { fillFor } from "../palette.js";
+import { t } from "../i18n.js";
 import { twinFor } from "./twin.js";
 
 // --- The banner vocabulary -------------------------------------------
@@ -126,7 +128,7 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_DROPPED,
       css: "var(--dropped)",
-      text: `This picture was drawn without ${count(dropped.length, "reference", "references")} this view names.`,
+      text: t(dropped.length === 1 ? "picture.dropped.one" : "picture.dropped.many", { count: dropped.length }),
       rows: dropped.map((ref) => ({
         code: text(ref && ref.code),
         pointer: text(ref && ref.pointer),
@@ -144,7 +146,7 @@ export function bannersFor(envelope, options = {}) {
       banners.push({
         code: BANNER_STALE,
         css: "var(--muted)",
-        text: `This view names ${count(stale.length, "thing", "things")} this game no longer has.`,
+        text: t(stale.length === 1 ? "picture.stale.one" : "picture.stale.many", { count: stale.length }),
         rows: stale,
       });
     }
@@ -168,9 +170,9 @@ export function bannersFor(envelope, options = {}) {
       code: BANNER_TRUNCATED_NODES,
       css: "var(--muted)",
       text:
-        "This picture hit its node cap and the answer had more nodes than it shows." +
+        t("picture.truncatedNodes") +
         (orphans > 0
-          ? ` ${count(orphans, "box is", "boxes are")} drawn at the top level because the container it names did not fit.`
+          ? t(orphans === 1 ? "picture.orphanBoxes.one" : "picture.orphanBoxes.many", { count: orphans })
           : ""),
       rows: [],
     });
@@ -179,7 +181,7 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_TRUNCATED_EDGES,
       css: "var(--muted)",
-      text: "This picture hit its edge cap and the answer had more edges than it shows.",
+      text: t("picture.truncatedEdges"),
       rows: [],
     });
   }
@@ -187,7 +189,7 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_TRUNCATED_DEPTH,
       css: "var(--muted)",
-      text: "A traversal was cut short at its depth bound; there is more graph beyond it.",
+      text: t("picture.truncatedDepth"),
       rows: [],
     });
   }
@@ -196,7 +198,7 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_PLACED,
       css: "var(--muted)",
-      text: `${count(placed, "new node was", "new nodes were")} placed automatically.`,
+      text: t(placed === 1 ? "picture.placed.one" : "picture.placed.many", { count: placed }),
       rows: [],
     });
   }
@@ -213,9 +215,7 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_SHELVED,
       css: "var(--muted)",
-      text:
-        `${count(shelved, "node has", "nodes have")} no coordinate and ` +
-        `${shelved === 1 ? "is" : "are"} on the shelf rather than on the map.`,
+      text: t(shelved === 1 ? "picture.shelved.one" : "picture.shelved.many", { count: shelved }),
       rows: [],
     });
   }
@@ -230,10 +230,10 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_OFF_AXIS,
       css: "var(--muted)",
-      text:
-        `${count(offAxisCount, "node has", "nodes have")} no value on this view's axis` +
-        (text(offAxis.field) === "" ? "" : ` (${text(offAxis.field)})`) +
-        `, and ${offAxisCount === 1 ? "is" : "are"} drawn before the axis begins.`,
+      text: t(offAxisCount === 1 ? "picture.offAxis.one" : "picture.offAxis.many", {
+        count: offAxisCount,
+        field: text(offAxis.field) === "" ? "" : ` (${text(offAxis.field)})`,
+      }),
       rows: [],
     });
   }
@@ -245,9 +245,7 @@ export function bannersFor(envelope, options = {}) {
       // Two sentences, because the second is the one a designer needs:
       // an image that vanished looks exactly like an arrangement that
       // vanished with it, and it did not.
-      text:
-        "This view's background image was removed. Every node keeps the " +
-        "coordinate it had.",
+      text: t("picture.backgroundMissing"),
       rows: [],
     });
   }
@@ -261,9 +259,7 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_AMBIGUOUS,
       css: "var(--muted)",
-      text:
-        `${count(ambiguous, "node", "nodes")} resolved a related attribute ambiguously — ` +
-        "more than one entity matched and the first by name was used.",
+      text: t(ambiguous === 1 ? "picture.ambiguous.one" : "picture.ambiguous.many", { count: ambiguous }),
       rows: [],
     });
   }
@@ -275,16 +271,14 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_CONTAINMENT_CYCLE,
       css: "var(--muted)",
-      text:
-        `${count(cycles.length, "containment cycle was", "containment cycles were")} found and ` +
-        "the nesting stops where it repeats; these things contain each other.",
+      text: t(cycles.length === 1 ? "picture.containmentCycle.one" : "picture.containmentCycle.many", { count: cycles.length }),
       rows: cycles.map((cycle) => ({
         code: BANNER_CONTAINMENT_CYCLE,
         // The two ends, as the labels the picture drew, so the band and
         // the boxes say the same words about the same entities.
         inner: text(cycle && cycle.inner),
         outer: text(cycle && cycle.outer),
-        message: `${text(cycle && cycle.outer)} contains ${text(cycle && cycle.inner)}, which contains it again`,
+        message: t("picture.containmentCycle.row", { outer: text(cycle && cycle.outer), inner: text(cycle && cycle.inner) }),
         css: "var(--muted)",
       })),
     });
@@ -298,15 +292,13 @@ export function bannersFor(envelope, options = {}) {
     banners.push({
       code: BANNER_INVERTED_SPAN,
       css: "var(--muted)",
-      text:
-        `${count(inverted.length, "span ends", "spans end")} before it starts; ` +
-        "the two values are drawn as they are and were not swapped.",
+      text: t(inverted.length === 1 ? "picture.invertedSpan.one" : "picture.invertedSpan.many", { count: inverted.length }),
       rows: inverted.map((span) => ({
         code: BANNER_INVERTED_SPAN,
         name: text(span && span.name),
         from: text(span && span.from),
         to: text(span && span.to),
-        message: `${text(span && span.name)} runs from ${text(span && span.from)} to ${text(span && span.to)}`,
+        message: t("picture.invertedSpan.row", { name: text(span && span.name), from: text(span && span.from), to: text(span && span.to) }),
         css: "var(--muted)",
       })),
     });
@@ -349,7 +341,7 @@ export function renamedFor(envelope) {
   return {
     count: rows.length,
     css: "var(--muted)",
-    text: `This view names ${count(rows.length, "thing", "things")} the game now spells differently.`,
+    text: t(rows.length === 1 ? "picture.renamed.one" : "picture.renamed.many", { count: rows.length }),
     rows,
   };
 }
@@ -456,23 +448,23 @@ export function footerFor(envelope, options = {}) {
   const maxDepth = countOf(stats.max_depth_reached);
   const durationMs = countOf(stats.duration_ms);
   const parts = [
-    `${count(nodes, "node", "nodes")}, ${count(edges, "edge", "edges")}`,
-    `depth ${maxDepth}`,
-    `query ${durationMs} ms`,
+    `${countLabel(nodes, t("unit.node"), t("unit.nodes"))}, ${countLabel(edges, t("unit.edge"), t("unit.edges"))}`,
+    t("picture.stats.depth", { depth: maxDepth }),
+    t("picture.stats.query", { ms: durationMs }),
   ];
-  if (layoutMs !== null) parts.push(`layout ${layoutMs} ms`);
+  if (layoutMs !== null) parts.push(t("picture.stats.layout", { ms: layoutMs }));
   if (outside !== null && outside > 0) {
     // "1 edge leads", not "1 edge lead": the verb agrees with the count
     // the same way the noun does. `count` writes the noun, so the verb
     // travels with it — a frame that says "1 edge lead outside this
     // picture" reads like a machine talking to itself, which is this
     // module's own argument for counting in words at all.
-    parts.push(`${count(outside, "edge leads", "edges lead")} outside this picture`);
+    parts.push(t(outside === 1 ? "picture.stats.outside.one" : "picture.stats.outside.many", { count: outside }));
   }
   if (against !== null && against > 0) {
     parts.push(
-      `${count(against, "edge runs", "edges run")} against the ranking` +
-        (cyclic ? "; this graph has a cycle" : ""),
+      t(against === 1 ? "picture.stats.against.one" : "picture.stats.against.many", { count: against }) +
+        (cyclic ? t("picture.stats.cyclic") : ""),
     );
   }
   return {
@@ -670,13 +662,6 @@ function text(value) {
 
 function countOf(value) {
   return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
-}
-
-// count writes a number beside the noun it counts, in the right number.
-// One node is not "1 nodes", and a frame that says so reads like a
-// machine talking to itself.
-function count(n, one, many) {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 // --- The scene: marks, layers, and the emitter's contract ------------

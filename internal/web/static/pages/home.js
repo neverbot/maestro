@@ -53,13 +53,10 @@ export const WRITES_DOCUMENTS = "writes.documents";
 // and two wordings of one state is one of them going stale.
 export const NO_TYPES_HEADING = t("content.empty.heading");
 export const NO_TYPES_SENTENCE = t("content.empty.sentence");
-  "and circuits in another. Yours has named none yet.";
 export const NO_RELATION_TYPES_HEADING = t("connections.empty.heading");
 export const NO_RELATION_TYPES_SENTENCE = t("connections.empty.sentence");
-  "needs another one first, a reward unlocks a class.";
 export const NO_PROSE_HEADING = t("writing.empty.heading");
 export const NO_PROSE_SENTENCE = t("writing.empty.sentence");
-  "character says. Every piece keeps its older versions.";
 
 // describeTotals is the one line under the game's name. An empty game
 // says so in words rather than showing three zeros, which reads as a
@@ -151,12 +148,12 @@ export async function home(opened) {
 
   if (opened.game === null) {
     if (opened.failure !== null) {
-      say(nameEl, "Could not load this game");
+      say(nameEl, t("home.unloadable"));
       say(summaryEl, opened.failure);
       return { ...opened, onEvent: null };
     }
-    say(nameEl, "Game not found");
-    say(summaryEl, "You may not have access to this game, or it no longer exists.");
+    say(nameEl, t("error.gameNotFound"));
+    say(summaryEl, t("error.noAccessToGame"));
     return { ...opened, onEvent: null };
   }
 
@@ -414,7 +411,6 @@ export function offerSettings(doc, slug, role) {
 
 export const CONNECT_HEADING = t("home.empty.heading");
 export const CONNECT_SENTENCE = t("home.empty.sentence");
-  "it in here. Your AI assistant writes it, and you read it, judge it and correct it.";
 export const CONNECT_LABEL = t("home.empty.key");
 export const CONNECT_STEPS = [
   t("home.empty.step1"),

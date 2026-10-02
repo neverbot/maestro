@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -166,4 +167,73 @@ func TestNoShellHardCodesAHeading(t *testing.T) {
 		}
 	}
 	assert.Must(t, checked > 20, "read %d headings out of the shells; the scan stopped matching", checked)
+}
+
+// moduleSources are the front end's own modules: the shells are guarded
+// above, and a vendored engine is not ours to translate.
+func moduleSources(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.Walk(filepath.Join("static"), func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".js") {
+			return err
+		}
+		if strings.Contains(path, string(filepath.Separator)+"vendor"+string(filepath.Separator)) {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// Comments argue; they are not read by anybody in a browser.
+		src := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(string(raw), "")
+		src = regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(src, "")
+		out[path] = src
+		return nil
+	})
+	assert.NoErr(t, err, "walk static")
+	assert.Must(t, len(out) > 20, "found %d modules; this guard is reading the wrong place", len(out))
+	return out
+}
+
+// **A count says its noun in the reader's language.** countLabel takes
+// both words from its caller, which is what makes "1 entity" and "2
+// entities" right in English and "1 elemento" right in Spanish — and
+// also what let twenty call sites pass English nouns into a Spanish
+// sentence. The nouns live in the catalogue under `unit.`.
+func TestNoModuleCountsInEnglish(t *testing.T) {
+	t.Parallel()
+	literal := regexp.MustCompile(`countLabel\([^,()]+,\s*"`)
+	var found []string
+	for path, src := range moduleSources(t) {
+		for _, m := range literal.FindAllString(src, -1) {
+			found = append(found, filepath.Base(path)+": "+strings.TrimSpace(m))
+		}
+	}
+	sort.Strings(found)
+	assert.Must(t, len(found) == 0, "a count names its noun in the markup's language: %s", strings.Join(found, "; "))
+}
+
+// **A module writes no sentence of its own.** Every word a reader meets
+// comes from a catalogue, so a page that assigns prose straight to an
+// element is a string one language has and the other does not. Short
+// values are admitted: a class name, an attribute value and a protocol
+// token are not prose.
+func TestNoModuleHardCodesASentence(t *testing.T) {
+	t.Parallel()
+	// textContent is how this front end puts words on a screen, and the
+	// four named keys are how it hands words to a shared component.
+	prose := regexp.MustCompile(`(?:textContent\s*=\s*|\b(?:heading|sentence|label|placeholder)\s*:\s*)"((?:[^"\\]|\\.)*)"`)
+	words := regexp.MustCompile(`[A-Za-z]{2,}\s+[A-Za-z]`)
+	var found []string
+	for path, src := range moduleSources(t) {
+		for _, m := range prose.FindAllStringSubmatch(src, -1) {
+			if !words.MatchString(m[1]) {
+				continue
+			}
+			found = append(found, filepath.Base(path)+": "+strconv.Quote(m[1]))
+		}
+	}
+	sort.Strings(found)
+	assert.Must(t, len(found) == 0, "a module says in English what the catalogue should say: %s", strings.Join(found, "; "))
 }

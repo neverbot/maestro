@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>View · Maestro</title>
+<title data-i18n="title.view"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -31,7 +31,7 @@
      looking at. It replaced this shell's back link: a trail says where you
      are as well as where you came from, in one component instead of four
      spellings across five screens. -->
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <!-- Everything on this page is built by pages/view.js: the frame owns
      every negative state (Task 4), the canvas owns the drawing and the
@@ -80,7 +80,7 @@
 <!-- The entity panel a node click opens, over the canvas rather than
      instead of it: losing an arrangement to read a field would make
      reading fields feel expensive. -->
-<aside id="entity-panel" class="side-panel" hidden aria-label="Entity"></aside>
+<aside id="entity-panel" class="side-panel" hidden data-i18n-attr="aria-label:view.entity"></aside>
 
 </main>
 

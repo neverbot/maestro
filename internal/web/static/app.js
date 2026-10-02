@@ -11,27 +11,24 @@
 // the moment the user loses access to that game or it is deleted, with no
 // natural place server-side to notice either has happened.
 import { countLabel, markTables, row } from "./rows.js";
+import { serverSays, t } from "./i18n.js";
 import { STATE_REFUSED, fillState, negativeState } from "./state.js";
 
 // The first thing a brand-new account sees, in the same shape as every
 // other negative state in the product. index.html leaves the hole; these
 // are the words.
-export const NO_GAMES_HEADING = "No games yet";
+export const NO_GAMES_HEADING = t("games.empty.heading");
 
 // **It described the data model to somebody who came to design a game.**
 // "A game is a world you are designing: its kinds of things, how they
 // connect, and the writing that describes them" is three nouns from the
 // metamodel and no verb a designer recognises. What they want to know,
 // standing on an empty screen, is what they will be doing here.
-export const NO_GAMES_SENTENCE =
-  "Name the game you are working on, and this becomes the place its design lives: every " +
-  "mission, place and character, what a player has to do before each one is available to " +
-  "them, and the lore that goes with it. You will be able to see it drawn, ask it what no " +
-  "player can reach, and hand the whole thing to your agents to fill in and keep straight.";
+export const NO_GAMES_SENTENCE = t("games.empty.sentence");
 
 // The refusal that replaces it when /api/games will not answer.
-export const GAMES_REFUSED_HEADING = "Could not list your games";
-export const TRY_AGAIN = "Try again";
+export const GAMES_REFUSED_HEADING = t("games.refused.heading");
+export const TRY_AGAIN = t("action.tryAgain");
 
 const LAST_GAME_KEY = "maestro:lastGame";
 
@@ -89,7 +86,7 @@ function safeReturnPath() {
 // writeError and its call sites) — this file always prefers that text
 // over inventing its own, so a wording change on the server is never
 // duplicated, and never drifts, here.
-export const fallbackMessage = "Could not reach the server. Please try again.";
+export const fallbackMessage = t("error.unreachable");
 
 // parseErrorBody reads {"error": code, "message": text} defensively: a
 // response that isn't JSON, or is JSON but not that shape, must not throw
@@ -98,7 +95,7 @@ async function parseErrorBody(response) {
   try {
     const body = await response.json();
     if (body && typeof body.message === "string" && body.message) {
-      return body.message;
+      return serverSays(body.message);
     }
   } catch {
     // Not JSON, or empty body — fall through to the generic message.
@@ -207,7 +204,7 @@ function gameSwitcher(games, current, destinations, destination) {
   all.className = "game-switcher-all";
   const allLink = document.createElement("a");
   allLink.href = GAMES_PATH;
-  allLink.textContent = "All games";
+  allLink.textContent = t("games.all");
   all.append(allLink);
   list.append(all);
 
@@ -295,8 +292,8 @@ export function renderHeader(options = {}) {
 // else: the one screen where a person could check which account they
 // were using was the one screen that never named it, on a product whose
 // first design principle is "always say where you are".
-export const SIGN_OUT = "Sign out";
-export const SIGN_OUT_ARMED = "Sign out — click again";
+export const SIGN_OUT = t("frame.signOut");
+export const SIGN_OUT_ARMED = t("frame.signOut.armed");
 
 export function personMenu(me) {
   const wrap = document.createElement("details");
@@ -317,7 +314,7 @@ export function personMenu(me) {
 
   const account = document.createElement("a");
   account.href = "/account";
-  account.textContent = "Your account";
+  account.textContent = t("account.title");
   menu.append(account);
 
   // Admin-only, and absent rather than disabled: a control that refuses
@@ -326,7 +323,7 @@ export function personMenu(me) {
   if (me && me.is_admin === true) {
     const admin = document.createElement("a");
     admin.href = "/admin";
-    admin.textContent = "Administration";
+    admin.textContent = t("admin.title");
     menu.append(admin);
   }
 
@@ -433,13 +430,13 @@ if (loginForm || inviteForm) {
     loginView.hidden = true;
     inviteView.hidden = false;
     if (inviteCopy) inviteCopy.textContent = copy;
-    document.title = "Create your account · Maestro";
+    document.title = t("title.register");
   }
   function showLoginView() {
     if (!loginView || !inviteView) return;
     loginView.hidden = false;
     inviteView.hidden = true;
-    document.title = "Sign in · Maestro";
+    document.title = t("title.login");
   }
 
   if (backToLogin) {
@@ -447,12 +444,12 @@ if (loginForm || inviteForm) {
   }
   if (registerToggle) {
     registerToggle.addEventListener("click", () => {
-      showInviteView("Create an account to get started.");
+      showInviteView(t("login.register.invitation"));
     });
   }
 
   if (inviteToken) {
-    showInviteView("You have been invited to Maestro. Create your account to continue.");
+    showInviteView(t("login.invited"));
   } else {
     // No invite token: tell the visitor what this instance actually
     // admits, driven by GET /api/config (a single-field, unauthenticated
@@ -466,13 +463,13 @@ if (loginForm || inviteForm) {
         if (!config) return;
         if (config.registration_mode === "domain_open") {
           if (modeNotice) {
-            modeNotice.textContent = "This instance is open to anyone with an allowed email address.";
+            modeNotice.textContent = t("login.mode.domainOpen");
             modeNotice.hidden = false;
           }
           if (registerToggleWrap) registerToggleWrap.hidden = false;
         } else if (config.registration_mode === "invite_only") {
           if (modeNotice) {
-            modeNotice.textContent = "This instance only admits invited users.";
+            modeNotice.textContent = t("login.mode.inviteOnly");
             modeNotice.hidden = false;
           }
         }
@@ -491,7 +488,7 @@ if (loginForm) {
     event.preventDefault();
     errorEl.textContent = "";
     const data = new FormData(loginForm);
-    setFormBusy(loginForm, true, "Signing in…");
+    setFormBusy(loginForm, true, t("login.signingIn"));
     const result = await postJSON("/api/auth/login", {
       email: data.get("email"),
       password: data.get("password"),
@@ -551,7 +548,7 @@ if (inviteForm) {
     // (the self-service "Create an account" path) is exactly what tells
     // POST /api/auth/register to take its domain_open branch instead of
     // trying to redeem an invite (internal/web/api_auth.go).
-    setFormBusy(inviteForm, true, "Creating your account…");
+    setFormBusy(inviteForm, true, t("login.creatingAccount"));
     const result = await postJSON("/api/auth/register", {
       email: data.get("email"),
       display_name: data.get("display_name"),
@@ -721,7 +718,7 @@ if (gamesList) {
     } else {
       // The count belongs in the head, beside the title, which is where
       // the page frame puts it on every other screen.
-      if (statusEl) statusEl.textContent = countLabel(games.length, "game", "games");
+      if (statusEl) statusEl.textContent = countLabel(games.length, t("unit.game"), t("unit.games"));
       gamesList.hidden = false;
       if (newGame) newGame.hidden = false;
       for (const game of games) {
@@ -746,7 +743,7 @@ if (createGameForm) {
     event.preventDefault();
     errorEl.textContent = "";
     const data = new FormData(createGameForm);
-    setFormBusy(createGameForm, true, "Creating…");
+    setFormBusy(createGameForm, true, t("action.creating"));
     // **No address goes up.** The server derives one from the name, so
     // that a game created here and a game created over REST get the same
     // rule rather than two spellings of it, and so a second game called

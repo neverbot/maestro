@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entity · Maestro</title>
+<title data-i18n="title.entity"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -31,7 +31,7 @@
      looking at. It replaced this shell's back link: a trail says where you
      are as well as where you came from, in one component instead of four
      spellings across five screens. -->
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
 <h1 id="entity-name" data-i18n="frame.loading"></h1>
@@ -48,12 +48,12 @@
      is the design: never a retry, never a silent merge.
      .superpowers/specs/2026-09-11-writing-in-the-interface-design.md -->
 <form id="rename" hidden>
-  <label for="rename-name">Name</label>
+  <label for="rename-name" data-i18n="form.name"></label>
   <input id="rename-name" type="text" autocomplete="off" maxlength="200" required>
   <p class="error" id="rename-error" role="alert" aria-live="assertive"></p>
   <div class="rename-actions">
-    <button type="submit">Save the name</button>
-    <button type="button" class="ghost" id="rename-cancel">Cancel</button>
+    <button type="submit" data-i18n="entity.saveName"></button>
+    <button type="button" class="ghost" id="rename-cancel" data-i18n="ui.cancel"></button>
   </div>
 </form>
 
@@ -61,14 +61,14 @@
      two actions with no default: the product has no opinion about whose
      text is better, and a pre-selected answer would be it having one. -->
 <div class="secret conflict" id="rename-conflict" role="status" aria-live="polite" hidden>
-  <b>Somebody changed this while you were editing</b>
+  <b data-i18n="entity.conflict"></b>
   <dl class="facts">
-    <dt>Theirs</dt><dd id="conflict-theirs"></dd>
-    <dt>Yours</dt><dd id="conflict-yours"></dd>
+    <dt data-i18n="entity.theirs"></dt><dd id="conflict-theirs"></dd>
+    <dt data-i18n="entity.yours"></dt><dd id="conflict-yours"></dd>
   </dl>
   <div class="rename-actions">
-    <button type="button" class="ghost" id="conflict-keep">Keep mine</button>
-    <button type="button" class="ghost" id="conflict-take">Take theirs</button>
+    <button type="button" class="ghost" id="conflict-keep" data-i18n="entity.keepMine"></button>
+    <button type="button" class="ghost" id="conflict-take" data-i18n="entity.takeTheirs"></button>
   </div>
 </div>
 <p class="mono" id="entity-address" aria-live="polite"></p>

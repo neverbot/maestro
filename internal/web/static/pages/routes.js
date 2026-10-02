@@ -14,20 +14,19 @@ import {
   whoWrites,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
+import { t } from "../i18n.js";
 
-export const NOTE_ROUTES =
-  "A route is a claim that one thing can be reached from another, saved so it can be checked " +
-  "again when the design moves.";
+export const NOTE_ROUTES = t("routes.note");
 
 // The empty state's heading, and what its sentence is about.
-export const NO_ROUTES_HEADING = "No routes yet";
-export const SAVES_ROUTES = "saves them";
+export const NO_ROUTES_HEADING = t("routes.none.heading");
+export const SAVES_ROUTES = t("routes.saves");
 
 // The three, in the reader's words, keyed by the engine's own spellings.
 export const STATUS_WORDS = {
-  never_checked: "Never checked",
-  stale: "Checked against an older design",
-  checked: "Checked",
+  never_checked: t("routes.status.never"),
+  stale: t("routes.status.stale"),
+  checked: t("routes.status.checked"),
 };
 
 export const STATUS_CLASSES = {
@@ -54,9 +53,9 @@ export async function routesPage(opened) {
   setBreadcrumb(doc, [
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_ANALYSIS, href: analysisURL(opened.slug) },
-    { label: "Routes" },
+    { label: t("checks.routes") },
   ]);
-  doc.title = opened.game.name + " · Routes · Maestro";
+  doc.title = opened.game.name + " · " + t("checks.routes") + " · Maestro";
   say(doc.getElementById("routes-note"), NOTE_ROUTES);
 
   const summary = await opened.client.summary();
@@ -101,9 +100,9 @@ export async function routesPage(opened) {
     // a pager does not stack three of them.
     if (shown === 0 && items.length > 0) {
       listEl.append(headerRow(doc, {
-        label: "Route",
-        key: "key",
-        cells: [{ text: "Length" }, { text: "Last check" }],
+        label: t("routes.route"),
+        key: t("column.key"),
+        cells: [{ text: t("routes.length") }, { text: t("routes.lastCheck") }],
         count: "",
       }));
     }
@@ -114,7 +113,7 @@ export async function routesPage(opened) {
           label: route.name || route.key,
           key: route.key,
           cells: [
-            { text: countLabel(route.step_count ?? 0, "step", "steps") },
+            { text: countLabel(route.step_count ?? 0, t("unit.step"), t("unit.steps")) },
             { text: status.text, status: status.status },
           ],
           count: "",

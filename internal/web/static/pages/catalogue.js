@@ -21,6 +21,7 @@ import {
   typesURL,
 } from "./page.js";
 import { nextCursorOf } from "../rows.js";
+import { t } from "../i18n.js";
 import { headerRow, row } from "../rows.js";
 import { formatValue } from "./entity.js";
 import { goToLogin } from "../app.js";
@@ -28,10 +29,7 @@ import { goToLogin } from "../app.js";
 // The line this page carries about itself. It is a constant so the
 // harness asks for it by identity and never by matching prose, and so
 // there is exactly one place it can be softened.
-export const CATALOGUE_NOTE =
-  "This is the catalogue of one declared type: every entity of it, in the order " +
-  "you choose from the column headings. " +
-  "It is not a view — a view is a saved query with a renderer, and lives under Views.";
+export const CATALOGUE_NOTE = t("catalogue.note");
 
 // **The empty state here names no action, and that is the role rule
 // rather than an omission.** The home's two empty states word their
@@ -40,8 +38,8 @@ export const CATALOGUE_NOTE =
 // entity the server will refuse is worse than telling them nothing. A
 // second call for one sentence is the wrong trade, so the sentence says
 // what is true for everybody and stops.
-export const NOTHING_OF_THIS_TYPE_HEADING = "Nothing of this type yet";
-export const NOTHING_OF_THIS_TYPE_SENTENCE = "An agent writes them; nothing on this page does.";
+export const NOTHING_OF_THIS_TYPE_HEADING = t("catalogue.none.heading");
+export const NOTHING_OF_THIS_TYPE_SENTENCE = t("catalogue.none.sentence");
 
 // **The pages get bigger as a reader keeps going.** A thousand rows at
 // fifty a press is eighteen presses, each after scrolling to a button
@@ -69,12 +67,13 @@ export function hiddenColumnsSentence(declared, shown, typeLabel) {
   // "a, b and c" rather than "a, b, c": this is a sentence a person
   // reads, not a list a machine parses.
   const last = names[names.length - 1];
-  const list = names.length === 1 ? last : names.slice(0, -1).join(", ") + " and " + last;
-  return (
-    "Showing " + shown + " of " + countLabel(declared.length, "declared field", "declared fields") +
-    ". " + list + (names.length === 1 ? " is" : " are") +
-    " on each " + String(typeLabel || "").toLowerCase() + "'s own page."
-  );
+  const list = names.length === 1 ? last : names.slice(0, -1).join(", ") + t("list.and") + last;
+  return t(names.length === 1 ? "catalogue.hiddenColumns.one" : "catalogue.hiddenColumns.many", {
+    shown,
+    all: countLabel(declared.length, t("unit.declaredField"), t("unit.declaredFields")),
+    list,
+    type: String(typeLabel || "").toLowerCase(),
+  });
 }
 
 export async function cataloguePage(opened) {
@@ -92,8 +91,8 @@ export async function cataloguePage(opened) {
   const moreEl = doc.getElementById("entities-more");
 
   if (opened.game === null) {
-    say(nameEl, "Game not found");
-    say(metaEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(nameEl, t("error.gameNotFound"));
+    say(metaEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
   // The type's own label is not known until its fetch lands, so the trail
@@ -110,7 +109,7 @@ export async function cataloguePage(opened) {
   // how many segments precede a key.
   const typeKey = segmentsOf(opened.location.pathname)[1] || "";
   if (!typeKey) {
-    say(nameEl, "No type asked for");
+    say(nameEl, t("catalogue.noneAsked"));
     return opened;
   }
 
@@ -131,14 +130,14 @@ export async function cataloguePage(opened) {
     say(noteEl, "");
     const tools = doc.querySelector(".tools");
     if (tools) tools.hidden = true;
-    say(nameEl, "This type is not in this game");
+    say(nameEl, t("catalogue.notInGame"));
     // The refusal in the one shape, with the way back that the address
     // bar cannot offer: the catalogue this key was supposed to be in.
     const refusal = negativeState(doc, {
       kind: STATE_REFUSED,
-      heading: "Nothing here is called “" + typeKey + "”",
+      heading: t("catalogue.noSuchType", { key: typeKey }),
       sentence: type.error.message,
-      action: { href: typesURL(opened.slug), label: "This game's catalogue" },
+      action: { href: typesURL(opened.slug), label: t("catalogue.thisGames") },
     });
     const host = doc.getElementById("entities-empty");
     if (host) {
@@ -214,7 +213,7 @@ export async function cataloguePage(opened) {
         // spelling, and a field keyed `min_level` with a label "Minimum
         // level" was reading "no min_level" on the screen whose whole job
         // is the game's vocabulary.
-        return { text: "no " + name, absent: true };
+        return { text: t("value.absent", { field: name }), absent: true };
       }
       if (value === "") return { text: "empty", absent: true };
       // **The same words the entity page uses**, which is the whole
@@ -234,7 +233,7 @@ export async function cataloguePage(opened) {
     listEl.append(
       headerRow(doc, {
         label: type.result.label || type.result.key,
-        key: "key",
+        key: t("column.key"),
         cells: columns.map((field) => ({
           text: field.label || field.key,
           numeric: field.type === "number",
@@ -297,9 +296,9 @@ export async function cataloguePage(opened) {
   // list says which set it is counting.
   function describeFilters() {
     const parts = [];
-    if (prefix !== "") parts.push("starting with \u201c" + prefix + "\u201d");
-    if (onlyInvalid) parts.push("no longer fitting this type");
-    return parts.join(" and ");
+    if (prefix !== "") parts.push(t("catalogue.filter.startingWith", { prefix }));
+    if (onlyInvalid) parts.push(t("catalogue.filter.notFitting"));
+    return parts.join(t("list.and"));
   }
 
   // The bold line over an empty filtered listing. It is built per case
@@ -308,10 +307,10 @@ export async function cataloguePage(opened) {
   // after a word ("Nothing that no longer fit this type").
   function nothingFound() {
     if (prefix !== "" && onlyInvalid) {
-      return "Nothing starting with \u201c" + prefix + "\u201d has stopped fitting";
+      return t("catalogue.none.prefixAndInvalid", { prefix });
     }
-    if (prefix !== "") return "No name starts with \u201c" + prefix + "\u201d";
-    return "Everything here still fits its type";
+    if (prefix !== "") return t("catalogue.none.prefix", { prefix });
+    return t("catalogue.none.allFit");
   }
 
   // Both filters restart the listing: a cursor belongs to the filter it
@@ -330,7 +329,7 @@ export async function cataloguePage(opened) {
   // search has narrowed it — what is being shown instead.
   function sayScope() {
     const parts = [type.result.key];
-    if (total !== null) parts.push(countLabel(total, "entity", "entities"));
+    if (total !== null) parts.push(countLabel(total, t("unit.entity"), t("unit.entities")));
     say(metaEl, parts.join(" \u00b7 "));
     if (!scopeEl) return;
     if (query !== "") {
@@ -346,9 +345,8 @@ export async function cataloguePage(opened) {
       // and whether the set goes on.
       say(
         scopeEl,
-        countLabel(rendered, "match", "matches") +
-          " for \u201c" + query + "\u201d" +
-          (cursor === null ? "" : ", so far"),
+        t("catalogue.matchesFor", { matches: countLabel(rendered, t("unit.match"), t("unit.matches")), query }) +
+          (cursor === null ? t("list.soFar") : ""),
       );
     } else if (filtering()) {
       // **A filtered listing is not the type.** "Showing 12 of 1000"
@@ -357,10 +355,10 @@ export async function cataloguePage(opened) {
       // has to answer the one they asked. The denominator is gone
       // because the server does not count a filtered listing, and a
       // number nobody can check is worse than none.
-      say(scopeEl, countLabel(rendered, "entity", "entities") + " " + describeFilters()
-        + (cursor === null ? "" : ", so far"));
+      say(scopeEl, countLabel(rendered, t("unit.entity"), t("unit.entities")) + " " + describeFilters()
+        + (cursor === null ? t("list.soFar") : ""));
     } else if (total !== null && rendered < total) {
-      say(scopeEl, "Showing " + rendered + " of " + total);
+      say(scopeEl, t("catalogue.showingOf", { shown: rendered, all: total }));
     } else {
       say(scopeEl, "");
     }
@@ -415,8 +413,8 @@ export async function cataloguePage(opened) {
       sayMiss(
         nothingFound(),
         total === null
-          ? "This type has entities; none of them answers that."
-          : countLabel(total, "entity", "entities") + " of this type, and none of them answers that.",
+          ? t("catalogue.miss.filter.unknownTotal")
+          : t("catalogue.miss.filter", { all: countLabel(total, t("unit.entity"), t("unit.entities")) }),
       );
     } else {
       if (missEl && query === "") missEl.hidden = true;
@@ -434,7 +432,7 @@ export async function cataloguePage(opened) {
       moreEl.hidden = cursor === null || rendered === 0;
       // It says how many it will fetch. "Show more" makes a reader guess
       // whether pressing it costs them a second or a minute.
-      moreEl.textContent = "Show " + nextPageSize(rendered) + " more";
+      moreEl.textContent = t("catalogue.showMore", { count: nextPageSize(rendered) });
       moreEl.disabled = false;
     }
   }
@@ -509,10 +507,10 @@ export async function cataloguePage(opened) {
       missEl.hidden = !missed;
       if (missed) {
         sayMiss(
-          "No match for \u201c" + query + "\u201d",
+          t("catalogue.miss.search", { query }),
           total === null
-            ? "Nothing of this type matches that name or key."
-            : countLabel(total, "entity", "entities") + " of this type, and none of them matches that name or key.",
+            ? t("catalogue.miss.search.unknownTotal")
+            : t("catalogue.miss.search.counted", { all: countLabel(total, t("unit.entity"), t("unit.entities")) }),
         );
       }
     }

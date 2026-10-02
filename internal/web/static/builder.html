@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>New overview · Maestro</title>
+<title data-i18n="title.builder"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -19,7 +19,7 @@
 </noscript>
 
 <main class="page">
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
   <h1 data-i18n="overviews.new"></h1>
@@ -49,14 +49,13 @@
 
 <h2 data-i18n="builder.savedAs"></h2>
 <form id="builder-save">
-  <label for="builder-name">Name</label>
-  <input id="builder-name" type="text" autocomplete="off" placeholder="Mage quests 20-30">
-  <label for="builder-key">Address</label>
+  <label for="builder-name" data-i18n="form.name"></label>
+  <input id="builder-name" type="text" autocomplete="off" data-i18n-attr="placeholder:builder.placeholder.name">
+  <label for="builder-key" data-i18n="form.address"></label>
   <input id="builder-key" type="text" autocomplete="off" pattern="[a-z0-9]+(-[a-z0-9]+)*"
-         placeholder="mage-quests">
-  <p class="muted field-note">Lowercase letters, digits and hyphens. It is what an agent and the
-    address bar call this view.</p>
-  <button type="submit" id="builder-save-button">Save this view</button>
+         data-i18n-attr="placeholder:builder.placeholder.slug">
+  <p class="muted field-note" data-i18n="builder.address.about"></p>
+  <button type="submit" id="builder-save-button" data-i18n="builder.save"></button>
   <p class="error" id="builder-save-error" role="alert" aria-live="assertive"></p>
 </form>
 

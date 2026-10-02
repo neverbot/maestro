@@ -13,15 +13,15 @@ import {
   typesURL,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
+import { t } from "../i18n.js";
 
 // --- The words -------------------------------------------------------
 
-export const NOTE_ON_DEMAND =
-  "The three checks below walk the game when you ask them to. Nothing below has been checked yet.";
-export const NOTE_CHECKED = "The three checks below walk the game when you ask them to.";
+export const NOTE_ON_DEMAND = t("checks.note.onDemand");
+export const NOTE_CHECKED = t("checks.note.checked");
 
-export const CYCLES_CLEAN = "Nothing depends on itself.";
-export const CONTAINMENT_CLEAN = "Nothing contains itself.";
+export const CYCLES_CLEAN = t("checks.cycles.clean");
+export const CONTAINMENT_CLEAN = t("checks.containment.clean");
 
 // **Both halves, always.** The verdict was built by pushing a sentence
 // for each half that came back *clean*, so the one report that can find
@@ -35,27 +35,26 @@ export function cyclesVerdict(loops, contains) {
   // The verb agrees with the count as well as the noun: "1 thing contain
   // themselves" is the sentence `countLabel` alone produces, and this
   // screen's whole claim is that it reads like a colleague's report.
-  const found = (count, one, many) =>
-    count === 1 ? "1 thing " + one + "." : count + " things " + many + ".";
+  const found = (count, key) => t(count === 1 ? key + ".one" : key + ".many", { count });
   return [
-    loops === 0 ? CYCLES_CLEAN : found(loops, "depends on itself", "depend on themselves"),
-    contains === 0 ? CONTAINMENT_CLEAN : found(contains, "contains itself", "contain themselves"),
+    loops === 0 ? CYCLES_CLEAN : found(loops, "checks.cycles.found"),
+    contains === 0 ? CONTAINMENT_CLEAN : found(contains, "checks.containment.found"),
   ].join(" ");
 }
-export const UNREACHABLE_CLEAN = "Everything can be reached.";
+export const UNREACHABLE_CLEAN = t("checks.unreachable.clean");
 
-export const HEADING_PREREQUISITE = "Prerequisite loops";
-export const HEADING_CONTAINMENT = "Containment loops";
+export const HEADING_PREREQUISITE = t("checks.heading.prerequisite");
+export const HEADING_CONTAINMENT = t("checks.heading.containment");
 
 // The reasons, in the reader's words. The engine's own spellings are
 // isolated_from_start, no_path, container_unreachable and depth_limited,
 // and not one of them should reach a screen whose job is the game's
 // vocabulary.
 export const REASONS = {
-  isolated_from_start: "Nothing leads to it",
-  no_path: "Every way in is itself unreachable",
-  container_unreachable: "The place it is in cannot be reached",
-  depth_limited: "Further away than this run looked",
+  isolated_from_start: t("checks.reason.isolated"),
+  no_path: t("checks.reason.noPath"),
+  container_unreachable: t("checks.reason.container"),
+  depth_limited: t("checks.reason.depth"),
 };
 
 // depth_limited is a fact about the run and not about the game, and
@@ -69,51 +68,42 @@ export const REASON_DEPTH = "depth_limited";
 // screen first shipped: the server answered
 // `mode: is "both"; the three are "isolated", "sink", "source"`, which is
 // a refusal doing the job a picker should have done.
-export function verb(n, singular, plural) {
-  return n === 1 ? singular : plural;
-}
-
 export const ORPHAN_MODES = [
   {
     mode: "isolated",
-    label: "Connected to nothing",
-    clean: "Everything is connected to something.",
-    found: (n) => countLabel(n, "entity", "entities") + verb(n, " is", " are") + " connected to nothing.",
+    label: t("checks.orphans.isolated.label"),
+    clean: t("checks.orphans.isolated.clean"),
+    found: (n) => t(n === 1 ? "checks.orphans.isolated.one" : "checks.orphans.isolated.many", { count: n }),
   },
   {
     mode: "sink",
-    label: "Nothing leads out of it",
-    clean: "Everything leads somewhere.",
-    found: (n) => countLabel(n, "entity", "entities") + verb(n, " leads", " lead") + " nowhere.",
+    label: t("checks.orphans.sink.label"),
+    clean: t("checks.orphans.sink.clean"),
+    found: (n) => t(n === 1 ? "checks.orphans.sink.one" : "checks.orphans.sink.many", { count: n }),
   },
   {
     mode: "source",
-    label: "Nothing leads into it",
-    clean: "Everything has a way in.",
-    found: (n) => countLabel(n, "entity", "entities")
-      + verb(n, " has nothing leading to it.", " have nothing leading to them."),
+    label: t("checks.orphans.source.label"),
+    clean: t("checks.orphans.source.clean"),
+    found: (n) => t(n === 1 ? "checks.orphans.source.one" : "checks.orphans.source.many", { count: n }),
   },
 ];
 
 // The page head's own control, and the two words it wears while it
 // works. Named because the harness asks for them by identity rather than
 // by matching prose.
-export const CHECK_EVERYTHING = "Check everything";
-export const CHECKING_EVERYTHING = "Checking…";
+export const CHECK_EVERYTHING = t("checks.checkEverything");
+export const CHECKING_EVERYTHING = t("checks.checking");
 
-export const TRUNCATED_HEAD = "This answer is not complete";
-export const TRUNCATED_RESULTS = "The run stopped at its result limit, so there may be more than these.";
-export const TRUNCATED_DEPTH =
-  "The walk stopped at its depth bound, so something further away may exist and this run did not look.";
+export const TRUNCATED_HEAD = t("checks.truncated.head");
+export const TRUNCATED_RESULTS = t("checks.truncated.results");
+export const TRUNCATED_DEPTH = t("checks.truncated.depth");
 
-export const UNDECLARED_HEAD = "This game has not said what its connections do";
-export const UNDECLARED_BODY =
-  "An analysis walks edges by what they mean, not by what they are called. Until a relation type " +
-  "declares that, there is nothing to follow — and an engine with nothing to follow would answer " +
-  "that nothing is wrong, which is the one answer it must never give.";
+export const UNDECLARED_HEAD = t("checks.undeclared.head");
+export const UNDECLARED_BODY = t("checks.undeclared.body");
 
-export const RUN_LABEL = "Check";
-export const RUNNING_LABEL = "Checking…";
+export const RUN_LABEL = t("checks.run");
+export const RUNNING_LABEL = t("checks.running");
 
 // routesVerdict is what the Routes section says about a game, in one
 // sentence: how many claims there are, and how many of them are about a
@@ -123,13 +113,14 @@ export function routesVerdict(rows) {
   if (routes.length === 0) return ROUTES_NONE;
   const stale = routes.filter((route) => route.status === "stale").length;
   const unchecked = routes.filter((route) => route.status === "unchecked").length;
-  const parts = [countLabel(routes.length, "route", "routes") + verb(routes.length, " is", " are") + " written"];
-  if (stale > 0) parts.push(stale + verb(stale, " is", " are") + " about a game that has since moved");
-  if (unchecked > 0) parts.push(unchecked + verb(unchecked, " has", " have") + " never been checked");
+  const one = (count, key) => t(count === 1 ? key + ".one" : key + ".many", { count });
+  const parts = [one(routes.length, "checks.routes.written")];
+  if (stale > 0) parts.push(one(stale, "checks.routes.stale"));
+  if (unchecked > 0) parts.push(one(unchecked, "checks.routes.unchecked"));
   return parts.join("; ") + ".";
 }
 
-export const ROUTES_NONE = "No routes are written yet. An agent writes one; nothing on this page does.";
+export const ROUTES_NONE = t("checks.routes.none");
 
 // paintRoutes fills the Routes section from the listing the server
 // already has.
@@ -175,14 +166,14 @@ export function walkedLine(result) {
     // neighbours is worse than no count, on the one line whose whole job
     // is to be checkable. The noun is the engine's own shape: a seed row,
     // which is what `seeds.total` is called two lines below.
-    parts.push("started from " + countLabel(result.seed_total, "starting point", "starting points"));
+    parts.push(t("checks.run.startedFrom", { seeds: countLabel(result.seed_total, t("unit.startingPoint"), t("unit.startingPoints")) }));
   }
   const seeds = result.seeds && typeof result.seeds === "object" ? result.seeds : null;
   if (seeds && Number.isFinite(seeds.total)) {
-    parts.push("started from " + countLabel(seeds.total, "starting point", "starting points"));
+    parts.push(t("checks.run.startedFrom", { seeds: countLabel(seeds.total, t("unit.startingPoint"), t("unit.startingPoints")) }));
   }
   if (Number.isFinite(result.considered_total)) {
-    parts.push("considered " + countLabel(result.considered_total, "entity", "entities"));
+    parts.push(t("checks.run.considered", { entities: countLabel(result.considered_total, t("unit.entity"), t("unit.entities")) }));
   }
   if (Number.isFinite(result.reachable_total)) {
     const total = Number.isFinite(result.unreachable_total)
@@ -190,18 +181,18 @@ export function walkedLine(result) {
       : null;
     parts.push(
       total === null
-        ? "reached " + countLabel(result.reachable_total, "entity", "entities")
-        : "reached " + result.reachable_total + " of " + countLabel(total, "entity", "entities"),
+        ? t("checks.run.reached", { entities: countLabel(result.reachable_total, t("unit.entity"), t("unit.entities")) })
+        : t("checks.run.reachedOf", { reached: result.reachable_total, all: countLabel(total, t("unit.entity"), t("unit.entities")) }),
     );
   }
   if (Number.isFinite(result.edges_walked)) {
-    parts.push("followed " + countLabel(result.edges_walked, "edge", "edges"));
+    parts.push(t("checks.run.followed", { edges: countLabel(result.edges_walked, t("unit.edge"), t("unit.edges")) }));
   }
   if (Number.isFinite(result.invalid_edges_followed) && result.invalid_edges_followed > 0) {
-    parts.push(countLabel(result.invalid_edges_followed, "of them invalid", "of them invalid"));
+    parts.push(t("checks.run.invalid", { count: result.invalid_edges_followed }));
   }
   if (parts.length === 0) return "";
-  return "This run " + parts.join(", ") + ".";
+  return t("checks.run.sentence", { what: parts.join(", ") });
 }
 
 // perTypeLine is where the unreachable answer stops being one number.
@@ -211,7 +202,7 @@ export function perTypeLine(result) {
     .filter((row) => row && Number.isFinite(row.unreachable) && row.unreachable > 0)
     .map((row) => String(row.entity_type ?? "") + ": " + row.unreachable);
   if (hit.length === 0) return "";
-  return "Out of reach by type — " + hit.join(", ") + ".";
+  return t("checks.perType", { list: hit.join(", ") });
 }
 
 // gateLine is the other half of the negative half: which relation types
@@ -233,13 +224,13 @@ export function gateLine(result) {
     // mechanism a lie in the one place it was meant to be visible: every
     // type read as declared.
     const how = entry.source === "derived_from_role"
-      ? " (from its role)"
+      ? t("checks.gate.fromRole")
       : entry.source === "caller_supplied"
-        ? " (because you asked for it)"
+        ? t("checks.gate.youAsked")
         : "";
     return traits === "" ? String(entry.key ?? "") : String(entry.key ?? "") + ": " + traits + how;
   });
-  return "It followed " + named.join("; ") + ".";
+  return t("checks.gate.followed", { list: named.join("; ") });
 }
 
 // cycleRow spells the loop in order: the names are the game's own words
@@ -284,7 +275,7 @@ function cycleList(doc, slug, heading, cycles) {
   wrap.append(head);
   const count = doc.createElement("p");
   count.className = "muted";
-  count.textContent = countLabel(cycles.length, "loop", "loops");
+  count.textContent = countLabel(cycles.length, t("unit.loop"), t("unit.loops"));
   wrap.append(count);
   const list = doc.createElement("ul");
   list.className = "cycles";
@@ -313,7 +304,7 @@ function unreachableSection(doc, slug, reason, findings) {
   wrap.append(head);
   const list = doc.createElement("ul");
   list.className = "catalogue wide";
-  list.append(headerRow(doc, { label: "Entity", key: "key", cells: [{ text: "Type" }, { text: "Would let it through" }] }));
+  list.append(headerRow(doc, { label: t("checks.column.entity"), key: t("column.key"), cells: [{ text: t("checks.column.type") }, { text: t("checks.column.wouldLetThrough") }] }));
   for (const finding of findings) {
     // The blockers are the only thing on this screen that is not already
     // on another one: they are what would have let this entity through.
@@ -325,7 +316,7 @@ function unreachableSection(doc, slug, reason, findings) {
         cells: [
           { text: finding.entity_type ?? "" },
           blockers.length === 0
-            ? { text: "no way in", absent: true }
+            ? { text: t("checks.noWayIn"), absent: true }
             : { text: blockers.map((b) => b.key ?? "").join(", ") },
         ],
         count: "",
@@ -348,8 +339,7 @@ export function adviceForDesigner(advice) {
   const quoted = String(advice ?? "").match(/"[^"]+"/g) || [];
   const words = [...new Set(quoted.map((term) => term.slice(1, -1)).filter((term) => term !== ""))];
   if (words.length === 0) return "";
-  return "A relation type says what it means to this analysis by declaring what it does — " +
-    words.join(", ") + " — and nothing on this page declares one. An agent does, over MCP.";
+  return t("checks.advice", { words: words.join(", ") });
 }
 
 // One finding, as a row. Lifted out of the painter so the pager can
@@ -400,7 +390,7 @@ export function showUndeclared(doc, slug, error) {
   const types = Array.isArray(details.relation_types) ? details.relation_types : [];
   list.replaceChildren();
   if (types.length > 0) {
-    list.append(headerRow(doc, { label: "Relation type", key: "", cells: [{ text: "Role" }, { text: "Declares" }] }));
+    list.append(headerRow(doc, { label: t("checks.column.relationType"), key: "", cells: [{ text: t("checks.column.role") }, { text: t("checks.column.declares") }] }));
   }
   for (const type of types) {
     const traits = Array.isArray(type.analysis_traits) ? type.analysis_traits : [];
@@ -409,8 +399,8 @@ export function showUndeclared(doc, slug, error) {
         label: type.key ?? "",
         key: "",
         cells: [
-          type.semantic_role ? { text: type.semantic_role } : { text: "no role", absent: true },
-          traits.length > 0 ? { text: traits.join(", ") } : { text: "declares nothing", absent: true },
+          type.semantic_role ? { text: type.semantic_role } : { text: t("checks.noRole"), absent: true },
+          traits.length > 0 ? { text: traits.join(", ") } : { text: t("checks.declaresNothing"), absent: true },
         ],
         count: "",
       }),
@@ -497,7 +487,7 @@ export async function analysisPage(opened) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_ANALYSIS },
   ]);
-  doc.title = opened.game.name + " · Checks · Maestro";
+  doc.title = opened.game.name + " · " + t("nav.checks") + " · Maestro";
   const noteEl = el(doc, "analysis-note");
   say(noteEl, NOTE_ON_DEMAND);
   // It said "nothing below has been checked yet" under three finished
@@ -541,7 +531,7 @@ export async function analysisPage(opened) {
       parts.verdict,
       findings.length === 0
         ? UNREACHABLE_CLEAN
-        : countLabel(findings.length, "entity", "entities") + " cannot be reached.",
+        : t(findings.length === 1 ? "checks.unreachable.one" : "checks.unreachable.many", { count: findings.length }),
     );
     parts.body.replaceChildren();
     const groups = reasonGroups(findings);
@@ -554,7 +544,7 @@ export async function analysisPage(opened) {
       const note = doc.createElement("p");
       note.className = "muted";
       note.textContent =
-        countLabel(beyond.length, "entity", "entities") + " were further away than this run looked.";
+        t(beyond.length === 1 ? "checks.beyond.one" : "checks.beyond.many", { count: beyond.length });
       parts.body.append(note);
     }
   }, noteDone);
@@ -603,9 +593,9 @@ export async function analysisPage(opened) {
     // carry the wrong assumption into the mode where the numbers matter.
     list.append(
       headerRow(doc, {
-        label: "Entity",
-        key: "key",
-        cells: [{ text: "Type" }, { text: "Leads in", numeric: true }, { text: "Leads out", numeric: true }],
+        label: t("checks.column.entity"),
+        key: t("column.key"),
+        cells: [{ text: t("checks.column.type") }, { text: t("checks.column.leadsIn"), numeric: true }, { text: t("checks.column.leadsOut"), numeric: true }],
       }),
     );
     for (const orphan of findings) list.append(orphanRow(doc, opened.slug, orphan));
@@ -616,7 +606,7 @@ export async function analysisPage(opened) {
       note.className = "muted";
       // An orphan report that silently ignored a relation type would be
       // wrong in a way nobody could see.
-      note.textContent = "Edges of these kinds were not counted: " + excluded.join(", ") + ".";
+      note.textContent = t("checks.excluded", { list: excluded.join(", ") });
       parts.body.append(note);
     }
   }, noteDone);
@@ -625,7 +615,7 @@ export async function analysisPage(opened) {
     // A named group, so a screen reader meets three related toggles
     // rather than three unrelated ones above an unexplained list.
     modesEl.setAttribute("role", "group");
-    modesEl.setAttribute("aria-label", "Which kind of unconnected");
+    modesEl.setAttribute("aria-label", t("checks.orphans.which"));
     for (const option of ORPHAN_MODES) {
       const chip = doc.createElement("button");
       chip.type = "button";

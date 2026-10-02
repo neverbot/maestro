@@ -12,6 +12,7 @@ import {
   renderHeader,
 } from "./app.js";
 import { nextCursorOf } from "./rows.js";
+import { locale, t } from "./i18n.js";
 // The chrome every other page gets. This reading view was rendering the
 // header with no destinations at all, which is one of the three
 // different chromes the 2026-09-09 audit found inside a single game.
@@ -26,8 +27,8 @@ import {
 } from "./pages/page.js";
 
 // The empty state, in the page rather than in the shell.
-export const NOT_ATTACHED_HEADING = "Attached to nothing";
-export const ATTACHES_IT = "attaches it to one";
+export const NOT_ATTACHED_HEADING = t("document.notAttached.heading");
+export const ATTACHES_IT = t("document.attachesIt");
 // A relative specifier, not "/static/app.js": the browser resolves it
 // against this module's own URL and gets the same file either way, and
 // Node — which internal/web/jstest drives this page with — can resolve
@@ -71,11 +72,11 @@ function describeAuthor(version, membersByID) {
     return version.author_label;
   }
   if (version.author_kind === "token") {
-    return "an agent";
+    return t("author.agent");
   }
   if (version.author_kind === "user") {
     if (!version.author_id) {
-      return "a former member";
+      return t("author.former");
     }
     // Present-but-nameless is a different fact from absent, and saying
     // "a former member" about someone still on the members list is
@@ -83,11 +84,11 @@ function describeAuthor(version, membersByID) {
     // so the two cases are told apart by whether the id is *in* the map
     // rather than by whether the name is truthy.
     if (!membersByID.has(version.author_id)) {
-      return "a former member";
+      return t("author.former");
     }
-    return membersByID.get(version.author_id) || "a member with no display name";
+    return membersByID.get(version.author_id) || t("author.noName");
   }
-  return "an unknown author";
+  return t("author.unknown");
 }
 
 // describeTime formats a timestamp in the reader's own locale, and falls
@@ -95,7 +96,7 @@ function describeAuthor(version, membersByID) {
 // not parseable.
 function describeTime(raw) {
   const when = new Date(raw);
-  return Number.isNaN(when.getTime()) ? String(raw ?? "") : when.toLocaleString();
+  return Number.isNaN(when.getTime()) ? String(raw ?? "") : when.toLocaleString(locale);
 }
 
 // entityRow is one line of the "Attached to" list: the entity's name,
@@ -125,13 +126,10 @@ function entityRow(link) {
 const titleEl = document.getElementById("doc-title");
 // --- Writing the document ---------------------------------------------
 
-export const EDIT_DOC_LABEL = "Edit";
-export const TRUNCATED_REFUSAL =
-  "This document is longer than this page can read in one piece, so it cannot be edited here. " +
-  "An agent can write it over MCP.";
-export const EMPTY_MESSAGE = "Say what changed: the history is what the next reader has to go on.";
-export const EDIT_CONFLICT =
-  "Somebody saved this document while you were writing. Yours is still here; theirs is on the page.";
+export const EDIT_DOC_LABEL = t("document.edit");
+export const TRUNCATED_REFUSAL = t("document.tooLong");
+export const EMPTY_MESSAGE = t("document.sayWhatChanged");
+export const EDIT_CONFLICT = t("document.conflict");
 
 // wireDocEditor puts the Edit control where the read-only notice would
 // be, and swaps the rendered document for its source when it is pressed.
@@ -201,7 +199,7 @@ function wireDocEditor(game, docPath, state) {
       return;
     }
     if (errorEl) errorEl.textContent = "";
-    setFormBusy(form, true, "Saving…");
+    setFormBusy(form, true, t("action.saving"));
     const result = await postJSON(`/api/games/${game}/docs`, {
       path: docPath,
       content: String(body.value ?? ""),
@@ -283,14 +281,14 @@ if (titleEl) {
     }
 
     if (!docPath) {
-      titleEl.textContent = "No document asked for";
-      showFailure("This address names no document. Open one from the game's Documents list.");
+      titleEl.textContent = t("document.noneAsked");
+      showFailure(t("document.noSuchDocument"));
     } else if (!games.ok) {
-      titleEl.textContent = "Could not load this document";
+      titleEl.textContent = t("document.unloadable");
       showFailure(games.message);
     } else if (!game) {
-      titleEl.textContent = "Game not found";
-      showFailure("You may not have access to this game, or it no longer exists.");
+      titleEl.textContent = t("error.gameNotFound");
+      showFailure(t("error.noAccessToGame"));
     } else {
       // The stored slug, for the reason app.js's own call says.
       await renderDocument(game.slug, docPath, game.name);
@@ -315,7 +313,7 @@ async function renderDocument(game, docPath, gameName) {
       goToLogin();
       return;
     }
-    if (titleEl) titleEl.textContent = "Could not read this document";
+    if (titleEl) titleEl.textContent = t("document.unreadable");
     showFailure(rendered.message);
     return;
   }
@@ -348,7 +346,7 @@ async function renderDocument(game, docPath, gameName) {
   // notice, because for them it is still true.
   const mayWrite = summary.ok && summary.body.role !== "viewer";
   if (mayWrite) wireDocEditor(game, docPath, { version });
-  else if (summary.ok) setReadOnly(document, summary.body.role, "writes this document");
+  else if (summary.ok) setReadOnly(document, summary.body.role, "writes.document");
   if (metaEl) {
     // The kind is optional on the wire, so the line is assembled from
     // the parts that are actually there rather than printing an empty
@@ -455,8 +453,7 @@ async function renderHistory(game, docPath, currentVersion, membersByID, role) {
   }
   if (noteEl && role === "viewer") {
     noteEl.textContent =
-      "Your role in this game is viewer, so this instance will refuse a revert from you: " +
-      "an editor or a game manager reverts a document.";
+      t("document.viewerCannotRevert");
     noteEl.hidden = false;
   }
 
@@ -562,7 +559,7 @@ function historyRow(game, docPath, currentVersion, version, membersByID, role) {
   if (version.deleted) {
     const tombstone = document.createElement("span");
     tombstone.className = "history-note";
-    tombstone.textContent = "deleted here";
+    tombstone.textContent = t("document.deletedHere");
     item.append(tombstone);
   }
 
@@ -612,18 +609,17 @@ function historyRow(game, docPath, currentVersion, version, membersByID, role) {
 function describeComparison(comparison) {
   if (comparison.coarse) {
     return (
-      "These two versions were too large to compare line by line, " +
-      "so this shows the whole document replaced."
+      t("document.diff.tooLarge")
     );
   }
   if (comparison.to_deleted && !comparison.from_deleted) {
-    return "The document was deleted at this version; the text is what it held when it went.";
+    return t("document.diff.deletedAt");
   }
   if (comparison.from_deleted && !comparison.to_deleted) {
-    return "The document was deleted at the earlier of these two versions and written again after it.";
+    return t("document.diff.deletedThenWritten");
   }
   if (!hasChangedLines(comparison.unified)) {
-    return "These two versions are identical.";
+    return t("document.diff.identical");
   }
   return "";
 }

@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // The row every list in this product is made of.
 export const CATALOGUE_CELLS = 3;
 
@@ -276,10 +277,10 @@ function headContent(doc, text, order, spec) {
   button.textContent = text + (active ? " " + (descending ? SORT_MARKS.desc : SORT_MARKS.asc) : "");
   button.setAttribute("aria-label",
     active && !descending
-      ? "Sorted by " + text + ", first to last. Sort last to first."
+      ? t("catalogue.sorted.ascending", { column: text })
       : active
-        ? "Sorted by " + text + ", last to first. Sort first to last."
-        : "Sort by " + text);
+        ? t("catalogue.sorted.descending", { column: text })
+        : t("catalogue.sortBy", { column: text }));
   button.addEventListener("click", () => {
     if (typeof spec.onSort === "function") spec.onSort(next);
   });

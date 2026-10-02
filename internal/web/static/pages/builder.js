@@ -23,37 +23,36 @@ import {
   roundTrips,
 } from "../query/compose.js";
 import { MstPicker, CHOOSE_EVENT, optionsFrom } from "../components/mst-picker.js";
+import { t } from "../i18n.js";
 import { entityTypeOptions, fieldOptions, relationTypeOptions } from "../components/pickers.js";
 import { goToLogin } from "../app.js";
 
 // The boundary, said once and on screen. §3: a builder that covers the
 // simple half of the language and *hides* the other half is worse than
 // one that covers it and says so.
-export const BOUNDARY =
-  "A question with two branches, a depth range, or a parameter is written as a document. " +
-  "Ask an agent for it.";
+export const BOUNDARY = t("builder.boundary");
 
 // The words this screen puts between the controls. They are the
 // product's own sentence, and they are constants so the harness asks for
 // them by identity rather than by matching prose.
-export const WORD_FROM = "Start from every";
-export const WORD_WHERE = "Narrow to where";
-export const WORD_FOLLOW = "Follow through";
-export const WORD_DIRECTION = "going";
-export const WORD_DEPTH = "up to";
-export const WORD_STEPS = "steps";
-export const WORD_DRAW = "Draw as a";
-export const WORD_COLOUR = "coloured by";
-export const ADD_WHERE = "and only where…";
-export const ADD_FOLLOW = "and then follow…";
-export const REMOVE_LABEL = "Remove";
+export const WORD_FROM = t("builder.word.from");
+export const WORD_WHERE = t("builder.word.where");
+export const WORD_FOLLOW = t("builder.word.follow");
+export const WORD_DIRECTION = t("builder.word.direction");
+export const WORD_DEPTH = t("builder.word.depth");
+export const WORD_STEPS = t("builder.word.steps");
+export const WORD_DRAW = t("builder.word.draw");
+export const WORD_COLOUR = t("builder.word.colour");
+export const ADD_WHERE = t("builder.add.where");
+export const ADD_FOLLOW = t("builder.add.follow");
+export const REMOVE_LABEL = t("builder.remove");
 
 // The three directions, in the product's words rather than the
 // language's. The key is what reaches the document.
 export const DIRECTIONS = [
-  { key: "out", label: "outwards" },
-  { key: "in", label: "inwards" },
-  { key: "both", label: "either way" },
+  { key: "out", label: t("builder.direction.out") },
+  { key: "in", label: t("builder.direction.in") },
+  { key: "both", label: t("builder.direction.both") },
 ];
 
 // The operators a person can compose, in the words a sentence uses. The
@@ -61,16 +60,16 @@ export const DIRECTIONS = [
 // that read as a clause, and the rest are what §3's boundary sentence is
 // about.
 export const OPERATORS = [
-  { key: "eq", label: "is" },
-  { key: "neq", label: "is not" },
-  { key: "gte", label: "is at least" },
-  { key: "lte", label: "is at most" },
-  { key: "gt", label: "is more than" },
-  { key: "lt", label: "is less than" },
-  { key: "contains", label: "contains" },
-  { key: "starts_with", label: "starts with" },
-  { key: "exists", label: "is set" },
-  { key: "empty", label: "is empty" },
+  { key: "eq", label: t("builder.op.eq") },
+  { key: "neq", label: t("builder.op.neq") },
+  { key: "gte", label: t("builder.op.gte") },
+  { key: "lte", label: t("builder.op.lte") },
+  { key: "gt", label: t("builder.op.gt") },
+  { key: "lt", label: t("builder.op.lt") },
+  { key: "contains", label: t("builder.op.contains") },
+  { key: "starts_with", label: t("builder.op.startsWith") },
+  { key: "exists", label: t("builder.op.exists") },
+  { key: "empty", label: t("builder.op.empty") },
 ];
 
 // The two operators that take no value: a clause reading "level is set"
@@ -112,9 +111,9 @@ export function documentText(stack) {
 export function saveProblems(stack, name, key) {
   const draw = stack.find((clause) => clause.kind === CLAUSE_DRAW) ?? {};
   const problems = [];
-  if (!draw.renderer) problems.push("Draw needs a way to draw it.");
-  if (String(name ?? "").trim() === "") problems.push("A view needs a name.");
-  if (String(key ?? "").trim() === "") problems.push("A view needs an address.");
+  if (!draw.renderer) problems.push(t("builder.needsRenderer"));
+  if (String(name ?? "").trim() === "") problems.push(t("builder.needsName"));
+  if (String(key ?? "").trim() === "") problems.push(t("builder.needsAddress"));
   return problems;
 }
 
@@ -139,7 +138,7 @@ export function clauseOfPointer(pointers, pointer) {
 // never edits, so saving writes a **new** view and the one it started
 // from is not touched.
 export function startedFrom(name) {
-  return "This starts from " + name + ". Saving writes a new view; " + name + " is not changed.";
+  return t("builder.startsFrom", { name });
 }
 
 // openedFrom turns a stored view into a clause stack, or answers null.
@@ -170,15 +169,15 @@ export async function builderPage(opened) {
   const keyEl = doc.getElementById("builder-key");
 
   if (opened.game === null) {
-    say(errorEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(errorEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
   setBreadcrumb(doc, [
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_VIEWS, href: viewsURL(opened.slug) },
-    { label: "New overview" },
+    { label: t("overviews.new") },
   ]);
-  doc.title = "New overview · Maestro";
+  doc.title = t("overviews.new") + " · Maestro";
   say(doc.getElementById("builder-boundary"), BOUNDARY);
 
   const summary = await opened.client.summary();
@@ -194,7 +193,7 @@ export async function builderPage(opened) {
   // from one of them.
   const [types, relationTypes] = await Promise.all([
     entityTypeOptions(opened.client),
-    relationTypeOptions(opened.client, { none: true, noneLabel: "any connection" }),
+    relationTypeOptions(opened.client, { none: true, noneLabel: t("builder.anyConnection") }),
   ]);
 
   // **Opened from a stored view, when that view round-trips.** The
@@ -326,7 +325,7 @@ export async function builderPage(opened) {
   if (opening !== null) {
     const name = String(opening.row.name || opening.row.key || from);
     say(doc.getElementById("builder-boundary"), startedFrom(name) + " " + BOUNDARY);
-    if (nameEl) nameEl.value = "Copy of " + name;
+    if (nameEl) nameEl.value = t("builder.copyOf", { name });
     // The address is left empty on purpose: a copy that suggested a key
     // would be one keystroke from overwriting nothing and one from
     // colliding with the view it came from, and the server refuses a
@@ -474,7 +473,7 @@ function lineFor(doc, clause, state, deps) {
     line.append(picker(doc, {
       options: deps.types,
       chosen: clause.type,
-      placeholder: "a kind of thing",
+      placeholder: t("builder.placeholder.kind"),
       onChoose: (option) => {
         clause.type = option.key;
         // **The fields follow the type, once.** They are fetched here
@@ -517,7 +516,7 @@ function lineFor(doc, clause, state, deps) {
       // that has not said what it wants.
       value.size = 12;
       value.placeholder = "a value";
-      value.setAttribute("aria-label", "the value to compare against");
+      value.setAttribute("aria-label", t("builder.label.value"));
       value.addEventListener("input", () => {
         clause.value = numberOrText(value.value);
         deps.redraw();
@@ -553,7 +552,7 @@ function lineFor(doc, clause, state, deps) {
     // One digit, usually. It was as wide as a name.
     depth.size = 3;
     depth.value = Number.isFinite(clause.depth) ? String(clause.depth) : "1";
-    depth.setAttribute("aria-label", "how many steps to follow");
+    depth.setAttribute("aria-label", t("builder.label.depth"));
     depth.addEventListener("input", () => {
       const asked = Number(depth.value);
       clause.depth = Number.isFinite(asked) && asked > 0 ? asked : undefined;
@@ -570,7 +569,7 @@ function lineFor(doc, clause, state, deps) {
       // Not "graph": a placeholder that names a real renderer reads as a
       // choice already made, and the save was refused by the server for
       // a renderer nobody had picked.
-      placeholder: "how to draw it",
+      placeholder: t("builder.placeholder.renderer"),
       onChoose: (option) => {
         clause.renderer = option.key;
         changed();

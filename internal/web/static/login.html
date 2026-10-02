@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Sign in · Maestro</title>
+<title data-i18n="title.login"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -34,13 +34,13 @@
 <h1>Maestro</h1>
 
 <div id="login-view">
-  <p class="lede">Sign in to reach your games.</p>
+  <p class="lede" data-i18n="login.lead"></p>
   <form id="login">
-    <label for="login-email">Email</label>
+    <label for="login-email" data-i18n="form.email"></label>
     <!-- The one screen with one purpose and three controls: the cursor
          starts where the reader would put it. -->
-    <input id="login-email" type="email" name="email" placeholder="you@example.test" autocomplete="username" autofocus required>
-    <label for="login-password">Password</label>
+    <input id="login-email" type="email" name="email" data-i18n-attr="placeholder:placeholder.yourEmail" autocomplete="username" autofocus required>
+    <label for="login-password" data-i18n="form.password"></label>
     <input id="login-password" type="password" name="password" autocomplete="current-password" required>
     <!-- **Under the field, above the button.** It was below the submit
          button, so a refusal was read in the order field, action, reason:
@@ -48,7 +48,7 @@
          and the sentence explaining why sat 70px past the control the
          reader had just been sent back to. -->
     <p class="error" id="login-error" role="alert" aria-live="assertive"></p>
-    <button type="submit">Sign in</button>
+    <button type="submit" data-i18n="login.signIn"></button>
   </form>
   <!-- **The recovery that does not exist, said where somebody locked out
        would look for it.** There is no forgot-password flow anywhere in
@@ -56,26 +56,25 @@
        is ever sent. Principle 5 is that what the product cannot do is
        written on the screen where somebody would look for it, and this
        is that screen. -->
-  <p class="muted sign-in-note">There is no password reset. This instance sends no email, so an
-    administrator invites you again instead.</p>
+  <p class="muted sign-in-note" data-i18n="login.noReset"></p>
   <p id="register-toggle-wrap" hidden>
-    <button type="button" id="register-toggle" class="link-button">Create an account</button>
+    <button type="button" id="register-toggle" class="link-button" data-i18n="login.createAccount"></button>
   </p>
 </div>
 
 <div id="invite-view" hidden>
-  <p id="invite-copy">You have been invited to Maestro. Create your account to continue.</p>
+  <p id="invite-copy" data-i18n="login.invited"></p>
   <form id="invite">
-    <label for="invite-email">Email</label>
-    <input id="invite-email" type="email" name="email" placeholder="you@example.test" autocomplete="username" required>
-    <label for="invite-display-name">Your name</label>
-    <input id="invite-display-name" type="text" name="display_name" placeholder="Your name" autocomplete="name" required>
-    <label for="invite-password">Password</label>
-    <input id="invite-password" type="password" name="password" placeholder="At least 12 characters" autocomplete="new-password" minlength="12" required>
-    <button type="submit">Create account</button>
+    <label for="invite-email" data-i18n="form.email"></label>
+    <input id="invite-email" type="email" name="email" data-i18n-attr="placeholder:placeholder.yourEmail" autocomplete="username" required>
+    <label for="invite-display-name" data-i18n="form.yourName"></label>
+    <input id="invite-display-name" type="text" name="display_name" data-i18n-attr="placeholder:login.placeholder.name" autocomplete="name" required>
+    <label for="invite-password" data-i18n="form.password"></label>
+    <input id="invite-password" type="password" name="password" data-i18n-attr="placeholder:login.placeholder.password" autocomplete="new-password" minlength="12" required>
+    <button type="submit" data-i18n="login.create"></button>
     <p class="error" id="invite-error" role="alert" aria-live="assertive"></p>
   </form>
-  <p><button type="button" id="back-to-login" class="link-button">Back to sign in</button></p>
+  <p><button type="button" id="back-to-login" class="link-button" data-i18n="login.back"></button></p>
 </div>
 
 <!-- **Below the forms, not above them.** This line says who the instance

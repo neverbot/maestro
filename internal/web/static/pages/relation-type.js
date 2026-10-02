@@ -16,28 +16,28 @@ import {
   typesURL,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
+import { t } from "../i18n.js";
 import { goToLogin } from "../app.js";
 
 // The empty state, in the page rather than in the shell. It is not an
 // omission being reported: a relation type with no fields is the ordinary
 // case, and the sentence says so.
-export const NO_FIELDS_HEADING = "No fields";
-export const NO_FIELDS_SENTENCE =
-  "A relation of this type is the connection itself, and carries no values of its own.";
+export const NO_FIELDS_HEADING = t("relationType.noFields.heading");
+export const NO_FIELDS_SENTENCE = t("relationType.noFields.sentence");
 
 // ANY_TYPE is what an empty endpoint list means, and it is the one place
 // this page says something the server did not: `source_type_keys: []` is
 // "no restriction", which is a permission and reads as an omission if it
 // is drawn as an empty list.
-export const ANY_TYPE = "anything";
+export const ANY_TYPE = t("relationType.anyType");
 
 // NO_ROLE and NO_TRAITS are the Named Absence Rule applied to the two
 // fields the analysis engine reads. An undeclared trait list is not an
 // empty one — internal/web/mcp_metamodel.go's own comment on
 // AnalysisTraits says so — and a screen that drew both as blank would
 // erase the distinction the column exists to carry.
-export const NO_ROLE = "No role declared";
-export const NO_TRAITS = "No traits declared, so a walk treats it as an ordinary edge";
+export const NO_ROLE = t("relationType.noRole");
+export const NO_TRAITS = t("relationType.noTraits");
 
 export function relationTypeKeyOf(pathname) {
   const parts = segmentsOf(pathname);
@@ -47,7 +47,7 @@ export function relationTypeKeyOf(pathname) {
 // endpointSentence says what may sit at each end, in the product's own
 // words rather than in the payload's.
 export function endpointSentence(sources, targets) {
-  return "From " + joinKeys(sources) + " to " + joinKeys(targets) + ".";
+  return t("relationType.endpoints.from") + joinKeys(sources) + t("relationType.endpoints.to") + joinKeys(targets) + ".";
 }
 
 // joinKeys is the one spelling of a list of allowed types, and both the
@@ -56,7 +56,7 @@ export function joinKeys(keys) {
   const list = Array.isArray(keys) ? keys.filter((key) => key !== "") : [];
   if (list.length === 0) return ANY_TYPE;
   if (list.length === 1) return list[0];
-  return list.slice(0, -1).join(", ") + " or " + list[list.length - 1];
+  return list.slice(0, -1).join(", ") + t("list.or") + list[list.length - 1];
 }
 
 // roleSentence says what a walk makes of this type. The two halves are
@@ -65,11 +65,11 @@ export function joinKeys(keys) {
 export function roleSentence(semanticRole, traits) {
   const declared = Array.isArray(traits) ? traits.filter((trait) => trait !== "") : [];
   const role = typeof semanticRole === "string" && semanticRole !== ""
-    ? "Its role is " + semanticRole + "."
+    ? t("relationType.roleIs", { role: semanticRole })
     : NO_ROLE + ".";
   const walk = declared.length === 0
     ? NO_TRAITS + "."
-    : "A walk reads it as " + declared.join(", ") + ".";
+    : t("relationType.walkReads", { roles: declared.join(", ") });
   return role + " " + walk;
 }
 
@@ -85,7 +85,7 @@ export function fieldRows(doc, schema) {
       key: field.key || "",
       cells: [
         { text: String(field.type ?? "") },
-        field.required === true ? { text: "required" } : { text: "optional", absent: true },
+        field.required === true ? { text: t("field.required") } : { text: t("field.optional"), absent: true },
         // **A declared default is a value and `false` is one of them.**
         // Reading `field.default` for truth would draw "no default" over
         // a field that defaults to false or to zero, which is the defect
@@ -93,7 +93,7 @@ export function fieldRows(doc, schema) {
         // and this page would have re-introduced it one layer up.
         Object.prototype.hasOwnProperty.call(field, "default")
           ? { text: JSON.stringify(field.default) }
-          : { text: "no default", absent: true },
+          : { text: t("relationType.noDefault"), absent: true },
       ],
       count: "",
     }),
@@ -107,9 +107,9 @@ export function fieldRows(doc, schema) {
 export function paintEndpoints(doc, el, slug, sources, targets) {
   if (!el) return;
   el.replaceChildren();
-  el.append(text(doc, "From "));
+  el.append(text(doc, t("relationType.endpoints.from")));
   appendKeys(doc, el, slug, sources);
-  el.append(text(doc, " to "));
+  el.append(text(doc, t("relationType.endpoints.to")));
   appendKeys(doc, el, slug, targets);
   el.append(text(doc, "."));
 }
@@ -150,8 +150,8 @@ export async function relationTypePage(opened) {
   const errorEl = doc.getElementById("relation-type-error");
 
   if (opened.game === null) {
-    say(nameEl, "Game not found");
-    say(metaEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(nameEl, t("error.gameNotFound"));
+    say(metaEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
 
@@ -168,7 +168,7 @@ export async function relationTypePage(opened) {
       goToLogin();
       return opened;
     }
-    say(nameEl, "Could not read this relation type");
+    say(nameEl, t("relationType.unreadable"));
     if (errorEl) {
       errorEl.textContent = answer.error.message;
       errorEl.hidden = false;
@@ -210,9 +210,9 @@ export async function relationTypePage(opened) {
     if (rows.length > 0) {
       listEl.append(
         headerRow(doc, {
-          label: "Field",
-          key: "key",
-          cells: [{ text: "Type" }, { text: "Required" }, { text: "Default" }],
+          label: t("relationType.column.field"),
+          key: t("column.key"),
+          cells: [{ text: t("relationType.column.type") }, { text: t("relationType.column.required") }, { text: t("relationType.column.default") }],
         }),
       );
       for (const line of rows) listEl.append(line);
@@ -231,7 +231,7 @@ export async function relationTypePage(opened) {
     const listed = (Array.isArray(summary.result.relation_types) ? summary.result.relation_types : [])
       .find((entry) => entry.key === type.key);
     if (listed) {
-      say(metaEl, type.key + " · " + countLabel(Number(listed.relation_count ?? 0), "relation", "relations"));
+      say(metaEl, type.key + " · " + countLabel(Number(listed.relation_count ?? 0), t("unit.relation"), t("unit.relations")));
     }
   }
 

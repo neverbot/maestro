@@ -16,25 +16,26 @@ import {
   setBreadcrumb,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
+import { locale, t } from "../i18n.js";
 import { STATUS_WORDS } from "./routes.js";
 
 // The empty state, in the page rather than in the shell.
-export const NO_STEPS_HEADING = "No steps";
-export const NO_STEPS_SENTENCE = "This route asserts nothing yet.";
+export const NO_STEPS_HEADING = t("route.noSteps.heading");
+export const NO_STEPS_SENTENCE = t("route.noSteps.sentence");
 
 // The four a step can come back as, in the reader's words. `ok` is not
 // "true": a verdict is a sentence about the design, not a boolean.
 export const STEP_VERDICTS = {
-  ok: "reachable",
-  missing_entity: "no longer exists",
-  out_of_order: "comes before something it needs",
-  unmet_prerequisite: "blocked",
+  ok: t("route.verdict.ok"),
+  missing_entity: t("route.verdict.missing"),
+  out_of_order: t("route.verdict.outOfOrder"),
+  unmet_prerequisite: t("route.verdict.blocked"),
 };
 
-export const STALE_HEAD = "This answer may no longer be about this game";
-export const CHECK_LABEL = "Check this route";
-export const CHECKING_LABEL = "Checking…";
-export const NEVER_CHECKED = "This route has never been checked.";
+export const STALE_HEAD = t("route.stale");
+export const CHECK_LABEL = t("route.check");
+export const CHECKING_LABEL = t("route.checking");
+export const NEVER_CHECKED = t("route.neverChecked");
 
 export function routeKeyOf(pathname) {
   // /g/{slug}/analysis/routes/{key} — the segment after "routes".
@@ -56,16 +57,16 @@ function verdictWord(verdict) {
 export function whenChecked(raw) {
   if (!raw) return "";
   const when = new Date(raw);
-  return Number.isNaN(when.getTime()) ? String(raw) : when.toLocaleString();
+  return Number.isNaN(when.getTime()) ? String(raw) : when.toLocaleString(locale);
 }
 
 export function metaLine(route) {
   const parts = [route.key, STATUS_WORDS[route.status] || route.status];
   const checked = whenChecked(route.last_checked_at);
   if (checked !== "") {
-    parts.push("last checked " + checked);
+    parts.push(t("route.lastCheckedAt", { when: checked }));
     if (Number.isFinite(route.last_checked_design_version)) {
-      parts.push("against design version " + route.last_checked_design_version);
+      parts.push(t("route.againstVersion", { version: route.last_checked_design_version }));
     }
   }
   return parts.join(" \u00b7 ");
@@ -85,23 +86,23 @@ export function paintVerdict(doc, slug, route) {
   say(
     verdictEl,
     check.holds === true
-      ? "Every step held."
-      : countLabel(check.steps_broken ?? 0, "step", "steps") + " did not hold.",
+      ? t("route.everyStepHeld")
+      : t("route.stepsBroken", { steps: countLabel(check.steps_broken ?? 0, t("unit.step"), t("unit.steps")) }),
   );
 
   // The negative half: five `ok`s from a check that walked nothing and
   // five from one that walked four hundred edges are the same answer
   // without this line.
   const parts = [];
-  if (Number.isFinite(check.edges_walked)) parts.push("followed " + countLabel(check.edges_walked, "edge", "edges"));
-  if (Number.isFinite(check.steps_checked)) parts.push("over " + countLabel(check.steps_checked, "step", "steps"));
+  if (Number.isFinite(check.edges_walked)) parts.push(t("route.followed", { edges: countLabel(check.edges_walked, t("unit.edge"), t("unit.edges")) }));
+  if (Number.isFinite(check.steps_checked)) parts.push(t("route.over", { steps: countLabel(check.steps_checked, t("unit.step"), t("unit.steps")) }));
   const cut = [];
-  if (check.depth_limited === true) cut.push("stopped at the depth it was willing to walk");
-  if (check.truncated === true) cut.push("stopped at the number of rows it was willing to read");
-  const sentence = parts.length === 0 ? "" : "This check " + parts.join(" ") + ".";
+  if (check.depth_limited === true) cut.push(t("route.cut.depth"));
+  if (check.truncated === true) cut.push(t("route.cut.rows"));
+  const sentence = parts.length === 0 ? "" : t("route.thisCheck", { what: parts.join(" ") });
   const caveat = cut.length === 0
     ? ""
-    : " It " + cut.join(" and ") + ", so a step it did not reach is not a step that held.";
+    : t("route.caveat", { what: cut.join(t("list.and")) });
   say(walkedEl, sentence === "" && caveat === "" ? "" : (sentence + caveat).trim());
 }
 
@@ -126,9 +127,9 @@ export function paintSteps(doc, slug, route) {
   if (steps.length > 0) {
     listEl.append(
       headerRow(doc, {
-        label: "Step",
-        key: "key",
-        cells: [{ text: "Verdict" }, { text: "Blocked by" }],
+        label: t("route.step"),
+        key: t("column.key"),
+        cells: [{ text: t("route.verdict") }, { text: t("route.blockedBy") }],
       }),
     );
   }
@@ -149,14 +150,14 @@ export function paintSteps(doc, slug, route) {
         cells: [
           found
             ? { text: verdictWord(found.verdict), status: found.verdict === "ok" ? "checked" : "broken" }
-            : { text: "not checked", absent: true },
+            : { text: t("route.notChecked"), absent: true },
           // **A word, not a blank.** Four rows under "Blocked by" were
           // empty cells, which cannot be told from a value that failed
           // to load — the rule this file's own unreachable section
           // already follows with "no way in". A step nothing blocks is
           // the good case and says so.
           blockers.length === 0
-            ? { text: "nothing blocks it", absent: true }
+            ? { text: t("route.nothingBlocks"), absent: true }
             : { text: blockers.map((b) => b.key ?? "").join(", ") },
         ],
         // One-based, because a designer reading their own claim counts
@@ -184,11 +185,10 @@ export function paintStale(doc, route) {
   say(doc.getElementById("route-stale-head"), STALE_HEAD);
   say(
     doc.getElementById("route-stale-body"),
-    "It was checked against design version " +
-      String(route.last_checked_design_version ?? "?") +
-      "; this game is at " +
-      String(route.design_version ?? "?") +
-      ".",
+    t("route.staleBody", {
+      checked: String(route.last_checked_design_version ?? "?"),
+      now: String(route.design_version ?? "?"),
+    }),
   );
 }
 
@@ -203,7 +203,7 @@ export async function routePage(opened) {
 
   const answer = await opened.client.getRoute(key);
   if (!answer.ok) {
-    say(nameEl, "Could not read this route");
+    say(nameEl, t("route.unreadable"));
     if (errorEl) {
       errorEl.textContent = answer.error.message;
       errorEl.hidden = false;
@@ -218,7 +218,7 @@ export async function routePage(opened) {
   setBreadcrumb(doc, [
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_ANALYSIS, href: analysisURL(opened.slug) },
-    { label: "Routes", href: routesURL(opened.slug) },
+    { label: t("checks.routes"), href: routesURL(opened.slug) },
     { label: name },
   ]);
   say(metaEl, metaLine(route));

@@ -20,6 +20,7 @@ import {
   viewURL,
 } from "./page.js";
 import { headerRow, nextCursorOf } from "../rows.js";
+import { t } from "../i18n.js";
 import { REREAD, TARGET_EVERYTHING, TARGET_VIEW } from "../client.js";
 import { goToLogin } from "../app.js";
 
@@ -32,7 +33,7 @@ export async function viewsPage(opened) {
   const moreEl = doc.getElementById("views-more");
 
   if (opened.game === null) {
-    say(noteEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(noteEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
   setBreadcrumb(doc, [
@@ -41,7 +42,7 @@ export async function viewsPage(opened) {
   ]);
   // The game first: a person with three games open read three tabs
   // called "Views".
-  doc.title = opened.game.name + " \u00b7 Overviews \u00b7 Maestro";
+  doc.title = opened.game.name + " \u00b7 " + t("nav.overviews") + " \u00b7 Maestro";
   const role = await opened.client.summary();
   // **The way in to the builder, where the read-only notice used to be
   // the whole of what this screen could say.** A viewer still gets the
@@ -56,7 +57,7 @@ export async function viewsPage(opened) {
     const compose = doc.createElement("a");
     compose.className = "button";
     compose.href = builderURL(opened.slug);
-    compose.textContent = "New overview";
+    compose.textContent = t("overviews.new");
     actions.replaceChildren(compose);
   } else if (role.ok) {
     setReadOnly(doc, role.result.role, "writes.views");
@@ -87,7 +88,7 @@ export async function viewsPage(opened) {
     // and this list did not, so the renderer's name sat right-aligned in
     // the count track with nothing saying what that word was.
     if (rendered === 0 && items.length > 0) {
-      listEl.append(headerRow(doc, { label: "View", key: "key", count: "Renderer" }));
+      listEl.append(headerRow(doc, { label: t("overviews.column.view"), key: t("column.key"), count: t("overviews.column.renderer") }));
     }
     for (const view of items) {
       listEl.append(
@@ -109,7 +110,7 @@ export async function viewsPage(opened) {
       onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc, role.ok ? role.result.role : "", opened.slug, hasContent)] : []));
       onboardingEl.hidden = rendered > 0;
     }
-    say(noteEl, rendered === 0 ? "" : countLabel(rendered, "overview", "overviews"));
+    say(noteEl, rendered === 0 ? "" : countLabel(rendered, t("unit.overview"), t("unit.overviews")));
     cursor = nextCursorOf(body);
     if (moreEl) {
       moreEl.hidden = cursor === null || rendered === 0;

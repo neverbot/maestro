@@ -15,36 +15,31 @@ import {
   setBreadcrumb,
 } from "./page.js";
 import { goToLogin, setFormBusy } from "../app.js";
+import { t } from "../i18n.js";
 import { openDialog } from "../components/mst-dialog.js";
 
 // What the warning says, with this game's own address in it. The
 // sentence names the thing that is about to stop working rather than
 // describing the category of thing: "/g/ashfall" is a URL a person
 // recognises, "your links" is not.
-export const ADDRESS_WARNING_PREFIX = "Changing the address breaks every link into this game. ";
+export const ADDRESS_WARNING_PREFIX = t("settings.addressWarning");
 
 export function addressWarning(currentSlug, nextSlug) {
   const current = "/g/" + currentSlug;
   if (!nextSlug || nextSlug === currentSlug) {
     return (
-      "This game is at " + current + ". Changing that address breaks every link into it: " +
-      "bookmarks, links you have sent to somebody, and anything an agent has written down. " +
-      "Nothing forwards the old one."
+      t("settings.address.unchanged", { address: current })
     );
   }
   return (
     ADDRESS_WARNING_PREFIX +
-    current + " stops resolving and /g/" + nextSlug + " takes its place. Bookmarks, links you " +
-    "have sent to somebody and anything an agent has written down will all have to be updated. " +
-    "Nothing forwards the old address."
+    t("settings.address.changing", { from: current, to: "/g/" + nextSlug })
   );
 }
 
 // The two words for a reader who may not change any of this.
-export const NOT_YOURS_HEADING = "Only a game manager can change these";
-export const NOT_YOURS_SENTENCE =
-  "A game's name and address are its managers' to change, because changing the address breaks " +
-  "every link into the game for everybody in it.";
+export const NOT_YOURS_HEADING = t("settings.notYours.heading");
+export const NOT_YOURS_SENTENCE = t("settings.notYours.sentence");
 
 export async function settingsPage(opened) {
   const doc = opened.document;
@@ -55,14 +50,14 @@ export async function settingsPage(opened) {
   const warningEl = doc.getElementById("address-warning");
 
   if (opened.game === null) {
-    say(errorEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(errorEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
   setBreadcrumb(doc, [
     { label: opened.game.name, href: gameURL(opened.slug) },
-    { label: "Game settings" },
+    { label: t("frame.gameSettings") },
   ]);
-  doc.title = opened.game.name + " · Game settings · Maestro";
+  doc.title = opened.game.name + " · " + t("frame.gameSettings") + " · Maestro";
 
   const answer = await opened.client.summary();
   if (!answer.ok) {
@@ -112,7 +107,7 @@ export async function settingsPage(opened) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       say(errorEl, "");
-      setFormBusy(form, true, "Saving…");
+      setFormBusy(form, true, t("action.saving"));
       const result = await opened.client.updateGame({
         slug: slugEl ? slugEl.value.trim() : "",
         name: nameEl ? nameEl.value : "",
@@ -126,7 +121,7 @@ export async function settingsPage(opened) {
         return;
       }
       setFormBusy(form, false);
-      say(errorEl, result.error.message || "Could not save these settings.");
+      say(errorEl, result.error.message || t("settings.saveFailed"));
     });
   }
 
@@ -135,39 +130,30 @@ export async function settingsPage(opened) {
 
 
 // --- The People tab ---------------------------------------------------
-export const ROLE_WORDS = { owner: "manager", editor: "editor", viewer: "viewer" };
+export const ROLE_WORDS = { owner: t("role.manager"), editor: t("role.editor"), viewer: t("role.viewer") };
 export const ROLE_MANAGER = "owner";
 
 export function roleWord(role) {
   return ROLE_WORDS[String(role || "")] ?? String(role || "");
 }
 
-export const YOU = "you";
-export const EDIT = "Edit";
-export const REMOVE = "Remove from this game";
-export const REMOVE_CONFIRM = "Remove them?";
-export const REVOKE_INVITE = "Revoke";
-export const REVOKE_INVITE_CONFIRM = "Revoke this invitation?";
-export const MEMBER_TITLE = "What they may do";
-export const SAVE = "Save";
-export const CANCEL = "Cancel";
-export const NO_MEMBERS_HEADING = "Only you";
-export const NO_MEMBERS_SENTENCE =
-  "Nobody else can open this game. An invitation above puts somebody in it, at the role you " +
-  "choose.";
-export const NO_INVITES_HEADING = "Nobody is waiting";
-export const NO_INVITES_SENTENCE =
-  "No invitation into this game is outstanding. One appears here from the moment you create it " +
-  "until the person uses it or you revoke it.";
-export const NOT_A_MANAGER_HEADING = "Only a game manager can change who is here";
-export const NOT_A_MANAGER_SENTENCE =
-  "You can see who is in this game and what they may do. Inviting somebody, changing a role or " +
-  "removing a member is a manager's.";
-export const LAST_MANAGER =
-  "This game must keep at least one manager. Make somebody else one first.";
-export const CANNOT_CHANGE_YOURSELF =
-  "This is your own membership. Another manager changes it, so nobody can take their own way " +
-  "into a game away by accident.";
+export const YOU = t("settings.you");
+export const EDIT = t("settings.edit");
+export const REMOVE = t("settings.remove");
+export const REMOVE_CONFIRM = t("settings.remove.confirm");
+export const REVOKE_INVITE = t("settings.revokeInvite");
+export const REVOKE_INVITE_CONFIRM = t("settings.revokeInvite.confirm");
+export const MEMBER_TITLE = t("settings.member.title");
+export const SAVE = t("settings.save");
+export const CANCEL = t("settings.cancel");
+export const NO_MEMBERS_HEADING = t("settings.noMembers.heading");
+export const NO_MEMBERS_SENTENCE = t("settings.noMembers.sentence");
+export const NO_INVITES_HEADING = t("settings.noInvites.heading");
+export const NO_INVITES_SENTENCE = t("settings.noInvites.sentence");
+export const NOT_A_MANAGER_HEADING = t("settings.notManager.heading");
+export const NOT_A_MANAGER_SENTENCE = t("settings.notManager.sentence");
+export const LAST_MANAGER = t("settings.lastManager");
+export const CANNOT_CHANGE_YOURSELF = t("settings.cannotChangeYourself");
 
 // memberRow is one person in this game: who they are, what they may do,
 // and the way in to changing it. The role is a word and not a chooser:
@@ -214,7 +200,7 @@ export function editMember(doc, member, actions) {
 
   const label = doc.createElement("label");
   label.setAttribute("for", "member-role");
-  label.textContent = "Role";
+  label.textContent = t("settings.role");
   const select = doc.createElement("select");
   select.setAttribute("id", "member-role");
   for (const [key, word] of Object.entries(ROLE_WORDS)) {
@@ -272,7 +258,7 @@ export function editMember(doc, member, actions) {
   form.addEventListener("submit", async (event) => {
     if (event && typeof event.preventDefault === "function") event.preventDefault();
     error.textContent = "";
-    setFormBusy(form, true, "Saving…");
+    setFormBusy(form, true, t("action.saving"));
     const answer = await actions.setRole(member, select.value);
     setFormBusy(form, false);
     if (answer && answer.ok === false) {
@@ -302,7 +288,7 @@ export function inviteRow(doc, invite, onRevoke) {
 
   const who = doc.createElement("span");
   who.className = "person-name";
-  who.textContent = invite.email || "anyone with the link";
+  who.textContent = invite.email || t("invite.anyone");
   item.append(who);
 
   const role = doc.createElement("span");
@@ -445,14 +431,14 @@ export async function peopleTab(opened, role) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       say(formError, "");
-      setFormBusy(form, true, "Creating…");
+      setFormBusy(form, true, t("action.creating"));
       const answer = await opened.client.inviteToGame(
         emailEl ? emailEl.value : "",
         roleEl ? roleEl.value : "editor",
       );
       setFormBusy(form, false);
       if (!answer.ok) {
-        say(formError, answer.error.message || "Could not create that invitation.");
+        say(formError, answer.error.message || t("settings.inviteFailed"));
         return;
       }
       // **Shown once, and never overwritten.** A second invitation must
@@ -517,9 +503,7 @@ export function installCommand(origin, token, slug) {
 // every host has its own.
 export function elsewhereSentence(origin) {
   return (
-    "Any other MCP client needs the same three things: the address " +
-    String(origin || "") + MCP_PATH +
-    ', the header Authorization: Bearer <token>, and HTTP as the transport.'
+    t("settings.elsewhere", { address: String(origin || "") + MCP_PATH })
   );
 }
 
@@ -527,14 +511,10 @@ export function elsewhereSentence(origin) {
 // fetches Maestro's own instructions itself, with skill.install, on its
 // first call; there is nothing for a designer to install, paste or
 // teach.
-export const TOKEN_NEXT =
-  "Then tell your agent to start. Its own first call fetches Maestro's instructions — the " +
-  "metamodel, the tools and three worked games — so you do not have to teach it any of that.";
+export const TOKEN_NEXT = t("settings.token.next");
 
 // The one sentence that has to be read before the panel is closed.
-export const TOKEN_ONCE =
-  "Copy this now. This is the only time this token is shown; if it is lost, create another and " +
-  "revoke this one.";
+export const TOKEN_ONCE = t("settings.token.once");
 
 // **Whose keys these are, said above them.** The same listing answers
 // two questions — your own, or every key in this game because you own it
@@ -543,35 +523,27 @@ export const TOKEN_ONCE =
 // two it answered and says so; this only spells it.
 export const SCOPE_OWN = "own";
 export const SCOPE_GAME = "game";
-export const YOUR_KEYS =
-  "These are your own tokens. Everybody in this game has their own, and only the person who " +
-  "created one can retire it.";
-export const EVERY_KEY =
-  "You manage this game, so this is every token in it, whoever created it — and you can retire any " +
-  "of them.";
+export const YOUR_KEYS = t("settings.keys.yours");
+export const EVERY_KEY = t("settings.keys.every");
 
 export function whoseTokens(scope) {
   return scope === SCOPE_GAME ? EVERY_KEY : YOUR_KEYS;
 }
 
-export const NO_TOKENS_HEADING = "No tokens yet";
-export const NO_TOKENS_SENTENCE =
-  "A token is how an agent reaches this game. Every agent, and every machine an agent runs on, " +
-  "gets its own, so one can be revoked without stopping the rest.";
+export const NO_TOKENS_HEADING = t("settings.noKeys.heading");
+export const NO_TOKENS_SENTENCE = t("settings.noKeys.sentence");
 
-export const NO_MINT_HEADING = "Only an editor or a game manager can create a token";
-export const NO_MINT_SENTENCE =
-  "A token carries whatever access this game grants, so it is not a viewer's to hand out. You " +
-  "can still see which tokens exist and revoke one.";
+export const NO_MINT_HEADING = t("settings.noMint.heading");
+export const NO_MINT_SENTENCE = t("settings.noMint.sentence");
 
-export const COPY_FAILED = "Could not copy. Select the text and copy it yourself.";
-export const COPIED = "Copied";
-export const REVOKE = "Revoke";
-export const REVOKED = "revoked";
-export const REVOKE_CONFIRM = "Revoke this token?";
+export const COPY_FAILED = t("settings.copyFailed");
+export const COPIED = t("settings.copied");
+export const REVOKE = t("settings.revoke");
+export const REVOKED = t("settings.revoked");
+export const REVOKE_CONFIRM = t("settings.revoke.confirm");
 // What a row says where its control would be when the key is somebody
 // else's. It is not an apology and not an error: it is who holds it.
-export const NOT_YOURS = "theirs";
+export const NOT_YOURS = t("settings.notYours.theirs");
 
 // A row of the token list.
 export function tokenRow(doc, token, onRevoke, mayRevoke) {
@@ -580,7 +552,7 @@ export function tokenRow(doc, token, onRevoke, mayRevoke) {
 
   const label = doc.createElement("span");
   label.className = "token-label";
-  label.textContent = token.label || "unnamed token";
+  label.textContent = token.label || t("settings.token.unnamed");
   item.append(label);
 
   const hint = doc.createElement("code");
@@ -592,7 +564,7 @@ export function tokenRow(doc, token, onRevoke, mayRevoke) {
 
   const by = doc.createElement("span");
   by.className = "muted";
-  by.textContent = token.minted_by ? "created by " + token.minted_by : "";
+  by.textContent = token.minted_by ? t("settings.token.createdBy", { who: token.minted_by }) : "";
   item.append(by);
 
   // **Four cells, always.** A row with no control — revoked, or
@@ -761,11 +733,11 @@ export async function agentsTab(opened, role) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       say(formError, "");
-      setFormBusy(form, true, "Creating…");
+      setFormBusy(form, true, t("action.creating"));
       const answer = await opened.client.createToken(labelEl ? labelEl.value.trim() : "");
       setFormBusy(form, false);
       if (!answer.ok) {
-        say(formError, answer.error.message || "Could not create the token.");
+        say(formError, answer.error.message || t("settings.token.failed"));
         return;
       }
       if (labelEl) labelEl.value = "";
@@ -792,17 +764,17 @@ export function showIssuedToken(opened, token) {
 
   const content = [
     note,
-    copyable(doc, "The token", token, "token-value"),
-    copyable(doc, "In Claude Code", command, "token-snippet"),
+    copyable(doc, t("settings.token.theToken"), token, "token-value"),
+    copyable(doc, t("settings.token.inClaudeCode"), command, "token-snippet"),
     line(doc, elsewhereSentence(origin)),
     line(doc, TOKEN_NEXT),
   ];
   return openDialog(doc, { title: TOKEN_ISSUED_TITLE, content, dismissLabel: DONE_LABEL });
 }
 
-export const TOKEN_ISSUED_TITLE = "Token created";
-export const DONE_LABEL = "Done";
-export const COPY_LABEL = "Copy";
+export const TOKEN_ISSUED_TITLE = t("settings.token.created");
+export const DONE_LABEL = t("settings.done");
+export const COPY_LABEL = t("settings.copy");
 
 // A labelled value and the button that copies it. Two of them, and they
 // are built rather than written into the shell because the dialog they

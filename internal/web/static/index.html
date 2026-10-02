@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Games · Maestro</title>
+<title data-i18n="title.games"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -61,7 +61,7 @@
      so app.js marks it data-only-action and styles.css takes the
      summary away: the form is the screen. -->
 <details id="new-game" hidden>
-  <summary>New game</summary>
+  <summary data-i18n="games.new"></summary>
   <form id="create-game">
     <!-- **One field, because one is what a person has.** This asked for
          a Name and an Address, the second under a rule nobody had been
@@ -69,9 +69,9 @@
          address is derived from the name now, by the server, so an agent
          creating a game over REST gets the same one; it is shown and can
          be changed afterwards in the game's own settings. -->
-    <label for="create-game-name">Name</label>
-    <input id="create-game-name" type="text" name="name" placeholder="Your game's name" autocomplete="off" required>
-    <button type="submit">Create game</button>
+    <label for="create-game-name" data-i18n="form.name"></label>
+    <input id="create-game-name" type="text" name="name" data-i18n-attr="placeholder:games.placeholder.name" autocomplete="off" required>
+    <button type="submit" data-i18n="games.create"></button>
     <p class="error" id="create-game-error" role="alert" aria-live="assertive"></p>
   </form>
 </details>

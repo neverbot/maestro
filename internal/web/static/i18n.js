@@ -122,6 +122,42 @@ export function has(key) {
   return Object.prototype.hasOwnProperty.call(messages, key);
 }
 
+// --- What the server said ---------------------------------------------
+
+// **The wire stays English and the reader does not.** A refusal arrives
+// as {"error": code, "message": text}, and one code carries several
+// different sentences ("not_found" is a game, a user, a token), so the
+// code alone cannot pick the words. The sentence itself is the key: it
+// is slugged, and a catalogue entry under that slug translates it. The
+// guard in internal/web/static_errors_test.go reads every message this
+// server writes and fails on one no catalogue carries, which is what
+// keeps this from drifting the first time a message is reworded.
+//
+// A message with no entry reaches the reader as the server wrote it,
+// which is English and true, rather than as a key or as nothing.
+export function errorKey(message) {
+  const slug = String(message ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, ERROR_SLUG_MAX)
+    // Trimmed again: a cut that lands on a separator would otherwise
+    // leave a trailing dash, and the key is a key or it is nothing.
+    .replace(/-+$/, "");
+  return slug === "" ? "" : "error." + slug;
+}
+
+// How much of a message the slug keeps. Long enough that no two of this
+// server's messages collide, which the same guard checks.
+export const ERROR_SLUG_MAX = 72;
+
+// serverSays translates one refusal's message, or hands back the words
+// the server chose.
+export function serverSays(message) {
+  const key = errorKey(message);
+  return key !== "" && has(key) ? t(key) : String(message ?? "");
+}
+
 // applyTo fills every element the shell marked with `data-i18n`, and the
 // attributes marked with `data-i18n-attr` ("placeholder:form.email").
 // The shells carry no English: an element waiting for its words is

@@ -1,6 +1,7 @@
 // The page a mistyped address lands on.
 
 import { fetchGames, fetchMe, goToLogin, renderHeader } from "../app.js";
+import { t } from "../i18n.js";
 import {
   DESTINATION_VIEWS,
   STATE_REFUSED,
@@ -27,16 +28,16 @@ export function whereTo(pathname, games) {
   const game = known.find((row) => row && row.slug === slug) || null;
   if (game !== null) return { href: gameURL(slug), label: game.name };
   if (known.length === 0) return null;
-  return { href: "/games", label: "Your games" };
+  return { href: "/games", label: t("games.title") };
 }
 
 export function sentenceFor(pathname, games) {
   const slug = slugOfPath(pathname);
   const known = Array.isArray(games) ? games : [];
   if (slug !== "" && !known.some((row) => row && row.slug === slug)) {
-    return "There is no game called “" + slug + "” that you can reach, so nothing under it has an address.";
+    return t("notFound.noSuchGame", { slug });
   }
-  return "Maestro has no page at " + String(pathname ?? "") + ". It may have been a typo, or a link to something that has since moved.";
+  return t("notFound.sentence", { path: String(pathname ?? "") });
 }
 
 if (globalThis.document && globalThis.document.getElementById("not-found")) {
@@ -61,7 +62,7 @@ if (globalThis.document && globalThis.document.getElementById("not-found")) {
     doc.getElementById("not-found").replaceChildren(
       negativeState(doc, {
         kind: STATE_REFUSED,
-        heading: "There is nothing at this address",
+        heading: t("notFound.heading"),
         sentence: sentenceFor(pathname, games),
         action: whereTo(pathname, games) ?? undefined,
       }),

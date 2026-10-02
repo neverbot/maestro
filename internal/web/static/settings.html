@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Settings · Maestro</title>
+<title data-i18n="title.settings"></title>
 <link rel="stylesheet" href="/static/styles.css">
 <!-- Applies the chosen theme before the first paint. Classic and not
      deferred on purpose: see static/theme.js. -->
@@ -27,7 +27,7 @@
 </noscript>
 
 <main class="page">
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<nav class="crumbs" id="crumbs" data-i18n-attr="aria-label:frame.breadcrumb"></nav>
 
 <div class="page-head">
 <h1 data-i18n="frame.gameSettings"></h1>
@@ -45,13 +45,13 @@
      no business scrolling past the control that breaks every link into
      the game. pages/settings.js moves the selection and the address's
      #agents carries it, so a link can point at either half. -->
-<nav class="tabs" id="settings-tabs" aria-label="Settings sections">
+<nav class="tabs" id="settings-tabs" data-i18n-attr="aria-label:settings.sections">
   <button type="button" class="tab" id="tab-game" data-panel="panel-game"
-          role="tab" aria-selected="true" aria-controls="panel-game">Game</button>
+          role="tab" aria-selected="true" aria-controls="panel-game" data-i18n="settings.tab.game"></button>
   <button type="button" class="tab" id="tab-people" data-panel="panel-people"
-          role="tab" aria-selected="false" aria-controls="panel-people">People</button>
+          role="tab" aria-selected="false" aria-controls="panel-people" data-i18n="settings.tab.people"></button>
   <button type="button" class="tab" id="tab-agents" data-panel="panel-agents"
-          role="tab" aria-selected="false" aria-controls="panel-agents">Agents</button>
+          role="tab" aria-selected="false" aria-controls="panel-agents" data-i18n="settings.tab.agents"></button>
 </nav>
 
 <section id="panel-game" role="tabpanel" aria-labelledby="tab-game">
@@ -60,11 +60,11 @@
      viewer or an editor reaching this tab is told so rather than
      shown a form the server will refuse. -->
 <form id="game-settings" hidden>
-  <label for="game-name">Name</label>
+  <label for="game-name" data-i18n="form.name"></label>
   <input id="game-name" type="text" name="name" autocomplete="off" required>
-  <p class="muted field-note">What this game is called, everywhere it is named.</p>
+  <p class="muted field-note" data-i18n="settings.name.about"></p>
 
-  <label for="game-slug">Address</label>
+  <label for="game-slug" data-i18n="form.address"></label>
   <input id="game-slug" type="text" name="slug" autocomplete="off"
          pattern="[a-z0-9]+(-[a-z0-9]+)*" required>
   <!-- **The warning sits above the button, not in a dialog after it.**
@@ -72,7 +72,7 @@
        so the sentence names the thing that is about to stop working. -->
   <p class="notice" id="address-warning"></p>
 
-  <button type="submit">Save settings</button>
+  <button type="submit" data-i18n="settings.save.button"></button>
   <p class="error" id="settings-error" role="alert" aria-live="assertive"></p>
 </form>
 
@@ -88,28 +88,23 @@
      The instance's invitations make accounts and grant no game; every
      membership route existed and nothing called it, so in practice a
      game had exactly one person in it — whoever made it. -->
-<p class="lede" id="people-lede">
-  Everybody who can open this game, and what each of them may do. A viewer reads it, an editor
-  writes its content, and a manager also renames the game, invites people and changes what they
-  may do. Administering this instance is a separate thing and grants none of this.
-</p>
+<p class="lede" id="people-lede" data-i18n="settings.people.about"></p>
 
 <h2 data-i18n="settings.invite"></h2>
 
 <!-- Manager-only; pages/settings.js hides this and says why for anybody
      else, rather than offering a form the server will refuse. -->
 <form id="invite-member" hidden>
-  <label for="invite-email">Email</label>
-  <input id="invite-email" type="email" name="email" placeholder="them@example.test" autocomplete="off" required>
-  <label for="invite-role">Role</label>
+  <label for="invite-email" data-i18n="form.email"></label>
+  <input id="invite-email" type="email" name="email" data-i18n-attr="placeholder:placeholder.theirEmail" autocomplete="off" required>
+  <label for="invite-role" data-i18n="form.role"></label>
   <select id="invite-role" name="role">
-    <option value="viewer">Viewer — reads this game</option>
-    <option value="editor" selected>Editor — writes its content</option>
-    <option value="owner">Manager — runs the game</option>
+    <option value="viewer" data-i18n="role.viewer"></option>
+    <option value="editor" selected data-i18n="role.editor"></option>
+    <option value="owner" data-i18n="role.manager"></option>
   </select>
-  <p class="muted field-note">The link is shown once, here. Nothing is sent anywhere: this
-    instance delivers no email, so you pass it on yourself.</p>
-  <button type="submit">Create an invitation</button>
+  <p class="muted field-note" data-i18n="settings.invite.about"></p>
+  <button type="submit" data-i18n="settings.createInvite"></button>
   <p class="error" id="invite-member-error" role="alert" aria-live="assertive"></p>
 </form>
 
@@ -120,7 +115,7 @@
      because a second invitation must not destroy the only copy of the
      first — the same decision the instance's invitations record. -->
 <div class="secret" id="invite-made" role="status" aria-live="polite" hidden>
-  <b>Send this link. It is shown once.</b>
+  <b data-i18n="invite.sendLink"></b>
   <div id="invite-links"></div>
 </div>
 
@@ -145,10 +140,7 @@
      made a game cannot write a line of its content by hand: an agent
      writes it, over MCP, holding a token that opens this game and no
      other. Everything below is in service of one paste. -->
-<p class="lede" id="agents-lede">
-  Nothing on these screens writes a game's content. An agent does, over MCP, using a token that
-  opens this game and no other.
-</p>
+<p class="lede" id="agents-lede" data-i18n="settings.agents.about"></p>
 
 <h2 data-i18n="settings.connectAgent"></h2>
 
@@ -156,11 +148,11 @@
      form and fills #agents-refused for anybody else, rather than
      offering a button the server will refuse. -->
 <form id="create-token" hidden>
-  <label for="token-label">What is this token for?</label>
+  <label for="token-label" data-i18n="settings.token.whatFor"></label>
   <input id="token-label" type="text" name="label" autocomplete="off"
-         placeholder="my laptop, the CI runner, …" required>
-  <p class="muted field-note">A name for you, so you know which one to revoke later.</p>
-  <button type="submit">Create a token</button>
+         data-i18n-attr="placeholder:settings.placeholder.tokenName" required>
+  <p class="muted field-note" data-i18n="settings.token.nameAbout"></p>
+  <button type="submit" data-i18n="settings.token.create"></button>
   <p class="error" id="create-token-error" role="alert" aria-live="assertive"></p>
 </form>
 

@@ -14,15 +14,15 @@ import {
   setReadOnly,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
+import { t } from "../i18n.js";
 import { headerRow, nextCursorOf, row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // The empty state, in the page rather than in the shell. It names where
 // an image actually comes from, because nothing on this screen uploads
 // one.
-export const NO_IMAGES_HEADING = "No images yet";
-export const NO_IMAGES_SENTENCE =
-  "A map view is given its background from the view itself, which is where an image is uploaded.";
+export const NO_IMAGES_HEADING = t("images.none.heading");
+export const NO_IMAGES_SENTENCE = t("images.none.sentence");
 
 // Where an uploaded image is served from: **the URL the server spelled**,
 // filtered through the one href rule this front end has.
@@ -58,7 +58,7 @@ export async function assetsPage(opened) {
   const moreEl = doc.getElementById("assets-more");
 
   if (opened.game === null) {
-    say(noteEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
+    say(noteEl, opened.failure ?? t("error.noAccessToGame"));
     return opened;
   }
   setBreadcrumb(doc, [
@@ -67,7 +67,7 @@ export async function assetsPage(opened) {
   ]);
   // The game first: a person with three games open read three tabs
   // called "Images".
-  doc.title = opened.game.name + " \u00b7 Images \u00b7 Maestro";
+  doc.title = opened.game.name + " \u00b7 " + t("nav.images") + " \u00b7 Maestro";
   const role = await opened.client.summary();
   if (role.ok) setReadOnly(doc, role.result.role, "writes.images");
 
@@ -104,7 +104,7 @@ export async function assetsPage(opened) {
     // listing puts the pixel size in the first content cell and the id
     // in the key track, and neither was named.
     if (rendered === 0 && items.length > 0) {
-      listEl.append(headerRow(doc, { label: "Image", key: "id", cells: [{ text: "Size" }] }));
+      listEl.append(headerRow(doc, { label: t("images.column.image"), key: "id", cells: [{ text: t("images.column.size") }] }));
     }
     for (const asset of items) {
       const source = assetURL(asset);
@@ -131,7 +131,7 @@ export async function assetsPage(opened) {
     }
     rendered += items.length;
     emptyOrRows(listEl, emptyEl, rendered);
-    say(noteEl, rendered === 0 ? "" : countLabel(rendered, "image", "images"));
+    say(noteEl, rendered === 0 ? "" : countLabel(rendered, t("unit.image"), t("unit.images")));
     cursor = nextCursorOf(body);
     if (moreEl) {
       // **A pager on an empty list is a control with nothing to fetch.**

@@ -21,16 +21,15 @@ import {
   say,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
+import { t } from "../i18n.js";
 import { openDialog } from "../components/mst-dialog.js";
 
 // The empty state, in the page rather than in the shell.
-export const NO_INVITES_HEADING = "Nobody is waiting";
-export const NO_INVITES_SENTENCE =
-  "No invitation is outstanding. One appears here from the moment you create it until the " +
-  "person uses it or you revoke it.";
+export const NO_INVITES_HEADING = t("admin.noInvites.heading");
+export const NO_INVITES_SENTENCE = t("admin.noInvites.sentence");
 
-export const REVOKE = "Revoke";
-export const REVOKE_ARMED = "Revoke — click again";
+export const REVOKE = t("admin.revoke");
+export const REVOKE_ARMED = t("admin.revoke.armed");
 
 // An invitation is a row with a state, so it is the shared row: the
 // address it was made for, when it expires, and the one thing that can
@@ -42,7 +41,7 @@ export function inviteRow(doc, invite, onRevoke) {
   // The id is still what the revoke button sends.
   const dead = invite.revoked === true;
   const item = row(doc, {
-    label: String(invite.email || "anyone with the link"),
+    label: String(invite.email || t("invite.anyone")),
     cells: [{ text: dead ? "revoked" : expiry(invite.expires_at), absent: dead }],
   });
   // **An address is not the game's voice.** The row's label is serif 600
@@ -116,7 +115,7 @@ export async function loadInvites(doc, onRevoke) {
   // is a value a reader has to guess at, and "expires in 14 days" beside
   // "revoked" is two different kinds of fact in one place.
   listEl.replaceChildren(
-    headerRow(doc, { label: "Invited", cells: [{ text: "State" }], count: "" }),
+    headerRow(doc, { label: t("admin.column.invited"), cells: [{ text: t("admin.column.state") }], count: "" }),
     ...invites.map((invite) => inviteRow(doc, invite, onRevoke)),
   );
   emptyOrRows(listEl, emptyEl, invites.length);
@@ -128,8 +127,8 @@ export async function loadInvites(doc, onRevoke) {
   // "1 invitation outstanding" over two rows is a count that argues with
   // what is under it.
   say(noteEl, live === invites.length
-    ? countLabel(live, "invitation outstanding", "invitations outstanding")
-    : live + " of " + invites.length + " still usable");
+    ? countLabel(live, t("invite.outstanding.one"), t("invite.outstanding.many"))
+    : t("invite.stillUsable", { live, all: invites.length }));
   return invites;
 }
 
@@ -144,7 +143,7 @@ export function wireInviteForm(doc, reload) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (errorEl) errorEl.textContent = "";
-    setFormBusy(form, true, "Creating…");
+    setFormBusy(form, true, t("action.creating"));
     const answer = await postJSON("/api/invites", { email: emailEl ? emailEl.value : "" });
     setFormBusy(form, false);
     if (!answer.ok) {
@@ -172,20 +171,16 @@ export function wireInviteForm(doc, reload) {
 
 // --- The accounts on this instance ------------------------------------
 
-export const ADMINISTRATOR = "administrator";
-export const YOU = "you";
-export const EDIT = "Edit";
-export const NO_USERS_HEADING = "Nobody but you";
-export const NO_USERS_SENTENCE =
-  "This instance has one account, yours. An invitation above is how a second one is made.";
-export const EDIT_TITLE = "Edit this account";
-export const SAVE = "Save";
-export const CANCEL = "Cancel";
-export const LAST_ADMIN =
-  "This instance must keep at least one administrator. Make somebody else one first.";
-export const CANNOT_DEMOTE_YOURSELF =
-  "You are signed in as an administrator. Taking it away here would lock you out of this page, " +
-  "so another administrator does it for you.";
+export const ADMINISTRATOR = t("admin.administrator");
+export const YOU = t("admin.you");
+export const EDIT = t("admin.edit");
+export const NO_USERS_HEADING = t("admin.noUsers.heading");
+export const NO_USERS_SENTENCE = t("admin.noUsers.sentence");
+export const EDIT_TITLE = t("admin.edit.title");
+export const SAVE = t("admin.save");
+export const CANCEL = t("admin.cancel");
+export const LAST_ADMIN = t("admin.lastAdmin");
+export const CANNOT_DEMOTE_YOURSELF = t("admin.cannotDemoteYourself");
 
 // personRow is one account: who they are, how they sign in, what they
 // may do, and the way in to changing it.
@@ -229,7 +224,7 @@ export function editAccount(doc, user, onSave) {
 
   const nameLabel = doc.createElement("label");
   nameLabel.setAttribute("for", "edit-name");
-  nameLabel.textContent = "Name";
+  nameLabel.textContent = t("form.name");
   const name = doc.createElement("input");
   // `setAttribute` and not `.id = `: the property reflects to the
   // attribute in a browser and not in this project's DOM stub, and a
@@ -240,7 +235,7 @@ export function editAccount(doc, user, onSave) {
 
   const emailLabel = doc.createElement("label");
   emailLabel.setAttribute("for", "edit-email");
-  emailLabel.textContent = "Email";
+  emailLabel.textContent = t("form.email");
   const email = doc.createElement("input");
   email.setAttribute("id", "edit-email");
   email.setAttribute("type", "email");
@@ -257,7 +252,7 @@ export function editAccount(doc, user, onSave) {
   // last-administrator rule would not catch it while another admin
   // exists. Somebody else does it for you.
   if (user.you === true) admin.disabled = true;
-  standing.append(admin, doc.createTextNode(" Administers this instance"));
+  standing.append(admin, doc.createTextNode(t("admin.administersThis")));
 
   const note = doc.createElement("p");
   note.className = "muted";
@@ -279,7 +274,7 @@ export function editAccount(doc, user, onSave) {
   form.addEventListener("submit", async (event) => {
     if (event && typeof event.preventDefault === "function") event.preventDefault();
     error.textContent = "";
-    setFormBusy(form, true, "Saving…");
+    setFormBusy(form, true, t("action.saving"));
     const answer = await onSave({
       display_name: name.value,
       email: email.value,
@@ -386,11 +381,11 @@ if (globalThis.document && globalThis.document.getElementById("new-invite")) {
         main.replaceChildren(head);
         main.append(negativeState(doc, {
           kind: STATE_REFUSED,
-          heading: "This instance is not yours to administer",
+          heading: t("admin.notYours.heading"),
           sentence: me && me.email
-            ? "You are signed in as " + me.email + ", which is not an administrator. An administrator can make you one."
-            : "This account does not administer this instance.",
-          action: { href: "/account", label: "Your account" },
+            ? t("admin.notYours.signedInAs", { email: me.email })
+            : t("admin.notYours.sentence"),
+          action: { href: "/account", label: t("account.title") },
         }));
       }
     }

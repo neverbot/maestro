@@ -91,8 +91,38 @@ every catalogue fills the same placeholders, no shell writes a heading
 into its own markup, no module hard-codes a sentence, no count names its
 noun in the markup's language, and every refusal this package writes has
 a catalogue entry. **A sentence is a key, not fragments spliced at
-runtime** — "{what} your assistant" puts the subject last in Spanish and
+runtime** — "{what} your agent" puts the subject last in Spanish and
 reads as nonsense, and so does an English noun inside a Spanish count.
+
+**Putting a word on a screen**, which is now never a string literal:
+
+1. Pick a key by where the words are read: `home.band.content.note`,
+   `settings.token.failed`, `checks.column.type`. Write the English in
+   `static/i18n/en.json` and the translation in every other catalogue
+   beside it, which today is `es.json`. A key in one and not the other
+   fails the first guard, and there is no runtime fallback by design: a
+   missing key renders as the key.
+2. **A string that never varies goes in the shell**, as an empty element
+   with `data-i18n="key"` (or `data-i18n-attr="placeholder:key"` for an
+   attribute), which `applyTo` in `i18n.js` fills on every page. A string
+   that depends on the data or on who is reading goes in the module, as
+   `t("key")` — never as a literal, which `TestNoModuleHardCodesASentence`
+   refuses.
+3. **A number takes its noun from the catalogue too**:
+   `countLabel(n, t("unit.step"), t("unit.steps"))`. A count with an
+   English noun in it fails `TestNoModuleCountsInEnglish`.
+4. **A sentence with a count that changes its shape is two keys**, `.one`
+   and `.many`, chosen by the caller: English pluralises by number and
+   Spanish also moves the verb, so there is no splicing that works for
+   both.
+5. **A sentence whose other half depends on the reader's role** goes
+   through `whoWrites(role, "writes.thing")`, which reads
+   `writes.thing.agent` or `writes.thing.viewer`.
+6. **The actor that writes a game's content is an agent**, in both
+   languages: `un agente`, never `tu asistente`. A screen that says both
+   has two names for one thing.
+7. A game's own words — the names of its types, entities, documents and
+   relation types — are **never** translated and never pass through `t`.
 
 **The wire stays English and the reader does not.** A refusal arrives as
 a code and a sentence, and one code carries several sentences, so the

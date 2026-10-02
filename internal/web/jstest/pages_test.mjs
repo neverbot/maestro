@@ -445,7 +445,7 @@ check("theHomeBandsAreContentOverviewsWritingInThatOrder", async () => {
 // words.** Twelve verbs with their counts and nothing else is a list a
 // designer cannot judge: `odia a 11` is right or wrong depending on
 // whether it joins races or zones. The endpoints arrive as keys, which
-// is what an assistant writes, and this screen speaks the game's.
+// is what an agent writes, and this screen speaks the game's.
 check("aConnectionNamesWhatItJoinsInTheGamesOwnWords", async () => {
   const dom = mount({
     ids: HOME_IDS,
@@ -476,7 +476,7 @@ check("aConnectionNamesWhatItJoinsInTheGamesOwnWords", async () => {
 
   const shown = text(dom.elements["relation-types"]);
   assert(shown.includes("Quests \u2192 Zones"), `the band does not name what the verb joins: ${JSON.stringify(shown)}`);
-  assert(!shown.includes("quest \u2192 zone"), "the band names the endpoints by the key an assistant writes");
+  assert(!shown.includes("quest \u2192 zone"), "the band names the endpoints by the key an agent writes");
 
   const undeclared = dom.elements["relation-types"].children.at(-1);
   const cell = undeclared.children.find((c) => (c.className || "").startsWith("catalogue-cell"));
@@ -539,8 +539,8 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
   assertEqual(anchors.length, 1, "the onboarding is not exactly one link");
   // **The way out answers what this game already has.** This game holds
   // four hundred quests, so what it needs is the way to compose the
-  // first overview, not an assistant it already has writing into it.
-  assertEqual(anchors[0].href, "/g/azeroth/views/new", "a game full of content is told to go and connect an assistant");
+  // first overview, not an agent it already has writing into it.
+  assertEqual(anchors[0].href, "/g/azeroth/views/new", "a game full of content is told to go and connect an agent");
   assertEqual(anchors[0].textContent, COMPOSE_LABEL, "the link is not labelled");
   assert(!lane.hidden, "the onboarding is hidden on a game with no views");
 
@@ -553,7 +553,7 @@ check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async (
 });
 
 // The other arm: nothing in the game yet, so the way out is the
-// assistant, and it stays inside this instance. It pointed at a README
+// agent, and it stays inside this instance. It pointed at a README
 // on GitHub, which is where the one person this product is for stops
 // reading.
 check("aGameWithNothingInItIsSentToConnectAnAssistant", async () => {
@@ -1575,7 +1575,7 @@ check("aCraftedLabelReachesTheHomeAsText", async () => {
 // **A catalogue says how much of the game a row is, not only how many.**
 // Ordered alphabetically, RL-Aeternum's heaviest connection (45 of 95,
 // nearly half the graph) sat ninth of twelve, and the key spent a whole
-// column on the word an assistant uses.
+// column on the word an agent uses.
 check("aCatalogueIsOrderedByWeightAndDrawsTheShare", async () => {
   const dom = mount({
     ids: HOME_IDS,
@@ -1728,7 +1728,7 @@ check("aGameThatFillsUpLeavesItsEmptyStateOnItsOwn", async () => {
 
 // **A game that is only writing is still a game.** "Empty" was a fact
 // about the metamodel alone, so a game holding one document and no types
-// hid every band, showed the three steps for connecting an assistant,
+// hid every band, showed the three steps for connecting an agent,
 // and said "Nothing in this game yet" with the document rendered inside
 // the hidden band. Reported from a real instance.
 check("aGameWithOnlyWritingIsNotAnEmptyGame", async () => {
@@ -1748,7 +1748,7 @@ check("aGameWithOnlyWritingIsNotAnEmptyGame", async () => {
   });
   await load("home");
   assert(!dom.elements.home.hidden, "the bands are hidden on a game that holds a document");
-  assert(dom.elements["connect-agent"].hidden, "a game with writing in it was told to connect an assistant");
+  assert(dom.elements["connect-agent"].hidden, "a game with writing in it was told to connect an agent");
   assert(
     text(dom.elements.docs).includes("general.md"),
     `the document is not on the page: ${JSON.stringify(text(dom.elements.docs))}`,

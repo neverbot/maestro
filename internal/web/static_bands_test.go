@@ -114,3 +114,41 @@ func TestThePairedCataloguesShareOneMeasurement(t *testing.T) {
 	got := len(strings.Fields(regexp.MustCompile(`\(\s*[^)]*\s*\)`).ReplaceAllString(strings.Join(tracks, " "), "()")))
 	assert.Must(t, got == want, "the pair declares %d tracks and a catalogue row sits in %d", got, want)
 }
+
+// **The page has a vertical rhythm, and a component can still override
+// it.** `.page p { margin: 0 }` replaced the browser's 14px with
+// nothing, so every sentence that introduces a table sat on its first
+// row — reported on the game home and true on eight screens. It also
+// outranked every class, which is why `.verdict` and `.walked` asked
+// for a margin they never got. The default is wrapped in `:where()` so
+// it carries no specificity at all: it is what a paragraph gets when
+// nothing else has an opinion.
+func TestThePageHasAVerticalRhythmAComponentCanOverride(t *testing.T) {
+	t.Parallel()
+	styles := homeStyles(t)
+
+	// The bully form, in any of its spellings.
+	bully := regexp.MustCompile(`(?m)^\.page p\s*(\{|,)`)
+	assert.Must(t, !bully.MatchString(styles),
+		"`.page p` outranks every class that styles a paragraph; wrap the default in :where()")
+
+	rhythm := regexp.MustCompile(`(?s):where\(\.page\) :where\(p\) \{([^}]*)\}`).FindStringSubmatch(styles)
+	assert.Must(t, rhythm != nil, "no default rhythm for a paragraph in the content column")
+	assert.Must(t, strings.Contains(rhythm[1], "margin: 0 0 var(--s"),
+		"the default paragraph rhythm is %q, which is not a step of the scale", strings.TrimSpace(rhythm[1]))
+
+	// The gap before a table, which is the one a reader reported.
+	before := regexp.MustCompile(`(?s):where\(\.page\) :where\((\s*p:has\(\+ ul\.catalogue\)[^)]*\)[^{]*)\{([^}]*)\}`).FindStringSubmatch(styles)
+	assert.Must(t, before != nil, "nothing separates a sentence from the table under it")
+	assert.Must(t, strings.Contains(before[2], "var(--s4)"),
+		"a sentence over a table is spaced by %q", strings.TrimSpace(before[2]))
+
+	// **The general sibling combinator, not the adjacent one.** Every
+	// band keeps a hidden `p.error` between its list and its control, and
+	// a hidden element is still a sibling, so `+` matched nothing — which
+	// is how the gap under a table shipped once at zero.
+	after := regexp.MustCompile(`(?s):where\(ul\.catalogue, \.scroller\) (\S) :where\(([^)]*)\) \{([^}]*)\}`).FindStringSubmatch(styles)
+	assert.Must(t, after != nil, "nothing separates a table from the control under it")
+	assert.Must(t, after[1] == "~", "the rule under a table uses %q, and a hidden sibling defeats it", after[1])
+	assert.Must(t, strings.Contains(after[3], "var(--s4)"), "a control under a table is spaced by %q", strings.TrimSpace(after[3]))
+}

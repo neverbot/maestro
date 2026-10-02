@@ -70,7 +70,7 @@ export function withHeader(header, rows) {
 // **What a relation type joins, in one cell, in the game's own words.**
 // The band listed twelve verbs with their counts and nothing else, and
 // `hates 11` is right or wrong depending on whether it joins races or
-// zones. The endpoints arrive as keys, which is what an assistant
+// zones. The endpoints arrive as keys, which is what an agent
 // writes; `labels` is the game's own vocabulary for them, built from the
 // entity types in the same answer, because this screen speaks the game's
 // words and meets a key on the thing's own page.
@@ -397,7 +397,7 @@ async function catalogueLane(doc, slug, client) {
   });
 
   // **No key column.** `Deidades  deity  27` spent a whole column, on
-  // every row, on the word an assistant uses. A designer reads the
+  // every row, on the word an agent uses. A designer reads the
   // game's own word here and meets the key on the thing's own page,
   // where they would copy it.
   //

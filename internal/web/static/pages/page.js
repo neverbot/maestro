@@ -428,7 +428,7 @@ export function fill(listEl, emptyEl, rows) {
 export const ROLE_VIEWER = "viewer";
 
 export function whoWrites(role, sentence) {
-  return t(sentence + (role === ROLE_VIEWER ? ".viewer" : ".assistant"));
+  return t(sentence + (role === ROLE_VIEWER ? ".viewer" : ".agent"));
 }
 
 
@@ -604,9 +604,9 @@ export { STATE_EMPTY, STATE_LOADING, STATE_REFUSED, negativeState, fillState } f
 // its own. It kept its name; what it lost is the box and the 3px
 // coloured left stripe, which the identity bans by name.
 // `hasContent` is whether this game holds anything to look at yet. It
-// decides the way out: a game with nothing in it needs an assistant
+// decides the way out: a game with nothing in it needs an agent
 // connected, and a game already full of missions needs the way to make
-// the first overview. Offering the first to somebody whose assistant is
+// the first overview. Offering the first to somebody whose agent is
 // already writing is the product telling them to do what they have
 // done.
 export function onboarding(doc, role, slug, hasContent) {

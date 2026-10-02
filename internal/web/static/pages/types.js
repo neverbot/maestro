@@ -62,7 +62,7 @@ export async function typesPage(opened) {
 
   // One read, in a function, so an event can run it again. This page
   // fetched once on load and listened to nothing: a game being written
-  // by an assistant showed the catalogue it had when the tab opened.
+  // by an agent showed the catalogue it had when the tab opened.
   async function load() {
     const answer = await opened.client.summary();
     if (!answer.ok) {

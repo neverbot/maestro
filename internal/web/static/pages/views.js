@@ -49,7 +49,7 @@ export async function viewsPage(opened) {
   // notice: the server would refuse the save, and a control that cannot
   // succeed is worse than a sentence saying so.
   // Whether this game holds anything to draw yet, which decides what the
-  // empty state offers: an assistant to connect, or the way to compose
+  // empty state offers: an agent to connect, or the way to compose
   // the first overview.
   const hasContent = role.ok && !isEmptyGame(role.result);
   const actions = doc.getElementById("page-actions");
@@ -121,7 +121,7 @@ export async function viewsPage(opened) {
   if (moreEl) moreEl.addEventListener("click", () => page());
   await page();
 
-  // **This list listened to nothing.** An assistant saving an overview
+  // **This list listened to nothing.** An agent saving an overview
   // left the page showing the ones it found on load, and a designer
   // watching it work saw nothing happen.
   const reread = coalesce(async () => {

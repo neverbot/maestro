@@ -575,6 +575,14 @@ here.
 - **Wide content scrolls inside its own container**, never the page. A
   table sets `min-width` and its wrapper `overflow-x: auto`, so a row
   stays 36px at any width instead of wrapping into two lines.
+- **Vertical rhythm in the content column:** a paragraph carries `md`
+  under it, and `lg` when the next thing is a table, the box one scrolls
+  in, or the controls over one. A table carries no margin of its own and
+  its neighbours own the gap on both sides, so one rule decides a
+  distance rather than two meeting. A paragraph that ends its section carries nothing. The
+  browser's own 14px is not in this scale and was once replaced by
+  `margin: 0`, which left every sentence that introduces a table sitting
+  on its first row — on eight screens, until a reader said so.
 
 ### Negative states
 

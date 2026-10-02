@@ -1209,9 +1209,40 @@ form label {
   .setting { grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
 }
 
-/* The user agent's 14px is a number this system does not contain, and
-   four paragraphs on these two screens were wearing it. */
-.page p { margin: 0; }
+/* **The page's own vertical rhythm.** The user agent's 14px is a number
+   this system does not contain, and four paragraphs were wearing it —
+   but `margin: 0` replaced a wrong number with no number, and what that
+   left was a sentence sitting on the first row of the table it
+   introduces. On the game home, on a type's catalogue, on the checks and
+   on settings: eight screens, none of them red, until a reader said the
+   sentences looked stuck to the tables.
+   A sentence that says what a table is must read as its own line, so
+   what sits above a table owns the gap and the table carries no margin
+   of its own — one rule decides the distance rather than two meeting.
+   docs/design.md's page frame states it. */
+/* **`:where()`, so a component can still speak.** `.page p` outranks a
+   class, which is why `.verdict` and `.walked` have been asking for a
+   margin they never got: a rule meant as the default for every
+   paragraph was overriding the two rules written for particular ones.
+   Wrapped in `:where()` this contributes no specificity at all, so it
+   is what a paragraph gets when nothing else has an opinion, and any
+   component rule wins without having to shout. */
+:where(.page) :where(p) { margin: 0 0 var(--s3); }
+:where(.page) :where(p:last-child) { margin-bottom: 0; }
+:where(.page) :where(
+  p:has(+ ul.catalogue), p:has(+ .scroller), p:has(+ .tools),
+  p:has(+ dl), p:has(+ table)
+) { margin-bottom: var(--s4); }
+/* The other side of the same rule: what follows a table owns the gap
+   under it, because the table has none. `Show more` was sitting on the
+   last row of the list it pages.
+   The general sibling combinator and not the adjacent one: every band
+   keeps a hidden `p.error` between its list and its control, and a
+   hidden element is still a sibling, so `+` matched nothing — which is
+   how this rule shipped once already with the gap still at zero. */
+:where(ul.catalogue, .scroller) ~ :where(.link-button, p, button) {
+  margin-top: var(--s4);
+}
 
 
 /* A short list of facts about you: name, address, since when. A
@@ -1994,7 +2025,10 @@ ul.history li:last-child { border-bottom: 0; }
    below: three grey sentences in a row, the middle one being the thing
    the reader pressed a button for. */
 .verdict {
-  margin: var(--s3) 0 0;
+  /* Only the side this rule has an opinion about: the shorthand wrote a
+     zero under the verdict too, which put the sentence after it on the
+     same line of paper. The page's own rhythm owns the other side. */
+  margin-top: var(--s3);
   font-size: 1rem;
   font-weight: 500;
   color: var(--ink);
@@ -2346,7 +2380,6 @@ li.cycle:last-child { border-bottom: 0; }
    negative states use, because it is a sentence on a page and not prose
    in a document. */
 .band-note {
-  margin: var(--s3) 0 var(--s4);
   max-width: 62ch;
   color: var(--muted);
 }

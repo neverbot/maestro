@@ -84,12 +84,22 @@ metaphor.
 **The human interface is translated, and English is its source
 language.** A string a person reads lives in `static/i18n/en.json` and in
 one catalogue per language beside it; `internal/web/static/i18n.js`
-fetches the one the reader needs and no other. Three rules hold it
-together, each a test in `static_i18n_test.go`: every catalogue carries
-every key English does, every catalogue fills the same placeholders, and
-no shell writes a heading into its own markup. **A sentence is a key, not
-fragments spliced at runtime** — "{what} your assistant" puts the subject
-last in Spanish and reads as nonsense.
+fetches the one the reader needs and no other. Six rules hold it
+together, each a test in `static_i18n_test.go` or
+`static_errors_test.go`: every catalogue carries every key English does,
+every catalogue fills the same placeholders, no shell writes a heading
+into its own markup, no module hard-codes a sentence, no count names its
+noun in the markup's language, and every refusal this package writes has
+a catalogue entry. **A sentence is a key, not fragments spliced at
+runtime** — "{what} your assistant" puts the subject last in Spanish and
+reads as nonsense, and so does an English noun inside a Spanish count.
+
+**The wire stays English and the reader does not.** A refusal arrives as
+a code and a sentence, and one code carries several sentences, so the
+browser slugs the sentence itself and looks that up: `serverSays` in
+`i18n.js`, against keys the Go guard generates from the handlers' own
+literals. The six refusals whose sentence is finished at runtime are
+named in that guard and reach a reader in English.
 
 Conversation with the user happens in whatever language they choose;
 artefacts written to disk are English regardless.

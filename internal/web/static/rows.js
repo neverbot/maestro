@@ -217,6 +217,18 @@ export function headerRow(doc, spec) {
   tally.setAttribute("role", "columnheader");
   tally.textContent = spec.count ?? "";
   item.append(tally);
+  // The share track's own heading, when the listing draws one. A bar and
+  // a percentage are the one column on the home page a reader had to
+  // infer the subject of: 43% of the entities, or of the game? Only a
+  // caller that draws shares passes it, so the seventh track stays
+  // collapsed on the listings that do not.
+  if (typeof spec.share === "string" && spec.share !== "") {
+    const share = doc.createElement("span");
+    share.className = "catalogue-share";
+    share.setAttribute("role", "columnheader");
+    share.textContent = spec.share;
+    item.append(share);
+  }
   return item;
 }
 

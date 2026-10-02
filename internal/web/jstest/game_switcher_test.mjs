@@ -59,6 +59,33 @@ function fakeElement(tag = "div") {
     querySelector() {
       return null;
     },
+    // classList, as in the other two harnesses: the shared row writes a
+    // class conditionally and the home toggles `pair` on its band
+    // container, and a stub with only `className` turns both into
+    // "Cannot read properties of undefined".
+    get classList() {
+      const owner = this;
+      const names = () => (owner.className === "" ? [] : owner.className.split(" "));
+      return {
+        add(...wanted) {
+          const has = names();
+          for (const name of wanted) if (!has.includes(name)) has.push(name);
+          owner.className = has.join(" ");
+        },
+        remove(...unwanted) {
+          owner.className = names().filter((name) => !unwanted.includes(name)).join(" ");
+        },
+        contains(name) {
+          return names().includes(name);
+        },
+        toggle(name, on) {
+          const wanted = on === undefined ? !names().includes(name) : Boolean(on);
+          if (wanted) this.add(name);
+          else this.remove(name);
+          return wanted;
+        },
+      };
+    },
   };
   // **Setting `textContent` clears the children and reading it walks
   // them**, as the real DOM does. Without the getter an assertion about

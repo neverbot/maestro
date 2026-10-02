@@ -44,37 +44,59 @@
      every game that already has content. -->
 <div id="connect-agent" hidden></div>
 
-<!-- **Bands, not columns.** These were three columns named after the
-     three tables the product stores things in: views, types, documents.
-     A designer's model of their own game is its missions, its places,
-     its classes and the writing about them, so the page is now one
-     column a reader goes down: what this game is made of, then the ways
-     somebody saved to look at it, then the writing.
+<!-- **Bands, not columns, and four peers rather than three.** These
+     were three columns named after the three tables the product stores
+     things in: views, types, documents. A designer's model of their own
+     game is its missions, its places, its classes and the writing about
+     them, so the page became one column a reader goes down.
 
-     Three columns also failed both states this page has. Empty, they
-     tripled the same bad news and buried the one action above them.
-     Full, they were three lanes competing for one glance and a long list
-     had a third of the window to sit in.
+     Three columns failed both states this page has. Empty, they tripled
+     the same bad news and buried the one action above them. Full, they
+     were three lanes competing for one glance and a long list had a
+     third of the window to sit in.
+
+     What replaced them put the connections *inside* the content band,
+     under a heading one step down, and that was a claim about the
+     metamodel nobody meant to make: entity types and relation types are
+     two halves of one pair, and the page taught a reader that one
+     contains the other. A reader said so. The two are peers now, each a
+     section with its own Headline heading, and docs/design.md's Band
+     Rule is where that is argued.
+
+     The pairing is the other half: those two bands encode the same unit
+     and are read against each other, so above 1200px they stand side by
+     side — pages/home.js sets `pair` on this element, and only when both
+     have rows. The long list never pairs, which is the half of the
+     three-column failure that was about width.
 
      The order is asserted rather than left to this file: pages/page.js
      declares DESTINATIONS and pages/home.js renders in that order. -->
 <div id="home" class="lanes" hidden>
-  <section class="lane" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
+  <section class="lane lane-paired" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
     <h2 id="lane-catalogue-heading" data-i18n="home.band.content"></h2>
+    <!-- What a reader is looking at, standing, in the words a designer
+         uses for their own game. It is in the shell and not in
+         pages/home.js because it never varies: not with the data, not
+         with who is reading. The holes below do both. -->
+    <p class="band-note" data-i18n="home.band.content.note"></p>
     <ul class="catalogue" id="types"></ul>
     <!-- The hole; pages/home.js carries the words, including the half
          that depends on who is reading: an editor can have a type
          declared, a viewer cannot, and telling a viewer to do what the
          server will refuse is worse than telling them nothing. -->
     <div id="types-empty" hidden></div>
+  </section>
 
-    <h3 data-i18n="home.band.connections"></h3>
+  <section class="lane lane-paired" id="lane-connections" aria-labelledby="lane-connections-heading">
+    <h2 id="lane-connections-heading" data-i18n="home.band.connections"></h2>
+    <p class="band-note" data-i18n="home.band.connections.note"></p>
     <ul class="catalogue" id="relation-types"></ul>
     <div id="relation-types-empty" hidden></div>
   </section>
 
   <section class="lane" id="lane-views" aria-labelledby="lane-views-heading">
     <h2 id="lane-views-heading" data-i18n="home.band.overviews"></h2>
+    <p class="band-note" data-i18n="home.band.overviews.note"></p>
     <ul class="catalogue" id="views" hidden></ul>
     <!-- A sentence and a way in, never a *New view* button: this page is
          read, and the one thing a reader of an empty game needs is the
@@ -85,6 +107,7 @@
 
   <section class="lane" id="prose" aria-labelledby="lane-prose-heading">
     <h2 id="lane-prose-heading" data-i18n="home.band.writing"></h2>
+    <p class="band-note" data-i18n="home.band.writing.note"></p>
     <!-- The kinds this game invented, above the documents they describe.
          Maestro ships no vocabulary of them, so nothing but this line
          tells a designer which words their own writing is using. Hidden

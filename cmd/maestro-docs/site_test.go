@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -377,4 +379,57 @@ func TestAPictureOnItsOwnLineIsAFigure(t *testing.T) {
 	// gets its own.
 	w, h, ok := pngSize(filepath.Join("..", "..", "docs", "images", "quest-chain.png"))
 	assert.Should(t, ok && w == 1440 && h == 815, "pngSize read %dx%d (ok=%v) from a 1440x815 screenshot", w, h, ok)
+}
+
+// **The design system is three files that move together, and nothing
+// made them.** docs/design.md argues each named rule, and
+// docs/design-tokens.json carries the sentence the generated page
+// renders — so a rule written in one and not the other is a rule the
+// design system states and the design system's own page does not have.
+// Found by writing one: the Band Rule landed in the document and the
+// page kept rendering eleven rules with nothing red anywhere.
+func TestEveryNamedRuleIsInBothHalvesOfTheDesignSystem(t *testing.T) {
+	t.Parallel()
+	document, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))
+	assert.NoErr(t, err, "read design.md")
+	sidecar, err := os.ReadFile(filepath.Join("..", "..", "docs", "design-tokens.json"))
+	assert.NoErr(t, err, "read design-tokens.json")
+
+	// `**The Something Rule.**` at the start of a line is how the
+	// document declares one.
+	declared := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^\*\*(The [^*.]+ Rule)\.\*\*`).FindAllStringSubmatch(string(document), -1) {
+		declared[m[1]] = true
+	}
+	assert.Must(t, len(declared) > 8, "found %d named rules in design.md; this guard is reading the wrong place", len(declared))
+
+	var side struct {
+		Narrative struct {
+			Rules []struct {
+				Name string `json:"name"`
+			} `json:"rules"`
+		} `json:"narrative"`
+	}
+	assert.NoErr(t, json.Unmarshal(sidecar, &side), "parse design-tokens.json")
+
+	carried := map[string]bool{}
+	for _, rule := range side.Narrative.Rules {
+		carried[rule.Name] = true
+	}
+
+	var missing, extra []string
+	for name := range declared {
+		if !carried[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range carried {
+		if !declared[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	assert.Must(t, len(missing) == 0, "design.md argues %s and design-tokens.json carries neither the sentence nor the page", strings.Join(missing, ", "))
+	assert.Must(t, len(extra) == 0, "design-tokens.json carries %s, which design.md does not argue", strings.Join(extra, ", "))
 }

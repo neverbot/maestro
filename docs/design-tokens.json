@@ -474,6 +474,10 @@
         "section": "typography"
       },
       {
+        "name": "The Band Rule",
+        "body": "A screen made of bands is a stack of peers: one section each, one Headline heading each, separated by xxxl and by a 1px line rule above every heading after the first. Nothing is ranked under a band by type size, because no two adjacent roles are far enough apart to say so, and nothing is ranked by face, because a face change means a change of owner. Two bands may stand side by side at 1200px and above, and only when they encode the same unit and are read against each other; the pair shares one grid measurement, and falls back to one column when either side has no rows."
+      },
+      {
         "name": "The No Uppercase Rule",
         "body": "Labels are sentence case with light tracking. All-caps labels are the admin-panel tell.",
         "section": "typography"

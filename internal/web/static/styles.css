@@ -205,6 +205,7 @@
   --s4: 16px;
   --s5: 24px;
   --s6: 32px;
+  --s7: 40px;
 
   --radius: 3px;
   --radius-pill: 999px;
@@ -1805,6 +1806,7 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 }
 .catalogue-share .share-pct { min-width: 2.5rem; text-align: right; }
 .catalogue-share .share-bar { width: 10rem; height: 6px; }
+.lanes.pair .lane-paired .catalogue-share .share-bar { width: 7rem; }
 .catalogue-share .share-track { fill: var(--line); }
 .catalogue-share .share-fill { fill: var(--data-1); }
 
@@ -1818,6 +1820,33 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .page > ul.catalogue {
   width: max-content;
   max-width: min(100%, 60rem);
+}
+/* **Two sibling grids share nothing, and the pair is a comparison.**
+   Side by side, the two catalogues had their counts 44px apart and their
+   share bars 45px apart, so "47% here against 43% there" could not be
+   read across the gap — which is the one thing the pairing is for. In
+   the pair each list fills its own column and every track after the name
+   is fixed, so the name absorbs the slack and the count, the share and
+   the bar land on the same x in both halves. docs/design.md's Band Rule
+   requires it. */
+@media (min-width: 1200px) {
+  .lanes.pair .lane-paired ul.catalogue {
+    width: 100%;
+    max-width: none;
+    /* Eight tracks, in the order rows.js appends cells: the name, the
+       key, the three content cells, the count, the share, the spacer.
+       The name takes the slack, so the spacer is nothing here — every
+       other track is the same width in both halves of the pair, which
+       is the whole point.
+       The share is narrower inside the pair than it is at full width:
+       at 596px a 10rem bar clipped the game's own words to "rinde
+       cult…", and the bar is the one thing on the row that reads at any
+       length. 7rem of bar, the percentage's 2.5rem and 0.6rem between
+       them, plus the cell's own 0.75rem margin. */
+    grid-template-columns:
+      minmax(0, 1fr) max-content max-content max-content max-content
+      5.5ch 10.85rem 0;
+  }
 }
 
 /* The one thing on this page that asks a designer to do something: rows
@@ -2251,23 +2280,75 @@ li.cycle:last-child { border-bottom: 0; }
   font-variant-numeric: tabular-nums;
 }
 
-/* One column at every width. These were three columns, which is the
-   shape of the storage and not of the reading: a band can be as wide as
-   its longest row, and the reader goes down the page in the order the
-   product thinks matters. */
+/* **A stack of peers, and one pair that stands side by side.** These
+   were three columns named after the three tables the product stores
+   things in, which is the shape of the storage and not of the reading;
+   one column replaced them and the reader goes down the page in the
+   order the product thinks matters.
+   One column is still the answer for a band nobody reads against
+   another. The exception the Band Rule admits is a pair encoding the
+   same unit: what a game is made of and how it connects are the two
+   halves of the metamodel, both short, and a designer reads them
+   against each other — "95 connections over 63 things, and one verb is
+   47% of them" is a question neither table answers alone, and today it
+   costs 250px of scrolling between the two. `.pair` is set by
+   pages/home.js and only when both sides have rows, so an empty game
+   states its absence once. */
 .lanes {
   display: grid;
-  gap: var(--s7, 2.5rem);
+  gap: var(--s7);
   grid-template-columns: 1fr;
   margin-top: 1.5rem;
+}
+@media (min-width: 1200px) {
+  .lanes.pair {
+    /* Two tracks for the pair, which the two paired sections sit in;
+       every other band spans both, so the long list keeps the window. */
+    grid-template-columns: 1fr 1fr;
+  }
+  .lanes.pair > .lane:not(.lane-paired) {
+    grid-column: 1 / -1;
+  }
 }
 .lane {
   /* A grid item's default minimum is its content, and a lane holding a
      long key is content wider than a third of the window. */
   min-width: 0;
 }
+/* **A band is told from the band above it by a line, not by a size.**
+   The separation was 40px of space and nothing else, with the ranking
+   carried by 1.6px of type size between a heading and a subheading —
+   which a reader resolved as nesting, correctly, because the markup
+   nested them. docs/design.md's Band Rule is this rule and
+   product.md names the instrument: hierarchy is earned with weight,
+   size and rule lines rather than with air. The first band has no line
+   above it: the page head's own rule is already there. */
 .lane h2 {
   margin-top: 0;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+.lane + .lane {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s5);
+}
+/* A paired band sits beside its peer, so the line above it would be a
+   line through the middle of one row of the page. The pair is separated
+   from what follows by the line on the band after it. */
+@media (min-width: 1200px) {
+  .lanes.pair > .lane-paired + .lane-paired {
+    border-top: 0;
+    padding-top: 0;
+  }
+}
+/* The standing sentence under a band's name: what the reader is looking
+   at, and what the numbers beside it mean. Capped at the measure the
+   negative states use, because it is a sentence on a page and not prose
+   in a document. */
+.band-note {
+  margin: var(--s3) 0 var(--s4);
+  max-width: 62ch;
+  color: var(--muted);
 }
 /* **Left over from when a lane row wrapped, and it unmade the row the
    moment it mattered.** `flex-basis: 100%` pushed the flag onto a line of
@@ -2279,22 +2360,6 @@ li.cycle:last-child { border-bottom: 0; }
 .lane .catalogue-invalid {
   flex: 0 0 auto;
 }
-.lane h2 a {
-  color: inherit;
-}
-/* The headline role, which is what a section heading inside a page is.
-   It was sans at 0.95rem muted — an eighth type role, 1.09 against the
-   body where the scale calls 1.24 mandatory, and greyer than the rows
-   under it. */
-.lane h3 {
-  margin: var(--s5) 0 var(--s2);
-  font-family: var(--serif);
-  font-size: 1.15rem;
-  line-height: 1.3;
-  color: var(--ink);
-  font-weight: 600;
-}
-
 /* The one piece of onboarding in this product: a sentence and a link,
    and deliberately no control. */
 /* **The three negative states, in one shape.** This rule replaced a

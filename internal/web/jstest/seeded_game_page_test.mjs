@@ -58,6 +58,33 @@ function fakeElement(tag = "div") {
     getAttribute(name) {
       return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
     },
+    // classList, because a row writes a class conditionally and the home
+    // toggles `pair` on the band container. A stub with only `className`
+    // turns every such write into "Cannot read properties of undefined",
+    // which is a harness crash wearing the costume of a page defect.
+    get classList() {
+      const owner = this;
+      const names = () => (owner.className === "" ? [] : owner.className.split(" "));
+      return {
+        add(...wanted) {
+          const has = names();
+          for (const name of wanted) if (!has.includes(name)) has.push(name);
+          owner.className = has.join(" ");
+        },
+        remove(...unwanted) {
+          owner.className = names().filter((name) => !unwanted.includes(name)).join(" ");
+        },
+        contains(name) {
+          return names().includes(name);
+        },
+        toggle(name, on) {
+          const wanted = on === undefined ? !names().includes(name) : Boolean(on);
+          if (wanted) this.add(name);
+          else this.remove(name);
+          return wanted;
+        },
+      };
+    },
   };
 }
 

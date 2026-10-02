@@ -183,7 +183,11 @@ Three files, and they move together:
 
 `docs/design-system.html` renders all three and is **generated** by
 `docs/design-system.mjs`. Edit the sources and regenerate; never edit
-the page.
+the page. "They move together" is a guard now rather than a hope:
+`TestEveryNamedRuleIsInBothHalvesOfTheDesignSystem` fails on a named
+rule `docs/design.md` argues and `docs/design-tokens.json` does not
+carry, which is how a rule written in the document reached none of the
+pages that render it.
 
 Interface work is analysed through the `impeccable` skill rather than
 by eye. Its loader looks for `product.md` and `design.md` at the repo

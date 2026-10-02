@@ -121,6 +121,12 @@ function fakeElement(tag = "div") {
         contains(name) {
           return names().includes(name);
         },
+        toggle(name, on) {
+          const wanted = on === undefined ? !names().includes(name) : Boolean(on);
+          if (wanted) this.add(name);
+          else this.remove(name);
+          return wanted;
+        },
       };
     },
     getAttribute(name) {
@@ -422,9 +428,96 @@ check("theHomeBandsAreContentOverviewsWritingInThatOrder", async () => {
   // of the sections in game.html.
   const { readFileSync } = await import("node:fs");
   const shell = readFileSync(path.join(HERE, "..", "static", "game.html"), "utf8");
-  const order = ["lane-catalogue", "lane-views", "prose"].map((id) => shell.indexOf(`id="${id}"`));
-  for (const at of order) assert(at > 0, "game.html is missing one of the three bands");
-  assert(order[0] < order[1] && order[1] < order[2], `the bands are not in destination order: ${order}`);
+  const order = ["lane-catalogue", "lane-connections", "lane-views", "prose"].map((id) => shell.indexOf(`id="${id}"`));
+  for (const at of order) assert(at > 0, "game.html is missing one of the four bands");
+  assert(
+    order[0] < order[1] && order[1] < order[2] && order[2] < order[3],
+    `the bands are not in destination order: ${order}`,
+  );
+});
+
+// **The pair stands side by side only when both halves have rows.** The
+// three columns this page used to have failed empty by tripling one
+// piece of bad news and burying the one action above them; the pairing
+// is the same shape of decision in reverse, and it is made here rather
+// than by the stylesheet, which only knows the window's width.
+// **The connections band says what each verb joins, in the game's own
+// words.** Twelve verbs with their counts and nothing else is a list a
+// designer cannot judge: `odia a 11` is right or wrong depending on
+// whether it joins races or zones. The endpoints arrive as keys, which
+// is what an assistant writes, and this screen speaks the game's.
+check("aConnectionNamesWhatItJoinsInTheGamesOwnWords", async () => {
+  const dom = mount({
+    ids: HOME_IDS,
+    pathname: "/g/azeroth",
+    routes: [
+      [
+        (url) => url === base + "/summary",
+        {
+          body: summaryOf({
+            relation_types: [
+              {
+                id: "c", key: "takes_place_in", label: "takes place in",
+                relation_count: 12, invalid_count: 0,
+                source_type_keys: ["quest"], target_type_keys: ["zone"],
+              },
+              // Neither end declared: "anything", which is a fact and is
+              // written as the word rather than left blank.
+              { id: "d", key: "mentions", label: "mentions", relation_count: 1, invalid_count: 0,
+                source_type_keys: [], target_type_keys: [] },
+            ],
+          }),
+        },
+      ],
+      noKinds, noDocs, noViews, events,
+    ],
+  });
+  await load("home");
+
+  const shown = text(dom.elements["relation-types"]);
+  assert(shown.includes("Quests \u2192 Zones"), `the band does not name what the verb joins: ${JSON.stringify(shown)}`);
+  assert(!shown.includes("quest \u2192 zone"), "the band names the endpoints by the key an assistant writes");
+
+  const undeclared = dom.elements["relation-types"].children.at(-1);
+  const cell = undeclared.children.find((c) => (c.className || "").startsWith("catalogue-cell"));
+  assert(cell.className.includes("absent"), `a type that declares neither end is not marked absent: ${cell.className}`);
+  assert(cell.textContent.includes("anything"), `an undeclared end reads ${JSON.stringify(cell.textContent)}`);
+});
+
+check("aGameWithBothCataloguesPairsTheTwoHalvesOfItsMetamodel", async () => {
+  const dom = mount({
+    ids: HOME_IDS,
+    pathname: "/g/azeroth",
+    routes: [[(url) => url === base + "/summary", { body: summaryOf() }], noKinds, noDocs, noViews, events],
+  });
+  await load("home");
+  assert(
+    dom.elements.home.className.split(" ").includes("pair"),
+    `a game with both catalogues does not pair: ${JSON.stringify(dom.elements.home.className)}`,
+  );
+});
+
+check("aGameMissingEitherCatalogueStatesItsAbsenceOnceAndDoesNotPair", async () => {
+  const dom = mount({
+    ids: HOME_IDS,
+    pathname: "/g/azeroth",
+    routes: [
+      [
+        (url) => url === base + "/summary",
+        // Types declared and nothing connecting them, which is where a
+        // game that has just started is: the connections band is an
+        // empty state, and an empty state in half the window beside a
+        // table is the layout this pairing exists not to produce.
+        { body: summaryOf({ relation_types: [], totals: { entities: 401, relations: 0, invalid: 3 } }) },
+      ],
+      noKinds, noDocs, noViews, events,
+    ],
+  });
+  await load("home");
+  assert(
+    !dom.elements.home.className.split(" ").includes("pair"),
+    `a game with one empty catalogue still pairs: ${JSON.stringify(dom.elements.home.className)}`,
+  );
 });
 
 // **A sentence and a link, and no button.** Nothing in this interface
@@ -1509,7 +1602,19 @@ check("aCatalogueIsOrderedByWeightAndDrawsTheShare", async () => {
   });
   await load("home");
 
-  const rows = dom.elements.types.children;
+  // **The first child is the header, and it names every column.** The
+  // band drew `Deidades · 27 · 43% · bar` with nothing over any of it:
+  // 27 of what, 43% of what. rows.js grew headerRow for exactly that
+  // and this page did not call it.
+  const all = dom.elements.types.children;
+  const head = all[0];
+  assertEqual(head.className, "catalogue-head", "the catalogue has no header row");
+  const headings = text(head);
+  for (const column of ["Kind", "Fields", "Things", "Of the game"]) {
+    assert(headings.includes(column), `the header does not name ${column}: ${JSON.stringify(headings)}`);
+  }
+
+  const rows = all.slice(1);
   const names = rows.map((li) => li.children[0].textContent);
   assertEqual(names[0], "Quests", `the heaviest kind is not first: ${JSON.stringify(names)}`);
 

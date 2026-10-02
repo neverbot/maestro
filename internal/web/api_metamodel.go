@@ -984,18 +984,43 @@ type GameCountsOutput struct {
 // EntityTypeSummary is one declared entity type and what the game holds
 // of it. InvalidCount is the number a designer has to act on: rows a
 // schema edit stopped fitting, kept and marked rather than deleted.
+//
+// FieldCount is how many fields the type declares, and it is here
+// because the home page's catalogue drew a name, a count and a share
+// and left three columns of the shared row component empty: a reader
+// asking which of their kinds is thin could not tell a type with eight
+// declared fields from one with none. It costs no query — the listing
+// already carries the schema this counts — and it is a count rather
+// than the schema itself, which types.get answers and a band of five
+// rows does not want five of.
 type EntityTypeSummary struct {
 	TypeOutput
 	EntityCount  int64 `json:"entity_count"`
 	InvalidCount int64 `json:"invalid_count"`
+	FieldCount   int   `json:"field_count"`
 }
 
 // RelationTypeSummary is one declared relation type, how many edges
 // instance it, and how many of those a schema edit stopped fitting.
+//
+// The endpoint keys are the same two lists relation_types.get answers
+// with, carried here for the home page: twelve verbs with no ends is a
+// list a designer cannot judge, because `hates 11` is right or wrong
+// depending on whether it joins deities or zones. They cost no query —
+// gameCounts already holds the id-to-key map — and they are always a
+// slice, never nil, with the same meaning endpointKeysOf documents: an
+// empty list is "this type accepts any".
+//
+// There is no field count here and there is one on an entity type: a
+// relation type's schema is empty on eleven of twelve rows in the game
+// this was read on, and a column that says 0 twelve times took the
+// width the game's own words were being clipped to fit.
 type RelationTypeSummary struct {
 	RelationTypeOutput
-	RelationCount int64 `json:"relation_count"`
-	InvalidCount  int64 `json:"invalid_count"`
+	RelationCount  int64    `json:"relation_count"`
+	InvalidCount   int64    `json:"invalid_count"`
+	SourceTypeKeys []string `json:"source_type_keys"`
+	TargetTypeKeys []string `json:"target_type_keys"`
 }
 
 // GameTotals is the whole game in three numbers.
@@ -1052,8 +1077,13 @@ func gameCounts(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (GameCou
 	}
 	for _, row := range entityTypes {
 		counts := entityCounts[row.ID]
+		fields, err := metamodel.ParseSchema(row.FieldSchema)
+		if err != nil {
+			return GameCountsOutput{}, fmt.Errorf("decode stored field schema: %w", err)
+		}
 		out.EntityTypes = append(out.EntityTypes, EntityTypeSummary{
 			TypeOutput: typeOf(row), EntityCount: counts.Total, InvalidCount: counts.Invalid,
+			FieldCount: len(fields),
 		})
 		out.Totals.Entities += counts.Total
 		out.Totals.Invalid += counts.Invalid
@@ -1063,6 +1093,8 @@ func gameCounts(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (GameCou
 		out.RelationTypes = append(out.RelationTypes, RelationTypeSummary{
 			RelationTypeOutput: relationTypeOf(row),
 			RelationCount:      counts.Total, InvalidCount: counts.Invalid,
+			SourceTypeKeys: endpointKeysOf(row.SourceTypeIds, names),
+			TargetTypeKeys: endpointKeysOf(row.TargetTypeIds, names),
 		})
 		out.Totals.Relations += counts.Total
 		out.Totals.Invalid += counts.Invalid

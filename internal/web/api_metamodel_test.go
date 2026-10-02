@@ -796,6 +796,75 @@ func TestTheGameSummaryCountsTheRowsASchemaEditInvalidated(t *testing.T) {
 	assert.Must(t, summary.Totals.Invalid == 1, "totals = %+v, want one invalid row", summary.Totals)
 }
 
+// **The home page's columns, on the wire.** The band drew a name, a
+// count and a share and left three columns of the shared row component
+// empty, so a reader could not tell a kind with eight declared fields
+// from one with none, and twelve verbs listed their counts with nothing
+// saying what any of them joined — `hates 11` is right or wrong
+// depending on whether it joins deities or zones. These four fields are
+// what the page draws there, and they cost no query: the summary's own
+// listings already carry the schema and the endpoint ids.
+func TestTheGameSummaryCarriesWhatTheHomeDraws(t *testing.T) {
+	t.Parallel()
+	f := newRESTFixture(t)
+
+	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests",
+		"field_schema": []any{
+			map[string]any{"key": "level", "label": "Level", "type": "number"},
+			map[string]any{"key": "reward", "label": "Reward", "type": "text"},
+		},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("quest = %d: %s", rec.Code, rec.Body.String())
+	}
+	// A kind that declares nothing: the other half of the fact, and the
+	// one a reader is looking for.
+	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "zone", "label": "Zone", "label_plural": "Zones"}); rec.Code != http.StatusOK {
+		t.Fatalf("zone = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
+		"key": "takes_place_in", "label": "takes place in",
+		"source_type_keys": []string{"quest"}, "target_type_keys": []string{"zone"},
+		"field_schema": []any{map[string]any{"key": "note", "label": "Note", "type": "text"}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("relation type = %d: %s", rec.Code, rec.Body.String())
+	}
+	// An undeclared endpoint rule means "anything", and it reads back as
+	// an empty slice rather than as null — the same contract
+	// endpointKeysOf documents for relation_types.get.
+	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
+		"key": "mentions", "label": "mentions"}); rec.Code != http.StatusOK {
+		t.Fatalf("second relation type = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec := f.as(t, http.MethodGet, "/summary", nil)
+	assert.Must(t, rec.Code == http.StatusOK, "summary = %d: %s", rec.Code, rec.Body.String())
+	var summary gameSummary
+	decodeBody(t, rec, &summary)
+
+	fields := map[string]int{}
+	for _, typ := range summary.EntityTypes {
+		fields[typ.Key] = typ.FieldCount
+	}
+	assert.Must(t, fields["quest"] == 2 && fields["zone"] == 0,
+		"declared fields = %+v, want two on quest and none on zone", fields)
+
+	byKey := map[string]int{}
+	for i, typ := range summary.RelationTypes {
+		byKey[typ.Key] = i
+	}
+	joins := summary.RelationTypes[byKey["takes_place_in"]]
+	assert.Must(t, strings.Join(joins.SourceTypeKeys, ",") == "quest", "source keys = %v", joins.SourceTypeKeys)
+	assert.Must(t, strings.Join(joins.TargetTypeKeys, ",") == "zone", "target keys = %v", joins.TargetTypeKeys)
+
+	any := summary.RelationTypes[byKey["mentions"]]
+	assert.Must(t, any.SourceTypeKeys != nil && len(any.SourceTypeKeys) == 0,
+		"an undeclared endpoint rule reads back as %#v, and a page must not have to tell null from \"anything\"", any.SourceTypeKeys)
+	assert.Must(t, any.TargetTypeKeys != nil && len(any.TargetTypeKeys) == 0,
+		"an undeclared endpoint rule reads back as %#v", any.TargetTypeKeys)
+}
+
 // gameSummary is GET /api/games/{game}/summary's answer, as a client
 // reads it.
 type gameSummary struct {
@@ -806,13 +875,16 @@ type gameSummary struct {
 		LabelPlural  string `json:"label_plural"`
 		EntityCount  int64  `json:"entity_count"`
 		InvalidCount int64  `json:"invalid_count"`
+		FieldCount   int    `json:"field_count"`
 	} `json:"entity_types"`
 	RelationTypes []struct {
-		ID            string `json:"id"`
-		Key           string `json:"key"`
-		Label         string `json:"label"`
-		RelationCount int64  `json:"relation_count"`
-		InvalidCount  int64  `json:"invalid_count"`
+		ID             string   `json:"id"`
+		Key            string   `json:"key"`
+		Label          string   `json:"label"`
+		RelationCount  int64    `json:"relation_count"`
+		InvalidCount   int64    `json:"invalid_count"`
+		SourceTypeKeys []string `json:"source_type_keys"`
+		TargetTypeKeys []string `json:"target_type_keys"`
 	} `json:"relation_types"`
 	Totals struct {
 		Entities  int64 `json:"entities"`

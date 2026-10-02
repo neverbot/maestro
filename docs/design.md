@@ -75,6 +75,7 @@ spacing:
   lg: "16px"
   xl: "24px"
   xxl: "32px"
+  xxxl: "40px"
   gutter: "24px"
   rail: "280px"
   page-max: "1440px"
@@ -381,9 +382,17 @@ should fall back, not become tofu.
 - **Mono** (mono 400, 0.78rem): keys, slugs, JSON pointers,
   version numbers. Anything a person might copy.
 
-Every adjacent step is at least a 1.24 ratio apart. A flat scale is what
-made the previous interface unreadable and is the specific fault this
-one exists to fix.
+**The seven roles above are the scale, and there is no eighth.** This
+paragraph used to read "every adjacent step is at least a 1.24 ratio
+apart", which the table it sat under has never obeyed: Headline over
+Title is 1.11. The sentence was written against a flat interface and it
+was aimed at the right fault, but a rule a document breaks on its own
+page cannot adjudicate a stylesheet, and it was cited to justify a
+heading that then kept the flat ratio and changed face instead. So: a
+role is one of these seven or it does not exist, and **a step between
+two adjacent roles is too small to carry a structural claim.** Ranking
+one heading under another is the Band Rule's job, with a rule line and
+space, not the type scale's.
 
 ### Named Rules
 
@@ -397,6 +406,26 @@ because it is the name of the thing on the page, and a *section heading*
 is sans because it is Maestro's furniture around that thing. On the
 prose screen those two sit four lines apart, which is where the rule was
 first visibly broken.
+
+**The Band Rule.** A screen made of bands is a stack of **peers**: one
+`section` each, one Headline heading each, separated by `xxxl` and by a
+1px `line` rule above every heading after the first. Nothing is ranked
+under a band by type size, because no two adjacent roles are far enough
+apart to say so, and nothing is ranked by face, because a face change
+means a change of owner and not a change of level (see the rule above).
+A thing that is genuinely part of a band sits inside it with no heading
+of its own; a thing that is a peer gets its own band. The game home
+shipped "How they connect" as a serif heading inside the band above it,
+and a reader correctly read the only legible cue and concluded the
+connections belonged to the content.
+
+Two bands may stand **side by side** at 1200px and above, and only when
+they encode the same unit and are read against each other — the two
+halves of a metamodel, never a short band beside a long one. The pair
+shares one grid measurement, so the same column lands on the same x in
+both; a pair whose counts do not align is a pair that has lost the
+comparison it exists for. When either side has no rows, the pair falls
+back to one column, so an empty state is stated once.
 
 **The No Uppercase Rule.** Labels are sentence case with light tracking.
 All-caps labels are the admin-panel tell, and they cost legibility at

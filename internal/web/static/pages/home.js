@@ -35,9 +35,9 @@ import {
   viewsURL,
   whoWrites,
 } from "./page.js";
-import { byWeight, nextCursorOf } from "../rows.js";
+import { byWeight, headerRow, nextCursorOf } from "../rows.js";
 import { goToLogin } from "../app.js";
-import { t } from "../i18n.js";
+import { locale, t } from "../i18n.js";
 
 // What the two role-dependent empty states are about, in the words the
 // sentence needs. They are arguments to one function rather than two
@@ -57,6 +57,67 @@ export const NO_RELATION_TYPES_HEADING = t("connections.empty.heading");
 export const NO_RELATION_TYPES_SENTENCE = t("connections.empty.sentence");
 export const NO_PROSE_HEADING = t("writing.empty.heading");
 export const NO_PROSE_SENTENCE = t("writing.empty.sentence");
+
+// withHeader puts a header over a listing that has rows, and gives back
+// the rows alone when it has none. **A header is not a row**: fill()
+// tells a listing from an empty state by counting what it is handed, so
+// a header passed in for a band with nothing in it renders a table of
+// column names over the empty state it hid.
+export function withHeader(header, rows) {
+  return header ? [header, ...rows] : rows;
+}
+
+// **What a relation type joins, in one cell, in the game's own words.**
+// The band listed twelve verbs with their counts and nothing else, and
+// `hates 11` is right or wrong depending on whether it joins races or
+// zones. The endpoints arrive as keys, which is what an assistant
+// writes; `labels` is the game's own vocabulary for them, built from the
+// entity types in the same answer, because this screen speaks the game's
+// words and meets a key on the thing's own page.
+//
+// An undeclared endpoint rule is an empty list and means "this type
+// accepts any", which is a fact and reads as the word rather than as a
+// blank — the Named Absence Rule — and a type that has declared neither
+// end is marked absent, because "anything → anything" is a type nobody
+// has pinned down yet.
+export function wordsForTypes(entityTypes) {
+  const words = new Map();
+  for (const type of Array.isArray(entityTypes) ? entityTypes : []) {
+    if (type && type.key) words.set(type.key, type.label_plural || type.label || type.key);
+  }
+  return words;
+}
+
+export function endpointCell(type, labels) {
+  const words = labels instanceof Map ? labels : new Map();
+  const named = (keys) => (Array.isArray(keys) ? keys.filter((key) => key !== "") : []);
+  const from = named(type && type.source_type_keys);
+  const to = named(type && type.target_type_keys);
+  const word = (list) =>
+    list.length === 0
+      ? t("relationType.anyType")
+      : list.map((key) => words.get(key) ?? key).join(", ");
+  return {
+    text: word(from) + " \u2192 " + word(to),
+    absent: from.length === 0 && to.length === 0,
+  };
+}
+
+// version is a document's version as a reader would say it. The number
+// alone in a column of numbers reads as a count of something.
+export function version(value) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? t("home.version", { version: n }) : "";
+}
+
+// written is when a document was last written, short, in the reader's
+// own language. The full timestamp is on the document's own page, where
+// the history is.
+export function written(value) {
+  const when = new Date(String(value ?? ""));
+  if (Number.isNaN(when.getTime())) return "";
+  return when.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+}
 
 // describeTotals is the one line under the game's name. An empty game
 // says so in words rather than showing three zeros, which reads as a
@@ -339,40 +400,80 @@ async function catalogueLane(doc, slug, client) {
   // every row, on the word an assistant uses. A designer reads the
   // game's own word here and meets the key on the thing's own page,
   // where they would copy it.
+  //
+  // **Every column these rows draw now has a name over it.** The band
+  // read `Deidades · 27 · 43% · bar`, and 27 of what and 43% of what
+  // were questions a reader had to answer for themselves — the defect
+  // rows.js grew headerRow for, which this page never called.
   const things = byWeight(entityTypes, (t) => Number(t.entity_count ?? 0));
   fill(
     doc.getElementById("types"),
     doc.getElementById("types-empty"),
-    things.sorted.map((type) =>
-      row(doc, {
-        label: type.label_plural || type.label || type.key,
-        count: String(Number(type.entity_count ?? 0)),
-        share: { value: Number(type.entity_count ?? 0), of: things.total },
-        flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
-        href: typeURL(slug, type.key),
-      }),
-    ),
+    withHeader(things.sorted.length > 0 && headerRow(doc, {
+      label: t("home.column.kind"),
+      cells: [{ text: t("home.column.fields"), numeric: true }],
+      count: t("home.column.things"),
+      share: t("home.column.ofTheGame"),
+    }), [
+      ...things.sorted.map((type) =>
+        row(doc, {
+          label: type.label_plural || type.label || type.key,
+          // How much a kind declares is how much a designer has said
+          // about it, and the band had no answer: a type with eight
+          // fields and one with none drew the same row. The summary
+          // carries the count because the page asks for it; the schema
+          // itself belongs to that type's own page.
+          cells: [{ text: String(Number(type.field_count ?? 0)), numeric: true }],
+          count: String(Number(type.entity_count ?? 0)),
+          share: { value: Number(type.entity_count ?? 0), of: things.total },
+          flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
+          href: typeURL(slug, type.key),
+        }),
+      ),
+    ]),
   );
   const links = byWeight(relationTypes, (t) => Number(t.relation_count ?? 0));
+  const labels = wordsForTypes(entityTypes);
   fill(
     doc.getElementById("relation-types"),
     doc.getElementById("relation-types-empty"),
-    links.sorted.map((type) =>
-      row(doc, {
-        label: type.label || type.key,
-        count: String(Number(type.relation_count ?? 0)),
-        share: { value: Number(type.relation_count ?? 0), of: links.total },
-        // Since migration 0009 an edge is judged against its relation
-        // type's field schema too, so a relation type can hold rows a
-        // designer has to go and fix.
-        flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
-        // The same destination the Catalogue's own list points at: a row
-        // that hovers like a link and goes nowhere is the state this
-        // lane and that one were both in.
-        href: relationTypeURL(slug, type.key),
-      }),
-    ),
+    withHeader(links.sorted.length > 0 && headerRow(doc, {
+      label: t("home.column.connection"),
+      cells: [{ text: t("home.column.between") }],
+      count: t("home.column.links"),
+      share: t("home.column.ofTheGraph"),
+    }), [
+      ...links.sorted.map((type) =>
+        row(doc, {
+          label: type.label || type.key,
+          // **What a verb joins is what makes it judgeable.** The band
+          // listed twelve of them with their counts and nothing else,
+          // and `odia a 11` is right or wrong depending on whether it
+          // joins deities or zones — a question this page sent a reader
+          // to another screen to ask twelve times.
+          cells: [endpointCell(type, labels)],
+          count: String(Number(type.relation_count ?? 0)),
+          share: { value: Number(type.relation_count ?? 0), of: links.total },
+          // Since migration 0009 an edge is judged against its relation
+          // type's field schema too, so a relation type can hold rows a
+          // designer has to go and fix.
+          flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
+          // The same destination the Catalogue's own list points at: a row
+          // that hovers like a link and goes nowhere is the state this
+          // lane and that one were both in.
+          href: relationTypeURL(slug, type.key),
+        }),
+      ),
+    ]),
   );
+  // **The pair stands side by side only when both halves have rows.**
+  // Three columns failed this page empty, by tripling one piece of bad
+  // news; two bands pair on the same condition in reverse. The class is
+  // set here and the breakpoint is the stylesheet's.
+  const bands = doc.getElementById("home");
+  if (bands) {
+    bands.classList.toggle("pair", entityTypes.length > 0 && relationTypes.length > 0);
+  }
   return { role: String(summary.role ?? ""), ok: true, empty, summary };
 }
 
@@ -549,6 +650,21 @@ function proseLane(doc, slug, client) {
     say(errorEl, "");
     const body = answer.result;
     const items = Array.isArray(body.items) ? body.items : [];
+    // **A column naming the columns, once, above the first page.** The
+    // band drew a title, a path and a word with nothing over any of
+    // them, and the word sat right-aligned in the track a count lives
+    // in — which a reader reads as a number. The header goes in before
+    // the first row and never again: `Show more` appends.
+    if (rendered === 0 && items.length > 0) {
+      listEl.append(
+        headerRow(doc, {
+          label: t("home.column.text"),
+          key: t("home.column.path"),
+          cells: [{ text: t("home.column.kindOfText") }, { text: t("home.column.version"), numeric: true }],
+          count: t("home.column.written"),
+        }),
+      );
+    }
     for (const document of items) {
       listEl.append(
         row(doc, {
@@ -557,7 +673,15 @@ function proseLane(doc, slug, client) {
           // A document need not have a kind, and an empty cell reads
           // better than the word "none", which would look like a kind
           // called "none".
-          count: document.kind ?? "",
+          cells: [
+            { text: document.kind ?? "", absent: !document.kind },
+            { text: version(document.version), numeric: true },
+          ],
+          // **When it was last written, which is the question a reader
+          // of an agent's work opens this band with.** The kind was in
+          // this track and the kind is a word; the line above the list
+          // already says how many of each kind there are.
+          count: written(document.updated_at),
           href: docURL(slug, document.path ?? ""),
         }),
       );

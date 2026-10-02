@@ -33,7 +33,7 @@
      inside anything: the header is the way back. -->
 
 <div class="page-head">
-<h1>Your account</h1>
+<h1 data-i18n="account.title"></h1>
 <!-- The head's third part, on the first screen in the product whose
      whole content is facts nobody can edit here. It is the component
      design.md wrote for exactly this: it states the limitation where
@@ -49,7 +49,7 @@
      screen was bare ground. Below 900px the two columns become one. -->
 <section class="setting">
   <div class="setting-head">
-    <h2>Identity</h2>
+    <h2 data-i18n="account.identity"></h2>
     <p class="muted">Who this account is. An invitation sets it; an administrator changes it.</p>
   </div>
   <div class="setting-body">
@@ -65,7 +65,7 @@
 
 <section class="setting">
   <div class="setting-head">
-    <h2>Appearance</h2>
+    <h2 data-i18n="account.appearance"></h2>
     <p class="muted">Kept in this browser, not in your account: on another machine you choose again.</p>
   </div>
   <div class="setting-body">
@@ -83,7 +83,28 @@
 
 <section class="setting">
   <div class="setting-head">
-    <h2>Password</h2>
+    <h2 data-i18n="account.language"></h2>
+    <p class="muted" data-i18n="account.language.about"></p>
+  </div>
+  <div class="setting-body">
+    <!-- The same shape as the theme above it, and for the same reason:
+         three answers, one of which is "do not decide", which follows
+         the browser's own languages. This one is kept in the account and
+         not in the browser, because the choice is the person's. -->
+    <fieldset class="choices" id="locale">
+      <legend class="sr-only" data-i18n="account.language"></legend>
+      <label><input type="radio" name="locale" value="" checked> <span data-i18n="account.language.browser"></span></label>
+      <label><input type="radio" name="locale" value="en"> <span data-i18n="account.language.en"></span></label>
+      <label><input type="radio" name="locale" value="es"> <span data-i18n="account.language.es"></span></label>
+    </fieldset>
+    <p class="muted" id="locale-done" hidden data-i18n="account.language.saved"></p>
+    <p class="error" id="locale-error" role="alert" hidden></p>
+  </div>
+</section>
+
+<section class="setting">
+  <div class="setting-head">
+    <h2 data-i18n="account.password"></h2>
     <p class="muted">There is no password reset. This instance sends no email, so an
       administrator invites you again instead.</p>
   </div>

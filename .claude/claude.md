@@ -76,8 +76,20 @@ rewriting history on a public repo is a decision for the human.
 
 **All written artefacts are in English.** Source, comments, identifier
 names, `docs/`, `readme.md`, `changelog.md`, commit messages, seeded
-markdown, issue and PR titles and bodies, default UI strings, design
-specs and plans.
+markdown, issue and PR titles and bodies, design specs and plans. The
+agent surface too: MCP tool descriptions, the skill bundle and the wire's
+own error messages, because an agent wants a contract and not a
+metaphor.
+
+**The human interface is translated, and English is its source
+language.** A string a person reads lives in `static/i18n/en.json` and in
+one catalogue per language beside it; `internal/web/static/i18n.js`
+fetches the one the reader needs and no other. Three rules hold it
+together, each a test in `static_i18n_test.go`: every catalogue carries
+every key English does, every catalogue fills the same placeholders, and
+no shell writes a heading into its own markup. **A sentence is a key, not
+fragments spliced at runtime** — "{what} your assistant" puts the subject
+last in Spanish and reads as nonsense.
 
 Conversation with the user happens in whatever language they choose;
 artefacts written to disk are English regardless.

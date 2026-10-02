@@ -69,7 +69,7 @@ export async function assetsPage(opened) {
   // called "Images".
   doc.title = opened.game.name + " \u00b7 Images \u00b7 Maestro";
   const role = await opened.client.summary();
-  if (role.ok) setReadOnly(doc, role.result.role, "uploads these images");
+  if (role.ok) setReadOnly(doc, role.result.role, "writes.images");
 
   let cursor = null;
   let rendered = 0;

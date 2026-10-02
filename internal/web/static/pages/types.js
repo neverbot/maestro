@@ -76,7 +76,7 @@ export async function typesPage(opened) {
 
     const summary = answer.result;
     say(noteEl, describeTotals(summary.totals));
-    setReadOnly(doc, summary.role, "declares the types");
+    setReadOnly(doc, summary.role, "writes.declaresTypes");
     fillState(doc, "types-empty", {
       heading: NO_TYPES_HEADING,
       sentence: NO_TYPES_SENTENCE + " " + whoWrites(summary.role, DECLARES_TYPES),

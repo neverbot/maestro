@@ -442,3 +442,14 @@ SELECT t.id, 'token'::text AS kind, t.label
 FROM api_tokens t
 WHERE t.project_id = sqlc.arg('project_id')::uuid
   AND t.id = ANY(sqlc.arg('token_ids')::uuid[]);
+
+-- name: SetUserLocale :one
+-- The language a person reads this product in, set by that person.
+--
+-- The empty string is admitted and means "not chosen", which follows the
+-- browser's own languages instead. Which tags are admitted is checked in
+-- Go against the catalogues that ship, not here.
+UPDATE users
+SET locale = sqlc.arg('locale')::text
+WHERE id = sqlc.arg('id')::uuid
+RETURNING *;

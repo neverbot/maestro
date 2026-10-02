@@ -915,7 +915,7 @@ export async function entityPage(opened) {
   // the instance will refuse the write, and offering a control that
   // cannot succeed is worse than saying so.
   if (mayWrite) wireRename(doc, opened, model);
-  else if (role.ok) setReadOnly(doc, role.result.role, "writes this entity");
+  else if (role.ok) setReadOnly(doc, role.result.role, "writes.entity");
   // Four crumbs, and the third is the type's **key** rather than its
   // plural label. The entity model carries `type_key` and not the type's
   // label, and fetching the type for a word in a trail would be a second

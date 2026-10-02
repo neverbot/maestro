@@ -86,6 +86,7 @@ takes.
 ## me
 
 - `GET /api/me`
+- `PATCH /api/me/locale`
 - `PATCH /api/me/password`
 
 ## members

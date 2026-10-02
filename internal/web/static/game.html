@@ -28,12 +28,12 @@
 
 <main class="page">
 <div class="page-head">
-<h1 id="game-name">Loading…</h1>
+<h1 id="game-name" data-i18n="frame.loading"></h1>
   <!-- What this screen cannot do, where the button would be.
        pages/page.js setReadOnly fills it. -->
   <span class="page-actions" id="page-actions"></span>
 </div>
-<p class="muted" id="game-summary" aria-live="polite">Loading this game…</p>
+<p class="muted" id="game-summary" aria-live="polite" data-i18n="frame.loadingGame"></p>
 
 <!-- **The one thing to do on a game with nothing in it.** The three
      lanes below each say an agent writes their content and nothing on
@@ -60,7 +60,7 @@
      declares DESTINATIONS and pages/home.js renders in that order. -->
 <div id="home" class="lanes" hidden>
   <section class="lane" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
-    <h2 id="lane-catalogue-heading">What this game is made of</h2>
+    <h2 id="lane-catalogue-heading" data-i18n="home.band.content"></h2>
     <ul class="catalogue" id="types"></ul>
     <!-- The hole; pages/home.js carries the words, including the half
          that depends on who is reading: an editor can have a type
@@ -68,13 +68,13 @@
          server will refuse is worse than telling them nothing. -->
     <div id="types-empty" hidden></div>
 
-    <h3>How they connect</h3>
+    <h3 data-i18n="home.band.connections"></h3>
     <ul class="catalogue" id="relation-types"></ul>
     <div id="relation-types-empty" hidden></div>
   </section>
 
   <section class="lane" id="lane-views" aria-labelledby="lane-views-heading">
-    <h2 id="lane-views-heading">Saved to look at</h2>
+    <h2 id="lane-views-heading" data-i18n="home.band.overviews"></h2>
     <ul class="catalogue" id="views" hidden></ul>
     <!-- A sentence and a way in, never a *New view* button: this page is
          read, and the one thing a reader of an empty game needs is the
@@ -84,7 +84,7 @@
   </section>
 
   <section class="lane" id="prose" aria-labelledby="lane-prose-heading">
-    <h2 id="lane-prose-heading">Writing</h2>
+    <h2 id="lane-prose-heading" data-i18n="home.band.writing"></h2>
     <!-- The kinds this game invented, above the documents they describe.
          Maestro ships no vocabulary of them, so nothing but this line
          tells a designer which words their own writing is using. Hidden
@@ -94,7 +94,7 @@
     <ul class="catalogue" id="docs"></ul>
     <div id="docs-empty" hidden></div>
     <p class="error" id="docs-error" hidden></p>
-    <button type="button" class="link-button" id="docs-more" hidden>Show more</button>
+    <button type="button" class="link-button" id="docs-more" data-i18n="home.showMore" hidden></button>
   </section>
 </div>
 

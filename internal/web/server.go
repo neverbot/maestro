@@ -343,6 +343,9 @@ func NewServer(opts Options) *Server {
 	s.route("GET /api/invites", requireCaller(s.handleListInstanceInvites))
 	s.route("DELETE /api/invites/{invite}", requireCaller(s.handleRevokeInstanceInvite))
 	s.route("PATCH /api/me/password", requireCaller(s.handleChangePassword))
+	// The language this person reads the product in. Theirs to set and
+	// nobody else's, so it is keyed on the caller and takes no user id.
+	s.route("PATCH /api/me/locale", requireCaller(s.handleSetLocale))
 	s.route("PATCH /api/admins", requireCaller(s.handleSetAdmin))
 	// **Who is on this instance, and the one place an account is
 	// edited.** `PATCH /api/admins` stays: it is addressed by email and
@@ -719,6 +722,15 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, caller Caller)
 	payload := map[string]any{
 		"user_id":  caller.UserID,
 		"is_admin": caller.IsAdmin,
+	}
+	// The language this person reads the product in, so the browser can
+	// correct the copy it kept in localStorage when the two disagree —
+	// which is what happens after choosing on another machine. Empty
+	// means unchosen, and the browser follows its own languages.
+	if !caller.IsToken() && s.opts.Identity != nil {
+		if user, err := s.opts.Identity.UserByID(r.Context(), caller.UserID); err == nil {
+			payload["locale"] = user.Locale
+		}
 	}
 	if projectID, ok := caller.ScopedProject(); ok {
 		payload["project_id"] = projectID

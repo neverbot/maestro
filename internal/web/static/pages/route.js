@@ -242,7 +242,7 @@ export async function routePage(opened) {
   const role = summary.ok ? String(summary.result.role ?? "") : "";
   const actions = doc.getElementById("page-actions");
   if (actions && role === ROLE_VIEWER) {
-    setReadOnly(doc, role, "checks these routes");
+    setReadOnly(doc, role, "writes.route");
   } else if (actions) {
     const button = doc.createElement("button");
     button.type = "button";

@@ -17,6 +17,11 @@ import { REREAD_DEBOUNCE_MS, client } from "../client.js";
 // here too.
 import { countLabel, markTables } from "../rows.js";
 import { STATE_EMPTY, negativeState } from "../state.js";
+// **Imported before any string below is declared.** i18n.js awaits its
+// catalogue at module scope, so every constant in this file already has
+// its words by the time it is assigned, and no page ever paints a
+// language the reader did not ask for.
+import { remember, t } from "../i18n.js";
 
 // The route prefix of one game, and the segments under it. They are
 // constants rather than spellings at each call site because
@@ -40,37 +45,34 @@ export const SEGMENT_ROUTES = "/analysis/routes";
 // added to the home cannot be missing from the strip on every other
 // page — which is exactly how a fourth destination would arrive
 // half-built.
-export const DESTINATION_VIEWS = "Overviews";
-export const DESTINATION_CATALOGUE = "Content";
-export const DESTINATION_PROSE = "Writing";
+export const DESTINATION_VIEWS = t("nav.overviews");
+export const DESTINATION_CATALOGUE = t("nav.content");
+export const DESTINATION_PROSE = t("nav.writing");
 // Images is a destination because it is a screen. It was not one, and
 // /g/{slug}/assets therefore had no place of its own to mark: it marked
 // **Views**, so a reader saw the wrong tab in bold and a screen reader
 // was told the wrong location (found in the 2026-09-09 audit). A page in
 // the product with no entry in the bar is a page the bar has to lie
 // about.
-export const DESTINATION_IMAGES = "Images";
+export const DESTINATION_IMAGES = t("nav.images");
 // The fifth, and it waited for its screens. The frame settled five
 // destinations and shipped four, because "a destination pointing at
 // nothing is worse than one that is missing"; these are the screens it
 // was waiting for.
-export const DESTINATION_ANALYSIS = "Checks";
+export const DESTINATION_ANALYSIS = t("nav.checks");
 export const DESTINATIONS = [DESTINATION_CATALOGUE, DESTINATION_VIEWS, DESTINATION_PROSE];
 
 // What a game with nothing saved to look at reads. It names the thing by
 // what a reader would get out of it, never by how it is stored.
-export const NO_VIEWS_HEADING = "Nothing saved to look at yet";
-export const NO_VIEWS_SENTENCE =
-  "An overview is a saved way of seeing part of this game: how its missions unlock each other, " +
+export const NO_VIEWS_HEADING = t("overviews.empty.heading");
+export const NO_VIEWS_SENTENCE = t("overviews.empty.sentence");
   "where its places sit, what happens in what order.";
-export const NO_VIEWS_COMPOSE =
-  "You can put a simple one together here. Your assistant writes the ones that ask a harder " +
+export const NO_VIEWS_COMPOSE = t("overviews.empty.compose");
   "question.";
-export const NO_VIEWS_VIEWER =
-  "You can read this game but not change it, so somebody with an editor's or a manager's role " +
+export const NO_VIEWS_VIEWER = t("overviews.empty.viewer");
   "saves these.";
-export const SKILL_BUNDLE_LABEL = "Connect an assistant";
-export const COMPOSE_LABEL = "Put one together";
+export const SKILL_BUNDLE_LABEL = t("overviews.connect");
+export const COMPOSE_LABEL = t("overviews.compose");
 
 // The one line in this front end that names an address outside this
 // instance, and it is a **hyperlink a human may click** rather than
@@ -80,7 +82,7 @@ export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-
 // The published documentation site, and the second address in this front
 // end that leaves the instance.
 export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/";
-export const DESTINATION_DOCUMENTATION = "Documentation";
+export const DESTINATION_DOCUMENTATION = t("nav.documentation");
 
 // slugOf reads the game's slug out of a path. One reader, for the reason
 // this file exists.
@@ -214,6 +216,11 @@ export async function openGame(options = {}) {
   // switcher is the game list and the menu on the right is the person.
   const [who, answer] = await Promise.all([fetchMe(), fetchGames()]);
   const me = who.ok ? who.body : null;
+  // The account's choice is the truth and localStorage is a copy of it.
+  // They differ after choosing on another machine; the copy is corrected
+  // here and the next page load reads the right catalogue. This page
+  // keeps the one it has rather than swapping words under the reader.
+  if (me && typeof me.locale === "string") remember(me.locale);
   if (!answer.ok) {
     if (answer.expired) {
       goToLogin();
@@ -423,17 +430,10 @@ export function fill(listEl, emptyEl, rows) {
 // that depends on who is reading.
 export const ROLE_VIEWER = "viewer";
 
-export function whoWrites(role, what) {
-  if (role === ROLE_VIEWER) {
-    return (
-      "You can read this game but not change it, so somebody with an editor's or a manager's " +
-      `role ${what}.`
-    );
-  }
-  // Who does it, not over what transport. The reader is a game designer
-  // and the sentence used to send them to an API they do not have.
-  return `Your assistant ${what}.`;
+export function whoWrites(role, sentence) {
+  return t(sentence + (role === ROLE_VIEWER ? ".viewer" : ".assistant"));
 }
+
 
 // --- A secret shown once, and when an invitation stops working --------
 // copyLine is one string a reader is meant to take away, with the way to
@@ -508,7 +508,7 @@ export function expiry(value) {
 // is read-only was inside an empty state, so the fuller a game was, the
 // less its screens said about what they will not let you do. Two
 // separate reviews found it, the second exactly that way round.
-export const READ_ONLY_LABEL = "Read-only";
+export const READ_ONLY_LABEL = t("frame.readOnly");
 
 export function readOnlyNotice(doc, role, what) {
   const note = doc.createElement("span");

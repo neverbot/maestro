@@ -59,7 +59,7 @@ export async function viewsPage(opened) {
     compose.textContent = "New overview";
     actions.replaceChildren(compose);
   } else if (role.ok) {
-    setReadOnly(doc, role.result.role, "writes these views");
+    setReadOnly(doc, role.result.role, "writes.views");
   }
 
   let cursor = null;

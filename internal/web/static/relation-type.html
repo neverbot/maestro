@@ -30,7 +30,7 @@
 <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
 <div class="page-head">
-  <h1 id="relation-type-name">Loading…</h1>
+  <h1 id="relation-type-name" data-i18n="frame.loading"></h1>
   <span class="page-actions" id="page-actions"></span>
 </div>
 <p class="muted" id="relation-type-meta" aria-live="polite"></p>
@@ -41,19 +41,19 @@
      which entity types may sit at each end, and that rule was readable
      nowhere in the interface: a designer met `requires` on an entity
      page and could not find out what it connects. -->
-<h2>What it connects</h2>
+<h2 data-i18n="relationType.connects"></h2>
 <p id="relation-type-endpoints"></p>
 
 <!-- **What a walk does with it.** semantic_role and analysis_traits are
      what the analysis engine reads to decide whether an edge gates,
      contains or merely annotates, so they belong on the page that
      describes the type rather than only inside a report. -->
-<h2>What analysis makes of it</h2>
+<h2 data-i18n="relationType.analysis"></h2>
 <p id="relation-type-role"></p>
 
 <!-- The fields an edge of this type carries, which is the other half a
      designer meets on an entity page with nothing explaining it. -->
-<h2>What each relation carries</h2>
+<h2 data-i18n="relationType.fields"></h2>
 <div class="scroller">
   <ul class="catalogue wide" id="relation-type-fields" hidden></ul>
 </div>

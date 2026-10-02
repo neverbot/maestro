@@ -204,6 +204,7 @@ type User struct {
 	IsAdmin      bool
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	Locale       string
 }
 
 type View struct {

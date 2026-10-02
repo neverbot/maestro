@@ -224,7 +224,7 @@ export async function relationTypePage(opened) {
   // The read-only sentence, in the slot every other screen puts it in.
   const summary = await opened.client.summary();
   if (summary.ok) {
-    setReadOnly(doc, String(summary.result.role ?? ""), "declares the types");
+    setReadOnly(doc, String(summary.result.role ?? ""), "writes.declaresTypes");
     // The count belongs beside the key, and the summary is the one call
     // that has it: a relation type with no edges reads differently from
     // one with four hundred.

@@ -185,7 +185,7 @@ export async function builderPage(opened) {
   if (summary.ok && String(summary.result.role ?? "") === ROLE_VIEWER) {
     // A viewer is told, rather than handed a builder whose save the
     // server will refuse.
-    setReadOnly(doc, summary.result.role, "saves a view");
+    setReadOnly(doc, summary.result.role, "writes.view");
     if (saveForm) saveForm.hidden = true;
   }
 

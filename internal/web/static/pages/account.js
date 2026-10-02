@@ -3,6 +3,7 @@
 import { fetchMe, markRefused, renderHeader, sendJSON, setFormBusy } from "../app.js";
 import { goToLogin } from "../app.js";
 import { say } from "./page.js";
+import { remember, t } from "../i18n.js";
 
 // The date a person reads, not the one a machine sorts by. The product
 // renders `06/09/2026, 16:30:11` elsewhere and it is ambiguous in half
@@ -43,6 +44,40 @@ export function wireTheme(doc, themeAPI, matchMedia) {
   sayWhich();
   if (query !== null && typeof query.addEventListener === "function") {
     query.addEventListener("change", sayWhich);
+  }
+  return group;
+}
+
+// wireLocale is the language radios. The choice is written to the
+// account, because it is the person's and not the browser's, and a copy
+// goes to localStorage so the next page load can ask for the right
+// catalogue before /api/me answers.
+//
+// The page reloads on a change rather than re-rendering: every string on
+// screen was read at module scope, and swapping a catalogue under a
+// built page would leave whatever is already drawn in the old language.
+export function wireLocale(doc, me, send, reload) {
+  const group = doc.getElementById("locale");
+  if (!group) return null;
+  const doneEl = doc.getElementById("locale-done");
+  const errorEl = doc.getElementById("locale-error");
+  const chosen = me && typeof me.locale === "string" ? me.locale : "";
+  for (const input of group.querySelectorAll("input[type=radio]")) {
+    input.checked = input.value === chosen;
+    input.addEventListener("change", async () => {
+      if (!input.checked) return;
+      say(errorEl, "");
+      if (errorEl) errorEl.hidden = true;
+      const answer = await send(input.value);
+      if (!answer.ok) {
+        say(errorEl, answer.message || t("account.language.failed"));
+        if (errorEl) errorEl.hidden = false;
+        return;
+      }
+      remember(input.value);
+      if (doneEl) doneEl.hidden = false;
+      reload();
+    });
   }
   return group;
 }
@@ -121,5 +156,20 @@ if (globalThis.document && globalThis.document.getElementById("who")) {
     wireTheme(doc, globalThis.window ? globalThis.window.maestroTheme : null,
       globalThis.window ? globalThis.window.matchMedia.bind(globalThis.window) : null);
     wirePassword(doc);
+    wireLocale(
+      doc,
+      me,
+      async (locale) => {
+        const answer = await fetch("/api/me/locale", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ locale }),
+        });
+        if (answer.ok) return { ok: true };
+        const body = await answer.json().catch(() => ({}));
+        return { ok: false, message: body?.message ?? "" };
+      },
+      () => globalThis.window.location.reload(),
+    );
   }
 }

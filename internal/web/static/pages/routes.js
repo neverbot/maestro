@@ -60,7 +60,7 @@ export async function routesPage(opened) {
   say(doc.getElementById("routes-note"), NOTE_ROUTES);
 
   const summary = await opened.client.summary();
-  if (summary.ok) setReadOnly(doc, summary.result.role, "writes these routes");
+  if (summary.ok) setReadOnly(doc, summary.result.role, "writes.routes");
 
   fillState(doc, "routes-empty", {
     heading: NO_ROUTES_HEADING,

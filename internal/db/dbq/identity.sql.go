@@ -230,7 +230,7 @@ const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, display_name, password_hash, is_admin)
 VALUES ($1::text, $2::text,
         $3::text, $4::boolean)
-RETURNING id, email, display_name, password_hash, is_admin, created_at, updated_at
+RETURNING id, email, display_name, password_hash, is_admin, created_at, updated_at, locale
 `
 
 type CreateUserParams struct {
@@ -256,6 +256,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Locale,
 	)
 	return i, err
 }
@@ -514,7 +515,7 @@ func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (GetSess
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at FROM users WHERE lower(email) = lower($1::text)
+SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at, locale FROM users WHERE lower(email) = lower($1::text)
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -528,12 +529,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at FROM users WHERE id = $1::uuid
+SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at, locale FROM users WHERE id = $1::uuid
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -547,6 +549,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Locale,
 	)
 	return i, err
 }
@@ -758,7 +761,7 @@ func (q *Queries) ListOutstandingProjectInvites(ctx context.Context, projectID u
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at FROM users
+SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at, locale FROM users
 WHERE ($1::timestamptz IS NULL
        OR (created_at, id) > ($1::timestamptz, $2::uuid))
 ORDER BY created_at, id
@@ -801,6 +804,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.IsAdmin,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Locale,
 		); err != nil {
 			return nil, err
 		}
@@ -972,6 +976,39 @@ func (q *Queries) RevokeProjectInvite(ctx context.Context, arg RevokeProjectInvi
 	return err
 }
 
+const setUserLocale = `-- name: SetUserLocale :one
+UPDATE users
+SET locale = $1::text
+WHERE id = $2::uuid
+RETURNING id, email, display_name, password_hash, is_admin, created_at, updated_at, locale
+`
+
+type SetUserLocaleParams struct {
+	Locale string
+	ID     uuid.UUID
+}
+
+// The language a person reads this product in, set by that person.
+//
+// The empty string is admitted and means "not chosen", which follows the
+// browser's own languages instead. Which tags are admitted is checked in
+// Go against the catalogues that ship, not here.
+func (q *Queries) SetUserLocale(ctx context.Context, arg SetUserLocaleParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserLocale, arg.Locale, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Locale,
+	)
+	return i, err
+}
+
 const touchAPIToken = `-- name: TouchAPIToken :exec
 UPDATE api_tokens SET last_used_at = now()
 WHERE id = $1::uuid
@@ -1001,7 +1038,7 @@ UPDATE users
 SET email = $1::text,
     display_name = $2::text
 WHERE id = $3::uuid
-RETURNING id, email, display_name, password_hash, is_admin, created_at, updated_at
+RETURNING id, email, display_name, password_hash, is_admin, created_at, updated_at, locale
 `
 
 type UpdateUserIdentityParams struct {
@@ -1030,6 +1067,7 @@ func (q *Queries) UpdateUserIdentity(ctx context.Context, arg UpdateUserIdentity
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Locale,
 	)
 	return i, err
 }

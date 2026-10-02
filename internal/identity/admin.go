@@ -207,3 +207,23 @@ func decodeUserCursor(cursor string) (time.Time, uuid.UUID, error) {
 // refusal and not an empty first page: answering a made-up cursor with
 // the start of the list would page a caller in a circle for ever.
 var ErrCursorInvalid = errors.New("that cursor is not one this listing issued")
+
+// SetLocale records the language a person reads this product in. The
+// empty string clears the choice, which is not the same as choosing
+// English: an account with no choice follows the browser's own
+// languages.
+//
+// **Which tags are admitted is not this package's to know.** The
+// catalogues that ship decide, and they live in internal/web beside the
+// files a browser fetches; this stores what it is given and the web
+// layer refuses a tag it has no catalogue for.
+func (s *Service) SetLocale(ctx context.Context, userID uuid.UUID, locale string) (User, error) {
+	row, err := s.q.SetUserLocale(ctx, dbq.SetUserLocaleParams{ID: userID, Locale: strings.TrimSpace(locale)})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, ErrUserNotFound
+		}
+		return User{}, fmt.Errorf("set locale: %w", err)
+	}
+	return userFrom(row), nil
+}

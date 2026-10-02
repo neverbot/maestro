@@ -37,29 +37,28 @@ import {
 } from "./page.js";
 import { byWeight, nextCursorOf } from "../rows.js";
 import { goToLogin } from "../app.js";
+import { t } from "../i18n.js";
 
 // What the two role-dependent empty states are about, in the words the
 // sentence needs. They are arguments to one function rather than two
 // functions, because "who may do this" is one rule with two subjects.
-export const DECLARES_TYPES = "names them";
-export const WRITES_DOCUMENTS = "writes them";
+// The key of a whole sentence, not a fragment to splice: see whoWrites.
+export const DECLARES_TYPES = "writes.types";
+export const WRITES_DOCUMENTS = "writes.documents";
 
 // The three negative states the home's lanes can be in. They live here
 // rather than in game.html, and pages/types.js reads the first two from
 // here rather than keeping a second wording of the same state: the
 // catalogue destination shows the same two catalogues this lane does,
 // and two wordings of one state is one of them going stale.
-export const NO_TYPES_HEADING = "This game has not said what it is made of";
-export const NO_TYPES_SENTENCE =
-  "Every game names its own kinds of things: missions, places and classes in one, drivers, cars " +
+export const NO_TYPES_HEADING = t("content.empty.heading");
+export const NO_TYPES_SENTENCE = t("content.empty.sentence");
   "and circuits in another. Yours has named none yet.";
-export const NO_RELATION_TYPES_HEADING = "Nothing connects to anything yet";
-export const NO_RELATION_TYPES_SENTENCE =
-  "A connection is a kind of link between two things: a mission happens in a place, a mission " +
+export const NO_RELATION_TYPES_HEADING = t("connections.empty.heading");
+export const NO_RELATION_TYPES_SENTENCE = t("connections.empty.sentence");
   "needs another one first, a reward unlocks a class.";
-export const NO_PROSE_HEADING = "Nothing written yet";
-export const NO_PROSE_SENTENCE =
-  "This is where the words go: the lore of a place, the brief for a mission, the lines a " +
+export const NO_PROSE_HEADING = t("writing.empty.heading");
+export const NO_PROSE_SENTENCE = t("writing.empty.sentence");
   "character says. Every piece keeps its older versions.";
 
 // describeTotals is the one line under the game's name. An empty game
@@ -71,20 +70,23 @@ export function describeTotals(totals, written) {
   const relations = Number(counts.relations ?? 0);
   const invalid = Number(counts.invalid ?? 0);
   const documents = Number(written ?? 0);
-  if (entities === 0 && relations === 0 && documents === 0) return "Nothing in this game yet.";
+  if (entities === 0 && relations === 0 && documents === 0) return t("home.totals.empty");
   const parts = [];
   // **A game that is only writing is still a game.** This counted the
   // metamodel and nothing else, so a game holding a document and no
   // types read "Nothing in this game yet" with the document on screen
   // underneath it.
   if (entities > 0 || relations > 0) {
-    parts.push(countLabel(entities, "thing", "things"), countLabel(relations, "connection", "connections"));
+    parts.push(
+      countLabel(entities, t("home.totals.thing"), t("home.totals.things")),
+      countLabel(relations, t("home.totals.connection"), t("home.totals.connections")),
+    );
   }
-  if (documents > 0) parts.push(countLabel(documents, "piece of writing", "pieces of writing"));
+  if (documents > 0) parts.push(countLabel(documents, t("home.totals.writing"), t("home.totals.writings")));
   // Only when there are any: a permanent "0 no longer fit" would train a
   // designer to ignore the one number on this page that ever asks them
   // to do something.
-  if (invalid > 0) parts.push(`${invalid} no longer fit what they are`);
+  if (invalid > 0) parts.push(t("home.totals.misfit", { count: invalid }));
   return parts.join(" · ");
 }
 
@@ -111,9 +113,9 @@ export function describeDocKinds(body) {
   const kinds = Array.isArray(from.kinds) ? from.kinds : [];
   if (kinds.length === 0) return "";
   const parts = kinds.map((k) => `${k.kind} ${Number(k.document_count ?? 0)}`);
-  let line = `Kinds: ${parts.join(" · ")}`;
+  let line = t("writing.kinds", { kinds: parts.join(" · ") });
   const unkinded = Number(from.unkinded ?? 0);
-  if (unkinded > 0) line += ` · ${unkinded} with no kind`;
+  if (unkinded > 0) line += " · " + t("writing.kinds.unkinded", { count: unkinded });
   return line;
 }
 
@@ -125,12 +127,12 @@ export function describeDocKinds(body) {
 // need to: the row says how the thing is drawn, in the words they would
 // use for it themselves.
 export const DRAWN_AS = {
-  graph: "as a web",
-  layered: "in steps",
-  nested: "as a tree",
-  map: "on a map",
-  timeline: "in order",
-  table: "as a list",
+  graph: t("overviews.drawn.graph"),
+  layered: t("overviews.drawn.layered"),
+  nested: t("overviews.drawn.nested"),
+  map: t("overviews.drawn.map"),
+  timeline: t("overviews.drawn.timeline"),
+  table: t("overviews.drawn.table"),
 };
 
 export function describeView(view) {
@@ -197,7 +199,7 @@ export async function home(opened) {
   // game with nothing in it.
   if (!summary.ok) return { ...opened, onEvent: null };
   const viewCount = await viewsLane(doc, slug, client, summary.role, !summary.empty);
-  setReadOnly(doc, summary.role, "writes this game's content");
+  setReadOnly(doc, summary.role, "writes.content");
   // **The way into the one screen that changes a game rather than its
   // content**, and it is here because the frame's five destinations are
   // places to go and read: settings is one person's screen, reached
@@ -393,7 +395,7 @@ export function showBands(doc, empty) {
 }
 
 // SETTINGS_LABEL is the link, and every member of the game gets it.
-export const SETTINGS_LABEL = "Game settings";
+export const SETTINGS_LABEL = t("frame.gameSettings");
 const OWNER = "owner";
 const EDITOR = "editor";
 
@@ -410,26 +412,21 @@ export function offerSettings(doc, slug, role) {
 
 // --- The empty game ----------------------------------------------------
 
-export const CONNECT_HEADING = "Nothing in this game yet";
-export const CONNECT_SENTENCE =
-  "Maestro holds what your game is made of: its missions, its places, its classes, whatever " +
-  "your game calls them, how they connect, and the writing about them. You do not type any of " +
+export const CONNECT_HEADING = t("home.empty.heading");
+export const CONNECT_SENTENCE = t("home.empty.sentence");
   "it in here. Your AI assistant writes it, and you read it, judge it and correct it.";
-export const CONNECT_LABEL = "Make a key for this game";
+export const CONNECT_LABEL = t("home.empty.key");
 export const CONNECT_STEPS = [
-  ", and give it to your assistant. The command to paste is on that screen.",
-  "Ask your assistant to read the Maestro guide for this game.",
-  "Then ask it to start. Something like this:",
+  t("home.empty.step1"),
+  t("home.empty.step2"),
+  t("home.empty.step3"),
 ];
 // The sentence a designer copies. It is the one thing on this page that
 // turns understanding into a game with something in it, and it names
 // this game rather than a placeholder, because a line somebody has to
 // edit before using is a line they get wrong.
 export function startingPrompt(name) {
-  return (
-    "Read the Maestro skill for " + name + ", then declare the kinds of things this game is " +
-    "made of and add the first ten of them."
-  );
+  return t("home.empty.prompt", { game: name });
 }
 
 // offerToConnectAnAgent is the crossing, and it is offered **only to
@@ -480,7 +477,7 @@ export function offerToConnectAnAgent(doc, slug, summary, name, empty) {
     steps.append(step);
   });
   state.append(steps);
-  state.append(copyLine(doc, startingPrompt(name), "Copy this"));
+  state.append(copyLine(doc, startingPrompt(name), t("home.empty.copy")));
 
   host.replaceChildren(state);
   host.hidden = false;

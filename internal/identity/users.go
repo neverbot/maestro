@@ -64,7 +64,11 @@ type User struct {
 	Email       string
 	DisplayName string
 	IsAdmin     bool
-	CreatedAt   time.Time
+	// Locale is the language this person reads the product in, or the
+	// empty string when they have not chosen one, which is a different
+	// fact from choosing English: unchosen follows the browser.
+	Locale    string
+	CreatedAt time.Time
 }
 
 func userFrom(u dbq.User) User {
@@ -73,6 +77,7 @@ func userFrom(u dbq.User) User {
 		Email:       u.Email,
 		DisplayName: u.DisplayName,
 		IsAdmin:     u.IsAdmin,
+		Locale:      u.Locale,
 		CreatedAt:   u.CreatedAt.Time,
 	}
 }

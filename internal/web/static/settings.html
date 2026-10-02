@@ -30,7 +30,7 @@
 <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
 <div class="page-head">
-<h1>Game settings</h1>
+<h1 data-i18n="frame.gameSettings"></h1>
   <span class="page-actions" id="page-actions"></span>
 </div>
 
@@ -94,7 +94,7 @@
   may do. Administering this instance is a separate thing and grants none of this.
 </p>
 
-<h2>Invite somebody</h2>
+<h2 data-i18n="settings.invite"></h2>
 
 <!-- Manager-only; pages/settings.js hides this and says why for anybody
      else, rather than offering a form the server will refuse. -->
@@ -124,14 +124,14 @@
   <div id="invite-links"></div>
 </div>
 
-<h2>Members</h2>
+<h2 data-i18n="settings.members"></h2>
 <div class="scroller">
   <ul class="people" id="members" hidden></ul>
 </div>
 <div id="members-empty" hidden></div>
 <p class="error" id="members-error" hidden></p>
 
-<h2>Invitations outstanding</h2>
+<h2 data-i18n="settings.invitesOutstanding"></h2>
 <div class="scroller">
   <ul class="people" id="game-invites" hidden></ul>
 </div>
@@ -150,7 +150,7 @@
   opens this game and no other.
 </p>
 
-<h2>Connect an agent</h2>
+<h2 data-i18n="settings.connectAgent"></h2>
 
 <!-- Minting is an editor's or the owner's; pages/settings.js hides this
      form and fills #agents-refused for anybody else, rather than
@@ -167,7 +167,7 @@
 <!-- The hole for a reader who may list and revoke but not mint. -->
 <div id="agents-refused" hidden></div>
 
-<h2>Tokens</h2>
+<h2 data-i18n="settings.tokens"></h2>
 <!-- Which of the two listings this is; pages/settings.js carries the
      words, and the server carries the decision. -->
 <p class="muted" id="tokens-whose"></p>

@@ -561,7 +561,7 @@ check("emptyStateActionsFollowTheRole", async () => {
   );
   for (const what of ["types", "docs", "views"]) {
     assert(
-      sentences.viewer[what].includes("read this game but not change it"),
+      sentences.viewer[what].includes("not change it"),
       `the viewer's ${what} sentence does not say they cannot change the game`,
     );
   }

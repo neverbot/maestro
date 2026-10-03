@@ -35,7 +35,7 @@ import {
   viewsURL,
   whoWrites,
 } from "./page.js";
-import { byWeight, headerRow, nextCursorOf } from "../rows.js";
+import { byWeight, headerRow, nextCursorOf, withHeader } from "../rows.js";
 import { goToLogin } from "../app.js";
 import { locale, t } from "../i18n.js";
 
@@ -57,15 +57,6 @@ export const NO_RELATION_TYPES_HEADING = t("connections.empty.heading");
 export const NO_RELATION_TYPES_SENTENCE = t("connections.empty.sentence");
 export const NO_PROSE_HEADING = t("writing.empty.heading");
 export const NO_PROSE_SENTENCE = t("writing.empty.sentence");
-
-// withHeader puts a header over a listing that has rows, and gives back
-// the rows alone when it has none. **A header is not a row**: fill()
-// tells a listing from an empty state by counting what it is handed, so
-// a header passed in for a band with nothing in it renders a table of
-// column names over the empty state it hid.
-export function withHeader(header, rows) {
-  return header ? [header, ...rows] : rows;
-}
 
 // **What a relation type joins, in one cell, in the game's own words.**
 // The band listed twelve verbs with their counts and nothing else, and

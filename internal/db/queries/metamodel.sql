@@ -881,6 +881,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   -- stretch of it rather than scattering the page.
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (name, id) > (sqlc.narg('after_name')::text, sqlc.narg('after_id')::uuid))
 ORDER BY name, id
@@ -916,6 +927,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (name, id) < (sqlc.narg('after_name')::text, sqlc.narg('after_id')::uuid))
 ORDER BY name DESC, id DESC
@@ -929,6 +951,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (key, id) > (sqlc.narg('after_key')::text, sqlc.narg('after_id')::uuid))
 ORDER BY key, id
@@ -942,6 +975,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (key, id) < (sqlc.narg('after_key')::text, sqlc.narg('after_id')::uuid))
 ORDER BY key DESC, id DESC
@@ -957,6 +1001,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (updated_at, id) > (sqlc.narg('after_updated')::timestamptz, sqlc.narg('after_id')::uuid))
 ORDER BY updated_at, id
@@ -971,6 +1026,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (updated_at, id) < (sqlc.narg('after_updated')::timestamptz, sqlc.narg('after_id')::uuid))
 ORDER BY updated_at DESC, id DESC
@@ -1017,6 +1083,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR CASE WHEN sqlc.narg('after_value')::jsonb IS NULL
                THEN fields -> sqlc.arg('field')::text IS NULL AND id > sqlc.narg('after_id')::uuid
@@ -1037,6 +1114,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('prefix')::text IS NULL
        OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. `prefix` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a `%` in a reader's text is a per cent sign.
+  AND (sqlc.narg('contains')::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold(sqlc.narg('contains')::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold(sqlc.narg('contains')::text)) > 0)
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR CASE WHEN sqlc.narg('after_value')::jsonb IS NULL
                THEN fields -> sqlc.arg('field')::text IS NULL AND id < sqlc.narg('after_id')::uuid

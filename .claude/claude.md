@@ -369,6 +369,16 @@ tokens and the control styles.
 
 Say these plainly rather than letting someone discover them:
 
+- **A catalogue's one filter is a scan, and that is the trade.** The
+  search box on an entity's catalogue sends `contains`, which matches
+  anywhere in a name or a key with accents folded by `maestro_fold` —
+  typing three letters narrows from the first keystroke, which the
+  game's full-text search cannot do because it matches whole words. The
+  price is that it reads the rows the other filters left rather than a
+  stretch of an index; `prefix` is still on the surface for an agent
+  paging a type with a hundred thousand rows. Nothing indexes the fold
+  yet, which is fine at a designer's scale and is where to look first if
+  a catalogue ever feels slow.
 - **The query builder covers the half of the language a sentence can
   hold.** `from`, one `where` per selector, a linear `traverse`, and the
   drawing. A question with two branches, a depth range or a parameter is

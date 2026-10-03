@@ -39,6 +39,13 @@ type EntityFilter struct {
 	// listing is already ordered by name, so a prefix is a contiguous
 	// stretch of that order rather than a scatter through it.
 	Prefix string
+	// Contains narrows a listing to the entities whose name or key holds
+	// it anywhere, case- and accent-insensitively. It is what a person
+	// typing into one box means — "portal" finds "The Dark Portal" — and
+	// it is the filter the catalogue screen uses. Unlike Prefix it is a
+	// scan of whatever the other filters left rather than a stretch of an
+	// index, which is the price of answering a question no prefix can.
+	Contains string
 	// Order is which way the listing is read: "name" (the default),
 	// "key" or "updated", each with a leading "-" for the reverse. It is
 	// part of the cursor's fingerprint, because a position in one order
@@ -169,7 +176,7 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	// canonical spelling is what is fingerprinted, not the caller's, so
 	// "name" and "" are one listing.
 	fingerprint := fingerprintOf(projectID.String(), "entities", typePart,
-		invalidFilterPart(f.Invalid), f.Prefix, order.String())
+		invalidFilterPart(f.Invalid), f.Prefix, f.Contains, order.String())
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
 		return EntityPage{}, err
@@ -184,6 +191,10 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	if f.Prefix != "" {
 		prefix := f.Prefix
 		base.Prefix = &prefix
+	}
+	if f.Contains != "" {
+		contains := f.Contains
+		base.Contains = &contains
 	}
 
 	rows, err := s.listEntitiesPage(ctx, order, base, after)

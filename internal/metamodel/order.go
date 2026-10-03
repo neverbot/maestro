@@ -129,7 +129,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 	case o.byField():
 		params := dbq.ListEntitiesPageByFieldParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Field: o.Field, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Field: o.Field, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -144,7 +144,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 	case o.By == OrderByKey && !o.Descending:
 		params := dbq.ListEntitiesPageByKeyParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -154,7 +154,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 	case o.By == OrderByKey:
 		params := dbq.ListEntitiesPageByKeyDescParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -168,7 +168,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 		}
 		params := dbq.ListEntitiesPageByUpdatedParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -182,7 +182,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 		}
 		params := dbq.ListEntitiesPageByUpdatedDescParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -192,7 +192,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 	case o.Descending:
 		params := dbq.ListEntitiesPageNameDescParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -202,7 +202,7 @@ func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base list
 	default:
 		params := dbq.ListEntitiesPageParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
-			Prefix: base.Prefix, Limit: base.Limit,
+			Prefix: base.Prefix, Contains: base.Contains, Limit: base.Limit,
 		}
 		if after.ID != uuid.Nil {
 			params.AfterID = &after.ID
@@ -220,6 +220,7 @@ type listingParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	Limit        int32
 }
 

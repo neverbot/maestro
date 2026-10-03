@@ -157,6 +157,13 @@ type EntitiesListInput struct {
 	// listing is ordered by name, so a prefix is a contiguous stretch of
 	// that order.
 	Prefix string `json:"prefix,omitempty"`
+	// Contains narrows the listing to the rows whose name or key holds
+	// it anywhere, without regard to case or to accents. It answers what
+	// a prefix cannot — the quest with "portal" in the middle of its
+	// name — and it pages like any other filter. The cost is the
+	// difference: a prefix is a stretch of an index and this is a scan
+	// of whatever the other filters left.
+	Contains string `json:"contains,omitempty"`
 	// Order is which way the page is read: "name" (the default), "key",
 	// "updated", or "field:<key>" for a field the type declares, each
 	// with a leading "-" for the reverse — so "-updated" is what changed
@@ -877,12 +884,13 @@ func MCPEntitiesList(ctx context.Context, deps MCPDeps, caller Caller, projectID
 // standing requireProject already resolved. See this file's header.
 func entitiesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesListInput) (EntitiesListOutput, error) {
 	filter := metamodel.EntityFilter{
-		TypeKey: in.TypeKey,
-		Invalid: in.Invalid,
-		Prefix:  in.Prefix,
-		Order:   in.Order,
-		Cursor:  in.Cursor,
-		Limit:   in.Limit,
+		TypeKey:  in.TypeKey,
+		Invalid:  in.Invalid,
+		Prefix:   in.Prefix,
+		Contains: in.Contains,
+		Order:    in.Order,
+		Cursor:   in.Cursor,
+		Limit:    in.Limit,
 	}
 	if in.RelatedTo != nil {
 		filter.RelatedTo = &metamodel.RelatedFilter{

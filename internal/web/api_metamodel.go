@@ -457,6 +457,13 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 	if !ok {
 		return
 	}
+	// What the catalogue's one search box sends: the same filter, matched
+	// anywhere in a name or a key. Read here for the reason the prefix is
+	// read here — this surface mirrors MCP route for route.
+	contains, ok := queryString(w, r, "contains")
+	if !ok {
+		return
+	}
 	// The catalogue's column headers set this, and it is read here for
 	// the reason the prefix is: this surface mirrors MCP route for
 	// route, and an order a person cannot spell in a URL is an order
@@ -466,7 +473,7 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 		return
 	}
 	in := EntitiesListInput{
-		TypeKey: typeKey, Prefix: prefix, Order: order,
+		TypeKey: typeKey, Prefix: prefix, Contains: contains, Order: order,
 		Cursor: cursor, Limit: limit, Verbose: verbose,
 	}
 	invalid, ok := queryTriState(w, r, "invalid")

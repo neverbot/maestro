@@ -695,10 +695,15 @@ export function client({
     if (typeof opts.typeKey === "string" && opts.typeKey !== "") {
       search.set("type_key", opts.typeKey);
     }
-    // The two filters a person can compose on this screen. A prefix
-    // narrows the listing's own order by name; `invalid` is the flag a
-    // schema edit leaves behind. Both belong to the listing rather than
-    // to search, which is why they page.
+    // The filters a person can compose on this screen. `contains` is
+    // what the one search box sends — matched anywhere in a name or a
+    // key, accents folded — `prefix` is the cheaper narrowing an agent
+    // can ask for, and `invalid` is the flag a schema edit leaves
+    // behind. All three belong to the listing, which is what makes them
+    // page.
+    if (typeof opts.contains === "string" && opts.contains !== "") {
+      search.set("contains", opts.contains);
+    }
     if (typeof opts.prefix === "string" && opts.prefix !== "") {
       search.set("prefix", opts.prefix);
     }

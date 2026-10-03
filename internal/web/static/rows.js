@@ -260,6 +260,15 @@ export function headerRow(doc, spec) {
   return item;
 }
 
+// withHeader puts a header over a listing that has rows, and gives back
+// the rows alone when it has none. **A header is not a row**: fill()
+// tells a listing from an empty state by counting what it is handed, so
+// a header passed in for a band with nothing in it renders a table of
+// column names over the empty state it hid.
+export function withHeader(header, rows) {
+  return header ? [header, ...rows] : rows;
+}
+
 // SORT_MARKS is what a sorted column says beside its name. The arrow is
 // never the only carrier: the button's own accessible name says which
 // way the next press would order the listing, in words, because an arrow

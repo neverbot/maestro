@@ -27,7 +27,7 @@ import {
   NO_TYPES_SENTENCE,
   describeTotals,
 } from "./home.js";
-import { byWeight } from "../rows.js";
+import { byWeight, headerRow, withHeader } from "../rows.js";
 import { t } from "../i18n.js";
 import { goToLogin } from "../app.js";
 import { REREAD, TARGET_CONTENT, TARGET_EVERYTHING } from "../client.js";
@@ -94,10 +94,18 @@ export async function typesPage(opened) {
       Array.isArray(summary.entity_types) ? summary.entity_types : [],
       (t) => Number(t.entity_count ?? 0),
     );
+    // **The same columns as the home, named the same way.** This screen
+    // and the game's first page draw the same two catalogues from the
+    // same call, and only one of them said what its numbers were: 27 and
+    // 43% under nothing at all. The rule was carried one step along.
     fill(
       doc.getElementById("types"),
       doc.getElementById("types-empty"),
-      things.sorted.map((type) =>
+      withHeader(things.sorted.length > 0 && headerRow(doc, {
+        label: t("home.column.kind"),
+        count: t("home.column.count"),
+        share: t("home.column.ofTotal"),
+      }), things.sorted.map((type) =>
         row(doc, {
           label: type.label_plural || type.label || type.key,
           count: String(Number(type.entity_count ?? 0)),
@@ -105,7 +113,7 @@ export async function typesPage(opened) {
           flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
           href: typeURL(opened.slug, type.key),
         }),
-      ),
+      )),
     );
     const links = byWeight(
       Array.isArray(summary.relation_types) ? summary.relation_types : [],
@@ -114,7 +122,11 @@ export async function typesPage(opened) {
     fill(
       doc.getElementById("relation-types"),
       doc.getElementById("relation-types-empty"),
-      links.sorted.map((type) =>
+      withHeader(links.sorted.length > 0 && headerRow(doc, {
+        label: t("home.column.connection"),
+        count: t("home.column.count"),
+        share: t("home.column.ofTotal"),
+      }), links.sorted.map((type) =>
         row(doc, {
           label: type.label || type.key,
           count: String(Number(type.relation_count ?? 0)),
@@ -126,7 +138,7 @@ export async function typesPage(opened) {
           // what it may join and what a walk makes of it.
           href: relationTypeURL(opened.slug, type.key),
         }),
-      ),
+      )),
     );
   }
 

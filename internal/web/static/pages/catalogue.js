@@ -49,12 +49,6 @@ export function nextPageSize(fetched) {
   return PAGE_SIZES[2];
 }
 
-// How many matches a search asks for at a time. It is a page size now
-// and not a cap: the search pages, so this is how much arrives per
-// press of the same button the listing uses, and no sentence has to
-// admit a wall any more.
-export const SEARCH_LIMIT = 50;
-
 export async function cataloguePage(opened) {
   const doc = opened.document;
   const nameEl = doc.getElementById("type-name");
@@ -153,6 +147,14 @@ export async function cataloguePage(opened) {
     setReadOnly(doc, counts.result.role, "writes.entities");
     const found = (counts.result.entity_types || []).find((entry) => entry.key === typeKey);
     if (found && Number.isFinite(found.entity_count)) total = found.entity_count;
+    // **A filter whose answer is always "none" teaches a reader to
+    // ignore the toolbar.** The misfit filter is the one control on this
+    // screen that answers a question most games never have, so it is
+    // drawn on the games that have one: the same number the catalogue
+    // already read decides it.
+    const misfits = found && Number.isFinite(found.invalid_count) ? found.invalid_count : 0;
+    const invalidLabel = doc.getElementById("entities-invalid-label");
+    if (invalidLabel) invalidLabel.hidden = misfits === 0;
   }
 
   // At most three of the type's declared fields become columns. Three,
@@ -221,15 +223,10 @@ export async function cataloguePage(opened) {
         sorted: order,
         onSort: (next) => {
           order = next;
-          // Ordering the listing clears a search, the way the two
-          // filters do and for the same reason: a search answers the
-          // fifty best matches for a word and is not the listing, so an
-          // order pressed over one would reorder something that is not
-          // on screen.
-          if (query !== "") {
-            query = "";
-            if (searchEl) searchEl.value = "";
-          }
+          // The filter survives an order: both are the listing's now, so
+          // reordering the rows that hold "portal" is a question somebody
+          // can ask. It used to clear the search box, because a search
+          // was a different answer that an order could not reach.
           void refilter();
         },
       }),
@@ -251,12 +248,13 @@ export async function cataloguePage(opened) {
 
   let cursor = null;
   let rendered = 0;
-  let query = "";
-  // The two filters the listing itself can take. They are the listing's
-  // and not the search's, which is what makes them pageable: search
-  // answers the fifty best matches for a word and cannot be paged past
-  // them, and these narrow the order the pager is already walking.
-  let prefix = "";
+  // **One text filter, and it belongs to the listing.** This page kept
+  // two — a full-text query and a prefix — because the search matches
+  // whole words and answers nothing while somebody is still typing. The
+  // listing's own filter matches anywhere in a name or a key, so typing
+  // narrows from the first letter and every row it finds is reachable by
+  // the pager underneath.
+  let filter = "";
   let onlyInvalid = false;
   // The order the column headers set. "name" is the server's default
   // and is spelled out here rather than left empty, so the header can
@@ -264,14 +262,14 @@ export async function cataloguePage(opened) {
   let order = "name";
 
   function filtering() {
-    return prefix !== "" || onlyInvalid;
+    return filter !== "" || onlyInvalid;
   }
 
   // What the reader asked for, in their own words, so the count above the
   // list says which set it is counting.
   function describeFilters() {
     const parts = [];
-    if (prefix !== "") parts.push(t("catalogue.filter.startingWith", { prefix }));
+    if (filter !== "") parts.push(t("catalogue.filter.matching", { text: filter }));
     if (onlyInvalid) parts.push(t("catalogue.filter.notFitting"));
     return parts.join(t("list.and"));
   }
@@ -281,10 +279,10 @@ export async function cataloguePage(opened) {
   // count ("0 entities that no longer fit this type") and as nonsense
   // after a word ("Nothing that no longer fit this type").
   function nothingFound() {
-    if (prefix !== "" && onlyInvalid) {
-      return t("catalogue.none.prefixAndInvalid", { prefix });
+    if (filter !== "" && onlyInvalid) {
+      return t("catalogue.none.matchingAndInvalid", { text: filter });
     }
-    if (prefix !== "") return t("catalogue.none.prefix", { prefix });
+    if (filter !== "") return t("catalogue.none.matching", { text: filter });
     return t("catalogue.none.allFit");
   }
 
@@ -309,31 +307,21 @@ export async function cataloguePage(opened) {
     // noun is the game's, not the metamodel's.
     say(metaEl, total === null ? "" : countLabel(total, singular, plural));
     if (!scopeEl) return;
-    if (query !== "") {
-      // **"First 50" and not "50 matches".** The search asks for fifty and
-      // reports what came back, so a query matching a thousand rows said
-      // "50 matches" — the same defect this pass exists to fix, a count
-      // naming the page rather than the thing, re-introduced in the new
-      // code path. The honest sentence is the one that admits the cap.
-      // **The count says what is on screen, and "so far" says there is
-      // more.** It read "First 50 matches … narrow it" when fifty was
-      // all a search could ever answer; the search pages now, so the
-      // honest sentence is the listing's own — what has been fetched,
-      // and whether the set goes on.
-      say(
-        scopeEl,
-        t("catalogue.matchesFor", { matches: countLabel(rendered, t("unit.match"), t("unit.matches")), query }) +
-          (cursor === null ? t("list.soFar") : ""),
-      );
+    // A filter that found nothing is said once, by the state under the
+    // list: "0 entities holding zzz" over "Nothing here holds zzz" is
+    // the same sentence twice, and the count is the less useful half.
+    if (filtering() && rendered === 0) {
+      say(scopeEl, "");
     } else if (filtering()) {
-      // **A filtered listing is not the type.** "Showing 12 of 1000"
-      // over a listing narrowed to names beginning "Th" would be a count
-      // of the wrong set: the reader asked a question and the sentence
-      // has to answer the one they asked. The denominator is gone
-      // because the server does not count a filtered listing, and a
-      // number nobody can check is worse than none.
+      // **A filtered listing is not the entity's own count.** "Showing 12
+      // of 1000" over a listing narrowed to the rows holding "portal"
+      // would be a count of the wrong set: the reader asked a question
+      // and the sentence has to answer the one they asked. There is no
+      // denominator because the server does not count a filtered
+      // listing, and a number nobody can check is worse than none; "so
+      // far" is what says the set goes on.
       say(scopeEl, countLabel(rendered, t("unit.entity"), t("unit.entities")) + " " + describeFilters()
-        + (cursor === null ? t("list.soFar") : ""));
+        + (cursor === null ? "" : t("list.soFar")));
     } else if (total !== null && rendered < total) {
       say(scopeEl, t("catalogue.showingOf", { shown: rendered, all: total }));
     } else {
@@ -343,7 +331,7 @@ export async function cataloguePage(opened) {
 
   async function page() {
     if (moreEl) moreEl.disabled = true;
-    const request = { typeKey, verbose: true, prefix, invalid: onlyInvalid, order, limit: nextPageSize(rendered) };
+    const request = { typeKey, verbose: true, contains: filter, invalid: onlyInvalid, order, limit: nextPageSize(rendered) };
     if (cursor !== null) request.cursor = cursor;
     const answer = await opened.client.listEntities(request);
     if (!answer.ok) {
@@ -394,7 +382,7 @@ export async function cataloguePage(opened) {
           : t("catalogue.miss.filter", { all: countLabel(total, t("unit.entity"), t("unit.entities")) }),
       );
     } else {
-      if (missEl && query === "") missEl.hidden = true;
+      if (missEl) missEl.hidden = true;
       emptyOrRows(listEl, emptyEl, rendered);
     }
     // **The type's count, not the page's.** This said
@@ -414,139 +402,16 @@ export async function cataloguePage(opened) {
     }
   }
 
-  // A search replaces the listing rather than filtering it in the page:
-  // the server holds a thousand rows and the browser holds fifty, so a
-  // filter over what is on screen would answer from the wrong set.
-  async function runSearch() {
-    listEl.replaceChildren();
-    putHeader();
-    rendered = 0;
-    cursor = null;
-    await searchPage();
-  }
-
-  // **A search pages, and that is what turned its cap from a wall into a
-  // door.** It answered the fifty best matches and hid the pager, so a
-  // query matching three hundred rows left two hundred and fifty of them
-  // unreachable by any path on this screen. The server walks the whole
-  // matching set now, in the ranking's own order, and this reads it the
-  // way `page` reads the listing — same button, same cursor rule, same
-  // sentence about what is on screen.
-  async function searchPage() {
-    if (moreEl) moreEl.disabled = true;
-    const request = { limit: SEARCH_LIMIT, verbose: true, kind: "entity" };
-    if (cursor !== null) request.cursor = cursor;
-    const answer = await opened.client.searchEntities(query, typeKey, request);
-    if (!answer.ok) {
-      if (expired(answer)) {
-        goToLogin();
-        return;
-      }
-      if (emptyEl) emptyEl.hidden = true;
-      say(errorEl, answer.error.message);
-      return;
-    }
-    say(errorEl, "");
-    // **A search hit is not an entity.** The route answers
-    // `{kind, rank, name_match, entity}` — one envelope per hit with the
-    // row nested inside it — and reading `hit.name` off the envelope
-    // rendered a list of empty rows that still counted correctly, which
-    // is the worst shape a bug can have. Found by searching for a key in
-    // a browser.
-    const hits = Array.isArray(answer.result.items) ? answer.result.items : [];
-    const entities = hits.map((hit) => hit.entity).filter((entity) => entity && entity.key);
-    for (const entity of entities) {
-      listEl.append(
-        row(doc, {
-          label: entity.name || entity.key,
-          key: entity.key,
-          // The found row is the one a reader most wants to compare, and
-          // it was the only row in the product rendered under headers for
-          // columns it did not draw.
-          cells: cellsFor(entity),
-          count: "",
-          flag: entity.invalid === true ? "invalid" : "",
-          href: entityURL(opened.slug, entity.type_key || typeKey, entity.key),
-        }),
-      );
-    }
-    rendered += entities.length;
-    // The cursor before the sentence, as the listing does it: `sayScope`
-    // says "so far" while there is more to fetch, and reading it a line
-    // later made the first page claim to be the whole answer.
-    cursor = nextCursorOf(answer.result);
-    // **A miss is not an empty type.** emptyOrRows shows the listing's
-    // own empty state, which reads "Nothing of this type yet" — three
-    // lines under a heading that says the type has 105 entities. A search
-    // that found nothing is a third negative state and it says so.
-    if (missEl) {
-      const missed = query !== "" && rendered === 0;
-      missEl.hidden = !missed;
-      if (missed) {
-        sayMiss(
-          t("catalogue.miss.search", { query }),
-          total === null
-            ? t("catalogue.miss.search.unknownTotal")
-            : t("catalogue.miss.search.counted", { all: countLabel(total, t("unit.entity"), t("unit.entities")) }),
-        );
-      }
-    }
-    if (query !== "") {
-      listEl.hidden = rendered === 0;
-      if (emptyEl) emptyEl.hidden = true;
-    } else {
-      emptyOrRows(listEl, emptyEl, rendered);
-    }
-    if (moreEl) {
-      moreEl.hidden = cursor === null;
-      moreEl.disabled = false;
-    }
-    sayScope();
-  }
-
   if (searchEl) {
     let timer = null;
     searchEl.addEventListener("input", () => {
       const next = searchEl.value.trim();
       if (timer !== null) clearTimeout(timer);
       // A keystroke is not a question. The pause is what turns typing
-      // into one query instead of one per character.
+      // into one request instead of one per character.
       timer = setTimeout(async () => {
-        if (next === query) return;
-        query = next;
-        if (query === "") {
-          if (missEl) missEl.hidden = true;
-          listEl.replaceChildren();
-          putHeader();
-          rendered = 0;
-          cursor = null;
-          await page();
-          return;
-        }
-        await runSearch();
-      }, 200);
-    });
-  }
-
-  const prefixEl = doc.getElementById("entities-prefix");
-  if (prefixEl) {
-    let timer = null;
-    prefixEl.addEventListener("input", () => {
-      const next = prefixEl.value.trim();
-      if (timer !== null) clearTimeout(timer);
-      // The same pause the search box takes, for the same reason: a
-      // keystroke is not a question.
-      timer = setTimeout(async () => {
-        if (next === prefix) return;
-        prefix = next;
-        // A prefix and a search are two answers to one question, and the
-        // search is the one that cannot be paged: narrowing the listing
-        // clears it rather than leaving a reader with a filter that does
-        // nothing to what is on screen.
-        if (query !== "") {
-          query = "";
-          if (searchEl) searchEl.value = "";
-        }
+        if (next === filter) return;
+        filter = next;
         await refilter();
       }, 200);
     });
@@ -556,18 +421,11 @@ export async function cataloguePage(opened) {
   if (invalidEl) {
     invalidEl.addEventListener("change", async () => {
       onlyInvalid = invalidEl.checked === true;
-      if (query !== "") {
-        query = "";
-        if (searchEl) searchEl.value = "";
-      }
       await refilter();
     });
   }
 
-  // One button, two sources. Which one it continues is which one is on
-  // screen: a search and the listing are never both showing, and the
-  // cursor belongs to whichever answered last.
-  if (moreEl) moreEl.addEventListener("click", () => (query === "" ? page() : searchPage()));
+  if (moreEl) moreEl.addEventListener("click", () => page());
   putHeader();
   await page();
   return opened;

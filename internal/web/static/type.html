@@ -41,26 +41,23 @@
 </div>
 <p class="muted" id="type-meta" aria-live="polite"></p>
 
-<!-- **Search, on the screen that most needs it.** A type with a thousand
-     entities was a thousand rows in one order with no way to find one, and
-     the server indexes a row's key alongside its name — so the handle a
-     designer meets in every error message is the one that works here. -->
+<!-- **One box, and it narrows the listing.** This screen had two text
+     controls and a checkbox, because the two answered different
+     questions: one ran the game's full-text search, which matches whole
+     words and so finds nothing while you are still typing, and the other
+     filtered the listing by a prefix so that typing could narrow it at
+     all. A reader does not have that distinction and should not be asked
+     to hold it — they type three letters and expect the rows that have
+     them. The box filters the listing, server-side, matched anywhere in
+     a name or a key and paged like any other listing.
+     The misfit filter stays, because a row a schema edit stopped fitting
+     is work somebody has to do, and it appears only on a game that has
+     one: a control whose answer is always "none" teaches a reader to
+     ignore it. -->
 <div class="tools">
   <input id="entities-search" type="search" data-i18n-attr="placeholder:type.placeholder.find,aria-label:type.find"
          autocomplete="off">
-  <!-- **The one filter a person can compose.** Search answers the fifty
-       best matches for a word and cannot be paged past them; this narrows
-       the listing itself, so a thousand entities become the ones whose
-       name starts with what you typed and every one of them is reachable
-       by the pager underneath. The listing's order is by name, so the
-       server answers it by walking a contiguous stretch of the order it
-       was already walking. -->
-  <label class="tools-label" for="entities-prefix" data-i18n="catalogue.startingWith"></label>
-  <input id="entities-prefix" type="text" data-i18n-attr="placeholder:type.placeholder.prefix,aria-label:type.startsWith" autocomplete="off" size="8">
-  <!-- A row a schema edit stopped fitting is work a designer has to do,
-       and until now the only way to find those rows was to scroll a
-       thousand of them looking for the flag. -->
-  <label class="tools-check"><input id="entities-invalid" type="checkbox"><span data-i18n="catalogue.onlyMisfits"></span></label>
+  <label class="tools-check" id="entities-invalid-label" hidden><input id="entities-invalid" type="checkbox"><span data-i18n="catalogue.onlyMisfits"></span></label>
   <span class="tools-note muted" id="entities-scope" aria-live="polite"></span>
 </div>
 

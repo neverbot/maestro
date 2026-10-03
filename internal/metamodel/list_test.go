@@ -1113,6 +1113,70 @@ func TestListArea(t *testing.T) {
 		}
 	})
 
+	// **The filter a person types into one box.** A prefix cannot answer
+	// "the quest with portal in the middle of its name", and the game's
+	// own words carry accents a reader does not type: both are why the
+	// catalogue screen sends this one and not the prefix.
+	t.Run("list filters by what a name or a key holds", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		for _, row := range []struct{ key, name string }{
+			{"dark-portal", "The Dark Portal"},
+			{"gestur-clerics", "Clérigos de Gestur"},
+			{"westfall", "Westfall"},
+			{"fifty", "50% Off"},
+		} {
+			if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+				TypeKey: "quest", Key: row.key, Name: row.name,
+				Fields: map[string]any{"min_level": float64(1)},
+			}); err != nil {
+				t.Fatalf("seed %s: %v", row.key, err)
+			}
+		}
+
+		for _, tc := range []struct {
+			name     string
+			contains string
+			want     []string
+		}{
+			{"it matches the middle of a name, which no prefix can", "portal", []string{"dark-portal"}},
+			{"it does not care about case", "PORTAL", []string{"dark-portal"}},
+			{"it folds the accents a reader does not type", "clerigos", []string{"gestur-clerics"}},
+			{"and it matches an accented query against the same row", "Clérigos", []string{"gestur-clerics"}},
+			{"it matches a key as well as a name", "west", []string{"westfall"}},
+			{"a per cent sign is a character and not a wildcard", "%", []string{"fifty"}},
+			{"and an underscore matches nothing rather than everything", "_", nil},
+			{"nothing matching is an empty page, not everything", "zzz", nil},
+			// The listing is in name order, and "50% Off" sorts before a letter.
+			{"no filter is no filter", "", []string{"fifty", "gestur-clerics", "dark-portal", "westfall"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				page, err := svc.ListEntities(ctx, project,
+					metamodel.EntityFilter{TypeKey: "quest", Contains: tc.contains, Limit: 50})
+				assert.Must(t, err == nil, "ListEntities: %v", err)
+				if got := keysOf(page); !equalStrings(got, tc.want) {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			})
+		}
+
+		// A cursor belongs to the filter it was issued for, as it does for
+		// the prefix: carried across, it pages perfectly into a listing
+		// nobody asked for.
+		first, err := svc.ListEntities(ctx, project,
+			metamodel.EntityFilter{TypeKey: "quest", Contains: "e", Limit: 1})
+		assert.Must(t, err == nil, "ListEntities: %v", err)
+		assert.Must(t, first.NextCursor != "", "a full page carried no cursor, so this test is holding nothing")
+		if _, err := svc.ListEntities(ctx, project,
+			metamodel.EntityFilter{TypeKey: "quest", Cursor: first.NextCursor, Limit: 1}); err == nil {
+			t.Error("a cursor from a filtered listing was accepted by the unfiltered one")
+		}
+	})
+
 	// TestListArea's "a cursor issued for one prefix is refused under another"
 	// case pins that the prefix is part of what a cursor belongs to.
 	t.Run("a cursor issued for one prefix is refused under another", func(t *testing.T) {

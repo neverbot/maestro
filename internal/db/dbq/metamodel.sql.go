@@ -864,10 +864,21 @@ WHERE project_id = $1::uuid
   -- stretch of it rather than scattering the page.
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR (name, id) > ($6::text, $5::uuid))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR (name, id) > ($7::text, $6::uuid))
 ORDER BY name, id
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListEntitiesPageParams struct {
@@ -875,6 +886,7 @@ type ListEntitiesPageParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterName    *string
 	Limit        int32
@@ -930,6 +942,7 @@ func (q *Queries) ListEntitiesPage(ctx context.Context, arg ListEntitiesPagePara
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterName,
 		arg.Limit,
@@ -973,15 +986,26 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR CASE WHEN $6::jsonb IS NULL
-               THEN fields -> $7::text IS NULL AND id > $5::uuid
-               ELSE fields -> $7::text IS NULL
-                    OR (fields -> $7::text, id)
-                       > ($6::jsonb, $5::uuid)
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR CASE WHEN $7::jsonb IS NULL
+               THEN fields -> $8::text IS NULL AND id > $6::uuid
+               ELSE fields -> $8::text IS NULL
+                    OR (fields -> $8::text, id)
+                       > ($7::jsonb, $6::uuid)
           END)
-ORDER BY fields -> $7::text ASC NULLS LAST, id ASC
-LIMIT $8::int
+ORDER BY fields -> $8::text ASC NULLS LAST, id ASC
+LIMIT $9::int
 `
 
 type ListEntitiesPageByFieldParams struct {
@@ -989,6 +1013,7 @@ type ListEntitiesPageByFieldParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterValue   []byte
 	Field        string
@@ -1035,6 +1060,7 @@ func (q *Queries) ListEntitiesPageByField(ctx context.Context, arg ListEntitiesP
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterValue,
 		arg.Field,
@@ -1079,15 +1105,26 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR CASE WHEN $6::jsonb IS NULL
-               THEN fields -> $7::text IS NULL AND id < $5::uuid
-               ELSE fields -> $7::text IS NULL
-                    OR (fields -> $7::text, id)
-                       < ($6::jsonb, $5::uuid)
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR CASE WHEN $7::jsonb IS NULL
+               THEN fields -> $8::text IS NULL AND id < $6::uuid
+               ELSE fields -> $8::text IS NULL
+                    OR (fields -> $8::text, id)
+                       < ($7::jsonb, $6::uuid)
           END)
-ORDER BY fields -> $7::text DESC NULLS LAST, id DESC
-LIMIT $8::int
+ORDER BY fields -> $8::text DESC NULLS LAST, id DESC
+LIMIT $9::int
 `
 
 type ListEntitiesPageByFieldDescParams struct {
@@ -1095,6 +1132,7 @@ type ListEntitiesPageByFieldDescParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterValue   []byte
 	Field        string
@@ -1110,6 +1148,7 @@ func (q *Queries) ListEntitiesPageByFieldDesc(ctx context.Context, arg ListEntit
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterValue,
 		arg.Field,
@@ -1154,10 +1193,21 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR (key, id) > ($6::text, $5::uuid))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR (key, id) > ($7::text, $6::uuid))
 ORDER BY key, id
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListEntitiesPageByKeyParams struct {
@@ -1165,6 +1215,7 @@ type ListEntitiesPageByKeyParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterKey     *string
 	Limit        int32
@@ -1177,6 +1228,7 @@ func (q *Queries) ListEntitiesPageByKey(ctx context.Context, arg ListEntitiesPag
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterKey,
 		arg.Limit,
@@ -1220,10 +1272,21 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR (key, id) < ($6::text, $5::uuid))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR (key, id) < ($7::text, $6::uuid))
 ORDER BY key DESC, id DESC
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListEntitiesPageByKeyDescParams struct {
@@ -1231,6 +1294,7 @@ type ListEntitiesPageByKeyDescParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterKey     *string
 	Limit        int32
@@ -1243,6 +1307,7 @@ func (q *Queries) ListEntitiesPageByKeyDesc(ctx context.Context, arg ListEntitie
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterKey,
 		arg.Limit,
@@ -1286,10 +1351,21 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR (updated_at, id) > ($6::timestamptz, $5::uuid))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR (updated_at, id) > ($7::timestamptz, $6::uuid))
 ORDER BY updated_at, id
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListEntitiesPageByUpdatedParams struct {
@@ -1297,6 +1373,7 @@ type ListEntitiesPageByUpdatedParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterUpdated pgtype.Timestamptz
 	Limit        int32
@@ -1311,6 +1388,7 @@ func (q *Queries) ListEntitiesPageByUpdated(ctx context.Context, arg ListEntitie
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterUpdated,
 		arg.Limit,
@@ -1354,10 +1432,21 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR (updated_at, id) < ($6::timestamptz, $5::uuid))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR (updated_at, id) < ($7::timestamptz, $6::uuid))
 ORDER BY updated_at DESC, id DESC
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListEntitiesPageByUpdatedDescParams struct {
@@ -1365,6 +1454,7 @@ type ListEntitiesPageByUpdatedDescParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterUpdated pgtype.Timestamptz
 	Limit        int32
@@ -1378,6 +1468,7 @@ func (q *Queries) ListEntitiesPageByUpdatedDesc(ctx context.Context, arg ListEnt
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterUpdated,
 		arg.Limit,
@@ -1421,10 +1512,21 @@ WHERE project_id = $1::uuid
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
   AND ($4::text IS NULL
        OR starts_with(lower(name), lower($4::text)))
-  AND ($5::uuid IS NULL
-       OR (name, id) < ($6::text, $5::uuid))
+  -- The catalogue's one filter: what a reader typed, matched anywhere in
+  -- the name or the key, accents folded on both sides. ` + "`" + `prefix` + "`" + ` above is
+  -- the cheap one — it narrows a contiguous stretch of the name order and
+  -- an index can serve it — and this one is a scan of the rows the other
+  -- filters already left, which is what a reader typing three letters is
+  -- asking for and what no prefix can answer ("portal" in the middle of
+  -- a quest name). strpos and not ILIKE, for the reason the prefix gives:
+  -- a ` + "`" + `%` + "`" + ` in a reader's text is a per cent sign.
+  AND ($5::text IS NULL
+       OR strpos(maestro_fold(name), maestro_fold($5::text)) > 0
+       OR strpos(maestro_fold(key), maestro_fold($5::text)) > 0)
+  AND ($6::uuid IS NULL
+       OR (name, id) < ($7::text, $6::uuid))
 ORDER BY name DESC, id DESC
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListEntitiesPageNameDescParams struct {
@@ -1432,6 +1534,7 @@ type ListEntitiesPageNameDescParams struct {
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
 	Prefix       *string
+	Contains     *string
 	AfterID      *uuid.UUID
 	AfterName    *string
 	Limit        int32
@@ -1466,6 +1569,7 @@ func (q *Queries) ListEntitiesPageNameDesc(ctx context.Context, arg ListEntities
 		arg.EntityTypeID,
 		arg.Invalid,
 		arg.Prefix,
+		arg.Contains,
 		arg.AfterID,
 		arg.AfterName,
 		arg.Limit,

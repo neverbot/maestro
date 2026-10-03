@@ -94,6 +94,34 @@ in your hands lists all of them, each at its own path.
 **The repair.** Read the whole failure list, fix all of it, send once.
 The difference is 200 round trips against one.
 
+## 7. A value written because the field insisted
+
+**Before.** `rank` is declared `required`, as an enum. Twelve of the
+twenty-seven rows have no rank in the source material, so the enum gains
+an option meaning "none" and those twelve are written with it.
+
+**The day it bites.** The first time somebody reads the catalogue. Half
+a column says the same phrase, and nothing on the screen or in the data
+can tell "this one is deliberately unranked" from "nobody has decided
+yet" — two different facts, now spelled identically and un-askable
+apart. A view grouping by that field draws them as one group. An
+analysis counts them as decided.
+
+**The repair.** Decide which fact the field is for. If a game genuinely
+has unranked things, the option is content and it stays. If the answer is
+"we do not know yet", the field is not required: an absent optional field
+reads back as absent, a `where` on it matches nothing rather than
+matching a word you invented, and the day the answer arrives you write
+it over nothing.
+
+**The rule.** **Do not write a value you do not have.** Nothing on this
+surface asks you to fill a field to make a row land: an optional field
+left out is a fact this product can report, and `required` is the
+declaration that says the fact must exist before the row does. Inventing
+a plausible value — a placeholder, a "TBD", an enum option meaning
+"unknown" — is the one kind of wrong this product cannot detect, because
+every check it has will treat it as a decision somebody made.
+
 ## Undoing is the seeding loop backwards
 
 Every repair above ends in a removal, and removals run in the reverse of

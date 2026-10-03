@@ -1610,7 +1610,7 @@ check("aCatalogueIsOrderedByWeightAndDrawsTheShare", async () => {
   const head = all[0];
   assertEqual(head.className, "catalogue-head", "the catalogue has no header row");
   const headings = text(head);
-  for (const column of ["Kind", "Fields", "Things", "Of the game"]) {
+  for (const column of ["Type", "Count", "Of the total"]) {
     assert(headings.includes(column), `the header does not name ${column}: ${JSON.stringify(headings)}`);
   }
 

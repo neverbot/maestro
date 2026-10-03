@@ -796,29 +796,19 @@ func TestTheGameSummaryCountsTheRowsASchemaEditInvalidated(t *testing.T) {
 	assert.Must(t, summary.Totals.Invalid == 1, "totals = %+v, want one invalid row", summary.Totals)
 }
 
-// **The home page's columns, on the wire.** The band drew a name, a
-// count and a share and left three columns of the shared row component
-// empty, so a reader could not tell a kind with eight declared fields
-// from one with none, and twelve verbs listed their counts with nothing
-// saying what any of them joined — `hates 11` is right or wrong
-// depending on whether it joins deities or zones. These four fields are
-// what the page draws there, and they cost no query: the summary's own
-// listings already carry the schema and the endpoint ids.
+// **The home page's columns, on the wire.** Twelve verbs listed their
+// counts with nothing saying what any of them joined, and `hates 11` is
+// right or wrong depending on whether it joins deities or zones. The
+// endpoint keys are what the page draws there, and they cost no query:
+// gameCounts already holds the id-to-key map they are rendered from.
 func TestTheGameSummaryCarriesWhatTheHomeDraws(t *testing.T) {
 	t.Parallel()
 	f := newRESTFixture(t)
 
 	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
-		"key": "quest", "label": "Quest", "label_plural": "Quests",
-		"field_schema": []any{
-			map[string]any{"key": "level", "label": "Level", "type": "number"},
-			map[string]any{"key": "reward", "label": "Reward", "type": "text"},
-		},
-	}); rec.Code != http.StatusOK {
+		"key": "quest", "label": "Quest", "label_plural": "Quests"}); rec.Code != http.StatusOK {
 		t.Fatalf("quest = %d: %s", rec.Code, rec.Body.String())
 	}
-	// A kind that declares nothing: the other half of the fact, and the
-	// one a reader is looking for.
 	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
 		"key": "zone", "label": "Zone", "label_plural": "Zones"}); rec.Code != http.StatusOK {
 		t.Fatalf("zone = %d: %s", rec.Code, rec.Body.String())
@@ -842,13 +832,6 @@ func TestTheGameSummaryCarriesWhatTheHomeDraws(t *testing.T) {
 	assert.Must(t, rec.Code == http.StatusOK, "summary = %d: %s", rec.Code, rec.Body.String())
 	var summary gameSummary
 	decodeBody(t, rec, &summary)
-
-	fields := map[string]int{}
-	for _, typ := range summary.EntityTypes {
-		fields[typ.Key] = typ.FieldCount
-	}
-	assert.Must(t, fields["quest"] == 2 && fields["zone"] == 0,
-		"declared fields = %+v, want two on quest and none on zone", fields)
 
 	byKey := map[string]int{}
 	for i, typ := range summary.RelationTypes {
@@ -875,7 +858,6 @@ type gameSummary struct {
 		LabelPlural  string `json:"label_plural"`
 		EntityCount  int64  `json:"entity_count"`
 		InvalidCount int64  `json:"invalid_count"`
-		FieldCount   int    `json:"field_count"`
 	} `json:"entity_types"`
 	RelationTypes []struct {
 		ID             string   `json:"id"`

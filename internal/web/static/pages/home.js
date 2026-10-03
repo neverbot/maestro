@@ -411,19 +411,12 @@ async function catalogueLane(doc, slug, client) {
     doc.getElementById("types-empty"),
     withHeader(things.sorted.length > 0 && headerRow(doc, {
       label: t("home.column.kind"),
-      cells: [{ text: t("home.column.fields"), numeric: true }],
-      count: t("home.column.things"),
-      share: t("home.column.ofTheGame"),
+      count: t("home.column.count"),
+      share: t("home.column.ofTotal"),
     }), [
       ...things.sorted.map((type) =>
         row(doc, {
           label: type.label_plural || type.label || type.key,
-          // How much a kind declares is how much a designer has said
-          // about it, and the band had no answer: a type with eight
-          // fields and one with none drew the same row. The summary
-          // carries the count because the page asks for it; the schema
-          // itself belongs to that type's own page.
-          cells: [{ text: String(Number(type.field_count ?? 0)), numeric: true }],
           count: String(Number(type.entity_count ?? 0)),
           share: { value: Number(type.entity_count ?? 0), of: things.total },
           flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
@@ -440,8 +433,8 @@ async function catalogueLane(doc, slug, client) {
     withHeader(links.sorted.length > 0 && headerRow(doc, {
       label: t("home.column.connection"),
       cells: [{ text: t("home.column.between") }],
-      count: t("home.column.links"),
-      share: t("home.column.ofTheGraph"),
+      count: t("home.column.count"),
+      share: t("home.column.ofTotal"),
     }), [
       ...links.sorted.map((type) =>
         row(doc, {

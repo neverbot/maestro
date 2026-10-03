@@ -167,7 +167,9 @@ func TestTheSkillZipIsTheEmbeddedBundle(t *testing.T) {
 	}
 	assert.Should(t, len(missing) <= 0, "the served archive is missing %d of the bundle's %d files:\n%s",
 		len(missing), len(want), strings.Join(missing, "\n"))
-	assert.Should(t, len(inZip) == len(want), "the archive holds %d entries and the bundle holds %d files", len(inZip), len(want))
+	// The pages, plus the manifest an installed copy checks itself with.
+	assert.Should(t, inZip[skill.ManifestName], "the served archive carries no %s, so an installed copy cannot check itself", skill.ManifestName)
+	assert.Should(t, len(inZip) == len(want)+1, "the archive holds %d entries and the bundle holds %d files plus its manifest", len(inZip), len(want))
 }
 
 // TestTheInstallDescriptorCarriesNoBundleBytes is the whole reason this

@@ -387,3 +387,43 @@ func TestTheRoutingGuardCatchesBothDirections(t *testing.T) {
 			"every genre page escapes the routing rule or every transcript is demanded in it")
 	}
 }
+
+// **A page may name another page anywhere, not only in the routing
+// table.** The guard above reads skill.md's section 7 and nothing else,
+// so a "where to look next" list at the foot of a recipe could point at
+// a page that had been deleted and no test would say so. One did, and
+// it was found by reading.
+func TestEveryPageNamedAnywhereExists(t *testing.T) {
+	fsys := Files()
+	present := map[string]bool{}
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		present[p] = true
+		return nil
+	})
+	assert.Must(t, err == nil, "walking the bundle: %v", err)
+	assert.Must(t, len(present) > 10, "the walk found %d files; this guard is reading the wrong tree", len(present))
+
+	named := 0
+	err = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".md" {
+			return err
+		}
+		body, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			for _, m := range routedPath.FindAllStringSubmatch(line, -1) {
+				named++
+				assert.Should(t, present[m[1]], "%s names %s, which is not in the bundle: "+
+					"a dead link sends an agent to read nothing", p, m[1])
+			}
+		}
+		return nil
+	})
+	assert.Must(t, err == nil, "reading the bundle: %v", err)
+	assert.Must(t, named > 20, "found %d page references in the whole bundle; the scan is not matching", named)
+}

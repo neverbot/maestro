@@ -96,6 +96,23 @@ For one row, `entities.get` and `relations.get` read it back by the
 address you wrote it under, which is the fastest way to check that a
 field you thought you set actually landed.
 
+**Read it back after step 4, not during.** A game between steps 3 and 4
+is *supposed* to look like a field of disconnected rows: the edges are
+step 4 and nothing before it can show them. Reading that as a broken
+design and starting to repair it lands your repairs on top of the seed
+that was about to write the edges.
+
+## Undoing
+
+Removals run in the reverse of the order the seed was written:
+`relations.remove`, then `entities.remove`, then
+`relation_types.remove`, then `types.remove`. The last two on
+something that still holds content answer `in_use` rather than taking
+the content with them, which is the one
+place this surface refuses to let a teardown quietly delete a game's
+content. Read the shape once before a teardown and once after: a count
+that did not move is a teardown that removed nothing.
+
 ## What this recipe will look like when the surface changes
 
 This page teaches a read-then-write loop **because the batch tools take

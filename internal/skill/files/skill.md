@@ -14,19 +14,18 @@ no Class, no Circuit. A game declares its own, and that is the product
 rather than a gap. You will declare a vocabulary before you can write
 anything, and the shape you choose is expensive to change later.
 
-Every tool's full contract is in that tool's own description, which your
-client already holds. These pages teach what no single description can:
-the order, the judgement, and the consequence that only shows up two
-calls later.
+Every tool's full contract is in its own description, which your client
+already holds. These pages teach what no description can: the order, the
+judgement, and the consequence that shows up two calls later.
 
 ## 1. Identify yourself
 
 Call `whoami` first. It says who you act for and which single game your
 token is bound to; the slug it answers with is that game's address, and
-the value the optional `game` argument on every other tool is checked
-against. One token, one game: a `scope_violation` is the answer to a
-request naming a different one, not a bug to route around. Ask the human
-for the right token.
+what the optional `game` argument on every other tool is checked against.
+One token, one game: a `scope_violation` answers a request naming a
+different one, and is not a bug to route around. Ask the human for the
+right token.
 
 ## 2. The four primitives
 
@@ -101,12 +100,10 @@ combinations it rules out. Read it once before your first edge type.
   **row** is `^[A-Za-z0-9][A-Za-z0-9_-]*$`. Both capped at 64, both
   ASCII. `modelling/naming.md` has the reason and the rest of the rules.
 
-The choice of language for a game's keys is **the game's**: a Spanish
-studio's `mision` is as correct as `quest`. Both rules are ASCII, so
-`misión` is no key at all — the case-folding index talking, not a
-preference about language. An entity reference is spelled three ways,
-one per domain; `reference/surface.md` has them, and how to read a
-shape off the wire before you send it.
+A game's keys are in the game's own language: `mision` is as correct as
+`quest`, while `misión` is no key at all — the ASCII rule is the
+case-folding index talking, not a preference. An entity reference is
+spelled three ways, one per domain; `reference/surface.md` has them.
 
 ## 5. The seeding loop
 
@@ -125,18 +122,18 @@ matching the version you read. A mismatch is `version_conflict` and
 carries what is current: re-read, merge, retry. Do not retry blind.
 
 **A version claim is a claim about a row that exists.** Claiming one for
-a row this game does not have is `not_found`, and is never a quiet
-re-creation.
+a row this game does not have is `not_found`, never a quiet re-creation.
 
 **Batches are bounded, and a batch over the bound fails as a batch**
 rather than silently writing a prefix. Split it yourself, before sending.
 
 ## 6. Response discipline
 
-Listings are slim by design — id, key, label, version. Ask for fields
-only when you will use them, and page rather than raising a limit. Do
-not re-read a page you already loaded this session: the surface has not
-changed under you unless you changed it.
+Listings are slim by design: identity and version, not field values. Ask
+for fields only when you will use them, and page rather than raising a
+limit. Do not re-read a page you already hold without a reason — and
+`version_conflict` is one, because a designer renames rows and edits
+fields from the interface while you work.
 
 ## 7. Where to go next
 
@@ -144,7 +141,6 @@ changed under you unless you changed it.
 |---|---|
 | decide a game's shape, or wonder whether something is a field or a relation | `modelling/deciding.md` |
 | choose keys, or wonder what a rename costs | `modelling/naming.md` |
-| recognise a shape that will cost a rewrite | `modelling/mistakes.md` |
 | find which of the tools exists | `reference/tools.md` |
 | read a contract, learn a shape, or drive REST instead of MCP | `reference/surface.md`, `reference/rest.md` |
 | declare a field type, or wonder what one costs later | `reference/fields.md` |
@@ -161,10 +157,14 @@ Nothing here is required, and a game none of these examples matches is the norma
 
 ## 8. Installing and updating
 
-`whoami` reports `skill_bundle_version`: the version of these pages the
-server would serve now. Matching the manifest beside your installed copy
-means you are current; otherwise call `skill.install`, fetch the zip its
-descriptor points at with your own HTTP tool, extract it over the install
-directory, and record the new version. **Then tell the human to restart
-the application that loads you**: most runtimes read a skills directory
-once, at session start, so the pages in effect are the ones you replaced.
+The server names the current version twice: in the instructions it sends
+when you connect, and in `whoami`'s `skill_bundle_version`. Check yours
+by hashing the `SHA256SUMS` beside these pages — `shasum -a 256
+<dir>/SHA256SUMS` — and comparing `sha256:<hex>`. It lists every page,
+so this catches an edited install as well as an old one.
+
+If they differ, call `skill.install`, fetch the zip its descriptor names,
+and extract it over the install directory. **Then tell the human to
+restart the application that loads you**: most runtimes read a skills
+directory once, at session start, so the pages in effect are the ones
+you replaced.

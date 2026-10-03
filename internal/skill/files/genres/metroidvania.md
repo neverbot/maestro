@@ -126,8 +126,7 @@ an ability is only interesting where a door mentions it.
 
 ## Where to look next
 
-- `modelling/deciding.md` — the field-or-relation decision, and the
-  cost of each direction.
-- `modelling/mistakes.md` — the shapes that cost a rewrite, including
-  the one this page took on purpose.
+- `modelling/deciding.md` — the field-or-relation decision, the cost of
+  each direction, and decision 3, which this page answers the other way
+  on purpose.
 - `reference/fields.md` — what a `text` field is and is not.

@@ -362,7 +362,10 @@ func readOnlyTool() *mcp.ToolAnnotations {
 // isolation is enforced in exactly one place regardless of how many
 // tools this file eventually holds.
 func (s *Server) newMCPServer() *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "maestro", Version: s.opts.Version}, nil)
+	srv := mcp.NewServer(
+		&mcp.Implementation{Name: "maestro", Version: s.opts.Version},
+		&mcp.ServerOptions{Instructions: skillInstructions(skill.Version())},
+	)
 	deps := s.deps()
 
 	addScopedTool(s, srv, deps, &mcp.Tool{

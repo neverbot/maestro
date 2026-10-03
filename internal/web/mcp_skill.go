@@ -38,9 +38,10 @@ type SkillInstallOutput struct {
 const skillInstallInstructions = "Fetch download_url with any HTTP tool the host gives you " +
 	"(curl, wget, Invoke-WebRequest, Python urllib, Node fetch) — it needs no Authorization " +
 	"header. Unzip it into preferred_dir, overwriting what is there; if you cannot write " +
-	"there, use fallback_dir. Create the directory if it does not exist. Write " +
-	"bundle_version into a manifest beside the files, and skip the download next time the " +
-	"version you are told matches the one you stored."
+	"there, use fallback_dir. Create the directory if it does not exist. The zip carries a " +
+	"SHA256SUMS listing every page: next time, hash it where you installed it " +
+	"(sha256sum <dir>/SHA256SUMS, or shasum -a 256) and skip the download when " +
+	"\"sha256:<hex>\" matches the bundle_version you are told."
 
 type skillInstallInput struct{ ScopedArgs }
 
@@ -105,4 +106,30 @@ var skillInstallOutputSchema = &jsonschema.Schema{
 			},
 		},
 	},
+}
+
+// skillInstructions is what every agent is told at connection time.
+//
+// **It lives in the server and not in the bundle.** An agent running an
+// outdated bundle reads outdated pages, so a bundle is the one party
+// that cannot tell anybody it is out of date; a bundle predating this
+// check would never have learnt to run it. The server always knows the
+// version it would serve now.
+//
+// The check is a hash of the file that ships, not a note the installer
+// wrote: SHA256SUMS is in the zip, every page is listed in it, and the
+// version announced here is its SHA-256. An install somebody edited
+// fails the same check an outdated install fails.
+func skillInstructions(bundleVersion string) string {
+	return "Maestro records the content design of a game — its own entity and relation " +
+		"vocabulary, the rows and edges that instance it, the prose about them, and saved " +
+		"views over the lot. The rules for agents ship as a skill bundle.\n\n" +
+		"Skill bundle version: " + bundleVersion + "\n\n" +
+		"Check it before relying on your installed skills: hash the " + skill.ManifestName +
+		" file in the directory where the maestro skill is installed (sha256sum <dir>/" +
+		skill.ManifestName + ", or shasum -a 256) and compare \"sha256:<hex>\" with the " +
+		"version above. If it differs, or the file is not there, call skill.install and " +
+		"follow the descriptor it answers with, then tell the human to restart this client: " +
+		"skills are read when a session starts, so the pages you replaced apply from the " +
+		"next one. If they match, carry on; there is nothing to do."
 }

@@ -32,6 +32,16 @@ zero-filled. A view asking `exists` on it will say so, and a `where`
 comparing it to a value will match nothing rather than matching the
 zero you assumed was there.
 
+**Do not write a value you do not have.** Nothing here asks you to fill
+a field to make a row land: an optional field left out is a fact this
+product can report, and `required` is the declaration that says the fact
+must exist before the row does. A placeholder, a "TBD" or an enum option
+meaning "unknown" is the one kind of wrong nothing can detect, because
+every check treats it as a decision somebody made — and a reader then
+cannot tell "deliberately none" from "nobody has decided yet". If a
+value is genuinely unknown at seed time, the field is optional and you
+leave it out.
+
 **A default is declared by the presence of the `"default"` key and by
 nothing else.** There is no separate flag saying a default exists, on
 the wire or anywhere else; the key being there is the whole declaration.
@@ -66,7 +76,7 @@ can tell you that the mistake was made at declaration time.
 
 - **`text`** holds anything and answers pattern questions. A level
   stored as `text` cannot be range-filtered, cannot rank a layered view
-  and cannot be a timeline axis.
+  and cannot be a timeline axis, and it sorts 1, 10, 100, 2.
 - **`number`** is the only thing range operators speak, the only thing a
   layered view can rank by directly, and one of the two things a
   timeline axis reads. Store a level, a lap count and a cost as numbers

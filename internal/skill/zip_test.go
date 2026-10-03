@@ -3,8 +3,11 @@ package skill
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -75,6 +78,10 @@ func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 
 	tree := treeOf(t, Files())
 	assert.Must(t, len(tree) != 0, "the bundle tree is empty: this test would pass by comparing two empty sets")
+	// The manifest ships beside the pages and is not one of them; its own
+	// contents are asserted by TestTheVersionIsTheHashOfTheFileThatShips.
+	assert.Must(t, len(packed[ManifestName]) > 0, "the archive carries no %s", ManifestName)
+	delete(packed, ManifestName)
 	for path, body := range tree {
 		got, ok := packed[path]
 		if !ok {
@@ -89,25 +96,78 @@ func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 	}
 }
 
-// TestTheVersionHashIsLengthPrefixed is the assertion that would be
-// missing if the test only checked that the real bundle hashes stably,
-// which is true under a broken hash too.
-func TestTheVersionHashIsLengthPrefixed(t *testing.T) {
-	left, err := hashTree(fstest.MapFS{"ab": &fstest.MapFile{Data: []byte("c")}})
-	assert.Must(t, err == nil, "hashTree: %v", err)
-	right, err := hashTree(fstest.MapFS{"a": &fstest.MapFile{Data: []byte("bc")}})
-	assert.Must(t, err == nil, "hashTree: %v", err)
-	assert.Must(t, left != right, "{\"ab\": \"c\"} and {\"a\": \"bc\"} hash the same (%s): the hash concatenates without length prefixes", left)
+// **The manifest separates a path from its content.** Two trees that
+// differ only in where one byte sits must not render the same
+// SHA256SUMS, which a hash built by concatenation would allow.
+// versionOfTree is Version() for a tree a test built, through the same
+// manifest the real bundle ships.
+func versionOfTree(fsys fs.FS) (string, error) {
+	manifest, err := manifestOf(fsys)
+	if err != nil {
+		return "", err
+	}
+	return VersionOf(manifest), nil
+}
+
+func TestTheManifestSeparatesPathFromContent(t *testing.T) {
+	left, err := manifestOf(fstest.MapFS{"ab": &fstest.MapFile{Data: []byte("c")}})
+	assert.Must(t, err == nil, "manifestOf: %v", err)
+	right, err := manifestOf(fstest.MapFS{"a": &fstest.MapFile{Data: []byte("bc")}})
+	assert.Must(t, err == nil, "manifestOf: %v", err)
+	assert.Must(t, !bytes.Equal(left, right), "{\"ab\": \"c\"} and {\"a\": \"bc\"} render the same manifest: %s", left)
+}
+
+// **An agent checks its install the way the server computed the
+// version.** The whole scheme rests on this one equality: the version
+// announced is the SHA-256 of the file that ships, so `shasum -a 256
+// SHA256SUMS` on disk answers it.
+func TestTheVersionIsTheHashOfTheFileThatShips(t *testing.T) {
+	archive, err := Zip()
+	assert.Must(t, err == nil, "Zip: %v", err)
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	assert.Must(t, err == nil, "reading the archive back: %v", err)
+
+	var shipped []byte
+	for _, entry := range reader.File {
+		if entry.Name != ManifestName {
+			continue
+		}
+		rc, err := entry.Open()
+		assert.Must(t, err == nil, "opening %s: %v", ManifestName, err)
+		shipped, err = io.ReadAll(rc)
+		if closeErr := rc.Close(); closeErr != nil {
+			t.Fatalf("closing %s: %v", ManifestName, closeErr)
+		}
+		assert.Must(t, err == nil, "reading %s: %v", ManifestName, err)
+	}
+	assert.Must(t, len(shipped) > 0, "the archive carries no %s: an installed copy cannot check itself", ManifestName)
+
+	sum := sha256.Sum256(shipped)
+	assert.Must(t, Version() == "sha256:"+hex.EncodeToString(sum[:]),
+		"Version() is %s and hashing the shipped %s gives sha256:%s", Version(), ManifestName, hex.EncodeToString(sum[:]))
+
+	// Every page is listed, and the manifest does not list itself.
+	lines := strings.Split(strings.TrimSpace(string(shipped)), "\n")
+	listed := map[string]bool{}
+	for _, line := range lines {
+		parts := strings.SplitN(line, "  ", 2)
+		assert.Must(t, len(parts) == 2, "a manifest line is not `<hex>  <path>`: %q", line)
+		listed[parts[1]] = true
+	}
+	assert.Must(t, !listed[ManifestName], "%s lists itself, which no file can honestly do", ManifestName)
+	for path := range treeOf(t, Files()) {
+		assert.Should(t, listed[path], "%s ships and %s does not list it", path, ManifestName)
+	}
 }
 
 // TestTheVersionMovesWhenOneByteMoves drives the real tree, not a
 // fixture, so a hash that somehow read something other than the bundle
 // would be caught here.
 func TestTheVersionMovesWhenOneByteMoves(t *testing.T) {
-	before, err := hashTree(Files())
+	before, err := versionOfTree(Files())
 	assert.Must(t, err == nil, "hashTree: %v", err)
 	assert.Must(t, before == Version(), "Version() is %s and hashing the tree gives %s: Version does not hash what ships", Version(), before)
-	after, err := hashTree(mutated(t, "skill.md", func(body []byte) []byte { return append(body, '.') }))
+	after, err := versionOfTree(mutated(t, "skill.md", func(body []byte) []byte { return append(body, '.') }))
 	assert.Must(t, err == nil, "hashTree: %v", err)
 	assert.Must(t, before != after, "appending one byte to skill.md left the version at %s", before)
 }
@@ -131,8 +191,8 @@ func TestTheVersionMovesWheneverTheZipDoes(t *testing.T) {
 	for name, tree := range trees {
 		archive, err := zipTree(tree)
 		assert.Must(t, err == nil, "zipTree(%s): %v", name, err)
-		sum, err := hashTree(tree)
-		assert.Must(t, err == nil, "hashTree(%s): %v", name, err)
+		sum, err := versionOfTree(tree)
+		assert.Must(t, err == nil, "versionOfTree(%s): %v", name, err)
 		shapes[name] = shape{zip: string(archive), version: sum}
 	}
 	for leftName, left := range shapes {

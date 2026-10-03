@@ -229,12 +229,26 @@ root, then `.agents/context/`, then `docs/` — which is why they live in
 Two rules govern it, and both were in `readme.md` until the readme
 became a readme. They are process, not product.
 
+- **An agent learns its pages are stale without being asked to look.**
+  The MCP server's instructions name `skill.Version()` at connection
+  time, and the bundle ships a `SHA256SUMS` listing every page: an
+  installed copy checks itself with `shasum -a 256 SHA256SUMS` against
+  the version it was told, so an edited install fails the same check an
+  old one does. The notice lives in the server and not in the bundle on
+  purpose — an outdated bundle reads outdated instructions, and one
+  predating the check would never learn to run it.
 - **The bundle never restates a tool's contract.** Every argument,
   admitted value, bound and refusal stays in the description the wire
   already carries; a page routes to it, or quotes it verbatim with
   attribution. This is enforced, not encouraged: a page that rewords a
   description, or a description reworded underneath a page that quotes
   it, fails `make skill-check`.
+- **A page teaches how to do a thing; there is no page of anti-patterns.**
+  `modelling/mistakes.md` was one, and six of its seven entries were a
+  second copy of a rule `deciding.md`, `naming.md`, `fields.md` or
+  `errors.md` already taught in positive form — a second copy that can
+  go false on its own. What a mistake adds over a rule is the *symptom*,
+  and that belongs beside the rule it diagnoses.
 - **The genre pages are examples and never an argument.** "The MMORPG
   template needs this" does not justify a change under `internal/` and
   may not be cited as one in review. If a genre cannot be expressed, the

@@ -65,8 +65,11 @@ session. That is `recipes/seeding-a-game.md`.
 
 - **Do not page the whole game.** A catalogue walk of every type is
   hundreds of calls to learn what one call already answered.
-- **Do not re-read what you loaded.** The game did not change under you
-  unless you changed it.
+- **Do not re-read what you loaded**, within one plan and absent a
+  reason. A designer can rename a row, edit a field and write a document
+  from the interface while you work, so a `version_conflict` is a real
+  answer rather than an impossible one: read again when you get one, and
+  before a write whose version you read long ago.
 - **Do not declare anything yet.** A type added by an agent on its way
   in is the fastest way to make a designer distrust the whole session.
   Propose it, in words, and let them say yes.
@@ -78,7 +81,7 @@ session. That is `recipes/seeding-a-game.md`.
 
 - `genres/racing.md` — a worked game, if the vocabulary you found looks
   like a career mode.
-- `modelling/mistakes.md` — recognising a shape that is going to cost
+- `modelling/deciding.md` — recognising a shape that is going to cost
   somebody a rewrite, before you build on it.
 - `recipes/composing-a-view.md` — answering a question about the game
   you just read.

@@ -92,6 +92,10 @@ them apart. The difference between this case and the one above is
 whether the distinction changes how the graph is *walked* or only which
 edges are *selected*.
 
+Splitting one type into two after the fact costs a write per edge —
+read them, rewrite half under the new type, remove the originals — plus
+one save for every stored view that walked the old one.
+
 There is a third reason, and today it is a hard one rather than a matter
 of taste. A relation type declares `analysis_traits` — how its edges
 **behave** in a graph walk, which is what lets an engine say anything

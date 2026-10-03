@@ -39,13 +39,9 @@ member.
 
 ## Read the refusal whole
 
-Every refusal on this surface reports **every problem it can see at
-once**: missing members and unknown ones alike, each at its own path.
-Fix all of them before calling again.
-
-An agent fixing one member per round trip on a 200-row seed pays 200
-round trips for one bad afternoon, and each of those answers carried the
-whole list the first time.
+Every refusal reports every problem it can see at once, each at its own
+path. `reference/errors.md` has the rule, what each code means and which
+recovery it asks for.
 
 ## One reference, three spellings
 

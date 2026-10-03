@@ -203,7 +203,7 @@ for (const row of summary.relation_types) {
 }
 
 const totals = elements["game-summary"].textContent;
-if (!totals.includes(`${summary.totals.entities} entities`)) {
+if (!totals.includes(`${summary.totals.entities} distinct entities`)) {
   fail(`the totals line does not carry the entity total: ${JSON.stringify(totals)}`);
 }
 if (!totals.includes(`${summary.totals.relations} relations`)) {

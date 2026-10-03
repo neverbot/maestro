@@ -702,5 +702,6 @@
   "value.empty.name": "{field} is empty",
   "catalogue.filter.matching": "holding “{text}”",
   "catalogue.none.matching": "Nothing here holds “{text}”",
-  "catalogue.none.matchingAndInvalid": "Nothing holding “{text}” has stopped fitting"
+  "catalogue.none.matchingAndInvalid": "Nothing holding “{text}” has stopped fitting",
+  "column.entity": "Entity"
 }

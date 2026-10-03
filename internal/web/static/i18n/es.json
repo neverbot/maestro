@@ -702,5 +702,6 @@
   "value.empty.name": "{field} está vacío",
   "catalogue.filter.matching": "con «{text}»",
   "catalogue.none.matching": "Aquí no hay nada que contenga «{text}»",
-  "catalogue.none.matchingAndInvalid": "Nada que contenga «{text}» ha dejado de encajar"
+  "catalogue.none.matchingAndInvalid": "Nada que contenga «{text}» ha dejado de encajar",
+  "column.entity": "Entidad"
 }

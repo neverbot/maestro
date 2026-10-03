@@ -177,21 +177,14 @@ export async function cataloguePage(opened) {
       // `faction: ""` rendered pixel-identically to one with no faction
       // at all. The rule is stated in this repository and the module next
       // door already honours it.
+      // A dash under a heading that already names the field; the words
+      // go to the accessible name. It printed "no Offerings it accepts"
+      // on every row that had none.
       if (value === undefined || value === null) {
-        // **A dash, under a heading that already names the field.** It
-        // read "no Offerings it accepts" on every row that had none: the
-        // column heading said again twenty times, in the one place a
-        // reader is scanning for the value. The words stay as the cell's
-        // accessible name, and they use the field's *label* and not its
-        // key — a field keyed `min_level` labelled "Minimum level" read
-        // "no min_level" on the screen whose whole job is the game's
-        // vocabulary.
         return { text: ABSENT_MARK, absent: true, name: t("value.absent", { field: name }) };
       }
       // Empty and absent are different facts and never look alike:
-      // design.md's Named Absence Rule, and the reason this has three
-      // arms rather than two. An entity with `faction: ""` said nothing
-      // and one with no faction at all said nothing, identically.
+      // design.md's Named Absence Rule.
       if (value === "") return { text: t("value.empty"), absent: true, name: t("value.empty.name", { field: name }) };
       // **The same words the entity page uses**, which is the whole
       // reason this calls a shared function rather than `String(value)`.
@@ -209,7 +202,9 @@ export async function cataloguePage(opened) {
     if (columns.length === 0) return;
     listEl.append(
       headerRow(doc, {
-        label: type.result.label || type.result.key,
+        // It read the type's own word, so the column meant something
+        // different on every catalogue.
+        label: t("column.entity"),
         key: t("column.key"),
         cells: columns.map((field) => ({
           text: field.label || field.key,

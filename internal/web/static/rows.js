@@ -2,12 +2,9 @@ import { t } from "./i18n.js";
 // The row every list in this product is made of.
 export const CATALOGUE_CELLS = 3;
 
-// What a cell draws where a row has no value for that column, in a
-// listing whose column headings already name the field. An em dash and
-// not the empty string: design.md's Named Absence Rule forbids a blank,
-// which cannot be told from a value that failed to load. A listing
-// whose absence is a *fact* rather than a hole — "no default", "no
-// role", "not checked" — says the fact instead, in words.
+// What a cell draws where a row has no value and the heading already
+// names the field. A blank is forbidden (Named Absence); an absence
+// that is a *fact* — "no default", "no role" — says so in words.
 export const ABSENT_MARK = "\u2014";
 
 // The namespace an SVG element has to be created in; a createElement
@@ -106,12 +103,7 @@ export function row(doc, spec) {
     if (cell && cell.status) value.classList.add("status", cell.status);
     value.setAttribute("role", "cell");
     value.textContent = cell ? (cell.text ?? "") : "";
-    // **What a mark means, for a reader who cannot see the column.** A
-    // cell may draw a dash where a row has no value — repeating "no
-    // Offerings it accepts" down a whole column says the heading again
-    // on every row and hides the one thing a reader is scanning for —
-    // and the words it replaces are the cell's accessible name rather
-    // than lost. Only a caller that draws a mark passes one.
+    // What a mark means, for a reader who cannot see the column.
     if (cell && cell.name) value.setAttribute("aria-label", cell.name);
     item.append(value);
   }

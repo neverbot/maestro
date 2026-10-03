@@ -1697,25 +1697,15 @@ ul.catalogue li.catalogue-head:hover { background: var(--paper); }
   border-radius: var(--radius);
 }
 
-/* **A heading is not a button to press, it is a word to read.** The
-   control vocabulary dresses a bare `<button>` as the primary button —
-   ink fill, paper text — and every control that is something else
-   undresses itself: the ghost, the chip, the tab, the link-button, each
-   with its own hover. This one undressed the resting state and left the
-   hover behind, so `button:hover` repainted the heading in ink while the
-   text stayed ink: a black box with an invisible word in it, on every
-   column of every catalogue. Reported from a browser, which is the only
-   place it was ever visible. */
+/* Undressed in the resting state and not on hover, so `button:hover`
+   repainted it in ink over ink text: a black box with an invisible word
+   in it, on every column of every catalogue. */
 .catalogue-sort:hover:not(:disabled) {
   background: none;
   box-shadow: none;
   color: var(--ink);
-  /* **Darkening alone is not an answer anybody can see.** A heading is
-     Label type — 0.75rem, Sepia — and going to Ink at that size is a
-     change a reader reported as "practically nothing". The underline is
-     the part that reads: it is the same answer `.link-button` gives,
-     which is this product's established way for a control written as a
-     word to say it can be pressed. */
+  /* Darkening alone is 1.18:1 at 0.75rem and was reported as nothing.
+     The underline is the part that reads, as on .link-button. */
   text-decoration: underline;
   text-decoration-color: var(--focus);
   text-decoration-thickness: 2px;
@@ -1830,14 +1820,7 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   font-variant-numeric: tabular-nums;
 }
 
-/* **An absent value is a mark, not a sentence.** It read "no Offerings
-   it accepts" on every row that had none, which is the column heading
-   said again twenty times under the column heading — and the one word a
-   reader is scanning for, the value, was the one thing not there. The
-   dash is the table convention for "nothing here", the cell keeps the
-   italic that tells it from a value, and rows.js puts the words on the
-   accessible name so a reader who cannot see the column still gets
-   them. */
+/* The italic is what tells a mark from a value. */
 .catalogue-cell.absent {
   font-style: italic;
 }

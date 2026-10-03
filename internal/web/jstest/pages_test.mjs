@@ -221,7 +221,6 @@ const SHELL_IDS = [
   "catalogue-error",
   "type-name",
   "type-meta",
-  "type-note",
   "relation-type-name",
   "relation-type-meta",
   "relation-type-about",
@@ -231,7 +230,6 @@ const SHELL_IDS = [
   "relation-type-fields-empty",
   "relation-type-error",
   "entities",
-  "entities-columns",
   "entities-empty",
   "entities-error",
   "entities-more",
@@ -756,68 +754,13 @@ check("aMovedDocumentIsFollowedNotCached", async () => {
 
 const CATALOGUE_IDS = [
   "type-name",
-  "entities-columns",
   "type-meta",
-  "type-note",
   "entities",
   "entities-empty",
   "entities-error",
   "entities-more",
   "crumbs",
 ];
-
-check("theCatalogueSaysItIsACatalogueAndNotAView", async () => {
-  const dom = mount({
-    ids: CATALOGUE_IDS,
-    pathname: "/g/azeroth/t/quest",
-    routes: [
-      [(url) => url === base + "/types/by-key/quest", { body: { key: "quest", label: "Quest", label_plural: "Quests", field_schema: [] } }],
-      [(url) => url.startsWith(base + "/entities"), { body: { items: [] } }],
-      events,
-    ],
-  });
-  const { CATALOGUE_NOTE } = await load("catalogue");
-  assertEqual(
-    dom.elements["type-note"].textContent,
-    CATALOGUE_NOTE,
-    "the catalogue does not say what it is",
-  );
-  assert(
-    CATALOGUE_NOTE.includes("not a view"),
-    "the catalogue's own line does not distinguish it from a view, which it is deliberately close to in appearance",
-  );
-});
-
-// **Through the page, not only through the function.** The sentence
-// above is pure and was asserted as a string; this is the call site,
-// which is where this front end's most repeated defect lives — a
-// function that is right and an element nothing ever fills.
-check("theCatalogueTellsTheReaderAboutTheColumnsItHid", async () => {
-  const schema = [
-    { key: "speed", type: "number" },
-    { key: "hull", type: "number" },
-    { key: "crew", type: "number" },
-    { key: "origin", type: "text" },
-    { key: "notes", type: "longtext" },
-  ];
-  const dom = mount({
-    ids: CATALOGUE_IDS,
-    pathname: "/g/azeroth/t/ship",
-    routes: [
-      [(url) => url === base + "/types/by-key/ship",
-        { body: { key: "ship", label: "Ship", label_plural: "Ships", field_schema: schema } }],
-      [(url) => url.startsWith(base + "/entities"), { body: { items: [] } }],
-      events,
-    ],
-  });
-  await load("catalogue");
-  const said = dom.elements["entities-columns"];
-  assertEqual(said.hidden, false, "the line about hidden columns stayed hidden on a type with five fields");
-  assert(
-    said.textContent.includes("origin and notes"),
-    `the page did not name the hidden columns: ${JSON.stringify(said.textContent)}`,
-  );
-});
 
 // **A thousand rows at fifty a press is eighteen presses.** The pages
 // grow instead: small first, because most visits end on the first page,
@@ -876,37 +819,6 @@ check("theCatalogueSpellsAValueTheWayTheEntityPageDoes", async () => {
     JSON.stringify(["no", "elwynn, wanted", "9"]),
     "the catalogue's cells",
   );
-});
-
-// **Three of eight fields, said out loud.** The catalogue draws at most
-// three of a type's declared fields — a lane of ten columns is a
-// spreadsheet — and it used to say nothing about the rest, so a type
-// declaring eight looked like a type with three. The cap is not the
-// defect; the silence was.
-check("theCatalogueSaysWhichColumnsItIsNotShowing", async () => {
-  const { hiddenColumnsSentence } = await load("catalogue");
-  const declared = [
-    { key: "speed", type: "number" },
-    { key: "hull", type: "number" },
-    { key: "crew", type: "number" },
-    { key: "origin", type: "text" },
-    { key: "notes", label: "Captain's notes", type: "longtext" },
-  ];
-  assertEqual(
-    hiddenColumnsSentence(declared, 3, "Ship"),
-    "Showing 3 of 5 declared fields. origin and Captain's notes are on each ship's own page.",
-    "the sentence about hidden columns",
-  );
-  assertEqual(
-    hiddenColumnsSentence(declared.slice(0, 4), 3, "Ship"),
-    "Showing 3 of 4 declared fields. origin is on each ship's own page.",
-    "one hidden column is one field, in the singular",
-  );
-  // A type whose fields all fit says nothing at all: a sentence about
-  // nothing hidden is a line of furniture on every catalogue in the
-  // product.
-  assertEqual(hiddenColumnsSentence(declared.slice(0, 3), 3, "Ship"), "", "nothing is hidden");
-  assertEqual(hiddenColumnsSentence([], 3, "Ship"), "", "no fields are declared at all");
 });
 
 // --- The relation type's own page -------------------------------------

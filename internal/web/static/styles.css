@@ -1697,7 +1697,20 @@ ul.catalogue li.catalogue-head:hover { background: var(--paper); }
   border-radius: var(--radius);
 }
 
-.catalogue-sort:hover { color: var(--ink); }
+/* **A heading is not a button to press, it is a word to read.** The
+   control vocabulary dresses a bare `<button>` as the primary button —
+   ink fill, paper text — and every control that is something else
+   undresses itself: the ghost, the chip, the tab, the link-button, each
+   with its own hover. This one undressed the resting state and left the
+   hover behind, so `button:hover` repainted the heading in ink while the
+   text stayed ink: a black box with an invisible word in it, on every
+   column of every catalogue. Reported from a browser, which is the only
+   place it was ever visible. */
+.catalogue-sort:hover:not(:disabled) {
+  background: none;
+  box-shadow: none;
+  color: var(--ink);
+}
 
 /* The column the listing is actually in. It is the one heading in full
    ink, so the answer to "which order am I reading?" is legible without
@@ -1807,6 +1820,14 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   font-variant-numeric: tabular-nums;
 }
 
+/* **An absent value is a mark, not a sentence.** It read "no Offerings
+   it accepts" on every row that had none, which is the column heading
+   said again twenty times under the column heading — and the one word a
+   reader is scanning for, the value, was the one thing not there. The
+   dash is the table convention for "nothing here", the cell keeps the
+   italic that tells it from a value, and rows.js puts the words on the
+   accessible name so a reader who cannot see the column still gets
+   them. */
 .catalogue-cell.absent {
   font-style: italic;
 }

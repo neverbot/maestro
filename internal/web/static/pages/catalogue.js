@@ -20,16 +20,12 @@ import {
   setReadOnly,
   typesURL,
 } from "./page.js";
-import { nextCursorOf } from "../rows.js";
+import { ABSENT_MARK, nextCursorOf } from "../rows.js";
 import { t } from "../i18n.js";
 import { headerRow, row } from "../rows.js";
 import { formatValue } from "./entity.js";
 import { goToLogin } from "../app.js";
 
-// The line this page carries about itself. It is a constant so the
-// harness asks for it by identity and never by matching prose, and so
-// there is exactly one place it can be softened.
-export const CATALOGUE_NOTE = t("catalogue.note");
 
 // **The empty state here names no action, and that is the role rule
 // rather than an omission.** The home's two empty states word their
@@ -59,28 +55,10 @@ export function nextPageSize(fetched) {
 // admit a wall any more.
 export const SEARCH_LIMIT = 50;
 
-// hiddenColumnsSentence says which declared fields the lane is not
-// showing, and where they can be read.
-export function hiddenColumnsSentence(declared, shown, typeLabel) {
-  const names = declared.slice(shown).map((field) => field.label || field.key).filter((name) => name !== "");
-  if (names.length === 0) return "";
-  // "a, b and c" rather than "a, b, c": this is a sentence a person
-  // reads, not a list a machine parses.
-  const last = names[names.length - 1];
-  const list = names.length === 1 ? last : names.slice(0, -1).join(", ") + t("list.and") + last;
-  return t(names.length === 1 ? "catalogue.hiddenColumns.one" : "catalogue.hiddenColumns.many", {
-    shown,
-    all: countLabel(declared.length, t("unit.declaredField"), t("unit.declaredFields")),
-    list,
-    type: String(typeLabel || "").toLowerCase(),
-  });
-}
-
 export async function cataloguePage(opened) {
   const doc = opened.document;
   const nameEl = doc.getElementById("type-name");
   const metaEl = doc.getElementById("type-meta");
-  const noteEl = doc.getElementById("type-note");
   fillState(doc, "entities-empty", {
     heading: NOTHING_OF_THIS_TYPE_HEADING,
     sentence: NOTHING_OF_THIS_TYPE_SENTENCE,
@@ -113,21 +91,18 @@ export async function cataloguePage(opened) {
     return opened;
   }
 
-  say(noteEl, CATALOGUE_NOTE);
-
   const type = await opened.client.getType(typeKey);
   if (!type.ok) {
     if (expired(type)) {
       goToLogin();
       return opened;
     }
-    // **A page that could not read its type has no catalogue on it**, so
-    // it keeps neither the note describing one nor the controls that
-    // narrow one. The search box stayed drawn and enabled over a refusal
-    // and answered nothing when typed into, because its listener is
-    // attached further down, after the fetch that just failed: a control
-    // that silently does nothing is worse than one that is not there.
-    say(noteEl, "");
+    // **A page that could not read its entity has no catalogue on it**,
+    // so it keeps none of the controls that narrow one. The search box
+    // stayed drawn and enabled over a refusal and answered nothing when
+    // typed into, because its listener is attached further down, after
+    // the fetch that just failed: a control that silently does nothing
+    // is worse than one that is not there.
     const tools = doc.querySelector(".tools");
     if (tools) tools.hidden = true;
     say(nameEl, t("catalogue.notInGame"));
@@ -147,6 +122,10 @@ export async function cataloguePage(opened) {
     return opened;
   }
   const typeName = type.result.label_plural || type.result.label || type.result.key;
+  // The game's own words for one of these and for many, which is what
+  // the line under the title counts in.
+  const singular = type.result.label || type.result.label_plural || type.result.key;
+  const plural = typeName;
   doc.title = typeName + " \u00b7 Maestro";
   say(nameEl, typeName);
   // The last crumb, now that the type has a name. Until this line it
@@ -157,7 +136,6 @@ export async function cataloguePage(opened) {
     { label: DESTINATION_CATALOGUE, href: typesURL(opened.slug) },
     { label: typeName },
   ]);
-  say(metaEl, type.result.key);
 
   // How many entities this type *has*, which is a different number from
   // how many are on screen. The summary is one call and the catalogue
@@ -183,17 +161,6 @@ export async function cataloguePage(opened) {
   // first, which is a better order than any this page could invent.
   const declared = Array.isArray(type.result.field_schema) ? type.result.field_schema : [];
   const columns = declared.slice(0, 3);
-  // **A hidden column is said out loud.** Three is the cap and the cap
-  // is right; a screen that shows three of eight fields and says nothing
-  // is a screen claiming the type has three. The sentence names what is
-  // missing and where it can be read, because "5 more fields" on its own
-  // tells a reader they are lost rather than where they are.
-  const columnsEl = doc.getElementById("entities-columns");
-  if (columnsEl) {
-    const sentence = hiddenColumnsSentence(declared, columns.length, type.result.label || type.result.key);
-    columnsEl.hidden = sentence === "";
-    say(columnsEl, sentence);
-  }
 
   // A value the entity does not carry is named, never blank: a blank cell
   // cannot be told from a value that failed to load.
@@ -209,13 +176,21 @@ export async function cataloguePage(opened) {
       // at all. The rule is stated in this repository and the module next
       // door already honours it.
       if (value === undefined || value === null) {
-        // The field's *label* and not its key: the key is the model's
-        // spelling, and a field keyed `min_level` with a label "Minimum
-        // level" was reading "no min_level" on the screen whose whole job
-        // is the game's vocabulary.
-        return { text: t("value.absent", { field: name }), absent: true };
+        // **A dash, under a heading that already names the field.** It
+        // read "no Offerings it accepts" on every row that had none: the
+        // column heading said again twenty times, in the one place a
+        // reader is scanning for the value. The words stay as the cell's
+        // accessible name, and they use the field's *label* and not its
+        // key — a field keyed `min_level` labelled "Minimum level" read
+        // "no min_level" on the screen whose whole job is the game's
+        // vocabulary.
+        return { text: ABSENT_MARK, absent: true, name: t("value.absent", { field: name }) };
       }
-      if (value === "") return { text: "empty", absent: true };
+      // Empty and absent are different facts and never look alike:
+      // design.md's Named Absence Rule, and the reason this has three
+      // arms rather than two. An entity with `faction: ""` said nothing
+      // and one with no faction at all said nothing, identically.
+      if (value === "") return { text: t("value.empty"), absent: true, name: t("value.empty.name", { field: name }) };
       // **The same words the entity page uses**, which is the whole
       // reason this calls a shared function rather than `String(value)`.
       // A quest with `repeatable: false` read "false" in this table and
@@ -328,9 +303,11 @@ export async function cataloguePage(opened) {
   // The line under the title: the key, what the type holds, and — when a
   // search has narrowed it — what is being shown instead.
   function sayScope() {
-    const parts = [type.result.key];
-    if (total !== null) parts.push(countLabel(total, t("unit.entity"), t("unit.entities")));
-    say(metaEl, parts.join(" \u00b7 "));
+    // **How many of the game's own thing there are**, which is the one
+    // fact this line carries: "27 Deidades" and not "deity · 27
+    // entities", because the key is the handle an agent uses and the
+    // noun is the game's, not the metamodel's.
+    say(metaEl, total === null ? "" : countLabel(total, singular, plural));
     if (!scopeEl) return;
     if (query !== "") {
       // **"First 50" and not "50 matches".** The search asks for fifty and
@@ -596,7 +573,7 @@ export async function cataloguePage(opened) {
   return opened;
 }
 
-if (globalThis.document && globalThis.document.getElementById("type-note")) {
+if (globalThis.document && globalThis.document.getElementById("entities")) {
   const opened = await openGame({ destination: DESTINATION_CATALOGUE });
   if (opened !== null) {
     const doc = opened.document;

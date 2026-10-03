@@ -533,6 +533,13 @@ The signature surface of this product and the one to get right.
   one-pixel wobble is what makes a table look unmade.
 - **Header:** Label type, Sepia, sticky under the page header, one
   Hairline beneath.
+- **A heading that sorts** is a word, not a box: under the pointer it
+  goes to Ink and takes a 2px accent underline, the same answer the
+  link-button gives, and it never fills. Filling is what the control
+  vocabulary does to a bare `<button>`, and a heading that took it was
+  an ink rectangle with an ink word inside it. Darkening alone was the
+  correction to that and it was not an answer anybody could see at
+  0.75rem: the underline is the part a reader notices.
 - **Hover:** the row turns Desk. No lift, no border change.
 - **Target:** the whole row is the link, through a pseudo-element on the
   name that covers it, so the row keeps one anchor and one accessible
@@ -543,9 +550,14 @@ The signature surface of this product and the one to get right.
 - **Name cell:** the entity name in the serif at 600 with its slug **inline**
   after it, in Mono at Sepia. Stacking the slug underneath costs 17px a
   row and takes a 900px window from 17 rows to 9.
-- **Absent value:** the word for what is missing, in Sepia italic, for
-  example "no zone". An empty cell is forbidden: it cannot be told from
-  a value that failed to load.
+- **Absent value:** a mark, never a blank, because a blank cannot be told
+  from a value that failed to load. In a listing whose column headings
+  already name the field it is an em dash in Sepia italic, with the
+  words — "no zone" — on the cell's accessible name: the sentence
+  printed in every row of a column said the heading again twenty times
+  and hid the values a reader was scanning for. Where an absence is a
+  *fact* rather than a hole — "no default", "no role", "not checked" —
+  the words stay on screen.
 - **Container:** one border and a 3px radius around the whole table,
   rules between rows, and `overflow-x: auto` on the wrapper with a
   `min-width` on the table. Rows never wrap into two lines to fit.

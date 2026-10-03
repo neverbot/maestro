@@ -1710,6 +1710,16 @@ ul.catalogue li.catalogue-head:hover { background: var(--paper); }
   background: none;
   box-shadow: none;
   color: var(--ink);
+  /* **Darkening alone is not an answer anybody can see.** A heading is
+     Label type — 0.75rem, Sepia — and going to Ink at that size is a
+     change a reader reported as "practically nothing". The underline is
+     the part that reads: it is the same answer `.link-button` gives,
+     which is this product's established way for a control written as a
+     word to say it can be pressed. */
+  text-decoration: underline;
+  text-decoration-color: var(--focus);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 /* The column the listing is actually in. It is the one heading in full

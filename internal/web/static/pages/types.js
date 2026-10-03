@@ -123,7 +123,7 @@ export async function typesPage(opened) {
       doc.getElementById("relation-types"),
       doc.getElementById("relation-types-empty"),
       withHeader(links.sorted.length > 0 && headerRow(doc, {
-        label: t("home.column.connection"),
+        label: t("home.column.kind"),
         count: t("home.column.count"),
         share: t("home.column.ofTotal"),
       }), links.sorted.map((type) =>

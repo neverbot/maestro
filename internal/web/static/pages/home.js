@@ -422,7 +422,7 @@ async function catalogueLane(doc, slug, client) {
     doc.getElementById("relation-types"),
     doc.getElementById("relation-types-empty"),
     withHeader(links.sorted.length > 0 && headerRow(doc, {
-      label: t("home.column.connection"),
+      label: t("home.column.kind"),
       cells: [{ text: t("home.column.between") }],
       count: t("home.column.count"),
       share: t("home.column.ofTotal"),

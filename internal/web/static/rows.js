@@ -201,7 +201,8 @@ export function headerRow(doc, spec) {
     // ordered is the caller's knowledge, not this module's.
     const text = heads[i] ? heads[i].text ?? heads[i] : "";
     const order = heads[i] && typeof heads[i] === "object" ? heads[i].order : "";
-    head.append(headContent(doc, text, order, spec));
+    // Empty stays empty, for the track to collapse. See headCell.
+    if (text !== "" || order) head.append(headContent(doc, text, order, spec));
     item.append(head);
   }
   // The count track, empty. It exists so the header spans the same six
@@ -226,7 +227,19 @@ export function headerRow(doc, spec) {
     const share = doc.createElement("span");
     share.className = "catalogue-share";
     share.setAttribute("role", "columnheader");
-    share.textContent = spec.share;
+    // **The heading stands over the bars, not over the percentages.**
+    // The cell holds two things — a right-aligned percentage and a bar
+    // that starts at a fixed x — and a heading at the cell's own left
+    // edge began where the percentage begins, which put it 24px from the
+    // heading before it and left the numbers sitting under its first
+    // letters. The same empty span the rows use for the percentage holds
+    // the place, so the word starts exactly where every bar under it
+    // does and no measurement is written twice.
+    const place = doc.createElement("span");
+    place.className = "share-pct";
+    const word = doc.createElement("span");
+    word.textContent = spec.share;
+    share.append(place, word);
     item.append(share);
   }
   return item;
@@ -246,7 +259,14 @@ function headCell(doc, text, className, order, spec) {
   if (className !== "") cell.className = className;
   cell.setAttribute("role", "columnheader");
   markSort(cell, spec, order);
-  cell.append(headContent(doc, text, order, spec));
+  // **A heading with nothing to say puts nothing in its cell.** The
+  // empty tracks are supposed to collapse — `.catalogue-cell:not(:empty)`
+  // is what gives a cell its minimum — and this appended an empty span
+  // to every one of them, so a cell holding no word was still a cell
+  // holding an element: three tracks of 28px and their gaps, 120px of
+  // nothing between the name and the count, on every listing that names
+  // fewer columns than the row component carries.
+  if (text !== "" || order) cell.append(headContent(doc, text, order, spec));
   return cell;
 }
 

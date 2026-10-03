@@ -165,6 +165,32 @@ shell.append(list);
 markTables({ querySelectorAll: (selector) => (selector === "ul.catalogue" ? [list] : []) });
 check("the catalogue itself is the table", list.getAttribute("role"), "table");
 
+// --- What a heading does with the tracks it does not name -------------
+
+// **An empty heading leaves its cell empty, so the track collapses.**
+// `.catalogue-cell:not(:empty)` is what gives a cell its minimum, and
+// the header put an empty span in every track the caller did not name —
+// so a cell holding no word was still a cell holding an element, and the
+// home's two bands carried three tracks of 28px and their gaps between
+// the name and the count: 120px of nothing, on a screen whose complaint
+// was that its tables looked wrong.
+const sparse = headerRow(doc, { label: "Quest", key: "", count: "" });
+check("a heading names a column or leaves it empty",
+  [...sparse.children].map((cell) => (cell.children || []).length),
+  [1, 0, 0, 0, 0, 0]);
+
+// **The share heading stands over the bars.** The cell holds a
+// right-aligned percentage and a bar that starts at a fixed x, and a
+// heading at the cell's own left edge began where the percentage begins:
+// 24px from the heading before it, with the numbers under its first
+// letters. The same empty span the rows use for the percentage holds the
+// place, so the word starts where every bar under it does.
+const shared = headerRow(doc, { label: "Quest", count: "Count", share: "Of the total" });
+const shareCell = [...shared.children].find((cell) => cell.className === "catalogue-share");
+check("the share heading is placed, not left-aligned",
+  shareCell ? [...shareCell.children].map((child) => child.className || child.textContent) : null,
+  ["share-pct", "Of the total"]);
+
 if (failures > 0) {
   console.log(failures + " failed");
   process.exit(1);

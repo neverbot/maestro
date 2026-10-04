@@ -69,43 +69,29 @@ type Walk struct {
 	SeedSQL   string
 	SeedArgs  []any
 
-	// RelationTypeIDs is the set of relation types an edge may carry to
-	// be followed. It is the one thing this walk trusts another table
-	// for: the emitted statement compares relations.relation_type_id
-	// against the list and **does not join relation_types**, so there is
-	// no position at which a relation type belonging to another game
-	// could be filtered out. What makes that safe is 0004_metamodel.sql's
-	// composite foreign key relations_relation_type_id_project_id_fkey,
-	// which puts an edge and its type in the same game by construction --
-	// verified against the shipped migration, and the reason
-	// TestAWalkCannotLeaveItsProjectThroughARogueEdge has to drop that
-	// constraint in a throwaway database before it can forge its rows. A
-	// caller passing ids it resolved in another game gets an empty walk,
-	// not another game's edges.
+	// RelationTypeIDs is the set of relation types an edge may carry to be
+	// followed. The statement compares relations.relation_type_id against
+	// the list and **does not join relation_types**, which is safe only
+	// because 0004_metamodel.sql's composite foreign key puts an edge and
+	// its type in the same game by construction: ids resolved in another
+	// game give an empty walk, never another game's edges.
 	//
-	// An empty list follows no edge at all -- not every edge, which is
-	// what dropping the clause would mean.
-	// TestAWalkWithNoRelationTypesReachesOnlyItsSeed pins the difference.
+	// An empty list follows no edge at all, not every edge.
 	RelationTypeIDs []uuid.UUID
 
 	Direction Direction
 
-	// EdgePredicate is an extra condition every hop's relation has to
-	// satisfy before the walk will follow it, written as **the caller's
-	// own SQL over the alias `r`, containing no caller text** -- the same
-	// contract SeedSQL carries and for the same reason. It is numbered
-	// from $1 and renumbered here, with EdgeArgs supplying its values, so
-	// a caller can build it with its own numbering.
+	// EdgePredicate is an extra condition every hop's relation must
+	// satisfy, written as **the caller's own SQL over the alias `r`,
+	// containing no caller text** — the contract SeedSQL carries. It is
+	// numbered from $1 and renumbered here, with EdgeArgs supplying the
+	// values.
 	//
-	// It sits **inside** the recursive term, next to the relation-type
-	// filter, because a relation the caller's predicate excludes is a
-	// relation the walk must not traverse: applied outside, the walk would
-	// still reach -- and hand back -- every node behind an excluded edge,
-	// which is a wrong answer with no error rather than a narrower
-	// picture. TestAnEdgePredicateIsAppliedInsideTheRecursion pins that
-	// difference with a node reachable only through the excluded edge.
+	// It sits inside the recursive term: applied outside, the walk would
+	// still reach and return every node behind an excluded edge, which is
+	// a wrong answer rather than a narrower one.
 	//
-	// An empty EdgePredicate adds no clause at all.
+	// Empty adds no clause.
 	EdgePredicate string
 	EdgeArgs      []any
 

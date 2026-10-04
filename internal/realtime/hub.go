@@ -23,21 +23,12 @@ type Event struct {
 	ProjectID uuid.UUID
 	Kind      string
 
-	// Payload is any JSON-marshalable value (nil is fine — it marshals
-	// to "null"). Marshalling happens exactly once, in
-	// internal/web/events.go's handleEvents, not here and not in
-	// Publish's caller: a publisher that had to marshal its own payload
-	// would also have to decide what to do with a marshal error in a
-	// code path that has just committed a database transaction and can
-	// do nothing useful with one. Centralising it in the one place that
-	// writes the wire frame also closes a real bug an earlier, string-
-	// typed Payload had: a caller-supplied string written directly into
-	// `data: %s` let a payload containing a raw newline end that SSE
-	// field early and a second newline end the frame, so anything after
-	// it — including a forged `event:` line — would be parsed by the
-	// client as a second, attacker-chosen event. json.Marshal escapes
-	// control characters (including newline) inside a JSON string, so
-	// the bytes handleEvents actually writes can never contain one.
+	// Payload is any JSON-marshalable value; nil marshals to "null".
+	// Marshalling happens once, where the wire frame is written, so a
+	// publisher that has just committed a transaction never has to decide
+	// what to do with a marshal error — and so no payload can carry a raw
+	// newline into `data:`, which would end the field early and let
+	// anything after it parse as a second, forged event.
 	Payload any
 
 	// MinRole optionally restricts delivery to subscribers whose Role

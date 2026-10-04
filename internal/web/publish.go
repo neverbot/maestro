@@ -73,22 +73,12 @@ const (
 	eventInviteCreated = "invite.created"
 	eventInviteRevoked = "invite.revoked"
 
-	// eventInviteRedeemed fires from handleRegister
-	// (internal/web/api_auth.go), not from a handler in this file, the
-	// moment identity.RedeemInvite reports a project-bound invite was
-	// just consumed. This is Decision 1's one real exception: redeeming
-	// an invite is the second producer of project membership besides
-	// handleChangeRole's own SetRole call, and the handler that runs it
-	// (handleRegister) is unauthenticated and project-less — it has
-	// neither a Caller nor a ProjectScope to reach s.publish through the
-	// way every other call site in this file does. identity.RedeemInvite
-	// was extended to report the consumed invite's id and, when the
-	// invite was project-bound, that project's id, specifically so
-	// handleRegister could still call s.publish directly with the
-	// project id RedeemInvite just handed back, keeping the hub itself
-	// out of internal/identity — see RedeemInvite's own doc comment for
-	// why that shape was chosen over giving identity.Service a *realtime.Hub
-	// field.
+	// Fires from handleRegister, which is unauthenticated and
+	// project-less: it has neither a Caller nor a ProjectScope to publish
+	// through the way every other call site here does. RedeemInvite
+	// reports the consumed invite's id and its project, so the handler
+	// can publish with what it was just handed and the hub stays out of
+	// internal/identity.
 	eventInviteRedeemed = "invite.redeemed"
 )
 

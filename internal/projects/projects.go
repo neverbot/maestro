@@ -543,21 +543,12 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 			return fmt.Errorf("set role: %w", err)
 		}
 
-		// A token grants an agent editor-equivalent access for as long as
-		// it lives, independent of its minter's current standing (Task
-		// 12's quality review settled this explicitly: a token outlives
-		// the person who made it, so re-deriving its access from a live
-		// membership lookup on every request would contradict that
-		// design, not honour it — see ProjectScope's own doc comment in
-		// internal/web/api_projects.go). The invariant that makes that
-		// safe is that a token never exceeds its minter's *current*
-		// standing, and the only way to keep that true without a
-		// per-request lookup is to close it off the moment standing
-		// changes: demoting a member below editor revokes every token
-		// they minted in this project, the same way RemoveMember already
-		// revokes them outright when membership itself is lost. Promoting,
-		// or moving between editor and owner, never triggers this — both
-		// remain roles.AtLeast Editor.
+		// A token grants editor-equivalent access for as long as it lives,
+		// independent of its minter's standing, so nothing re-derives its
+		// access per request. Keeping that safe means closing it the
+		// moment standing drops: demoting a member below editor revokes
+		// every token they minted here, as RemoveMember already does when
+		// membership is lost. Promoting never triggers it.
 		if !roles.AtLeast(roles.Role(role), roles.Editor) {
 			labels, err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID})
 			if err != nil {

@@ -55,22 +55,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return checkNoSchemaDrift(ctx, provider)
 }
 
-// checkNoSchemaDrift refuses to let this process serve traffic when the
-// database's applied schema version is higher than the highest migration
-// this binary's embedded migrations know about — the one case Up() alone
-// does not fail on. goose's Up() only ever walks forward through
-// migrations it recognizes from its own source list; when an older binary
-// talks to a database a newer one has already migrated (a rollback, or a
-// rolling deploy that reaches an old replica after a new migration has
-// landed elsewhere), those newer, unrecognized rows are simply invisible
-// to it — Up() reports success having correctly applied everything it
-// knows about, and this process would otherwise go on to serve live
-// traffic against a schema shape it does not understand, with no log line
-// anywhere pointing at why. Comparing the database's own version
-// bookkeeping (GetDBVersion) against the highest version this binary's
-// embedded migrations declare (the max of ListSources) turns that into an
-// explicit refusal to start instead of a silent mismatch discovered only
-// when a query collides with a column or constraint it never expected.
+// checkNoSchemaDrift refuses to serve traffic when the database's applied
+// schema version is higher than the highest migration this binary knows
+// about — the one case Up() does not fail on, because goose only walks
+// forward through migrations it recognises and newer rows are invisible
+// to it. Without this, an old binary against a newly migrated database
+// starts cleanly and serves a schema it does not understand.
 func checkNoSchemaDrift(ctx context.Context, provider *goose.Provider) error {
 	dbVersion, err := provider.GetDBVersion(ctx)
 	if err != nil {

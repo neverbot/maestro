@@ -621,22 +621,14 @@ func (s *Server) Close() {
 	s.closeOnce.Do(func() { close(s.closing) })
 }
 
-// securityHeaders sets the three response headers every response in this
-// product can carry, and the policy is built from the assets rather than
-// written out here: `default-src 'self'` rules out every injected-script
-// and injected-stylesheet exfiltration path a future XSS bug could reach
-// for, and it also — silently — switches off the one inline script this
-// product does ship, the import map. static.go's importMapHashes is the
-// exemption, one SHA-256 source per distinct map, computed from the bytes
-// that are served; see its doc comment for why a hash and not a nonce or
-// 'unsafe-inline', and for what opening a page in a browser found. X-Content-Type-Options: nosniff stops a browser from guessing a
-// different content type than the one this package already sets on every
-// response it writes (serveAsset, static.go, and writeJSON, this file);
-// and Referrer-Policy: no-referrer is the same protection login.html's own
-// <meta name="referrer"> gives that one page, applied to every response
-// this server writes rather than left to the one page a quality review
-// happened to check by hand — a query parameter on any other page (a
-// return path, say) deserves the same treatment an invite token got.
+// securityHeaders sets the three headers every response carries. The CSP
+// is built from the assets rather than written here: `default-src 'self'`
+// rules out injected scripts and stylesheets, and silently switches off
+// the one inline script this product ships, the import map — so
+// static.go's importMapHashes is its exemption, one SHA-256 per distinct
+// map, computed from the bytes served. `nosniff` holds the content type
+// this package already sets on every response, and `no-referrer` keeps a
+// query parameter on any page out of the next request's Referer.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)

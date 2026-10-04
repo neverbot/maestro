@@ -160,21 +160,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 			}
 			lastSeq = ev.Seq
 			payload, err := json.Marshal(ev.Payload)
-			// The id: line the else branch below writes is not a
-			// resumption token, even though a real EventSource client
-			// remembers it and resends it as a Last-Event-ID header on
-			// its own automatic reconnect: this handler never reads that
-			// header, and ev.Seq is scoped to this one subscription
-			// (Hub's own doc comment, realtime/hub.go), assigned fresh
-			// from 1 on every new Subscribe — a reconnecting client gets
-			// a brand new subscription with its own Seq starting over,
-			// regardless of what Last-Event-ID it sent. id: exists only
-			// so this connection's own gap check (sseSawGap, below) has
-			// a value to compare on the wire, and so a person reading
-			// raw bytes with curl -N can watch the counter advance; see
-			// this handler's own doc comment on Event.Seq (above) for
-			// the actual answer to "what did I miss" (refetch over
-			// REST).
+			// The id: line is not a resumption token, though a browser
+			// will resend it as Last-Event-ID: this handler never reads
+			// that header, and ev.Seq is scoped to one subscription and
+			// restarts at 1 on every Subscribe. It exists so this
+			// connection's own gap check below has a value to compare,
+			// and so curl -N shows the counter advancing. The answer to
+			// "what did I miss" is a refetch over REST.
 			if err != nil {
 				// A malformed payload is the publisher's bug, not this
 				// stream's: dropping just this one event and continuing

@@ -123,26 +123,13 @@ type Server struct {
 	loginIPLimiter    *identity.Limiter
 	registerIPLimiter *identity.Limiter
 
-	// changePasswordLimiter and changePasswordFloodLimiter both guard
-	// PATCH /api/me/password, keyed on the caller's own user id rather
-	// than an IP — unlike every limiter above, this endpoint is only
-	// ever reached by an already-authenticated caller, so there is no
-	// "attacker picks their own key" concern a second, IP-keyed budget
-	// would need to close. They serve different jobs, and — a Round 2
-	// review found — must run in a specific order: changePasswordLimiter
-	// (10/minute) is consulted only after a guess has already turned out
-	// wrong, to decide whether that particular failure reports 401 or
-	// 429; it must never gate entry before the password is checked,
-	// because a design that does refuses a *correct* password once an
-	// attacker with a stolen session (but not the password) has spent
-	// the budget with wrong guesses — denying the account owner the one
-	// remedy this endpoint exists to provide, with no password reset
-	// anywhere in this product to fall back on. changePasswordFloodLimiter
-	// (60/minute, deliberately looser) is what still gates entry, to
-	// bound the argon2 cost a flood of requests can force regardless of
-	// correctness, without being tight enough to plausibly deny a real
-	// caller. See handleChangePassword's own doc comment for the full
-	// reasoning and the order both limiters run in.
+	// Both guard PATCH /api/me/password, keyed on the caller's user id:
+	// the endpoint is only reachable by an authenticated caller, so no
+	// IP-keyed budget is needed. changePasswordLimiter (10/minute) is
+	// consulted only after a guess is already wrong, to choose between
+	// 401 and 429; changePasswordFloodLimiter (60/minute) gates entry and
+	// bounds argon2 cost under a flood. handleChangePassword has the
+	// order and why it matters.
 	changePasswordLimiter      *identity.Limiter
 	changePasswordFloodLimiter *identity.Limiter
 

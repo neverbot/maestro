@@ -14,85 +14,42 @@ type changePasswordRequest struct {
 }
 
 // handleChangePassword rotates the caller's own password.
-// identity.ChangeOwnPassword (Task 21's own doc comment there) does the
-// actual work — verify the current password, then rotate the hash and
-// revoke every session belonging to the account in one transaction — so
-// everything below is HTTP plumbing: authorization, rate limiting, error
-// mapping, and re-issuing a fresh session for the request that made the
-// change.
+// identity.ChangeOwnPassword does the work — verify the current
+// password, rotate the hash and revoke every session of the account in
+// one transaction — so everything here is HTTP plumbing: authorization,
+// rate limiting, error mapping, and a fresh session for the request that
+// made the change.
 //
-// Requiring the current password is the whole answer to "what does this
-// endpoint cost an attacker who has a live session but not the
-// password": without it, a stolen session cookie alone would be able to
-// lock the real owner out permanently (ChangePassword revokes every
-// session, including the one that requested it), which is strictly
-// worse than what a stolen cookie already grants on its own. With it, an
-// attacker who only ever had the cookie gains nothing here they did not
-// already have — and a designer who suspects their password leaked can
-// still use it to rotate their attacker straight out, everywhere,
-// including that attacker's own stolen tab. That designer's other
-// standing credentials are a separate concern this endpoint does not
-// reach: an API token minted before the rotation keeps working
-// afterwards (tokens have no expiry, only explicit revocation — Task 9),
-// so rotating a password is not, by itself, a way to be sure a thief who
-// minted one first is locked out. A designer who suspects their session
-// was compromised should also check that game's token list
-// (GET .../tokens) for anything they don't recognise.
+// The current password is required: without it a stolen session cookie
+// alone could lock the owner out permanently, since the rotation revokes
+// every session. With it, a thief who only has the cookie gains nothing,
+// and the owner can rotate the thief out of every tab including their
+// own. API tokens are not revoked by a rotation and have no expiry, so a
+// compromised account should also have its token list checked.
 //
-// Human-only (requireHumanCaller): a bearer token authenticates an
-// agent scoped to one game's content, never a person with a password of
-// their own to rotate — the same reasoning requireHumanCaller's own doc
-// comment (api_projects.go) gives for every other account-level action
-// in this codebase.
+// Human-only: a bearer token authenticates an agent scoped to one game's
+// content, never a person with a password to rotate.
 //
-// Changing your password here logs you out everywhere *except* here: a
-// designer who just rotated their password and is instantly thrown out
-// of the very tab they did it in would read that as a bug, not a safety
-// feature, so this handler re-issues a fresh session immediately after
-// ChangeOwnPassword succeeds and sets it as the response's cookie —
-// coherent with the endpoint's own stated purpose (kick out every
-// *other* device, including a thief's) without punishing the one request
-// that just proved it knows the new password.
+// The request that rotates keeps its session: a fresh one is issued and
+// set as the response cookie, so the endpoint logs you out everywhere
+// except here.
 //
-// Rate limiting is two limiters, not one, and the order they run in
-// matters — a Round 2 review found the original single-limiter design
-// could deny the exact remedy this endpoint exists to provide. That
-// design checked changePasswordLimiter.Allowed before ever verifying
-// anything: once ten wrong guesses had spent the budget, even a request
-// carrying the correct current password was refused with 429. Live, that
-// is the threat model's own premise turned into a weapon — a session
-// thief spends the budget with ten deliberately wrong guesses from the
-// hijacked session (cheap: no argon2 derivation happens if the entry gate
-// is what refuses the request) and holds the real owner's rotation
-// endpoint shut for as long as they keep spending it, with no password
-// reset anywhere in this product to fall back on. Fixed by verifying
-// first: ChangeOwnPassword always runs, regardless of any budget, so a
-// correct current password always succeeds. changePasswordLimiter (10
-// wrong guesses per minute) is now consulted only once a guess has
-// already turned out wrong, purely to decide whether *that* failure
-// reports 401 or 429 — it can delay how fast an attacker learns their
-// next guess failed, but it can never turn a caller who actually knows
-// the password away.
+// Two limiters, and the order matters. ChangeOwnPassword always runs, so
+// a correct current password always succeeds: changePasswordLimiter (10
+// wrong guesses a minute) is consulted only once a guess is already
+// wrong, to decide whether that failure reports 401 or 429. Gating entry
+// on it instead would let a session thief spend the budget on deliberate
+// wrong guesses and hold the owner's rotation endpoint shut — and this
+// product has no password reset to fall back on.
 //
-// Verifying unconditionally reopens a narrower problem the entry gate
-// used to close for free: nothing now bounds how many argon2
-// derivations a flood of requests against one account can force,
-// regardless of correctness. changePasswordFloodLimiter is the answer —
-// a second, much looser per-account budget (60/minute) that *does* gate
-// entry, before ChangeOwnPassword ever runs, the way the single limiter
-// used to. Its ceiling is set high enough that no legitimate use — a
-// designer mistyping their current password a few times, even a
-// scripted retry — should ever reach it; its job is bounding worst-case
-// CPU cost under a genuine flood, not shaping the experience of a real
-// caller the way changePasswordLimiter's tighter 401-vs-429 choice does.
-// It is recorded on every attempt, correct or not, since cost is what it
-// bounds, not correctness.
+// Verifying unconditionally leaves nothing bounding argon2 derivations
+// under a flood, which is what changePasswordFloodLimiter is for: a
+// looser per-account budget (60/minute) that does gate entry, set high
+// enough that no legitimate caller reaches it, and recorded on every
+// attempt because cost is what it bounds.
 //
-// Both limiters live in process memory (identity.Limiter's own doc
-// comment) — a multi-replica deployment has one independent budget per
-// process, not one shared across the instance, the same caveat that
-// applies to every other limiter this codebase has built (Task 6, Task
-// 11).
+// Both budgets live in process memory: one per replica, not one per
+// instance.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, caller Caller) {
 	if !requireHumanCaller(w, caller) {
 		return

@@ -7,45 +7,19 @@ import (
 // The analysis surface over REST: the browser's half of what
 // mcp_analysis.go gives an agent.
 //
-// **Every handler here calls the same unexported core the MCP tool
-// calls**, which is the split mcp_docs.go's header argues and this file
-// inherits from api_views.go: requireScope asks "is this token bound to
-// this game", which a session caller cannot answer, and requireProject
-// asks the equivalent question of a session. One implementation of every
-// tool, two admission checks — so a designer in a browser and an agent
-// on /mcp cannot be answered differently about what a cycle is or what
-// refused a route.
+// Every handler calls the same unexported core the MCP tool calls, with
+// a different admission check in front — requireScope asks whether a
+// token is bound to this game, requireProject asks the equivalent of a
+// session — so the two surfaces cannot answer differently about what a
+// cycle is or what refused a route.
 //
-// **The prefix is `/api/games/{game}/…`, which is what shipped, and not
-// the `/api/g/<slug>/…` the analysis spec's §9 writes.** The spec is
-// wrong about it; there is no second family of URLs on this server and
-// inventing one here would make this the only domain a client addresses
-// differently.
-//
-// **An analysis is a read spelled as a POST, and that costs something.**
-// Its arguments are a nested object — a seed set, a gating choice, three
-// type filters — which does not fit in a query string, so a POST is the
-// only honest spelling; and registerContentRoute puts requireEditor in
-// front of every non-GET route on this surface (server.go), so a viewer
-// cannot run an analysis over REST while a viewer with a token can over
-// MCP.
-//
-// **api_views.go met this exactly and did not resolve it**, for
-// `views.run`, and recorded what it costs and why the alternatives are
-// worse: registering through registerProjectRoute to dodge the editor
-// gate would put a game-content route outside the one convention test
-// that watches this surface, and a GET carrying a document in its URL
-// would meet a server's own header bounds on the first interesting
-// query. This file follows that file, which is the instruction — and the
-// finding stands and is recorded rather than papered over: a **viewer
-// cannot run a read-only analysis over REST**. It is a finding against
-// api_views.go's resolution and not against this one, because the two
-// have the same shape and one answer between them; a viewer's read-only
-// runner is a decision for the change that builds the browser client,
-// and building it here for one domain would leave `views.run` as the
-// only read on the surface a viewer cannot make.
-// TestAViewerCanRunAnAnalysisAndCannotUpsertARoute asserts what actually
-// ships, over both surfaces, rather than what would be nicer.
+// An analysis is a read spelled as a POST: its arguments are a nested
+// object that does not fit in a query string. registerContentRoute puts
+// requireEditor in front of every non-GET route here, so a **viewer
+// cannot run an analysis over REST** while a viewer with a token can
+// over MCP. That is a known gap, shared with `views.run`, and it belongs
+// to the change that builds a read-only runner rather than to one
+// domain.
 
 func (s *Server) handleAnalysisCycles(w http.ResponseWriter, r *http.Request,
 	_ Caller, scope ProjectScope,

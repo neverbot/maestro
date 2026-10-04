@@ -21,23 +21,12 @@ import (
 // returning, "the service call returned nil" and "the write is durable"
 // are the same moment here for any single write.
 const (
-	// eventGameDeleted fires once, from handleDeleteGame, after
-	// projects.Delete returns successfully. Every subscriber of the
-	// deleted game receives it regardless of role (MinRole is empty) and
-	// regardless of HumanOnly (false, unlike every other kind below): a
-	// token caller's own credential is about to stop resolving too, once
-	// the cascade this event announces finishes removing the membership
-	// it depends on (ProjectScope's own doc comment, api_projects.go),
-	// and it is already holding this exact connection open — there is no
-	// REST listing this mirrors and no reason to withhold the one signal
-	// that connection will ever get about why it is about to stop
-	// working. The payload carries nothing beyond the empty object
-	// handleEvents already treats a nil Payload as (realtime.Event.Payload's
-	// own doc comment): a client's only correct reaction to "this game
-	// is gone" is to stop referencing it, never to patch its local state
-	// from a deletion event's fields, so there is nothing a fuller
-	// payload would let a client do that a bare signal does not already
-	// cover.
+	// Fires once from handleDeleteGame, after projects.Delete succeeds.
+	// Every subscriber gets it whatever their role, token callers
+	// included: their credential is about to stop resolving and this is
+	// the only signal that connection will get about why. The payload is
+	// empty, because the only correct reaction to "this game is gone" is
+	// to stop referencing it.
 	eventGameDeleted = "game.deleted"
 
 	// eventMemberUpdated fires from handleChangeRole after
@@ -65,46 +54,22 @@ const (
 	// its sibling.
 	eventMemberRemoved = "member.removed"
 
-	// eventTokenMinted and eventTokenRevoked fire from handleCreateToken
-	// and handleRevokeToken. Both are gated at MinRole roles.Editor,
-	// deliberately *tighter* than handleListTokens' own role gate (none
-	// — any member): that REST endpoint is open to any member (metadata
-	// only, never a secret — apiTokenResponse's own doc comment), so a
-	// viewer who explicitly asks can already see the same fields this
-	// event carries. What the role gate withholds is not the data but
-	// the *push*: an agent credential being minted or revoked is exactly
-	// the kind of ambient churn a viewer's open browser tab has no
-	// standing reason to be notified of in real time just for having a
-	// tab open, as opposed to the deliberate act of opening the token
-	// list to go check. This is a considered inconsistency with the REST
-	// endpoint's own role openness, not an oversight — a client author
-	// relying on this stream to keep a token list current should know a
-	// viewer's copy will drift silently while every other list on the
-	// page stays live, and must keep polling GET .../tokens (or refetch
-	// on its own schedule) for that one list if a viewer-facing UI wants
-	// it current at all.
+	// Gated at MinRole roles.Editor, tighter than the REST listing these
+	// mirror, which any member may read. What the gate withholds is the
+	// push and not the data: a viewer who asks still sees the same
+	// metadata. A viewer's token list therefore drifts while every other
+	// list on the page stays live, and a viewer-facing client has to
+	// refetch that one on its own.
 	eventTokenMinted  = "token.minted"
 	eventTokenRevoked = "token.revoked"
 
-	// eventInviteCreated and eventInviteRevoked fire from
-	// handleCreateProjectInvite and handleRevokeProjectInvite — the
-	// project-scoped invite endpoints, never the account-only ones
-	// (handleCreateInstanceInvite, handleRevokeInstanceInvite), which
-	// have no project id to publish against at all. Gated at MinRole
-	// roles.Owner, matching handleListProjectInvites exactly (both
-	// require an owner already): a pending invite is a future grant of
-	// membership, up to and including ownership, and this package
-	// already treats that as owner-only business to *read*, not only to
-	// create — publishing it to every member regardless of role would
-	// leak more than the REST surface it mirrors ever does. HumanOnly is
-	// true too, though it adds nothing MinRole owner does not already
-	// exclude on its own: a token caller's Role is always roles.Editor
-	// (never Owner), so no token subscriber could ever have met this
-	// MinRole in the first place. Set anyway, for the same reason every
-	// kind in this file that mirrors a requireHumanCaller-gated REST
-	// endpoint sets it: declaring the real rule (this is human-only
-	// business) rather than relying on an unrelated gate to have the
-	// same effect by coincidence.
+	// Fired from the project-scoped invite endpoints, never the
+	// account-only ones, which have no project to publish against.
+	// MinRole roles.Owner matches the REST surface this mirrors: a
+	// pending invite is a future grant of membership, which this package
+	// already treats as owner-only to read. HumanOnly adds nothing a
+	// token caller could pass anyway, and is set to declare the rule
+	// rather than lean on another gate having the same effect.
 	eventInviteCreated = "invite.created"
 	eventInviteRevoked = "invite.revoked"
 

@@ -114,25 +114,12 @@ type GamesListOutput struct {
 	Truncated  bool         `json:"truncated"`
 }
 
-// CallerForToken resolves a bearer token to a Caller. It is exported
-// only so this package's own external test package (web_test — mcp_test.go
-// and a handful of others) can build a Caller directly, without going
-// through a real HTTP request, to unit-test what a given Caller shape is
-// and is not allowed to do. No production code path calls this: the MCP
-// transport goes through the ordinary authenticate middleware instead
-// (mcpHandler's own doc comment explains why), and every other caller of
-// a Caller in this package receives one the same way. A quality review
-// asked, of this and every other export with no caller outside its own
-// tests, to either unexport it behind a test shim or document plainly
-// that it is test-only; this file chose the doc route over an internal
-// test-only shim because mcp_test.go and its siblings already live in
-// web_test, the external test package, and moving them into this
-// package's own internal test files purely to reach an unexported
-// function was a larger, unrelated churn than the export itself
-// justifies — CallerForToken's surface area is small (one function,
-// mirroring one already-reviewed piece of production logic below) and
-// its risk is nil, since nothing calls it but tests that are themselves
-// asserting what a Caller may do, not what constructs one.
+// CallerForToken resolves a bearer token to a Caller.
+//
+// **Test-only, and exported for it:** the external test package builds a
+// Caller directly to assert what a given shape may do. No production
+// path calls it — the MCP transport goes through the ordinary
+// authenticate middleware.
 func CallerForToken(ctx context.Context, ids *identity.Service, token string) (Caller, error) {
 	summary, err := ids.ResolveAPIToken(ctx, token)
 	if err != nil {
@@ -443,24 +430,15 @@ func (s *Server) newMCPServer() *mcp.Server {
 }
 
 // mcpHandler serves the MCP endpoint. Every request must carry a bearer
-// token that resolves to a live token caller — not merely "any Caller",
-// which would also admit a session cookie. The REST routes that decide
-// who holds standing in the product — creating and listing games,
-// membership, tokens, invites — are deliberately closed to token callers
-// (requireHumanCaller, api_projects.go); Task 8's game-*content* routes
-// (api_metamodel.go) are not, because a token is exactly a credential
-// for one game's content and refusing it there would deny over REST what
-// the same token already does over MCP. This is the opposite gate,
-// deliberately closing the agent surface to a browser session: a person's session cookie proves
-// they are logged in as themselves, not that they are entitled to act as
-// an unscoped agent, and every tool this task adds assumes exactly one
-// bound project on the caller, which only a token caller ever carries
-// (Caller.ScopedProject, auth.go). This check happens before the SDK's
-// own transport ever runs, so an unauthenticated or session-authenticated
-// request gets our ordinary JSON error body and never reaches the MCP
-// framing at all — it cannot discover the protocol version, the tool
-// list or anything else about the server's capabilities by probing this
-// route without a token.
+// token resolving to a live token caller — not merely any Caller, which
+// would admit a session cookie. A session proves somebody is logged in
+// as themselves, not that they may act as an agent, and every tool here
+// assumes the one bound project only a token caller carries.
+//
+// The check runs before the SDK's transport, so an unauthenticated or
+// session-authenticated request gets this package's JSON error and never
+// reaches the MCP framing: it cannot discover the protocol version or
+// the tool list by probing without a token.
 const maxMCPRequestBodyBytes = 4 << 20 // 4 MiB
 
 func (s *Server) mcpHandler() http.Handler {

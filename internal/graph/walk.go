@@ -1,43 +1,25 @@
 // Package graph emits the one bounded traversal Maestro walks a game's
 // relations with: project-filtered in both terms of the recursion,
-// depth-bounded, and guarded against *expanding* a node twice on the
-// path it arrived by -- while still handing the caller the edge that
-// closes a cycle.
+// depth-bounded, and guarded against expanding a node twice on the path
+// it arrived by, while still handing the caller the edge that closes a
+// cycle.
 //
-// It exists in neither of its callers on purpose. The views sub-project's
-// query language compiles traversal steps into it; the analysis engine
-// will compile its reachability closure into it. Both specs asked for
-// "one walk, two callers, no drift", neither said who owned it, and
-// deciding after both were written is how the drift happens. The
-// precedent is internal/paging, extracted for exactly this reason: a copy
-// of a cursor is a copy of its bugs, and a copy of a walk is a copy of a
-// missing project filter.
+// It lives outside both of its callers so there is one walk and no drift:
+// internal/views routes every traversal step deeper than one hop through
+// WalkCTE, and internal/analysis runs its reachability closure through it
+// with the gating direction in EdgePredicate.
 //
-// **Callers as of this commit:** internal/views -- whose compiler routes
-// every traversal step deeper than one hop through WalkCTE and splices
-// the result into its own statement (see builder.adopt there) -- and
-// internal/analysis, whose reachability closure runs Direction Any with
-// the per-type gating direction in EdgePredicate (see normalisedWalk
-// there).
+// **Callers as of this commit:** internal/views and internal/analysis.
 //
 // **Not a caller yet:** none.
 //
-// Those two lines are stated rather than implied, because a package
-// comment claiming callers it cannot point at is the "documentation
-// claiming more than the code does" defect this repository has produced
-// nineteen times. They are also *checked*:
-// TestThePackageCommentNamesItsCallersAndOnlyItsCallers reads the
-// module's real import graph -- not any package's prose -- and fails on a
-// name in the first line that does not import this package, on an
-// importer missing from it, and on a name in the second line that does
-// import it. A guard a comment can satisfy is not a guard, so the
-// sentence cannot be left one step behind the code: the commit that adds
-// the second importer is red until this line names it.
+// Both lines are checked against the real import graph by
+// TestThePackageCommentNamesItsCallersAndOnlyItsCallers, so the commit
+// that adds a third importer is red until it is named above.
 //
-// What lives here is the SQL primitive. Policy -- which relation types
+// What lives here is the SQL primitive. Policy — which relation types
 // gate what, whether a container propagates reachability, what a step's
-// result means -- belongs to the caller, and this package has no opinion
-// about any of it.
+// result means — belongs to the caller.
 package graph
 
 import (
@@ -127,81 +109,44 @@ type Walk struct {
 	EdgePredicate string
 	EdgeArgs      []any
 
-	// MinDepth and MaxDepth bound the hops. Depth 0 is the seed itself,
-	// which the recursion always carries because the guard needs it on
-	// the path; MinDepth is applied *after* the recursion has finished,
-	// in the CTE ReadFrom names, so a walk with min 2 still walks through
-	// depth 1 and simply does not hand it back.
+	// MinDepth and MaxDepth bound the hops. Depth 0 is the seed, which the
+	// recursion always carries because the cycle guard needs it on the
+	// path; MinDepth is applied after the recursion, in the CTE ReadFrom
+	// names, so a walk with min 2 still walks depth 1 and does not hand
+	// it back.
 	//
-	// MinDepth is honoured here rather than left to the caller on
-	// purpose: it is a bound, bounds are this package's subject, and a
-	// bound each caller applies for itself is the drift this package was
-	// extracted to prevent. TestMinDepthDropsTheNearHopsAfterWalkingThem
-	// pins both halves.
-	//
-	// Both are non-negative and MinDepth may not exceed MaxDepth; WalkCTE
-	// panics otherwise. A negative MaxDepth is a walk that returns its
-	// seed and nothing else, a MinDepth above MaxDepth is a walk that
-	// returns nothing at all, and both are the empty answer with no error
-	// that this repository keeps producing -- the same reason the CTE
-	// name and the direction panic. TestANegativeOrInvertedBoundPanics
-	// pins all four shapes.
+	// Both are non-negative and MinDepth may not exceed MaxDepth. WalkCTE
+	// panics rather than returning the empty answer with no error that a
+	// negative or inverted bound would otherwise produce.
 	MinDepth int
 	MaxDepth int
 
-	// MaxRows caps the rows a caller can read from the walk. Zero means
-	// no cap; a negative value panics rather than meaning "no cap", which
-	// is what an unchecked LIMIT would have made it.
+	// MaxRows caps the rows a caller can read. Zero means no cap; a
+	// negative value panics.
 	//
-	// It is a cap on what comes back, **not** a bound on the work
-	// Postgres does: LIMIT is not allowed in a recursive term, so the cap
-	// is a LIMIT on the wrapper CTE. Postgres's recursion is demand
-	// driven and in practice stops early under it, but nothing here
-	// measures that and this comment does not claim it.
+	// It caps what comes back, not the work Postgres does: LIMIT is
+	// illegal in a recursive term, so the cap is a LIMIT on the wrapper
+	// CTE. The emitted limit is **MaxRows + 1**, so a caller reading
+	// MaxRows+1 rows knows its answer was truncated — exactly-at-cap and
+	// truncated-at-cap are otherwise the same answer.
 	//
-	// The emitted LIMIT is **MaxRows + 1**, so a caller that reads
-	// MaxRows+1 rows knows its answer was truncated and one that reads
-	// MaxRows or fewer knows it was not. Exactly-at-cap and
-	// truncated-at-cap are otherwise the same answer, and a walk that
-	// cannot say which it is gets reported to a designer as complete.
-	// This is the same cap+1 mechanism Task 7's truncation flags use, and
-	// it is here rather than there because the truncation happens here.
-	// TestMaxRowsReturnsOneRowPastTheCapSoTruncationIsDetectable pins it,
-	// with an uncapped control in the same test.
-	//
-	// Which rows survive the cap is **ORDER BY depth**: a truncated
-	// answer is a prefix of the nearest hops, connected to the seed,
-	// rather than an arbitrary scatter of nodes whose own edges were
-	// dropped. Order within one depth is unspecified.
-	// TestATruncatedWalkIsOrderedByDepth pins the ordering.
+	// Which rows survive is ORDER BY depth: a truncated answer is a
+	// prefix of the nearest hops, connected to the seed, rather than a
+	// scatter of nodes whose own edges were dropped. Order within one
+	// depth is unspecified.
 	MaxRows int
 
 	// CarryRelationPath adds a rel_path uuid[] column: the relation ids
-	// walked to reach this row, in order, so a caller holding a closed
-	// row can name every edge of the cycle it closed and not only the
-	// closing one. path carries node ids, and a cycle's edges cannot be
-	// reconstructed from consecutive node pairs where it matters most --
-	// two relation types between the same pair is exactly the case an
-	// analysis has to tell apart.
+	// walked to reach this row, in order, so a caller holding a closed row
+	// can name every edge of the cycle and not only the closing one. path
+	// carries node ids, and two relation types between the same pair of
+	// nodes cannot be told apart from node ids alone.
 	//
-	// **Opt-in, and the reason is a golden file.** internal/views does
-	// not need it, and adding a column unconditionally would change the
-	// SQL text that package's golden tests assert -- which are, per its
-	// own plan, the *only* defence for several invariants that have no
-	// behavioural signature in today's build. So a walk that does not ask
-	// for it emits byte-identical SQL to what shipped, and
-	// TestAWalkWithoutTheRelationPathEmitsTheSameStatementItAlwaysDid
-	// pins that as text.
-	//
-	// It is here rather than in internal/analysis because it is a
-	// property of the recursion -- the ids accumulate in the recursive
-	// term or they are not available at all -- and this package owns the
-	// recursion. What a caller does with them is policy and stays out.
+	// Opt-in, so a walk that does not ask for it emits the SQL text
+	// internal/views' golden tests assert.
 	//
 	// The seed's rel_path is a zero-length array and never NULL: `||`
-	// against NULL is NULL, so a NULL seed would make every path
-	// downstream NULL, which is an empty answer with no error.
-	// TestTheRelationPathIsEmptyAtTheSeedAndNotNull pins it.
+	// against NULL is NULL, which would make every path downstream NULL.
 	CarryRelationPath bool
 }
 
@@ -227,129 +172,53 @@ func isIdentifier(s string) bool {
 // itself.
 func ReadFrom(w Walk) string { return w.Name + "_out" }
 
-// WalkCTE returns the bodies of the CTEs one bounded walk needs -- ready
-// to follow a `WITH RECURSIVE` -- and the bind arguments they use,
-// numbered from $1. The caller reads its rows from ReadFrom(w).
+// WalkCTE returns the bodies of the CTEs one bounded walk needs, ready
+// to follow a `WITH RECURSIVE`, and the bind arguments they use, numbered
+// from $1. The caller reads its rows from ReadFrom(w).
 //
-// The columns it produces are (id, depth, path, via_relation, from_id,
-// closed): the node reached, how many hops away, the ids on the path that
-// reached it, the relation walked to get there (null at depth 0), the
-// node it came from (null at depth 0), and whether this hop closed a
-// cycle. A caller that wants the edges a walk traversed reads
-// via_relation; a caller that wants only the nodes reads id and ignores
-// the rest. **One row is one edge traversal**, so a node reachable by two
-// edges arrives twice: collapsing that is the caller's job, and it is the
-// direction that loses no information -- a walk that deduplicated by node
-// would drop one of the two edges between a pair joined in both
-// directions, and a renderer cannot draw an edge it was never handed.
-// TestDirectionAnyTraversesEachEdgeOnceFromEachNode pins the counts on
-// exactly that pair.
+// Columns: (id, depth, path, via_relation, from_id, closed) — the node
+// reached, how many hops away, the ids on the path that reached it, the
+// relation walked to get there (null at depth 0), the node it came from
+// (null at depth 0), and whether this hop closed a cycle. rel_path is a
+// seventh, between path and via_relation, only when CarryRelationPath is
+// set.
 //
-// A seventh column, rel_path, is present only when the caller set
-// CarryRelationPath, and it sits between path and via_relation. See that
-// field for why it is opt-in.
+// **One row is one edge traversal**, so a node reachable by two edges
+// arrives twice; collapsing that is the caller's job. Deduplicating by
+// node here would drop one of the two edges between a pair joined both
+// ways, and a renderer cannot draw an edge it was never handed.
 //
-// **What a walk returns for a cycle, which eleven tasks need to read.**
-// A cycle is legal content -- the core spec allows prerequisite cycles
-// deliberately, so that they can be surfaced as design errors, and
-// surfacing one means drawing the edge that closes it. So the hop onto a
-// node already on the path is **returned**, once, with closed = true, and
-// is **not expanded from**. Concretely, walking out from a:
+// **A cycle is content, not an error.** The hop onto a node already on
+// the path is returned once with closed = true and is not expanded from,
+// so an n-cycle comes back with all n of its edges and a self-loop with
+// its own.
 //
-//   - a self-loop a -> a returns one row: a at depth 1, closed, via the
-//     loop's own relation. TestASelfLoopIsReturnedOnceAndNotExpanded.
-//   - a two-cycle a -> b -> a returns two rows: b at depth 1 and a at
-//     depth 2, closed, via the return edge -- which the earlier shape of
-//     this walk never handed to anybody. TestATwoCycleReturnsItsReturnEdge.
-//   - a three-cycle a -> b -> c -> a returns four rows at min depth 0:
-//     a, b, c and a again at depth 3, closed, via c -> a. Three distinct
-//     relations, three distinct nodes.
-//     TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt.
+// Five things in the emitted statement are load-bearing:
 //
-// The earlier shape suppressed the *row*, not just the recursion, which
-// meant an n-cycle came back with n-1 of its n edges and a self-loop came
-// back with none. That contradicted this walk's own justification for its
-// row shape -- see the paragraph above about a renderer that cannot draw
-// an edge it was never handed -- and it made the one thing the analysis
-// engine exists to find, a prerequisite cycle, the one thing this walk
-// could not show.
-//
-// **Three things in the emitted statement are load-bearing:**
-//
-//   - project_id = $1 appears on every table reference, in the anchor and
-//     in the recursive term, on the relation *and* on the entity at the
-//     far end of it. An anchor-only filter seeds correctly and then lets
-//     the walk leave the project through any edge whose far side lives
-//     elsewhere. TestTheProjectFilterIsInBothTermsOfTheRecursion asserts
-//     it as text -- counting all three positions, the anchor's included
-//     -- and TestAWalkCannotLeaveItsProjectThroughARogueEdge asserts the
-//     two in the recursive term behaviourally by forging, in its own
-//     throwaway database with 0004_metamodel.sql's composite keys
-//     dropped, the two rows the shipped schema makes impossible.
-//     TestTheAnchorFiltersOnTheProjectEvenWhenTheSeedDoesNot is the
-//     behavioural half of the third: SeedSQL is documented as the
-//     caller's own and this package does not control whether it filters,
-//     so the anchor join is the only thing between a project-blind seed
-//     and another game's entity.
-//   - NOT w.closed in the recursive term is the cycle guard, and it is a
-//     correctness requirement rather than a defensive one. It is **not**
-//     what makes the walk terminate -- the depth bound below does that,
-//     and removing the guard leaves this package's cycle test finishing
-//     with the same node set. What it stops is the cycle being re-walked
-//     once per level until that bound is reached: four rows rather than
-//     eleven for a three-node cycle at max depth 10.
-//     TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt pins
-//     the node set, the row count and the edge set, and only the counts
-//     are red without the guard. The guard is computed against the
-//     **whole** path and not against the seed alone:
-//     TestACycleThatExcludesTheSeedIsGuardedByTheWholePath is the input
-//     that separates the two, because every other fixture's cycle passes
-//     through the seed.
-//   - depth < $n sits in the recursive term, where it prunes, and not in
+//   - project_id = $1 on every table reference, in the anchor and in the
+//     recursive term, on the relation and on the entity at its far end.
+//     An anchor-only filter lets the walk leave the project through an
+//     edge whose far side lives elsewhere, and SeedSQL is the caller's
+//     own, so the anchor join is all that stands between a project-blind
+//     seed and another game's entity.
+//   - NOT w.closed in the recursive term. The depth bound is what makes
+//     the walk terminate; this is what stops a cycle being re-walked once
+//     per level until that bound. It is computed against the whole path,
+//     not against the seed.
+//   - depth < $n in the recursive term, where it prunes, rather than in
 //     an outer WHERE, which would materialise the whole walk first.
-//     TestDepthBoundsTheWalk pins what it reaches.
+//   - EdgePredicate, when the caller set one, ANDed into the same JOIN so
+//     a condition on the relation prunes the recursion instead of
+//     filtering its output.
+//   - r.id IS DISTINCT FROM w.via_relation, which only fires under Any:
+//     without it, arriving at b over a -> b and walking the same edge
+//     back emits a closed row for a on every edge in the graph, and an
+//     engine looking for prerequisite cycles finds one everywhere.
 //
-// A fourth clause is there only when the caller asked for one:
-// EdgePredicate, ANDed into the same JOIN, so a condition on the relation
-// prunes the recursion instead of filtering its output. See the field.
-//
-// A fifth line is load-bearing only under Any:
-// r.id IS DISTINCT FROM w.via_relation, which stops a walk re-traversing
-// the relation it just arrived by. Under Out and In it can never fire.
-// Under Any it is what keeps every single edge from reading as a
-// two-cycle: without it, arriving at b over a -> b and then walking the
-// same edge backwards would emit a closed row for a on every edge in the
-// graph, and an analysis engine looking for prerequisite cycles would
-// find one everywhere. The path guard used to hide this, because the
-// backtrack always lands on the previous node; now that a closing hop is
-// returned rather than suppressed, it has to be excluded on purpose.
-// TestASelfLoopIsReturnedOnceAndNotExpanded and
-// TestDirectionAnyTraversesEachEdgeOnceFromEachNode both fail without it.
-//
-// **The shape this deliberately does not reuse, and why the plan's
-// replacement is not the one that shipped.** ListEntitiesRelatedTo
-// (internal/db/queries/metamodel.sql) selects the far end of an edge in
-// the join condition, with two arms guarded by a scalar `direction`, so
-// one arm is dead on every row. Under `any` both arms are live. The
-// answer is *not* to emit one UNION ALL arm per direction: Postgres
-// refuses that outright -- SQLSTATE 42P19, "recursive reference to query
-// \"w\" must not appear within its non-recursive term", because a third
-// branch makes the first two the non-recursive term -- and, written in
-// the legal way that gets the same rows (a two-armed edge relation
-// feeding one self-reference), a self-loop matches under both arms and
-// the walk doubles at every level: measured on this project's Postgres
-// at 1, 2, 4 and 8 rows for depths 0 to 3, against 1, 1, 1, 1 for the
-// arm below, both with the guard removed. So `any` is **one** arm: the
-// near end matches either column and the far end is the scalar CASE of
-// whichever matched, which cannot produce an edge twice from one node.
-//
-// The arm count is now **observable with the guard in place**, which it
-// was not while a closing hop was suppressed: a self-loop under Any is
-// exactly the edge a two-armed shape matches twice, and it now comes back
-// as a returned row rather than as nothing, so the second copy is a
-// second row. TestASelfLoopIsReturnedOnceAndNotExpanded asserts the one
-// row and is red -- with two rows over one relation -- against the
-// two-armed emitter, which is what that test could not do before.
+// Any is **one** arm, not one per direction: the near end matches either
+// column and the far end is a CASE of whichever matched. Postgres refuses
+// three UNION ALL arms outright (42P19), and the legal two-armed shape
+// matches a self-loop twice and doubles the walk at every level.
 func WalkCTE(w Walk) (string, []any) {
 	if !isIdentifier(w.Name) {
 		panic(fmt.Sprintf("graph: a CTE name must be a lower-case identifier, got %q; a name "+

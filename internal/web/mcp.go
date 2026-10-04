@@ -78,13 +78,13 @@ type WhoamiOutput struct {
 	ProjectID   *uuid.UUID `json:"project_id,omitempty"`
 	ProjectSlug string     `json:"project_slug,omitempty"`
 	ProjectName string     `json:"project_name,omitempty"`
-	// SkillBundleVersion is the content hash of the skill bundle this
-	// server would serve now, read from skill.Version() — the same
-	// source skill.install's bundle_version is read from, so the two
-	// cannot disagree. It is on whoami, the call an agent makes first,
-	// because that is the only moment at which "the pages I installed
-	// three months ago are stale" can be discovered before they are
-	// acted on.
+	// SkillBundleVersion is the hash of the SHA256SUMS the bundle ships,
+	// read from skill.Version() — the same source skill.install's
+	// bundle_version and the server's connection instructions are read
+	// from, so the three cannot disagree. It is on whoami as the
+	// fallback path: the instructions say it at connection time, and a
+	// client that never shows those to the model would otherwise leave
+	// an agent reading pages from three months ago.
 	SkillBundleVersion string `json:"skill_bundle_version"`
 }
 
@@ -377,9 +377,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 			"project_id is returned too and is not an address: nothing on either surface " +
 			"takes it.\n\n" +
 			"**skill_bundle_version is the version of the skill bundle this server would " +
-			"serve now.** Compare it against the manifest beside your installed copy: the " +
-			"same value means your pages are current, a different one means skill.install " +
-			"has a newer bundle than the one you are reading.",
+			"serve now**, the same value the server's own instructions carry, for a client " +
+			"that does not show those to you. Check it by hashing the SHA256SUMS that ships " +
+			"beside your installed pages — `shasum -a 256 <dir>/SHA256SUMS` — and comparing " +
+			"\"sha256:<hex>\". A difference means skill.install has a newer bundle, or the " +
+			"copy you are reading was edited.",
 		OutputSchema: whoamiOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, _ uuid.UUID, _ whoamiInput) (WhoamiOutput, error) {

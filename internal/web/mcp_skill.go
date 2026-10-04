@@ -72,10 +72,11 @@ func (s *Server) addSkillTools(srv *mcp.Server, deps MCPDeps) {
 			"files themselves**, deliberately: the bundle costs about twenty thousand " +
 			"tokens and inlining it here would charge you that on every call, including " +
 			"the calls where you already had it.\n\n" +
-			"Fetch the zip with your own HTTP tool, extract it over the install " +
-			"directory, and write `bundle_version` into a manifest beside it; a matching " +
-			"version next time means skip the download. The URL is signed and expires in " +
-			"five minutes, and needs no Authorization header.\n\n" +
+			"Fetch the zip with your own HTTP tool and extract it over the install " +
+			"directory. It carries a `SHA256SUMS` listing every page: next time, hash it " +
+			"where you installed it — `shasum -a 256 <dir>/SHA256SUMS` — and skip the " +
+			"download when `sha256:<hex>` matches the `bundle_version` you were told. The " +
+			"URL is signed, expires in five minutes, and needs no Authorization header.\n\n" +
 			"**Tell the human to restart the application that loads you.** Most agent " +
 			"runtimes read a skills directory once, at session start; until then the old " +
 			"pages are the ones in effect, and the human cannot infer that from your " +

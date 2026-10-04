@@ -9,9 +9,8 @@ this project is built and verified. It says nothing about the machine
 it is built on, nothing about the author's other work, and nothing
 about where an instance of it happens to run.
 
-Keep it honest as decisions land. Every sentence here is a claim about
-code that can go false with nothing turning red — which happened
-repeatedly during the build, and cost more than any compiler error did.
+Keep it honest as decisions land: every sentence here is a claim about
+code, and a claim can go false with nothing turning red.
 
 ## What Maestro is
 
@@ -148,7 +147,7 @@ artefacts written to disk are English regardless.
   with per-game bearer tokens. One token = one game.
 - **Frontend:** vanilla CSS + Lit, ES modules, **no build step**, no
   TypeScript. Graph layout by a vendored layout engine; rendering is
-  ours in SVG. Two consequences that have each cost a day:
+  ours in SVG. Two consequences:
   - **`default-src 'self'`.** A `<style>` element built by script is
     refused silently; a shadow root gets its CSS through
     `adoptedStyleSheets`. Fonts are self-hosted for the same reason.
@@ -168,30 +167,25 @@ artefacts written to disk are English regardless.
   `ghcr.io/neverbot/maestro:latest` plus a commit-tagged image a
   deployment can pin to or roll back to. Nothing is published from a
   branch or a pull request. The binaries are `maestro`,
-  `maestro-skilldoc`, `maestro-docs` and `maestro-demo` — the last is a
-  development tool the image does not contain, and `make demo` writes
-  the game the screens need in order to be *seen*: a prerequisite cycle,
+  `maestro-skilldoc`, `maestro-docs` and `maestro-demo`. The last is a
+  development tool the image does not contain: `make demo` writes the
+  game a screen needs in order to be judged — a prerequisite cycle,
   something reachable only behind it, something connected to nothing, a
   type with more fields than a catalogue draws, three hundred rows to
-  page, prose with two versions and an image. Three defects in this
-  product were found the first time a screen was rendered with data in
-  it, each on a game nobody had committed.
+  page, prose with two versions and an image. **A screen is not verified
+  until it has been seen holding content like that.**
 - **The documentation site** is built by `cmd/maestro-docs` from the
   files that are already here — the readme, the skill bundle's own
   pages, the generated design system — plus the pages it writes for a
   reader those files were not written for, and it is published by the
   `publish-docs` job of `.github/workflows/ci.yml` — the same workflow
   as the gate, so a red gate publishes neither the site nor the image.
-  - **It is written as we decide, and it claims nothing the product
-    does not do.** The rule here used to be "it invents no prose",
-    which kept the site honest by making it incapable of speaking: the
-    front page was a readme, and the person this product is for — a
-    game designer who does not write code — met four hundred words
-    about `docker compose` before anything about their own work. The
-    fear behind that rule was real and survives in the second half of
-    this sentence: a claim written beside the product is a claim that
-    can go false quietly, so a page may be written freely and may not
-    promise a screen, a control or a behaviour that is not there.
+  - **A page may be written freely and may not promise a screen, a
+    control or a behaviour that is not there.** The site is for a game
+    designer who does not write code, so it is written for them rather
+    than assembled out of the readme; and a claim beside the product is
+    a claim that can go false quietly, which is what the second half of
+    that rule is for.
   - **Screenshots are dated by their own index.** They are the one
     thing on the site that rots without anybody editing it, so
     `docs/images/readme.md` carries the recipe that made each one and a
@@ -226,8 +220,7 @@ root, then `.agents/context/`, then `docs/` — which is why they live in
 
 ## The agent skill bundle
 
-Two rules govern it, and both were in `readme.md` until the readme
-became a readme. They are process, not product.
+Two rules govern it. They are process, not product.
 
 - **An agent learns its pages are stale without being asked to look.**
   The MCP server's instructions name `skill.Version()` at connection
@@ -243,12 +236,11 @@ became a readme. They are process, not product.
   attribution. This is enforced, not encouraged: a page that rewords a
   description, or a description reworded underneath a page that quotes
   it, fails `make skill-check`.
-- **A page teaches how to do a thing; there is no page of anti-patterns.**
-  `modelling/mistakes.md` was one, and six of its seven entries were a
-  second copy of a rule `deciding.md`, `naming.md`, `fields.md` or
-  `errors.md` already taught in positive form — a second copy that can
-  go false on its own. What a mistake adds over a rule is the *symptom*,
-  and that belongs beside the rule it diagnoses.
+- **A page teaches how to do a thing; there is no page of
+  anti-patterns.** An anti-pattern is a rule with the sign flipped, so a
+  page of them is a second copy of rules taught elsewhere — and a second
+  copy goes false on its own. What a mistake adds over a rule is the
+  *symptom*, and that belongs beside the rule it diagnoses.
 - **The genre pages are examples and never an argument.** "The MMORPG
   template needs this" does not justify a change under `internal/` and
   may not be cited as one in review. If a genre cannot be expressed, the
@@ -266,16 +258,27 @@ became a readme. They are process, not product.
   Implementation plans: `.superpowers/plans/YYYY-MM-DD-<topic>.md`.
 - **Record a correction where the decision lives**, not in a commit
   message: a commit message is read once, and the code beside it is
-  read by whoever changes the area next. **A doc comment states the
-  contract and the one non-obvious reason, and stops.** The account of
-  how a decision was reached goes in `.superpowers/`. This has a
-  measured ceiling — `internal/style` fails a package over 32% comment
-  — because prose was the one thing here under no deletion pressure:
-  the source was 58.7% comment, 1.4 MB of it, with nothing red.
+  read by whoever changes the area next. The account of how a decision
+  was reached goes in `.superpowers/`, never in the source.
 - Throwaway artefacts (screenshots, probe pages, scratch dumps) go in
   `.scratch/`, which is git-ignored. Never in `.claude/` (read-only
   context) and never at the repo root.
 - Markdown filenames are lowercase (`readme.md`, `claude.md`).
+
+### Comments
+
+**As short as the thing allows.** A comment says what a function does,
+in the general case, and stops. It does not say what the function does
+not do, what it used to do, what it will do, or what changed — the code
+says the first, and git says the rest.
+
+A special case earns a line when it is not plain from the code: why a
+value is clamped, why an order matters, why an obvious-looking
+alternative was refused. One line, not a paragraph, and only where
+somebody reading the code would otherwise stop and wonder.
+
+Prose about how a decision was reached belongs in `.superpowers/`, and
+the story of a bug belongs in its commit.
 
 ### How this project verifies itself
 

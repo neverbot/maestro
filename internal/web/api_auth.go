@@ -119,22 +119,16 @@ func unknownMembers(body []byte, target any) []string {
 	return unknown
 }
 
-// decodeJSONBody enforces the two boundary checks every handler that
-// accepts a JSON body needs before it looks at the body at all: a
-// declared application/json content type (a browser form post, or a
-// client that forgot the header, gets a clear 415 instead of a JSON
-// decode error that reads like a malformed body), and the
-// maxAuthRequestBodyBytes bound (Task 10's note — see the constant's own
-// doc comment, and identity.HashPassword's, for why service validation
-// alone is not enough: it only rejects an oversized value after decoding
-// it into memory). A body that merely exceeds the bound is reported as
-// 413, not the generic 400 an actually-malformed body gets, since
-// http.MaxBytesReader's own error (*http.MaxBytesError) lets the two be
-// told apart. Despite the name this file's own quality review gave it,
-// this is not auth-specific: every JSON-accepting handler in this
-// package uses it, api_projects.go and api_tokens.go included, so a
-// handler that reads r.Body directly is the exception that needs
-// justifying, not the rule.
+// decodeJSONBody enforces the two checks every handler taking a JSON
+// body needs before reading it: a declared application/json content
+// type, so a form post gets a 415 rather than a decode error that reads
+// like a malformed body, and the maxAuthRequestBodyBytes bound, because
+// service validation only rejects an oversized value after decoding it
+// into memory. Exceeding the bound is a 413 and a malformed body a 400.
+//
+// Not auth-specific despite the file it lives in: every JSON-accepting
+// handler here uses it, and reading r.Body directly is the exception
+// that needs justifying.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeJSONBodyLimit(w, r, v, maxAuthRequestBodyBytes)
 }

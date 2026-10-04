@@ -119,9 +119,7 @@ type compileOptions struct {
 
 // Compile turns a resolved query into one SELECT and its arguments.
 //
-// $1 is always the project id, in every CTE and every arm, and
-// TestCompileArea's "every table reference is project filtered" case
-// asserts it as text.
+// $1 is always the project id, in every CTE and every arm.
 //
 // **The projection travels as one jsonb column**, built per node arm by
 // project.go: every slot the document asked for, plus the one hop a slot
@@ -139,12 +137,11 @@ type compileOptions struct {
 //
 // **What the emitted statement costs.** entities.fields is indexed by
 // `gin (fields jsonb_path_ops)`, which serves containment and nothing
-// else — no ranges, no ordering, not even key existence. So every leaf
-// this compiler emits against a declared field is a scan of the rows the
-// selector's entity_type_id filter left, with one exception: `contains`
-// on a list<text> field is emitted as `fields @> jsonb_build_object(...)`
-// and can use that index. That is accepted rather than hidden; Task 7's
-// stats is what makes it measurable.
+// else: no ranges, no ordering, not even key existence. Every leaf
+// against a declared field is therefore a scan of the rows the
+// selector's entity_type_id filter left, except `contains` on a
+// list<text>, which is emitted as `fields @> jsonb_build_object(...)`
+// and does use the index.
 func Compile(r *Resolved, projectID uuid.UUID) (string, []any, error) {
 	return compileWith(r, projectID, compileOptions{})
 }

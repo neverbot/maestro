@@ -45,24 +45,12 @@ type Event struct {
 	MinRole string
 
 	// HumanOnly restricts delivery to subscribers admitted with isToken
-	// false (see Subscribe). It exists because a project role alone does
-	// not capture this distinction: resolveProjectScope
-	// (internal/web/api_projects.go) always grants a token caller
-	// roles.Editor, meeting any MinRole up to Editor — but a token
-	// caller's own REST access is refused outright, by
-	// requireHumanCaller, from every member, token and invite listing
-	// this hub's member/token/invite event kinds mirror (see
-	// internal/web/publish.go's own doc comment on each kind's HumanOnly
-	// setting). A quality review found the first version of this hub
-	// wired with real publishers let exactly that slip through: an
-	// agent's own token watched another agent's token get minted,
-	// carrying that other token's hint, over a stream the minting
-	// token's own bearer could not have read the equivalent listing
-	// through. MinRole cannot express "no token caller, regardless of
-	// role" — a token caller's Role is always Editor, never Owner, so
-	// only an Owner-gated event was ever naturally excluded — which is
-	// why this is a separate field rather than a convention layered onto
-	// MinRole.
+	// false (see Subscribe). A role cannot express it: a token caller is
+	// always granted roles.Editor, so it meets any MinRole up to Editor,
+	// while its REST access to the member, token and invite listings
+	// these events mirror is refused outright. Without this field an
+	// agent's token would watch another agent's token being minted over
+	// a stream whose bearer could not read the equivalent listing.
 	HumanOnly bool
 
 	// Seq is a per-subscription, monotonically increasing sequence

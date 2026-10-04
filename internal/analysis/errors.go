@@ -3,19 +3,14 @@
 // can reach, what nothing points at, and whether a named progression
 // still holds.
 //
-// It depends on internal/metamodel deliberately and acyclically. Every
-// question it asks is asked of that package's rows, so the dependency is
-// real, and nothing in the metamodel mentions analysis. Taking it means
-// this package reuses that one's FieldError, ValidationError, sentinels,
-// Actor and key grammar rather than growing a second, drifting copy of
-// each — the same reasoning internal/views' and internal/markdown's
-// package comments record.
+// It depends on internal/metamodel, acyclically, so that it reuses that
+// package's FieldError, ValidationError, sentinels, Actor and key
+// grammar rather than growing a drifting copy of each.
 //
-// **It does not depend on internal/views, and internal/views does not
-// depend on it.** internal/graph owns the SQL primitive both compile
-// into; policy is not shared. This package's policy — normalised
-// dependency direction, any/all gating, containment propagation — lives
-// in reach.go and is not pushed down.
+// **It does not depend on internal/views, nor views on it.**
+// internal/graph owns the SQL primitive both compile into; policy —
+// normalised dependency direction, any/all gating, containment
+// propagation — lives in reach.go and is not shared.
 package analysis
 
 import (
@@ -26,43 +21,17 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
-// CodeSemanticsUndeclared is the one wire code this sub-project adds.
+// CodeSemanticsUndeclared is the one wire code this sub-project adds,
+// because its recovery is one no existing code names: not "change your
+// argument", not "resend", but **declare something about your game's
+// relation types**. It also carries a payload no existing code has a
+// place for — the project's relation types with their current roles and
+// traits, which is the list a caller needs to perform that recovery.
 //
-// **Exactly one, and the count is the decision.** Four candidates were
-// considered and three refused, each because an existing code already
-// names the same recovery — and a code that names the same recovery as
-// an existing code is how a vocabulary rots:
-//
-//   - `analysis_timeout` — refused. SQLSTATE 57014 (query_canceled) is
-//     already in metamodel's retryableSQLStates and already maps to
-//     `retryable`, whose meaning is "change nothing and resend".
-//     internal/views faced this exact choice four days before this
-//     package existed and refused `query_timeout` on that argument,
-//     extending the error's *message* with which bound to lower rather
-//     than adding a code. Adding it here would be this repository's
-//     standing defect in its purest form: a rule established correctly
-//     and not carried one step along. What ships instead is a
-//     `retryable` whose message names the elapsed budget and the
-//     arguments that narrow the run — max_depth, entity_types,
-//     relation_types and seed_entity_types, that last being the one that
-//     actually helps, since a reachability walk seeded from every entity
-//     in the game is the expensive shape.
-//   - `invalid_argument` — refused. metamodel.CodeInvalidInput is
-//     documented as "a row's own arguments being malformed; the fix is
-//     to change that argument", which is exactly an empty seed set with
-//     include_ungated false. A third spelling of one code is worse than
-//     no code.
-//   - `query_invalid` — refused. It is internal/views' code for a query
-//     *document* and it carries a JSON pointer into one. This package's
-//     inputs are a flat struct; there is no document, and a pointer into
-//     nothing is a path a caller cannot follow.
-//
-// This one ships because its recovery is none of those. Not "change your
-// argument", not "resend": **declare something about your game's
-// relation types.** And because it carries a payload no existing code
-// has a place for — the project's relation types with their current
-// roles and traits, which is the list a caller needs in front of it to
-// perform that recovery.
+// A timeout here is `retryable`, whose message names the elapsed budget
+// and the arguments that narrow a run; a malformed argument is
+// `invalid_input`; and `query_invalid` belongs to a query document,
+// which this package's flat inputs are not.
 const CodeSemanticsUndeclared = "semantics_undeclared"
 
 // ErrSemanticsUndeclared is the sentinel CodeSemanticsUndeclared names.

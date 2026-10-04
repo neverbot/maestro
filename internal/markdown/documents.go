@@ -223,22 +223,12 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		}
 		return dbq.Document{}, fmt.Errorf("upsert document: %w", err)
 	}
-	// **There is deliberately no `row.Path != in.Path` check here**, and
-	// the plan's Task 3 said there should be, so the reason is worth writing
-	// down. The claim was that a creation racing another creation under a
-	// different spelling passes both the locked read and the guard, and that
-	// comparing the returned spelling closes it. It cannot happen: a row this
-	// statement *updated* was found by the guard, which only matches when
-	// expected equals the stored current_version, and the racing creator's row
-	// is at version 1 while a creating caller passes 0 — so the losing
-	// creation always falls to the ErrNoRows arm above rather than reaching
-	// here, and a row this statement *inserted* carries the caller's own
-	// spelling by construction. Proved by mutation: deleting the check left
-	// the whole suite green at -count=3, including TestDocumentsArea's "a
-	// creation losing to a differently spelled path is told the spelling"
-	// case, which is the staged version of exactly that race and which
-	// conflictAfterFailedUpsert answers. A check that cannot fire is a second
-	// claim about a race that only one place actually handles.
+	// **No `row.Path != in.Path` check here, and it cannot fire.** A row
+	// this statement updated was found by the version guard, so a
+	// creation racing another under a different spelling is already at
+	// version 1 while a creating caller passes 0: the loser falls to the
+	// ErrNoRows arm above. A row this statement inserted carries the
+	// caller's own spelling by construction.
 	if _, err := q.InsertDocumentVersion(ctx, dbq.InsertDocumentVersionParams{
 		ProjectID:  projectID,
 		DocumentID: row.ID,

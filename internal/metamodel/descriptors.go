@@ -61,45 +61,20 @@ func CheckText(value, allowedControls string) (TextFault, bool) {
 	return TextFault{}, false
 }
 
-// textProblem is CheckText's judgement in this package's words, and the
-// one rule this package applies to every piece of
-// caller-supplied prose it stores or renders — an entity or type name, a
-// label, a plural, a description, a text or longtext field value, an
-// element of a list<text> — and it is the same rule checkSearchQuery
-// applies to a search query and validateName applies to a project name
-// in internal/projects/projects.go: valid UTF-8, and no control
-// character.
+// textProblem is the one rule this package applies to every piece of
+// caller-supplied prose it stores or renders — a name, a label, a
+// plural, a description, a text or longtext value, an element of a
+// list<text>: valid UTF-8, and no control character. The same rule
+// guards a search query here and a project name in internal/projects.
 //
-// Before this existed the package had three different answers to the
-// same question -- projects.go refused controls, search.go refused
-// controls, and every metamodel name, descriptor and field value refused
-// nothing -- so a NUL inside a name reached Postgres unexamined and came
-// back as `ERROR: invalid byte sequence for encoding "UTF8" (SQLSTATE
-// 22021)`, untyped, over the caller's own argument; the identical NUL
-// inside a longtext field value failed a different way, `unsupported
-// Unicode escape sequence (SQLSTATE 22P05)`, because jsonb encodes a NUL
-// as the six-character escape and Postgres's json input routine refuses
-// that escape outright. Neither is a schema_violation Task 4's caller
-// could read as "the value is wrong shape" -- both are exactly the NUL
-// checkSearchQuery already refuses on the read side, reaching the same
-// caller through the write side instead.
+// **allowNewlineAndTab is the one asymmetry.** A longtext value and a
+// description are free-form prose, where a newline is the caller's own
+// paragraph break. Everything else is rendered as a single line — a page
+// title, a picker, a listing row, a tag chip — so a newline or a tab
+// there is refused like any other control character.
 //
-// **allowNewlineAndTab decides the one asymmetry a single rule cannot
-// avoid stating.** A `longtext` field value and a row's `description`
-// are free-form prose — a lore document, a designer's notes — and a
-// newline in either is the caller's own paragraph break, not malformed
-// input; refusing it would make the rule less useful than the bug it
-// replaces. Every other text this function sees — a `name`, a `label`,
-// a `label_plural`, a `text` field value, one element of a `list<text>`
-// — is rendered as a single line (a page title, a game picker, a
-// listing row, a tag chip), the same reasoning validateName gives for
-// entity and project names alike, so a newline or a tab there is refused
-// exactly like any other control character rather than silently kept or
-// silently dropped.
-//
-// A control character is refused, not stripped, for the reason
-// checkSearchQuery's doc comment gives: silently deleting part of what a
-// caller wrote answers a question it did not ask.
+// A control character is refused and never stripped: deleting part of
+// what a caller wrote answers a question they did not ask.
 func textProblem(value string, allowNewlineAndTab bool) string {
 	allowed := ""
 	if allowNewlineAndTab {

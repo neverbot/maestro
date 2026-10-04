@@ -175,20 +175,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, newPassw
 	})
 }
 
-// ChangeOwnPassword is ChangePassword's self-service counterpart: it
-// verifies currentPassword against the account's own stored hash before
-// ever calling ChangePassword to rotate it. This is what the HTTP layer
-// (PATCH /api/me/password, api_password.go) calls, and it is the whole
-// answer to "what does this endpoint cost an attacker who has a live
-// session but not the password" — without this check, a stolen session
-// cookie alone would be enough to lock the real owner out permanently
-// (ChangePassword itself revokes every session, including the owner's
-// own, the moment it runs), which is strictly worse than what a stolen
-// session can already do. Requiring the current password first means
-// that exact attacker gains nothing here that session hijacking did not
-// already give them elsewhere, and a designer who suspects their
-// password leaked can still rotate it out from under an attacker who
-// only ever had the cookie.
+// ChangeOwnPassword verifies currentPassword against the stored hash
+// before calling ChangePassword to rotate it. The check is what keeps a
+// stolen session cookie from locking the owner out permanently, since
+// the rotation revokes every session; with it, an attacker holding only
+// the cookie gains nothing, and the owner can still rotate them out.
 func (s *Service) ChangeOwnPassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
 	dbUser, err := s.q.GetUserByID(ctx, userID)
 	if err != nil {

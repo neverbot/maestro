@@ -240,20 +240,10 @@ type createProjectInviteRequest struct {
 }
 
 // handleCreateProjectInvite mints an invite bound to this game and a
-// role. Owner-only — not editor-or-owner the way handleCreateToken is —
-// because an invite is a deferred grant of membership: redeeming it runs
-// the same UpsertMembership handleChangeRole runs directly, and
-// handleChangeRole restricts *every* role change, including a lateral
-// viewer-to-viewer no-op, to an owner. An invite that could grant a role
-// up to and including owner has to be gated at the ceiling of what it can
-// grant, not the floor of what a particular request happens to ask for —
-// an editor-gated check that only rejected an owner-role *request* would
-// still let an editor mint a viewer-role invite, silently doing a slice
-// of what handleChangeRole reserves entirely for owners. This directly
-// answers this task's own "should granting owner require an owner"
-// question: yes, and by construction — there is no per-role branch here
-// to get wrong, because every request this handler accepts already
-// required an owner regardless of which role it names.
+// role. Owner-only, unlike handleCreateToken: an invite is a deferred
+// grant of membership, and it is gated at the ceiling of what it can
+// grant rather than the floor of what one request asks for. There is no
+// per-role branch here to get wrong.
 func (s *Server) handleCreateProjectInvite(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !requireProjectOwner(w, caller, scope, "invite someone into a game") {
 		return

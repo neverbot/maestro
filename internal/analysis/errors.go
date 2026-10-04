@@ -81,18 +81,14 @@ const (
 // UndeclaredError is what an analysis answers when the game it was asked
 // about has told it nothing.
 //
-// **It is emphatically not "no problems found".** A clean bill of health
-// from an engine that had nothing to read is the worst output this
-// package could produce: a designer would believe their game's
-// prerequisites do not loop when the truth is that no relation type
-// declares itself a prerequisite, so no walk had an edge to follow.
+// **It is not "no problems found".** A clean bill of health from an
+// engine that had nothing to read would tell a designer their
+// prerequisites do not loop, when the truth is that no relation type
+// declares itself a prerequisite and no walk had an edge to follow.
 //
-// It carries the catalogue rather than pointing at it — every relation
-// type of the game with its current role and traits — because the
-// recovery is "declare something about your game's relation types" and
-// the caller cannot perform it without the list in front of it. That
-// payload is the reason this error earns a code of its own: no existing
-// code has a place to put it.
+// It carries the catalogue — every relation type with its current role
+// and traits — because the recovery is to declare something about them,
+// and the caller cannot do that without the list.
 type UndeclaredError struct {
 	// Types is every relation type the game has, in the order the
 	// catalogue returned them, each with whatever it currently declares.

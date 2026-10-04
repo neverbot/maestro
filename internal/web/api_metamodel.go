@@ -1000,18 +1000,11 @@ type EntityTypeSummary struct {
 // RelationTypeSummary is one declared relation type, how many edges
 // instance it, and how many of those a schema edit stopped fitting.
 //
-// The endpoint keys are the same two lists relation_types.get answers
-// with, carried here for the home page: twelve verbs with no ends is a
-// list a designer cannot judge, because `hates 11` is right or wrong
-// depending on whether it joins deities or zones. They cost no query —
-// gameCounts already holds the id-to-key map — and they are always a
-// slice, never nil, with the same meaning endpointKeysOf documents: an
-// empty list is "this type accepts any".
-//
-// There is no field count on either summary. Both had one for a day:
-// how much a type declares is a question about that type's schema and
-// it is answered on that type's own page, while this screen answers
-// what the game is made of and how much of it each kind is.
+// The endpoint keys are the two lists relation_types.get answers with,
+// carried here because a verb with no ends cannot be judged: `hates 11`
+// is right or wrong depending on whether it joins deities or zones. They
+// cost no query, and are always a slice: an empty one means the type
+// accepts any.
 type RelationTypeSummary struct {
 	RelationTypeOutput
 	RelationCount  int64    `json:"relation_count"`

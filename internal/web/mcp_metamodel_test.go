@@ -175,6 +175,36 @@ func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
 	}
 }
 
+// TestEveryWholeReplacementWriteSaysSo is here because one of these four
+// descriptions said it and the other three did not, and an agent that
+// built an update from a slim listing emptied fifty-four rows under a
+// correct version claim. The version guards against another writer, not
+// against a half-built payload, so the only thing that can protect a
+// caller is the sentence.
+func TestEveryWholeReplacementWriteSaysSo(t *testing.T) {
+	t.Parallel()
+	f := newMetamodelFixture(t)
+	descriptions := f.srv.ToolDescriptionsForTest()
+	// Each tool, what it must say it replaces, and the read-first call it
+	// must name: the listing that omits the thing is what the mistake was
+	// built from, so naming the reader is half the rule.
+	for tool, phrases := range map[string][]string{
+		"entities.upsert":       {"replaces the row's whole field map", "entities.get"},
+		"relations.upsert":      {"replaces its fields whole", "relations.get"},
+		"types.upsert":          {"replaces the whole declaration", "types.get"},
+		"relation_types.upsert": {"replaces the whole declaration", "relation_types.get"},
+	} {
+		got, ok := descriptions[tool]
+		if !ok {
+			t.Errorf("%s is not served", tool)
+			continue
+		}
+		for _, phrase := range phrases {
+			assert.Should(t, strings.Contains(got, phrase), "%s does not say %q", tool, phrase)
+		}
+	}
+}
+
 // TestTheRenameToolsSayWhatARenameDoesNotDo is the description guard for
 // the one thing an agent will otherwise meet as a surprise.
 func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {

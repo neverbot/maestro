@@ -60,8 +60,10 @@ two stale copies is exactly what it exists to stop.
 Until the surface grows a conflict mode, a re-seed is three steps:
 
 1. `entities.list` the type. The slim listing carries each row's key and
-   its current version, which is all this needs — do not ask for fields
-   you are about to overwrite.
+   its current version, which is all a re-seed needs — you are about to
+   send every field value again anyway, so do not ask for the fields.
+   **This is the only case where the slim listing is enough**; see below
+   for the one that looks like it and is not.
 2. Send the same items back, each with the `expected_version` the
    listing gave for its key.
 3. For a key the listing did not return, send it with no version claim
@@ -75,6 +77,15 @@ meantime.
 
 The same three steps work for edges, with `relations.list` and
 `relations.upsert` in place of the entity pair.
+
+**A re-seed is not a partial update, and the difference is destructive.**
+A re-seed hands back every field it ever wrote, so replacing the row's
+whole map costs nothing. Changing one field and keeping the rest is a
+different call: a write replaces the whole map, so a field you leave out
+is cleared rather than left alone. Read the row first — `entities.get`,
+or the listing with `verbose` — change the one value inside the map you
+read, and send that map. `reference/fields.md` states the rule, and the
+tool's own description states it for the call.
 
 ## Reading the shape back
 

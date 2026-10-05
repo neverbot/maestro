@@ -11,6 +11,18 @@ have cost you by then.
 
 ## The rules that surprise people
 
+**A write replaces a row's whole field map.** `entities.upsert` and
+`relations.upsert` do not merge: a field the item does not name is
+cleared, not left where it stood. So an update is built from the row as
+it is now — `entities.get` and `relations.get` always answer with
+fields, and the two listings do when `verbose` is true — and never from
+a listing that omitted them, which is what a listing does by default.
+The version you send guards you against another writer and not against
+your own half-built payload: it is the correct version of a row you are
+about to empty. `name` is where this gets easy to miss, because it is
+required and an item that forgot it is refused, while a field map
+missing a key looks exactly like a row that never had one.
+
 **An unknown field is an error.** It is never silently dropped, in a row
 or in a declaration. A key you did not declare comes back refused, and a
 typo in a declaration — `defualt`, `has_default`, `lable` — is refused

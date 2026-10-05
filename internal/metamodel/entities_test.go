@@ -112,6 +112,36 @@ func TestEntitiesArea(t *testing.T) {
 		assert.Must(t, second.Name == "Wanted: Hogger (revised)", "Name = %q, want the revised one", second.Name)
 	})
 
+	t.Run("an upsert replaces the whole field map", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:          map[string]any{"min_level": float64(12)},
+			ExpectedVersion: ptrInt32(1),
+		})
+		assert.Must(t, err == nil, "update: %v", err)
+		var stored map[string]any
+		if err := json.Unmarshal(row.Fields, &stored); err != nil {
+			t.Fatalf("stored fields: %v", err)
+		}
+		_, kept := stored["summary"]
+		assert.Must(t, !kept, "summary survived a write that did not name it: this is the "+
+			"behaviour four tool descriptions state, so it is asserted here and not inferred")
+		assert.Must(t, stored["min_level"] == float64(12), "min_level = %v, want the written 12", stored["min_level"])
+	})
+
 	t.Run("upsert entity rejects stale version", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

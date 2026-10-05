@@ -1458,7 +1458,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"a game declares its own. field_schema declares the fields every entity of the " +
 			"type carries and is what entity values are judged against; changing it re-checks " +
 			"every existing entity and marks the ones that no longer fit as invalid rather " +
-			"than deleting them. Idempotent by key, so re-running a seed updates in place. " +
+			"than deleting them. Idempotent by key, so re-running a seed updates in place, and " +
+			"**an update replaces the whole declaration**: a field the schema you send does not " +
+			"name is no longer declared, and every entity carrying a value for it is marked " +
+			"invalid. So an update is built from types.get, which answers with the schema, and " +
+			"not from types.list, which does not. " +
 			"expected_version is required to update an existing type and must match the " +
 			"stored version; on creation there is nothing to match. " + versionClaimDoc,
 		OutputSchema: typeDetailOutputSchema,
@@ -1554,7 +1558,12 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"and marks the ones that no longer fit as invalid rather than deleting them "+
 				"or filling in the missing values, exactly as types.upsert does for "+
 				"entities. relations.list's `invalid` filter is how to find them. "+
-				"Idempotent by key; expected_version is required to update an existing type. %s",
+				"Idempotent by key; expected_version is required to update an existing type, and "+
+				"**an update replaces the whole declaration** — the endpoint lists, the role, the "+
+				"traits and the field schema are what you send and not what you send merged onto "+
+				"what is stored, so an update is built from relation_types.get, which answers "+
+				"with all of it, and not from relation_types.list, which answers with none of "+
+				"it. %s",
 			quotedList(metamodel.SemanticRoles), quotedList(metamodel.AnalysisTraits),
 			traitRefusalDoc(), versionClaimDoc),
 		OutputSchema: relationTypeDetailOutputSchema,
@@ -1625,6 +1634,12 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"\"atomic\" (one transaction; one bad row rolls the whole batch back and nothing "+
 			"is reported as done). Anything else is refused rather than read as partial. "+
 			"Rows are idempotent by (type_key, key), so re-running a seed updates in place; "+
+			"**a write replaces the row's whole field map**, so a field the item does not name is "+
+			"cleared rather than left alone, and an update is therefore built from the row as it "+
+			"stands — entities.get, or entities.list with verbose, both of which answer with "+
+			"fields — and never from a listing that omitted them. "+
+			"name is required and refuses a half-built item where fields cannot: a map missing a "+
+			"key looks exactly like a row that never had one. "+
 			"updating an existing entity requires expected_version, which the written entries "+
 			"of a previous call carry. "+versionClaimDoc+" written names every row that landed with its id and "+
 			"its new version; count is how many. A failure coded \"retryable\" means the "+
@@ -1719,7 +1734,10 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"checked against the relation type's declared endpoint lists, and a violation is "+
 			"endpoint_type_mismatch naming the end that is wrong. "+
 			"**An edge is identified by (relation type, source, target) and carries a "+
-			"version**: writing one that already exists replaces its fields whole and "+
+			"version**: writing one that already exists replaces its fields whole — a field the "+
+			"item does not name is cleared rather than left alone, so an update is built from "+
+			"relations.get, or from relations.list with verbose, and not from a listing that "+
+			"omitted the fields — and "+
 			"requires expected_version, which the written entries of a previous call carry, "+
 			"exactly as entities.upsert does. Sending the wrong one, or none, is "+
 			"version_conflict reporting the version to merge onto — nothing is overwritten. "+

@@ -33,6 +33,8 @@ const {
   fieldsWith,
   fieldList,
   fieldRows,
+  relationGroups,
+  relationList,
   wireFieldEdits,
   BOOL_TRUE,
   CLEAR_HINT,
@@ -55,6 +57,10 @@ const ENTITY = {
   name: "Wanted: Hogger",
   version: 3,
   fields: { min_level: 9, summary: "A gnoll.", faction: "alliance", tags: ["elwynn"] },
+  // The rendering the browser's own route sends beside the values. The
+  // tool's answer carries no such key, which is why the page reads it by
+  // key and shows text when it is not there.
+  fields_html: { summary: "<p>A gnoll.<br>\nIn Elwynn.</p>" },
 };
 
 // --- The controls, on their own ---------------------------------------
@@ -157,6 +163,51 @@ function stage(script) {
   return { list, rows, wired, opened };
 }
 
+// --- An edge's own fields, in a row -----------------------------------
+
+// The same rule the catalogue applies by declared type, applied here by
+// length: this page reads the slim relation type listing, which carries
+// no field schema, so what it knows about a value is how long it is.
+{
+  const long = "notes ".padEnd(130, "x");
+  const groups = relationGroups([
+    { type_key: "grants", source: { type_key: "guild", key: "zulk" }, target: { type_key: "ability", key: "invocar" },
+      fields: { notes: long, tier: "one" } },
+  ], "in", new Map([["grants", "otorga"]]));
+  const list = relationList(doc, "azeroth", groups);
+  const edge = list.children.find((child) => child.getAttribute("class") !== "catalogue-head");
+  const cells = edge.children.filter((child) => (child.getAttribute("class") || "").includes("catalogue-cell"));
+  const clipped = cells.filter((cell) => (cell.getAttribute("class") || "").includes("oneline"));
+  check("an edge field too long for a row is clipped, and a short one is not", clipped.length, 1);
+}
+
+// --- The prose a longtext is ------------------------------------------
+
+// summary is the second declared field, so its value cell is index 1.
+{
+  const rows = fieldRows(SCHEMA, ENTITY);
+  const list = fieldList(doc, rows);
+  const cell = list.children[1 * 3 + 1];
+  check("a longtext cell says it is prose", cell.getAttribute("class"), "field-value field-prose");
+  check("and holds the rendering rather than the source", cell.children[0].innerHTML, "<p>A gnoll.<br>\nIn Elwynn.</p>");
+  check("a field with no rendering is still text", list.children[0 * 3 + 1].textContent, "9");
+
+  // **The regression this is really here for.** editable() replaces the
+  // cell's children with its own, so a page a member can edit flattened
+  // the block back to one line of source the moment the writing was
+  // wired — and every read-only harness passed.
+  const opened = { slug: "azeroth", client: client({ writes: [], reads: [] }), document: doc };
+  wireFieldEdits(doc, opened, { entity: { ...ENTITY }, fieldsList: list, rows }, SCHEMA);
+  // Read defensively, so a cell flattened back to text fails with the
+  // comparison this is about rather than with a TypeError two lines down.
+  const kept = cell.children[0] && cell.children[0].children ? cell.children[0].children[0] : null;
+  check("the rendering survives the writing being wired", kept ? kept.innerHTML : "", "<p>A gnoll.<br>\nIn Elwynn.</p>");
+  // A block, not a span: paragraphs inside an inline element are invalid
+  // nesting and lay out as one line whatever the stylesheet says.
+  check("and the holder it sits in is a block", cell.children[0].tagName, "div");
+  check("and the cell still says it is prose", cell.getAttribute("class"), "field-value field-prose");
+}
+
 // The cells are found by position — label, value, type — so a change to
 // that shape is caught here rather than by a page that quietly wires
 // nothing.
@@ -197,7 +248,7 @@ function cellOf(list, index) {
       { ok: true, result: { written: [{ version: 4 }], failed: [] } },
       { ok: true, result: { written: [{ version: 5 }], failed: [] } },
     ],
-    reads: [],
+    reads: [{ ok: true, result: { fields_html: { summary: "<p>A gnoll, still.</p>" } } }],
   });
   wired[0].open.click();
   wired[0].form.children[0].value = "12";
@@ -206,6 +257,11 @@ function cellOf(list, index) {
   wired[1].form.children[0].value = "A gnoll, still.";
   await wired[1].form.dispatch("submit", { preventDefault() {} });
   check("the second write states the version the first produced", opened.client.calls[1].version, 4);
+  // **A saved longtext is read back for its rendering.** The write
+  // answers with a batch report and this browser cannot render markdown,
+  // so without the re-read a field read as prose until somebody edited it
+  // and as source for the rest of the session.
+  check("a saved longtext is read back", opened.client.calls[2], { call: "getEntity", typeKey: "quest", key: "hogger" });
   check(
     "and carries the first write's value with it",
     opened.client.calls[1].fields.min_level,

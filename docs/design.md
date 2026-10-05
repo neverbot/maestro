@@ -407,6 +407,21 @@ is sans because it is Maestro's furniture around that thing. On the
 prose screen those two sit four lines apart, which is where the rule was
 first visibly broken.
 
+**The Rendered Prose Rule.** A `longtext` value is the game's own writing
+and is markdown, so a screen renders it and never shows the source. It has
+two shapes and the room decides which: on a page with a column to spare it
+is a block, Prose role, capped at the measure, under the first baseline of
+its label; in a 36-pixel row it is one line, clipped, and the whole of it
+is one click away on the thing's own page. The source belongs in the
+control that edits it and nowhere else.
+
+The rendering is the server's, from the one renderer this product has
+(`internal/markdown`, goldmark with no raw HTML and a scheme filter on
+every destination), and it reaches the browser only on the browser's own
+route: an agent asked to rewrite a value is given the markdown it will
+edit. **Two modules insert markup and a guard says which**, because a
+third one is how a name a designer typed becomes a tag.
+
 **The Band Rule.** A screen made of bands is a stack of **peers**: one
 `section` each, one Headline heading each, separated by `xxxl` and by a
 1px `line` rule above every heading after the first. Nothing is ranked

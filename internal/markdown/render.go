@@ -10,6 +10,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
+	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
@@ -33,6 +34,19 @@ var docRenderer = goldmark.New(
 	goldmark.WithParserOptions(parser.WithASTTransformers(
 		util.Prioritized(safeLinks{}, 100),
 	)),
+)
+
+// fieldRenderer is the same renderer with hard wraps, for a field value.
+// **A single newline is a line break here and not in a document**: a
+// document is written as markdown, where a wrapped paragraph is one
+// paragraph, while a longtext field holds lines an agent separated with
+// \n and nothing else — a stat block, a per-game note — and collapsing
+// those into one paragraph is the run-on wall this exists to stop.
+var fieldRenderer = goldmark.New(
+	goldmark.WithParserOptions(parser.WithASTTransformers(
+		util.Prioritized(safeLinks{}, 100),
+	)),
+	goldmark.WithRendererOptions(goldmarkhtml.WithHardWraps()),
 )
 
 // RenderDoc turns one of this repository's own markdown pages into HTML
@@ -130,6 +144,17 @@ func Render(body string) (string, error) {
 	var out bytes.Buffer
 	if err := renderer.Convert([]byte(body), &out); err != nil {
 		return "", fmt.Errorf("render markdown: %w", err)
+	}
+	return out.String(), nil
+}
+
+// RenderField turns one longtext field value into HTML for a reading
+// surface. The caller is the browser: an agent is given the value it
+// wrote. See fieldRenderer for what it does that Render does not.
+func RenderField(value string) (string, error) {
+	var out bytes.Buffer
+	if err := fieldRenderer.Convert([]byte(value), &out); err != nil {
+		return "", fmt.Errorf("render field markdown: %w", err)
 	}
 	return out.String(), nil
 }

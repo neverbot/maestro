@@ -28,6 +28,8 @@ export function createDocument() {
       // `dataset`, because a control that goes busy stashes its idle
       // label there while a write is in flight (app.js setFormBusy).
       this.dataset = {};
+      // What innerHTML stored, if anything did.
+      this.markup = "";
     }
 
     setAttribute(name, value) {
@@ -242,12 +244,22 @@ export function createDocument() {
       return found;
     }
 
+    // **Stored, not parsed.** Two modules in this front end insert markup
+    // and both insert what internal/markdown rendered: doc.js for a
+    // document body and pages/entity.js for a longtext field. A harness
+    // that threw here could not drive either, and a harness that parsed
+    // would be a second HTML parser nobody tested. Which modules may
+    // reach this at all is held by a guard over the sources
+    // (TestOnlyTheRenderedProseIsInsertedAsMarkup) rather than by this
+    // stub, because a stub only sees the modules a harness happens to
+    // load.
     get innerHTML() {
-      throw new Error("stub: innerHTML parses markup, and nothing in this front end may read or write it");
+      return this.markup;
     }
 
-    set innerHTML(_value) {
-      throw new Error("stub: innerHTML parses markup, and nothing in this front end may read or write it");
+    set innerHTML(value) {
+      this.markup = typeof value === "string" ? value : "";
+      this.childNodes.length = 0;
     }
   }
 

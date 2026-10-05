@@ -555,7 +555,7 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request, caller 
 	if !s.requireContentService(w) {
 		return
 	}
-	out, err := entitiesGet(r.Context(), s.deps(), caller, scope.ProjectID, EntitiesGetInput{
+	out, err := entityRead(r.Context(), s.deps(), caller, scope.ProjectID, EntitiesGetInput{
 		TypeKey: r.PathValue("type"), Key: r.PathValue("key"),
 	})
 	if err != nil {

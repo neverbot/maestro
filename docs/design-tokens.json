@@ -474,6 +474,11 @@
         "section": "typography"
       },
       {
+        "name": "The Rendered Prose Rule",
+        "body": "A longtext value is the game's own writing and is markdown: a screen renders it and never shows the source. Two shapes, and the room decides which: a block in the Prose role, capped at the measure, where there is a column for it, and one clipped line in a 36-pixel row, with the whole of it on the thing's own page. The rendering is the server's, from the one renderer this product has, and it reaches the browser only on the browser's own route.",
+        "section": "typography"
+      },
+      {
         "name": "The Band Rule",
         "body": "A screen made of bands is a stack of peers: one section each, one Headline heading each, separated by xxxl and by a 1px line rule above every heading after the first. Nothing is ranked under a band by type size, because no two adjacent roles are far enough apart to say so, and nothing is ranked by face, because a face change means a change of owner. Two bands may stand side by side at 1200px and above, and only when they encode the same unit and are read against each other; the pair shares one grid measurement, and falls back to one column when either side has no rows."
       },

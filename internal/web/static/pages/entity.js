@@ -84,21 +84,33 @@ export function formatValue(type, value) {
 export function fieldRows(schema, entity) {
   const declared = Array.isArray(schema) ? schema : [];
   const values = entity && typeof entity.fields === "object" && entity.fields !== null ? entity.fields : {};
+  const rendered = entity && typeof entity.fields_html === "object" && entity.fields_html !== null
+    ? entity.fields_html
+    : {};
   const seen = new Set();
   const rows = declared
     .filter((field) => field && typeof field.key === "string")
     .map((field) => {
       seen.add(field.key);
       const has = Object.prototype.hasOwnProperty.call(values, field.key) && values[field.key] !== null;
+      const cell = has
+        ? presentCell(field.key, formatValue(field.type, values[field.key]), values[field.key])
+        : absentCell(field.key);
+      // The rendering the browser's own route sent for this value. It is
+      // read by key and not decided by type a second time: the server
+      // renders exactly the longtext fields a row has a value for, and a
+      // key with no entry is a value this page shows as text.
+      if (has) {
+        const html = rendered[field.key];
+        if (typeof html === "string" && html !== "") cell.html = html;
+      }
       return {
         key: field.key,
         label: field.label || field.key,
         type: String(field.type ?? ""),
         required: field.required === true,
         undeclared: false,
-        cell: has
-          ? presentCell(field.key, formatValue(field.type, values[field.key]), values[field.key])
-          : absentCell(field.key),
+        cell,
       };
     });
   for (const key of Object.keys(values).sort()) {
@@ -204,12 +216,17 @@ export function fieldList(doc, rows) {
     list.append(term);
 
     const value = doc.createElement("dd");
-    value.textContent = field.cell.text;
     // `field-value` is what wireFieldEdits finds a cell by. The list
     // stays presentational — it paints a model and knows nothing about
     // writing — exactly as the page head knows nothing about the rename
     // that replaces its button.
     value.className = field.cell.absent ? "field-value absent" : "field-value";
+    if (typeof field.cell.html === "string" && field.cell.html !== "") {
+      value.classList.add("field-prose");
+      value.append(proseBlock(doc, field.cell.html));
+    } else {
+      value.textContent = field.cell.text;
+    }
     list.append(value);
 
     const kind = doc.createElement("dd");
@@ -219,6 +236,29 @@ export function fieldList(doc, rows) {
   }
   return list;
 }
+
+// proseBlock is a longtext value, rendered. **This and doc.js are the
+// only two places in this product that insert markup**, and the
+// argument is the one doc.js states: the string comes from
+// internal/markdown, which is goldmark with no html.WithUnsafe, so a tag
+// a designer or an agent typed arrives as text and a link destination
+// whose scheme is not http, https or mailto arrives as "#". Nothing a
+// game holds can reach the parser through here.
+export function proseBlock(doc, html) {
+  const block = doc.createElement("div");
+  block.className = "prose";
+  block.innerHTML = html;
+  return block;
+}
+
+// ROW_TEXT_MAX is how much text a row can hold and still be one line you
+// can compare with the row under it. **It is a length and not a declared
+// type**, unlike the catalogue's columns: this page lists edges, and the
+// slim relation type listing it reads carries no field schema, so what
+// it knows about a value is how long it is. A longtext on an edge wrapped
+// to six lines here, on the screen the catalogue's own fix was reported
+// from.
+const ROW_TEXT_MAX = 120;
 
 // relationList paints one direction. The relation type heads its group,
 // the far end is a link to that entity's own page, and the edge's fields
@@ -269,7 +309,10 @@ export function relationList(doc, slug, groups) {
       const item = row(doc, {
         label: edge.far === null ? t("entity.endGone") : edge.far.name || edge.far.key,
         key: edge.far === null ? "" : edge.far.type + "/" + edge.far.key,
-        cells: edge.fields.map((field) => ({ text: field.key + " " + field.cell.text })),
+        cells: edge.fields.map((field) => {
+          const text = field.key + " " + field.cell.text;
+          return { text, oneline: text.length > ROW_TEXT_MAX };
+        }),
         count: "",
         flag: edge.invalid ? "invalid" : "",
         href: edge.far === null ? "" : entityURL(slug, edge.far.type, edge.far.key),
@@ -525,8 +568,17 @@ export function wireFieldEdits(doc, opened, model, schema) {
 // and — once pressed — the control, Save, Cancel and a sentence of its
 // own.
 function editable(doc, opened, cell, field, hooks) {
-  const shown = doc.createElement("span");
-  shown.textContent = cell.textContent;
+  // **A prose field keeps its rendering when the page becomes writable.**
+  // This function replaces the cell's children with its own, so without
+  // the three lines below a longtext was rendered by fieldList and
+  // flattened back to one line of source the moment the writing was
+  // wired — which is to say on every page a member can edit, and on none
+  // of the read-only panels the module tests drove.
+  const isProse = String(cell.className || "").includes("field-prose");
+  const first = isProse && typeof cell.querySelector === "function" ? cell.querySelector(".prose") : null;
+  const startHTML = first ? first.innerHTML : "";
+  const shown = doc.createElement(isProse ? "div" : "span");
+  if (!isProse) shown.textContent = cell.textContent;
   const wasAbsent = String(cell.className || "").includes("absent");
 
   const open = doc.createElement("button");
@@ -544,12 +596,22 @@ function editable(doc, opened, cell, field, hooks) {
   const error = doc.createElement("p");
   error.className = "error";
 
-  const draw = (value, absent) => {
-    shown.textContent = value;
-    cell.className = absent ? "field-value absent" : "field-value";
+  const draw = (value, absent, html) => {
+    // The class says the cell *holds* a block, not that the field could
+    // have one: a longtext somebody cleared is an absence and wears the
+    // absence's own treatment, with nothing to render inside it.
+    const holds = isProse && typeof html === "string" && html !== "";
+    if (holds) {
+      shown.replaceChildren(proseBlock(doc, html));
+    } else {
+      shown.replaceChildren();
+      shown.textContent = value;
+    }
+    const base = holds ? "field-value field-prose" : "field-value";
+    cell.className = absent ? base + " absent" : base;
     cell.replaceChildren(shown, open, form, error);
   };
-  draw(cell.textContent, wasAbsent);
+  draw(cell.textContent, wasAbsent, startHTML);
 
   let control = null;
   const close = () => {
@@ -625,11 +687,12 @@ function editable(doc, opened, cell, field, hooks) {
           field,
           read,
           error,
-          settled: (next) => {
+          settled: async (next) => {
             hooks.settled(next);
             const values = next.fields || {};
             const has = Object.prototype.hasOwnProperty.call(values, field.key) && values[field.key] !== null;
-            draw(has ? formatValue(field.type, values[field.key]) : absentTextFor(field.label || field.key), !has);
+            draw(has ? formatValue(field.type, values[field.key]) : absentTextFor(field.label || field.key), !has,
+              isProse && has ? await renderedFor(opened, next, field.key) : "");
             close();
           },
         });
@@ -648,11 +711,28 @@ function editable(doc, opened, cell, field, hooks) {
     hooks.settled(next);
     draw(read.absent === true
       ? absentTextFor(field.label || field.key)
-      : formatValue(field.type, read.value), read.absent === true);
+      : formatValue(field.type, read.value), read.absent === true,
+    isProse && read.absent !== true ? await renderedFor(opened, next, field.key) : "");
     close();
   });
 
   return { cell, open, form };
+}
+
+// renderedFor re-reads the row for one field's rendering. A write answers
+// with a batch report and this browser cannot render markdown itself, so
+// the alternative is a field that reads as prose until the moment somebody
+// edits it and as source afterwards. A failed re-read is not a failure of
+// the save: the value landed, and the source the page already holds is
+// what it falls back to.
+async function renderedFor(opened, entity, key) {
+  const again = await opened.client.getEntity(entity.type_key, entity.key);
+  if (!again || !again.ok) return "";
+  const map = again.result && typeof again.result.fields_html === "object" && again.result.fields_html !== null
+    ? again.result.fields_html
+    : {};
+  const html = map[key];
+  return typeof html === "string" ? html : "";
 }
 
 // resolveFieldConflict is the rename's conflict, about a value.
@@ -694,7 +774,7 @@ async function resolveFieldConflict(doc, opened, spec) {
       box.hidden = true;
       const refused = again.ok && Array.isArray(again.result.failed) ? again.result.failed[0] : null;
       if (again.ok && !refused) {
-        spec.settled({
+        await spec.settled({
           ...spec.entity,
           fields: fieldsWith(values, spec.field.key, spec.read),
           version: current.result.version + 1,
@@ -709,9 +789,9 @@ async function resolveFieldConflict(doc, opened, spec) {
     };
   }
   if (take) {
-    take.onclick = () => {
+    take.onclick = async () => {
       box.hidden = true;
-      spec.settled({ ...spec.entity, fields: values, version: current.result.version });
+      await spec.settled({ ...spec.entity, fields: values, version: current.result.version });
     };
   }
 }

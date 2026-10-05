@@ -143,17 +143,14 @@ check("theDOMStubStartsWhereTheAssertionsBegin", () => {
   }
   assert(threw !== null, "setAttribute refuses a non-string value");
 
-  // Both directions of the one sink this component exists to avoid.
-  for (const direction of ["read", "write"]) {
-    let caught = null;
-    try {
-      if (direction === "read") void element.innerHTML;
-      else element.innerHTML = "<b>x</b>";
-    } catch (err) {
-      caught = err;
-    }
-    assert(caught !== null, `innerHTML throws on ${direction}`);
-  }
+  // The one sink this component exists to avoid. The stub stores markup
+  // rather than refusing it — two modules in this front end insert what
+  // internal/markdown rendered, and a harness that threw could not drive
+  // them — so what this asserts is that the renderers reach it through a
+  // property of their own element and that nothing is parsed out of it.
+  element.innerHTML = "<b>x</b>";
+  assertEqual(element.innerHTML, "<b>x</b>", "the stub stores markup verbatim");
+  assertEqual(element.childNodes.length, 0, "the stub parses no children out of markup");
 
   // And a namespace is required, so "this landed in the SVG namespace"
   // cannot be satisfied by a default.

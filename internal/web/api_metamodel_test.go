@@ -1656,3 +1656,54 @@ func TestRESTRelationsUpsertTakesAnExpectedVersion(t *testing.T) {
 			report.Written[0].Version)
 	}
 }
+
+// TestRESTAnEntitysProseArrivesRenderedAndMCPsDoesNot is the split
+// internal/markdown's header states, asserted at both ends of it: the
+// browser's route carries the longtext rendered, and the tool answers
+// with the markdown an agent would edit.
+func TestRESTAnEntitysProseArrivesRenderedAndMCPsDoesNot(t *testing.T) {
+	t.Parallel()
+	f := newRESTFixture(t)
+	rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests",
+		"field_schema": []any{
+			map[string]any{"key": "summary", "type": "longtext"},
+			map[string]any{"key": "hint", "type": "text"},
+		},
+	})
+	assert.Must(t, rec.Code == http.StatusOK, "declare quest type = %d: %s", rec.Code, rec.Body.String())
+
+	rec = f.as(t, http.MethodPost, "/entities", map[string]any{
+		"items": []any{map[string]any{
+			"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger",
+			"fields": map[string]any{
+				"summary": "First line\nsecond line\n\nA new paragraph with **weight**.",
+				"hint":    "Not prose, and **not rendered**.",
+			},
+		}},
+	})
+	assert.Must(t, rec.Code == http.StatusOK, "create = %d: %s", rec.Code, rec.Body.String())
+
+	read := f.as(t, http.MethodGet, "/entities/by-key/quest/hogger", nil)
+	assert.Must(t, read.Code == http.StatusOK, "read = %d: %s", read.Code, read.Body.String())
+	var browser struct {
+		Fields     map[string]any    `json:"fields"`
+		FieldsHTML map[string]string `json:"fields_html"`
+	}
+	assert.NoErr(t, json.Unmarshal(read.Body.Bytes(), &browser), "decode the browser's answer")
+	assert.Must(t, strings.Contains(browser.FieldsHTML["summary"], "<strong>weight</strong>"), "summary came back unrendered: %q", browser.FieldsHTML["summary"])
+	assert.Must(t, strings.Contains(browser.FieldsHTML["summary"], "<br"), "the single newline was collapsed: %q", browser.FieldsHTML["summary"])
+	_, renderedHint := browser.FieldsHTML["hint"]
+	assert.Must(t, !renderedHint, "a text field was rendered: only a longtext is prose")
+	assert.Must(t, browser.Fields["summary"] == "First line\nsecond line\n\nA new paragraph with **weight**.", "the raw value did not survive beside the rendering: %v", browser.Fields["summary"])
+
+	// And the tool, which is the half that must not change.
+	out, err := web.MCPEntitiesGet(context.Background(), f.deps(), f.caller(), f.game, web.EntitiesGetInput{
+		TypeKey: "quest", Key: "hogger",
+	})
+	assert.NoErr(t, err, "MCPEntitiesGet")
+	encoded, err := json.Marshal(out)
+	assert.NoErr(t, err, "marshal the tool's answer")
+	assert.Must(t, !strings.Contains(string(encoded), "fields_html"), "the agent's answer carries a rendering: %s", encoded)
+	assert.Must(t, !strings.Contains(string(encoded), "<strong>"), "the agent's answer carries markup: %s", encoded)
+}

@@ -1820,6 +1820,21 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   font-variant-numeric: tabular-nums;
 }
 
+/* **In a row, prose is a lead-in and not the text.** A longtext column
+   held six hundred characters that wrapped to five lines and took the
+   36-pixel row with it, on a list whose whole claim is that a row is one
+   line you can compare with the row under it. One line, clipped, and the
+   whole of it is on the entity's own page, which is where a value this
+   long is read. The cap is what bounds the track: the three content
+   tracks are `auto`, so without it the cell's own max-content is the
+   column width. */
+.catalogue-cell.oneline {
+  max-width: 28rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The italic is what tells a mark from a value. */
 .catalogue-cell.absent {
   font-style: italic;
@@ -2485,6 +2500,23 @@ dl.fields dd.field-value {
   align-items: baseline;
   gap: var(--s2);
 }
+
+/* **A longtext is the game's own writing, so it is read and not parsed by
+   eye.** The value arrives rendered from the browser's own route and the
+   cell stops being a line beside its label: the flex row above lays two
+   paragraphs out side by side, and the source it used to show put a stat
+   block and three sentences on one wrapped line. The label stays on the
+   first baseline of the prose, which is what keeps the column of labels
+   readable down a row four paragraphs tall. */
+dl.fields dd.field-prose {
+  display: block;
+}
+/* The block carries the measure and nothing else: `.prose` is the one
+   statement of what the game's writing looks like, and a second one here
+   would be the Build It Once rule broken inside the rule's own system. */
+dl.fields dd.field-prose .prose > :first-child { margin-top: 0; }
+dl.fields dd.field-prose .prose > :last-child { margin-bottom: 0; }
+dl.fields dd.field-prose .field-edit { margin-top: var(--s2); }
 
 /* The quiet control: a button that is not the point of the screen. The
    field editor's "Edit" was the first, and the clause stack's "Remove"

@@ -138,6 +138,16 @@ check("a content row names its cells too",
   [line.getAttribute("role"), ...line.children.map((c) => c.getAttribute("role"))],
   ["row", "cell", "cell", "cell", "cell", "cell", "cell", "cell"]);
 
+// A value too long for a row is clipped to one line by a class, because
+// the three content tracks size to what is in them: a six-hundred
+// character longtext made the column that wide and the row five lines
+// tall.
+{
+  const prose = row(doc, { label: "Hogger", key: "hogger", cells: [{ text: "A gnoll.", oneline: true }], count: "" });
+  check("a cell that cannot hold its value says so", prose.children[2].getAttribute("class"), "catalogue-cell oneline");
+  check("and an ordinary cell does not", line.children[2].getAttribute("class"), "catalogue-cell");
+}
+
 // **aria-sort, and the button's name, are two answers to two
 // questions.** The button says what pressing it would do; aria-sort says
 // how the table is ordered right now, which is what a reader arriving at

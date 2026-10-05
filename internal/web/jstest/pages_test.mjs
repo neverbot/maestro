@@ -821,6 +821,47 @@ check("theCatalogueSpellsAValueTheWayTheEntityPageDoes", async () => {
   );
 });
 
+check("aLongtextColumnIsAOneLineLeadInAndNotTheText", async () => {
+  const dom = mount({
+    ids: CATALOGUE_IDS,
+    pathname: "/g/azeroth/t/quest",
+    routes: [
+      [(url) => url === base + "/types/by-key/quest", {
+        body: {
+          key: "quest", label: "Quest", label_plural: "Quests",
+          field_schema: [
+            { key: "summary", type: "longtext" },
+            { key: "min_level", type: "number" },
+          ],
+        },
+      }],
+      [(url) => url.startsWith(base + "/entities"), {
+        body: {
+          items: [{
+            type_key: "quest", key: "hogger", name: "Wanted: Hogger",
+            fields: { summary: "A gnoll.\nIn Elwynn.", min_level: 9 },
+          }],
+        },
+      }],
+      events,
+    ],
+  });
+  await load("catalogue");
+  const row = dom.elements["entities"].children.find((child) => child.className !== "catalogue-head");
+  const cells = row.children.filter((child) => child.className.includes("catalogue-cell"));
+  // The row keeps its one line: a six-hundred character value in an
+  // `auto` track made the column that wide and the row five lines tall,
+  // and the whole of a value this long is read on the entity's own page.
+  assert(
+    cells[0].className.includes("oneline"),
+    `a longtext column is not clipped: ${JSON.stringify(cells[0].className)}`,
+  );
+  assert(
+    !cells[1].className.includes("oneline"),
+    `a number column is clipped too: ${JSON.stringify(cells[1].className)}`,
+  );
+});
+
 // --- The relation type's own page -------------------------------------
 
 check("aRelationTypeSaysWhatItJoinsAndWhatAWalkMakesOfIt", async () => {

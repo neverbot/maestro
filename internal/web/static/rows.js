@@ -96,6 +96,8 @@ export function row(doc, spec) {
     const value = doc.createElement("span");
     value.className = cell && cell.absent ? "catalogue-cell absent" : "catalogue-cell";
     if (cell && cell.numeric) value.classList.add("numeric");
+    // A value too long for a row says so, and the row stays one line.
+    if (cell && cell.oneline) value.classList.add("oneline");
     // A cell whose meaning has a treatment of its own — a route's three
     // states are the only one today. It is a class and not a colour at
     // the call site, so the stylesheet stays the one place a meaning is

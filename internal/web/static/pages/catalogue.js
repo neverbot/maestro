@@ -23,7 +23,7 @@ import {
 import { ABSENT_MARK, nextCursorOf } from "../rows.js";
 import { t } from "../i18n.js";
 import { headerRow, row } from "../rows.js";
-import { formatValue } from "./entity.js";
+import { FIELD_LONGTEXT, formatValue } from "./entity.js";
 import { goToLogin } from "../app.js";
 
 
@@ -192,7 +192,11 @@ export async function cataloguePage(opened) {
       // "no" on its own page, and a list of tags read "elwynn,quest"
       // here and "elwynn, quest" there: two spellings of one value, on
       // two screens a designer moves between by clicking a row.
-      return { text: formatValue(field.type, value), numeric: field.type === "number" };
+      return {
+        text: formatValue(field.type, value),
+        numeric: field.type === "number",
+        oneline: field.type === FIELD_LONGTEXT,
+      };
     });
   }
 

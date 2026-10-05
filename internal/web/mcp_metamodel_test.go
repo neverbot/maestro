@@ -205,6 +205,31 @@ func TestEveryWholeReplacementWriteSaysSo(t *testing.T) {
 	}
 }
 
+// TestEveryToolThatTouchesALongtextSaysItIsMarkdown. A game's prose is
+// read by a person and rendered on the way, so what an agent writes into
+// a longtext is not what a reader sees. That is a contract, and an agent
+// that has not been told it writes a value whose newlines a reader never
+// meets — which is the shape the entity page was reported in.
+func TestEveryToolThatTouchesALongtextSaysItIsMarkdown(t *testing.T) {
+	t.Parallel()
+	f := newMetamodelFixture(t)
+	descriptions := f.srv.ToolDescriptionsForTest()
+	// The two that declare a longtext and the two that write one. A tool
+	// missing from this list is a surface where the rule is not on the
+	// wire at the moment it applies.
+	for _, tool := range []string{
+		"types.upsert", "relation_types.upsert", "entities.upsert", "relations.upsert",
+	} {
+		got, ok := descriptions[tool]
+		if !ok {
+			t.Errorf("%s is not served", tool)
+			continue
+		}
+		assert.Should(t, strings.Contains(got, "A longtext value is markdown"), "%s does not say a longtext is markdown", tool)
+		assert.Should(t, strings.Contains(got, "single newline is a line break"), "%s does not say what a newline does, which is the half a reader notices", tool)
+	}
+}
+
 // TestTheRenameToolsSayWhatARenameDoesNotDo is the description guard for
 // the one thing an agent will otherwise meet as a surprise.
 func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {

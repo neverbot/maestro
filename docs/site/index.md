@@ -63,6 +63,11 @@ with both values named rather than one of them quietly winning:
 - an entity's field values,
 - a document's body.
 
+A long text field holds markdown, and so does a document: you write the
+source and read it set, with paragraphs where the blank lines are. The
+screens that show one in full render it; a catalogue row shows its first
+line, because a row is something to compare with the row under it.
+
 An agent writing those same values writes a whole row at a time, or says
 it is changing one field and leaving the rest. It has to be one or the
 other: a write that names a single field and does not say so clears the

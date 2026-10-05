@@ -40,8 +40,8 @@ Everything else in Maestro — catalogues, place graphs, mission lists with
 their preconditions, progression trees — is a **view** over those four.
 There is no fifth primitive and no built-in notion of a quest.
 
-Every field an entity or an edge carries is one of these types, and there
-are exactly six:
+Every field an entity or an edge carries is one of these six, and a
+`longtext` holds markdown (`reference/fields.md` has the rest):
 
 ```vocab:field_types
 text longtext number bool enum list<text>

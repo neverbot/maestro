@@ -14,6 +14,9 @@ call.
 objective summary is a field, because somebody will want to filter or
 draw it; its dialogue script is a document, because nobody will ever
 query inside it and it would make every listing of that type expensive.
+**Both are markdown** and both are rendered for a reader, so the choice
+is about what the prose costs a listing and what a query can reach, never
+about what it may look like.
 
 Frontmatter is stored and echoed back, never interpreted. It declares no
 fields and creates no attachments, so nothing you write there becomes

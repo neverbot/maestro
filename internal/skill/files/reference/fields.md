@@ -114,9 +114,18 @@ can tell you that the mistake was made at declaration time.
   numbers and no list of enums — and it is the one field type whose
   membership test is indexed. A tag set belongs here; a set of
   references to other entities does not, because that is a relation.
-- **`longtext`** is prose short enough to sit in a table cell. Anything a
-  query, a view or an analysis would ever have to read **inside** is a
-  document instead; `reference/documents.md` draws that line.
+- **`longtext`** is prose, and **prose here is markdown**. A blank line
+  starts a paragraph, a single newline is a line break, and that is what
+  a person reads: every screen that shows one in full renders it. Write
+  the markdown, not the rendering — HTML is not admitted, a tag you write
+  arrives as the characters you typed, and a link whose scheme is not
+  `http`, `https` or `mailto` arrives pointing at nothing. **`text` is
+  one line and is never rendered**, so a value with a line break in it is
+  a `longtext` and not a long `text`. Keep it short enough that a listing
+  can carry it — a catalogue row shows its first line and the whole of it
+  is read on the thing's own page — and anything a query, a view or an
+  analysis would ever have to read **inside** is a document instead;
+  `reference/documents.md` draws that line.
 
 ## Where the caps and the exact refusals are
 

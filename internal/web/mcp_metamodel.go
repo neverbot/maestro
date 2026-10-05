@@ -1381,6 +1381,17 @@ var versionClaimDoc = "**A version claim is a claim about a row that exists.** S
 	"edge, position, saved-view reference and attachment that named the old one would go " +
 	"on naming nothing. Send it again with no expected_version to re-create it deliberately."
 
+// longtextDoc is the one statement of what a longtext field holds,
+// carried by every tool that declares one and every tool that writes one.
+// A game's prose is read by a person, and what a person sees is not the
+// characters an agent sent.
+var longtextDoc = "**A longtext value is markdown.** A blank line starts a paragraph and a single " +
+	"newline is a line break, and that is what a reader gets: a screen showing one in full " +
+	"renders it. HTML is not markdown here — a tag arrives as the characters you typed, and " +
+	"a link whose scheme is not http, https or mailto arrives pointing nowhere. text is one " +
+	"line and is never rendered, so prose with a line break in it is a longtext and not a " +
+	"long text."
+
 func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	// The two halves of the repair tools' descriptions, written once and
 	// used by both, because a rule stated twice is a rule that drifts:
@@ -1475,7 +1486,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"**an update replaces the whole declaration**: a field the schema you send does not " +
 			"name is no longer declared, and every entity carrying a value for it is marked " +
 			"invalid. So an update is built from types.get, which answers with the schema, and " +
-			"not from types.list, which does not. " +
+			"not from types.list, which does not. " + longtextDoc + " " +
 			"expected_version is required to update an existing type and must match the " +
 			"stored version; on creation there is nothing to match. " + versionClaimDoc,
 		OutputSchema: typeDetailOutputSchema,
@@ -1576,7 +1587,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"traits and the field schema are what you send and not what you send merged onto "+
 				"what is stored, so an update is built from relation_types.get, which answers "+
 				"with all of it, and not from relation_types.list, which answers with none of "+
-				"it. %s",
+				"it. "+longtextDoc+" %s",
 			quotedList(metamodel.SemanticRoles), quotedList(metamodel.AnalysisTraits),
 			traitRefusalDoc(), versionClaimDoc),
 		OutputSchema: relationTypeDetailOutputSchema,
@@ -1659,7 +1670,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"merge onto a row the invalid filter reports is refused by the stale keys that row "+
 			"still carries: repair it with entities.repair, or write it whole. "+
 			"name is required and refuses a half-built item where fields cannot: a map missing a "+
-			"key looks exactly like a row that never had one. "+
+			"key looks exactly like a row that never had one. "+longtextDoc+" "+
 			"updating an existing entity requires expected_version, which the written entries "+
 			"of a previous call carry. "+versionClaimDoc+" written names every row that landed with its id and "+
 			"its new version; count is how many. A failure coded \"retryable\" means the "+
@@ -1766,6 +1777,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			versionClaimDoc+" "+
 			"An edge's fields are validated against the relation type's field_schema, and a "+
 			"successful write clears any invalid flag a schema edit had put on it. "+
+			longtextDoc+" "+
 			"A game cannot hold two edges of one "+
 			"relation type between the same ordered pair — say the second meaning as its own "+
 			"relation type, or as a field on the one edge.", metamodel.MaxBulkItems),

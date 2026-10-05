@@ -119,7 +119,9 @@ If a query, a view or an analysis would ever need to read **inside** it,
 it does not belong in a document. `longtext` is prose short enough to
 sit in a table cell — a one-line objective, a flavour sentence. A
 dialogue script, a chapter of lore, the game bible: those are documents,
-attached to the entity they belong to.
+attached to the entity they belong to. Both hold markdown, so this is a
+decision about cost and reach and not about formatting;
+`reference/fields.md` has what a `longtext` admits.
 
 The cost of putting a novel in a `longtext` field is paid by everyone
 who lists that type afterwards. The cost of putting a queryable value in

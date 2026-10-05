@@ -11,6 +11,47 @@ export const ABSENT_MARK = "\u2014";
 // gives an HTMLUnknownElement that renders nothing.
 export const SVG_NS = "http://www.w3.org/2000/svg";
 
+// **The two marks a boolean column draws, and why they are drawn here.**
+// The shipped font subset carries no check and no cross — Fira Sans's
+// latin subset stops at punctuation — so a glyph would be a fallback to
+// whatever the reader's machine has, or nothing at all. These are two
+// paths on a 16 box, the same way the share bar is an SVG rect: this
+// product has no icon set and needs none for two shapes.
+//
+// The cross is **not** the danger treatment. A false is an ordinary
+// value and not a thing that needs attention, so it is drawn in the
+// muted ink the stylesheet gives it and the shape alone carries the
+// meaning — which is also what keeps it legible to a reader who sees no
+// colour. A third state, no value at all, stays the em dash: three
+// states, three shapes.
+export const BOOL_MARKS = {
+  yes: "M3 8.5 L6.5 12 L13 4",
+  no: "M4 4 L12 12 M12 4 L4 12",
+};
+
+// boolMark draws one of them.
+export function boolMark(doc, kind) {
+  const path = BOOL_MARKS[kind] || BOOL_MARKS.no;
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "13");
+  svg.setAttribute("height", "13");
+  // The word beside it is the cell's accessible name, so the drawing
+  // itself is decoration as far as a screen reader is concerned.
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "mark mark-" + kind);
+  const line = doc.createElementNS(SVG_NS, "path");
+  line.setAttribute("d", path);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", "currentColor");
+  line.setAttribute("stroke-width", kind === "yes" ? "2" : "1.75");
+  line.setAttribute("stroke-linecap", "round");
+  line.setAttribute("stroke-linejoin", "round");
+  svg.append(line);
+  return svg;
+}
+
+
 // byWeight orders a catalogue by how much of the game each row is, and
 // shares out the proportion. Alphabetical order hid the shape: in
 // RL-Aeternum `rinde culto a` is 45 of 95 connections, nearly half the
@@ -104,7 +145,16 @@ export function row(doc, spec) {
     // spelled.
     if (cell && cell.status) value.classList.add("status", cell.status);
     value.setAttribute("role", "cell");
-    value.textContent = cell ? (cell.text ?? "") : "";
+    // **A yes or a no is drawn, not spelled.** A column of "sí" and "no"
+    // is two words of the same length and the same weight, and the
+    // pattern a designer came to see is not in it. The word is still the
+    // cell's accessible name, below.
+    if (cell && cell.mark) {
+      value.classList.add("marked");
+      value.append(boolMark(doc, cell.mark));
+    } else {
+      value.textContent = cell ? (cell.text ?? "") : "";
+    }
     // What a mark means, for a reader who cannot see the column.
     if (cell && cell.name) value.setAttribute("aria-label", cell.name);
     item.append(value);

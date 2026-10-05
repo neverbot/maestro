@@ -508,6 +508,11 @@
         "section": "components"
       },
       {
+        "name": "The Drawn Boolean Rule",
+        "body": "A yes or a no is a mark and not a word: a check for true, a cross for false, the em dash of a Named Absence where there is no value. Three states, three shapes, and the shape carries the meaning — the cross is muted ink and never the alarm, since a false is an ordinary value. The word stays as the cell's accessible name, and the same spelling is used wherever the value appears. The two marks are two paths rather than an icon set: the shipped font subset carries no check, and two shapes do not justify a library.",
+        "section": "components"
+      },
+      {
         "name": "The Shadow Boundary Rule",
         "body": "An element selector in the global stylesheet does not reach inside a component's shadow root, and custom properties do. No component writes a bare button rule of its own; every one adopts the shared control stylesheet written in terms of var(--...).",
         "section": "components"

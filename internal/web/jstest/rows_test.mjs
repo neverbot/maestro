@@ -148,6 +148,37 @@ check("a content row names its cells too",
   check("and an ordinary cell does not", line.children[2].getAttribute("class"), "catalogue-cell");
 }
 
+// A boolean is drawn, because a column of two words of the same length
+// and the same weight carries no pattern to scan. The word stays as the
+// cell's accessible name: the drawing says nothing to a reader who
+// cannot see it.
+{
+  const yes = row(doc, { label: "Elfos", key: "elf", cells: [{ mark: "yes", name: "sí" }], count: "" });
+  const no = row(doc, { label: "Drow", key: "drow", cells: [{ mark: "no", name: "no" }], count: "" });
+  const cellOf = (r) => r.children[2];
+  // Read defensively: a cell that went back to spelling the word fails
+  // with the comparison this is about rather than with a TypeError.
+  const drawingIn = (r) => cellOf(r).children[0] || null;
+  const pathOf = (r) => {
+    const svg = drawingIn(r);
+    const line = svg && svg.children ? svg.children[0] : null;
+    return line ? line.getAttribute("d") : "";
+  };
+  check("a true draws a mark rather than a word",
+    [cellOf(yes).textContent, cellOf(yes).children.length, drawingIn(yes) ? drawingIn(yes).tagName : ""],
+    ["", 1, "svg"]);
+  check("the two marks are different drawings",
+    [pathOf(yes), pathOf(no)],
+    ["M3 8.5 L6.5 12 L13 4", "M4 4 L12 12 M12 4 L4 12"]);
+  check("and the word is what the cell is called", cellOf(no).getAttribute("aria-label"), "no");
+  // The drawing itself is decoration: the cell is already named, and a
+  // reader hearing "no" and then "graphic" hears the value twice.
+  check("the drawing says nothing on its own", drawingIn(no) ? drawingIn(no).getAttribute("aria-hidden") : "", "true");
+  // The namespace, because createElement gives an HTMLUnknownElement
+  // that renders nothing and looks identical in a DOM dump.
+  check("the mark is in the SVG namespace", drawingIn(yes) ? drawingIn(yes).namespaceURI : "", "http://www.w3.org/2000/svg");
+}
+
 // **aria-sort, and the button's name, are two answers to two
 // questions.** The button says what pressing it would do; aria-sort says
 // how the table is ordered right now, which is what a reader arriving at

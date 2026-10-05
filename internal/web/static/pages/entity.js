@@ -3,7 +3,7 @@
 
 import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
 import { t } from "../i18n.js";
-import { CATALOGUE_CELLS, row } from "../rows.js";
+import { CATALOGUE_CELLS, boolMark, row } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
   ROLE_VIEWER,
@@ -74,7 +74,12 @@ export function formatValue(type, value) {
     default:
       // A type this interface has not been taught is still shown: an
       // unknown type is a reason to render the JSON text, never a reason
-      // to hide a value the game holds.
+      // to hide a value the game holds. **A boolean is the exception**,
+      // because JSON spells it `true` and that is a word in one language
+      // on a screen in another — and this branch is where an edge's
+      // fields arrive, the relation type listing being slim enough to
+      // carry no schema.
+      if (typeof value === "boolean") return value ? BOOL_TRUE : BOOL_FALSE;
       return typeof value === "string" ? value : JSON.stringify(value);
   }
 }
@@ -103,6 +108,13 @@ export function fieldRows(schema, entity) {
       if (has) {
         const html = rendered[field.key];
         if (typeof html === "string" && html !== "") cell.html = html;
+        // A boolean is drawn here too, and not only in a catalogue: one
+        // value spelled two ways on two screens is the defect this
+        // product keeps reporting against itself.
+        if (field.type === FIELD_BOOL && typeof values[field.key] === "boolean") {
+          cell.mark = values[field.key] ? "yes" : "no";
+          cell.name = values[field.key] ? BOOL_TRUE : BOOL_FALSE;
+        }
       }
       return {
         key: field.key,
@@ -224,6 +236,10 @@ export function fieldList(doc, rows) {
     if (typeof field.cell.html === "string" && field.cell.html !== "") {
       value.classList.add("field-prose");
       value.append(proseBlock(doc, field.cell.html));
+    } else if (field.cell.mark) {
+      value.classList.add("marked");
+      value.setAttribute("aria-label", field.cell.name || field.cell.text);
+      value.append(boolMark(doc, field.cell.mark));
     } else {
       value.textContent = field.cell.text;
     }
@@ -577,6 +593,11 @@ function editable(doc, opened, cell, field, hooks) {
   const isProse = String(cell.className || "").includes("field-prose");
   const first = isProse && typeof cell.querySelector === "function" ? cell.querySelector(".prose") : null;
   const startHTML = first ? first.innerHTML : "";
+  // The same trap the prose met: a drawn boolean is a child of the cell,
+  // and this function replaces the cell's children with its own.
+  const drawn = typeof cell.querySelector === "function" ? cell.querySelector(".mark") : null;
+  const startMark = drawn ? String(drawn.getAttribute("class") || "").replace("mark mark-", "") : "";
+  const startName = cell.getAttribute ? cell.getAttribute("aria-label") : "";
   const shown = doc.createElement(isProse ? "div" : "span");
   if (!isProse) shown.textContent = cell.textContent;
   const wasAbsent = String(cell.className || "").includes("absent");
@@ -596,22 +617,26 @@ function editable(doc, opened, cell, field, hooks) {
   const error = doc.createElement("p");
   error.className = "error";
 
-  const draw = (value, absent, html) => {
+  const draw = (value, absent, html, mark, name) => {
     // The class says the cell *holds* a block, not that the field could
     // have one: a longtext somebody cleared is an absence and wears the
     // absence's own treatment, with nothing to render inside it.
     const holds = isProse && typeof html === "string" && html !== "";
     if (holds) {
       shown.replaceChildren(proseBlock(doc, html));
+    } else if (mark) {
+      shown.replaceChildren(boolMark(doc, mark));
     } else {
       shown.replaceChildren();
       shown.textContent = value;
     }
-    const base = holds ? "field-value field-prose" : "field-value";
+    const base = holds ? "field-value field-prose" : mark ? "field-value marked" : "field-value";
     cell.className = absent ? base + " absent" : base;
+    if (mark) cell.setAttribute("aria-label", name || value);
+    else if (cell.removeAttribute) cell.removeAttribute("aria-label");
     cell.replaceChildren(shown, open, form, error);
   };
-  draw(cell.textContent, wasAbsent, startHTML);
+  draw(cell.textContent, wasAbsent, startHTML, startMark, startName);
 
   let control = null;
   const close = () => {
@@ -691,8 +716,11 @@ function editable(doc, opened, cell, field, hooks) {
             hooks.settled(next);
             const values = next.fields || {};
             const has = Object.prototype.hasOwnProperty.call(values, field.key) && values[field.key] !== null;
-            draw(has ? formatValue(field.type, values[field.key]) : absentTextFor(field.label || field.key), !has,
-              isProse && has ? await renderedFor(opened, next, field.key) : "");
+            const current = values[field.key];
+            const marked = has && field.type === FIELD_BOOL && typeof current === "boolean";
+            draw(has ? formatValue(field.type, current) : absentTextFor(field.label || field.key), !has,
+              isProse && has ? await renderedFor(opened, next, field.key) : "",
+              marked ? (current ? "yes" : "no") : "", marked ? (current ? BOOL_TRUE : BOOL_FALSE) : "");
             close();
           },
         });
@@ -709,10 +737,12 @@ function editable(doc, opened, cell, field, hooks) {
       version: written && Number.isFinite(written.version) ? written.version : entity.version + 1,
     };
     hooks.settled(next);
+    const drawnNow = read.absent !== true && field.type === FIELD_BOOL && typeof read.value === "boolean";
     draw(read.absent === true
       ? absentTextFor(field.label || field.key)
       : formatValue(field.type, read.value), read.absent === true,
-    isProse && read.absent !== true ? await renderedFor(opened, next, field.key) : "");
+    isProse && read.absent !== true ? await renderedFor(opened, next, field.key) : "",
+    drawnNow ? (read.value ? "yes" : "no") : "", drawnNow ? (read.value ? BOOL_TRUE : BOOL_FALSE) : "");
     close();
   });
 

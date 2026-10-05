@@ -814,11 +814,14 @@ check("theCatalogueSpellsAValueTheWayTheEntityPageDoes", async () => {
   await load("catalogue");
   const row = dom.elements["entities"].children.find((child) => child.className !== "catalogue-head");
   const cells = row.children.filter((child) => child.className.includes("catalogue-cell"));
+  // The boolean is drawn on both screens and spelled on neither, which
+  // is what this check is named for: one value, one spelling.
   assertEqual(
     JSON.stringify(cells.slice(0, 3).map((cell) => cell.textContent)),
-    JSON.stringify(["no", "elwynn, wanted", "9"]),
+    JSON.stringify(["", "elwynn, wanted", "9"]),
     "the catalogue's cells",
   );
+  assertEqual(cells[0].getAttribute("aria-label"), "no", "what the drawn boolean is called");
 });
 
 check("aLongtextColumnIsAOneLineLeadInAndNotTheText", async () => {
@@ -859,6 +862,47 @@ check("aLongtextColumnIsAOneLineLeadInAndNotTheText", async () => {
   assert(
     !cells[1].className.includes("oneline"),
     `a number column is clipped too: ${JSON.stringify(cells[1].className)}`,
+  );
+});
+
+check("aBooleanColumnIsDrawnAndStillNamed", async () => {
+  const dom = mount({
+    ids: CATALOGUE_IDS,
+    pathname: "/g/azeroth/t/quest",
+    routes: [
+      [(url) => url === base + "/types/by-key/quest", {
+        body: {
+          key: "quest", label: "Quest", label_plural: "Quests",
+          field_schema: [
+            { key: "repeatable", type: "bool" },
+            { key: "min_level", type: "number" },
+          ],
+        },
+      }],
+      [(url) => url.startsWith(base + "/entities"), {
+        body: {
+          items: [
+            { type_key: "quest", key: "hogger", name: "Hogger", fields: { repeatable: true, min_level: 9 } },
+            { type_key: "quest", key: "kobold", name: "Kobold", fields: { repeatable: false, min_level: 3 } },
+            { type_key: "quest", key: "unknown", name: "Unknown", fields: { min_level: 1 } },
+          ],
+        },
+      }],
+      events,
+    ],
+  });
+  await load("catalogue");
+  const rows = dom.elements["entities"].children.filter((child) => child.className !== "catalogue-head");
+  const boolCell = (row) => row.children.filter((c) => (c.className || "").includes("catalogue-cell"))[0];
+  assertEqual(
+    JSON.stringify(rows.map((row) => boolCell(row).textContent)),
+    JSON.stringify(["", "", "\u2014"]),
+    "a boolean column spells no words, and a row with no value keeps the dash",
+  );
+  assertEqual(
+    JSON.stringify(rows.slice(0, 2).map((row) => boolCell(row).getAttribute("aria-label"))),
+    JSON.stringify(["yes", "no"]),
+    "what the two marks are called",
   );
 });
 

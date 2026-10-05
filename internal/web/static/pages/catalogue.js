@@ -23,7 +23,7 @@ import {
 import { ABSENT_MARK, nextCursorOf } from "../rows.js";
 import { t } from "../i18n.js";
 import { headerRow, row } from "../rows.js";
-import { FIELD_LONGTEXT, formatValue } from "./entity.js";
+import { BOOL_FALSE, BOOL_TRUE, FIELD_BOOL, FIELD_LONGTEXT, formatValue } from "./entity.js";
 import { goToLogin } from "../app.js";
 
 
@@ -192,6 +192,11 @@ export async function cataloguePage(opened) {
       // "no" on its own page, and a list of tags read "elwynn,quest"
       // here and "elwynn, quest" there: two spellings of one value, on
       // two screens a designer moves between by clicking a row.
+      // A boolean is drawn and named: the mark is what a reader scans
+      // down the column, and the word is what the cell is called.
+      if (field.type === FIELD_BOOL && typeof value === "boolean") {
+        return { mark: value ? "yes" : "no", name: value ? BOOL_TRUE : BOOL_FALSE };
+      }
       return {
         text: formatValue(field.type, value),
         numeric: field.type === "number",

@@ -1835,6 +1835,19 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   text-overflow: ellipsis;
 }
 
+/* **A drawn yes or no.** The mark is the whole cell, so it sits on the
+   row's own centre line and takes the width a short word would. The
+   false is muted and the true is ink: the shape already carries the
+   meaning, and the colour only says which of the two a long column is
+   mostly made of. */
+.catalogue-cell.marked {
+  display: flex;
+  align-items: center;
+}
+.mark { display: block; }
+.mark-yes { color: var(--ink); }
+.mark-no { color: var(--muted); }
+
 /* The italic is what tells a mark from a value. */
 .catalogue-cell.absent {
   font-style: italic;

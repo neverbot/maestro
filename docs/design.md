@@ -422,6 +422,23 @@ route: an agent asked to rewrite a value is given the markdown it will
 edit. **Two modules insert markup and a guard says which**, because a
 third one is how a name a designer typed becomes a tag.
 
+**The Drawn Boolean Rule.** A yes or a no is a mark and not a word: a
+check for true, a cross for false, the em dash of a Named Absence for a
+row that has no value at all. Three states, three shapes, and the shape
+alone carries the meaning — the cross is muted ink and never the alarm,
+because a false is an ordinary value and not something that needs
+attention. The word stays as the cell's accessible name, so a reader who
+cannot see the column hears "no" and not "graphic". It is drawn in the
+same spelling wherever the value appears, a catalogue column and a
+thing's own page alike.
+
+**This product ships no icon set and this is not the start of one.** The
+two marks are two paths, held beside the share bar's rect, because the
+shipped font subset carries no check and a glyph would be a fallback to
+whatever the reader's machine has. A named set becomes a real question
+the day an entity type's declared `icon` is drawn, since a game may
+declare any name; until then, two shapes do not justify fifteen hundred.
+
 **The Band Rule.** A screen made of bands is a stack of **peers**: one
 `section` each, one Headline heading each, separated by `xxxl` and by a
 1px `line` rule above every heading after the first. Nothing is ranked

@@ -35,7 +35,9 @@ const {
   fieldRows,
   relationGroups,
   relationList,
+  formatValue,
   wireFieldEdits,
+  BOOL_FALSE,
   BOOL_TRUE,
   CLEAR_HINT,
   NOT_A_NUMBER,
@@ -179,6 +181,34 @@ function stage(script) {
   const cells = edge.children.filter((child) => (child.getAttribute("class") || "").includes("catalogue-cell"));
   const clipped = cells.filter((cell) => (cell.getAttribute("class") || "").includes("oneline"));
   check("an edge field too long for a row is clipped, and a short one is not", clipped.length, 1);
+}
+
+// A value whose declared type this page was never told — an edge's
+// field, because the relation type listing carries no schema — is shown
+// as its JSON text, and `true` is a word in one language on a screen in
+// another.
+check("an undeclared boolean is still a word a reader knows",
+  [formatValue("", true), formatValue("", false), formatValue("", 12)],
+  [BOOL_TRUE, BOOL_FALSE, "12"]);
+
+// --- A boolean, drawn on this screen too ------------------------------
+
+// repeatable is the fourth declared field, so its value cell is index 3.
+{
+  const entity = { ...ENTITY, fields: { ...ENTITY.fields, repeatable: false } };
+  const rows = fieldRows(SCHEMA, entity);
+  const list = fieldList(doc, rows);
+  const cell = list.children[3 * 3 + 1];
+  check("a boolean field draws its value", [cell.textContent, cell.children.length], ["", 1]);
+  check("and says what the drawing is", cell.getAttribute("aria-label"), "no");
+
+  // The regression editable() caused for the prose, asserted for the
+  // mark: this function replaces the cell's children with its own.
+  const opened = { slug: "azeroth", client: client({ writes: [], reads: [] }), document: doc };
+  wireFieldEdits(doc, opened, { entity, fieldsList: list, rows }, SCHEMA);
+  const kept = cell.children[0] && cell.children[0].children ? cell.children[0].children[0] : null;
+  check("the drawing survives the writing being wired", kept ? kept.tagName : "", "svg");
+  check("and the cell is still named", cell.getAttribute("aria-label"), "no");
 }
 
 // --- The prose a longtext is ------------------------------------------

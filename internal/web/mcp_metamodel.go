@@ -133,8 +133,13 @@ type RelationTypesRemoveInput struct {
 // separate single-row tool to keep in step with this one.
 type EntitiesUpsertInput struct {
 	ScopedArgs
-	Mode  string            `json:"mode,omitempty"`
-	Items []EntityItemInput `json:"items"`
+	Mode string `json:"mode,omitempty"`
+	// FieldsMode decides what a write does with the fields an item does
+	// not name: "replace" (the default) clears them, "merge" leaves them
+	// where they are. It is one argument for the whole batch, like Mode,
+	// so a typo is one refusal rather than one per item.
+	FieldsMode string            `json:"fields_mode,omitempty"`
+	Items      []EntityItemInput `json:"items"`
 }
 
 // EntityItemInput is one row of an entities.upsert batch. It carries no
@@ -206,8 +211,10 @@ type EntitiesRemoveInput struct {
 // RelationsUpsertInput is the argument shape of relations.upsert.
 type RelationsUpsertInput struct {
 	ScopedArgs
-	Mode  string              `json:"mode,omitempty"`
-	Items []RelationItemInput `json:"items"`
+	Mode string `json:"mode,omitempty"`
+	// FieldsMode is EntitiesUpsertInput's, for edges.
+	FieldsMode string              `json:"fields_mode,omitempty"`
+	Items      []RelationItemInput `json:"items"`
 }
 
 // RelationItemInput is one edge of a relations.upsert batch. It carries
@@ -780,9 +787,15 @@ func entitiesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 			Key:             item.Key,
 			Name:            item.Name,
 			Fields:          item.Fields,
+			FieldsMode:      metamodel.FieldsMode(in.FieldsMode),
 			ExpectedVersion: item.ExpectedVersion,
 			Actor:           actor,
 		})
+	}
+	// Refused once for the call rather than once per item, which is what
+	// the argument being a property of the batch buys.
+	if err := metamodel.CheckFieldsMode(metamodel.FieldsMode(in.FieldsMode)); err != nil {
+		return EntitiesUpsertOutput{}, err
 	}
 	result, err := deps.Metamodel.UpsertEntities(ctx, projectID, items, metamodel.BulkMode(in.Mode))
 	if err != nil {
@@ -1638,6 +1651,13 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"cleared rather than left alone, and an update is therefore built from the row as it "+
 			"stands — entities.get, or entities.list with verbose, both of which answer with "+
 			"fields — and never from a listing that omitted them. "+
+			"**fields_mode \"merge\"** writes only the fields each item names and leaves the rest "+
+			"of the stored map alone, which is how a one-field edit is made without carrying the "+
+			"others; an explicit null clears a field, since omitting it no longer does. It is one "+
+			"argument for the whole batch, like mode, and anything but \"replace\" (the default) "+
+			"or \"merge\" is invalid_input at path `fields_mode` rather than read as replace. A "+
+			"merge onto a row the invalid filter reports is refused by the stale keys that row "+
+			"still carries: repair it with entities.repair, or write it whole. "+
 			"name is required and refuses a half-built item where fields cannot: a map missing a "+
 			"key looks exactly like a row that never had one. "+
 			"updating an existing entity requires expected_version, which the written entries "+
@@ -1737,7 +1757,9 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"version**: writing one that already exists replaces its fields whole — a field the "+
 			"item does not name is cleared rather than left alone, so an update is built from "+
 			"relations.get, or from relations.list with verbose, and not from a listing that "+
-			"omitted the fields — and "+
+			"omitted the fields — and fields_mode \"merge\" applies here exactly as it does to "+
+			"entities.upsert, writing only the fields an item names and clearing one on an "+
+			"explicit null, and "+
 			"requires expected_version, which the written entries of a previous call carry, "+
 			"exactly as entities.upsert does. Sending the wrong one, or none, is "+
 			"version_conflict reporting the version to merge onto — nothing is overwritten. "+

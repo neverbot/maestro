@@ -21,6 +21,7 @@ type EntityInput struct {
 	Key             string
 	Name            string
 	Fields          map[string]any
+	FieldsMode      FieldsMode
 	ExpectedVersion *int32
 	Actor           Actor
 }
@@ -134,6 +135,9 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 	if len(problems) > 0 {
 		return upsertedEntity{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
+	if err := CheckFieldsMode(in.FieldsMode); err != nil {
+		return upsertedEntity{}, err
+	}
 	// type_key is deliberately not validated as a key here: it addresses
 	// a row this call only reads, so a malformed one has one honest
 	// answer — there is no such type — and it already gets it below.
@@ -160,10 +164,6 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 	if err != nil {
 		return upsertedEntity{}, err
 	}
-	values, err := schema.Validate(in.Fields)
-	if err != nil {
-		return upsertedEntity{}, err
-	}
 
 	expected := noVersion
 	if in.ExpectedVersion != nil {
@@ -175,6 +175,7 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 	existing, err := q.GetEntityByKeyForUpdate(ctx, dbq.GetEntityByKeyForUpdateParams{
 		ProjectID: projectID, EntityTypeID: typ.ID, Key: in.Key,
 	})
+	found := err == nil
 	switch {
 	case err == nil:
 		// Spelling before version: a caller failing for both reasons
@@ -201,6 +202,24 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 		// Creation: no version to match, nothing to lock.
 	default:
 		return upsertedEntity{}, fmt.Errorf("lookup entity: %w", err)
+	}
+
+	// **Validation runs after the row has been read, because in merge
+	// mode the map being judged is not the one the caller sent.** A
+	// required field the item leaves out is present in the merged map and
+	// is not a problem; a stale key the row still carries from before a
+	// schema edit is, which is what sends that caller to the repair.
+	fields := in.Fields
+	if in.FieldsMode == FieldsMerge && found {
+		merged, err := mergedFields(existing.Fields, in.Fields)
+		if err != nil {
+			return upsertedEntity{}, err
+		}
+		fields = merged
+	}
+	values, err := schema.Validate(fields)
+	if err != nil {
+		return upsertedEntity{}, err
 	}
 
 	encoded, err := json.Marshal(values)

@@ -262,6 +262,56 @@ func TestRESTAValueThatDoesNotFitItsSchemaIsSchemaViolation(t *testing.T) {
 	assertError(t, rec, http.StatusUnprocessableEntity, "schema_violation", "fields.min_level")
 }
 
+// TestRESTAMergeReachesTheWriteThroughItsOwnName is the call-site half of
+// the merge: the domain tests prove the behaviour, and this proves the
+// argument an agent actually spells — fields_mode, on the body, over the
+// REST mirror — arrives there. A JSON tag nobody posted would be a knob
+// that works in Go and does nothing on the wire.
+func TestRESTAMergeReachesTheWriteThroughItsOwnName(t *testing.T) {
+	t.Parallel()
+	f := newRESTFixture(t)
+	rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests",
+		"field_schema": []any{
+			map[string]any{"key": "min_level", "type": "number"},
+			map[string]any{"key": "summary", "type": "text"},
+		},
+	})
+	assert.Must(t, rec.Code == http.StatusOK, "declare quest type = %d: %s", rec.Code, rec.Body.String())
+
+	rec = f.as(t, http.MethodPost, "/entities", map[string]any{
+		"items": []any{map[string]any{
+			"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger",
+			"fields": map[string]any{"min_level": 10, "summary": "Kill Hogger."},
+		}},
+	})
+	assert.Must(t, rec.Code == http.StatusOK, "create = %d: %s", rec.Code, rec.Body.String())
+
+	rec = f.as(t, http.MethodPost, "/entities", map[string]any{
+		"fields_mode": "merge",
+		"items": []any{map[string]any{
+			"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger",
+			"fields": map[string]any{"min_level": 12}, "expected_version": 1,
+		}},
+	})
+	assert.Must(t, rec.Code == http.StatusOK, "merge = %d: %s", rec.Code, rec.Body.String())
+
+	read := f.as(t, http.MethodGet, "/entities/by-key/quest/hogger", nil)
+	assert.Must(t, read.Code == http.StatusOK, "read back = %d: %s", read.Code, read.Body.String())
+	assert.Must(t, strings.Contains(read.Body.String(), "Kill Hogger."), "the row came back without the field the merge did not name: %s", read.Body.String())
+
+	// And the misspelling, because the whole argument for refusing one is
+	// that reading it as replace is silent.
+	rec = f.as(t, http.MethodPost, "/entities", map[string]any{
+		"fields_mode": "mrege",
+		"items": []any{map[string]any{
+			"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger",
+			"fields": map[string]any{"min_level": 13}, "expected_version": 2,
+		}},
+	})
+	assertError(t, rec, http.StatusBadRequest, "invalid_input", "fields_mode")
+}
+
 // TestRESTAStaleVersionIsRefusedWithTheCurrentOne pins the conflict
 // shape a browser needs to merge: the code, and the version the write
 // would have met.

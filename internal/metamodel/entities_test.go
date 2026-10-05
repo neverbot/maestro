@@ -142,6 +142,184 @@ func TestEntitiesArea(t *testing.T) {
 		assert.Must(t, stored["min_level"] == float64(12), "min_level = %v, want the written 12", stored["min_level"])
 	})
 
+	t.Run("a merge writes the fields it names and keeps the rest", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		// min_level is required and this item does not carry it: the write
+		// lands because what the schema judges is the merged map, which is
+		// the whole point of validating after the row has been read.
+		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:          map[string]any{"summary": "Kill Hogger, twice."},
+			FieldsMode:      metamodel.FieldsMerge,
+			ExpectedVersion: ptrInt32(1),
+		})
+		assert.Must(t, err == nil, "merge: %v", err)
+		var stored map[string]any
+		if err := json.Unmarshal(row.Fields, &stored); err != nil {
+			t.Fatalf("stored fields: %v", err)
+		}
+		assert.Must(t, stored["min_level"] == float64(10), "min_level = %v, want the stored 10 — a merge dropped a field it did not name", stored["min_level"])
+		assert.Must(t, stored["summary"] == "Kill Hogger, twice.", "summary = %v, want the written value", stored["summary"])
+	})
+
+	t.Run("a merge clears a field on an explicit null", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:          map[string]any{"summary": nil},
+			FieldsMode:      metamodel.FieldsMerge,
+			ExpectedVersion: ptrInt32(1),
+		})
+		assert.Must(t, err == nil, "merge: %v", err)
+		var stored map[string]any
+		if err := json.Unmarshal(row.Fields, &stored); err != nil {
+			t.Fatalf("stored fields: %v", err)
+		}
+		_, kept := stored["summary"]
+		assert.Must(t, !kept, "summary survived an explicit null: with omission no longer clearing a field, null is the only way left")
+		assert.Must(t, stored["min_level"] == float64(10), "min_level = %v, want the stored 10", stored["min_level"])
+	})
+
+	t.Run("a merge needs no stored row to merge onto", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:     map[string]any{"min_level": float64(10)},
+			FieldsMode: metamodel.FieldsMerge,
+		})
+		assert.Must(t, err == nil, "create under merge: %v", err)
+		assert.Must(t, row.Version == 1, "Version = %d, want 1", row.Version)
+	})
+
+	t.Run("a merge onto an invalid row is refused by its stale keys", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		// summary stops being declared; the row keeps its value and is
+		// flagged. A merge then carries that value into the validator.
+		if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+			Key: "quest", Label: "Quest", LabelPlural: "Quests",
+			Schema:          metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber, Required: true}},
+			ExpectedVersion: ptrInt32(1),
+		}); err != nil {
+			t.Fatalf("shrink the schema: %v", err)
+		}
+
+		_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:          map[string]any{"min_level": float64(11)},
+			FieldsMode:      metamodel.FieldsMerge,
+			ExpectedVersion: ptrInt32(1),
+		})
+		assert.Must(t, errors.Is(err, metamodel.ErrSchemaViolation), "err = %v, want ErrSchemaViolation", err)
+		assert.Must(t, strings.Contains(err.Error(), "summary"), "err = %v, want it to name the stale key the repair has to take out", err)
+	})
+
+	t.Run("a merge clears a stale key with a null and the row is valid again", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+			Key: "quest", Label: "Quest", LabelPlural: "Quests",
+			Schema:          metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber, Required: true}},
+			ExpectedVersion: ptrInt32(1),
+		}); err != nil {
+			t.Fatalf("shrink the schema: %v", err)
+		}
+
+		// A null names the key, and naming an undeclared key is how one
+		// row is taken out from under a schema edit without a repair over
+		// the whole type.
+		row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:          map[string]any{"summary": nil},
+			FieldsMode:      metamodel.FieldsMerge,
+			ExpectedVersion: ptrInt32(1),
+		})
+		assert.Must(t, err == nil, "merge: %v", err)
+		assert.Must(t, !row.Invalid, "the row is still flagged after the stale key went")
+		var stored map[string]any
+		if err := json.Unmarshal(row.Fields, &stored); err != nil {
+			t.Fatalf("stored fields: %v", err)
+		}
+		_, kept := stored["summary"]
+		assert.Must(t, !kept, "the stale key survived the null that named it")
+	})
+
+	t.Run("an unknown fields mode is refused rather than read as replace", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedQuestType(t, svc, project)
+
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields:          map[string]any{"min_level": float64(11)},
+			FieldsMode:      "mrege",
+			ExpectedVersion: ptrInt32(1),
+		})
+		assert.Must(t, err != nil, "a misspelled mode was accepted, and reading it as replace is the one mistake the argument exists to prevent")
+		assert.Must(t, strings.Contains(err.Error(), "fields_mode"), "err = %v, want it to name the argument", err)
+		stored, getErr := svc.EntityByKey(ctx, project, "quest", "hogger")
+		assert.Must(t, getErr == nil, "read back: %v", getErr)
+		assert.Must(t, stored.Version == 1, "Version = %d, want 1: a refused call wrote anyway", stored.Version)
+	})
+
 	t.Run("upsert entity rejects stale version", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

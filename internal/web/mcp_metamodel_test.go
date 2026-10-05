@@ -189,8 +189,8 @@ func TestEveryWholeReplacementWriteSaysSo(t *testing.T) {
 	// must name: the listing that omits the thing is what the mistake was
 	// built from, so naming the reader is half the rule.
 	for tool, phrases := range map[string][]string{
-		"entities.upsert":       {"replaces the row's whole field map", "entities.get"},
-		"relations.upsert":      {"replaces its fields whole", "relations.get"},
+		"entities.upsert":       {"replaces the row's whole field map", "entities.get", "fields_mode"},
+		"relations.upsert":      {"replaces its fields whole", "relations.get", "fields_mode"},
 		"types.upsert":          {"replaces the whole declaration", "types.get"},
 		"relation_types.upsert": {"replaces the whole declaration", "relation_types.get"},
 	} {

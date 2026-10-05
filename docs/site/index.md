@@ -63,13 +63,14 @@ with both values named rather than one of them quietly winning:
 - an entity's field values,
 - a document's body.
 
-An agent writing those same values writes a whole row at a time: it
-reads the entity, changes what it means to change, and sends all of it
-back. That is in the pages it was handed, because a write that names one
-field clears the others — nothing can tell a value somebody deliberately
-removed from a value the writer forgot to carry. If content vanishes
-from a row an agent has just touched, that is the shape of the accident,
-and the row's version is what stops two writers doing it to each other.
+An agent writing those same values writes a whole row at a time, or says
+it is changing one field and leaving the rest. It has to be one or the
+other: a write that names a single field and does not say so clears the
+others, because nothing can tell a value somebody deliberately removed
+from a value the writer forgot to carry. If content vanishes from a row
+an agent has just touched, that is the shape of the accident. The row's
+version is what stops two writers doing it to each other, and it is no
+help at all against one writer sending half a row.
 
 A view can also be composed in the browser, clause by clause, for the
 half of the query language a sentence can hold. The other half is a

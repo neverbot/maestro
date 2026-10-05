@@ -29,6 +29,7 @@ type RelationInput struct {
 	Source          Ref
 	Target          Ref
 	Fields          map[string]any
+	FieldsMode      FieldsMode
 	ExpectedVersion *int32
 	Actor           Actor
 }
@@ -127,6 +128,9 @@ func (s *Service) UpsertRelation(ctx context.Context, projectID uuid.UUID, in Re
 // see rows the same transaction has just written. Nothing in here
 // publishes.
 func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, in RelationInput) (upsertedRelation, error) {
+	if err := CheckFieldsMode(in.FieldsMode); err != nil {
+		return upsertedRelation{}, err
+	}
 	relType, err := q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{
 		ProjectID: projectID, Key: in.TypeKey,
 	})
@@ -171,18 +175,6 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 	if err != nil {
 		return upsertedRelation{}, err
 	}
-	// Validate, not CheckValues: this is a write, and the declared
-	// defaults belong in the row being written. CheckValues is for the
-	// re-validation of rows nobody is editing.
-	values, err := schema.Validate(in.Fields)
-	if err != nil {
-		return upsertedRelation{}, err
-	}
-	encoded, err := json.Marshal(values)
-	if err != nil {
-		return upsertedRelation{}, fmt.Errorf("encode fields: %w", err)
-	}
-
 	expected := noVersion
 	if in.ExpectedVersion != nil {
 		expected = *in.ExpectedVersion
@@ -199,6 +191,7 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		SourceID:       source.row.ID,
 		TargetID:       target.row.ID,
 	})
+	found := err == nil
 	switch {
 	case err == nil:
 		if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
@@ -222,6 +215,29 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		// Creation: no version to match, nothing to lock.
 	default:
 		return upsertedRelation{}, fmt.Errorf("lookup relation: %w", err)
+	}
+
+	// After the read, for the reason upsertEntityWith states: in merge
+	// mode the map being judged is the stored one with the item's own laid
+	// over it, not the one the caller sent.
+	fields := in.Fields
+	if in.FieldsMode == FieldsMerge && found {
+		merged, err := mergedFields(existing.Fields, in.Fields)
+		if err != nil {
+			return upsertedRelation{}, err
+		}
+		fields = merged
+	}
+	// Validate, not CheckValues: this is a write, and the declared
+	// defaults belong in the row being written. CheckValues is for the
+	// re-validation of rows nobody is editing.
+	values, err := schema.Validate(fields)
+	if err != nil {
+		return upsertedRelation{}, err
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return upsertedRelation{}, fmt.Errorf("encode fields: %w", err)
 	}
 
 	row, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{

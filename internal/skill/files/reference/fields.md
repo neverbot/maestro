@@ -11,17 +11,27 @@ have cost you by then.
 
 ## The rules that surprise people
 
-**A write replaces a row's whole field map.** `entities.upsert` and
-`relations.upsert` do not merge: a field the item does not name is
-cleared, not left where it stood. So an update is built from the row as
-it is now — `entities.get` and `relations.get` always answer with
-fields, and the two listings do when `verbose` is true — and never from
-a listing that omitted them, which is what a listing does by default.
-The version you send guards you against another writer and not against
-your own half-built payload: it is the correct version of a row you are
-about to empty. `name` is where this gets easy to miss, because it is
-required and an item that forgot it is refused, while a field map
-missing a key looks exactly like a row that never had one.
+**A write replaces a row's whole field map, unless it says otherwise.**
+By default `entities.upsert` and `relations.upsert` do not merge: a field
+the item does not name is cleared, not left where it stood. So an update
+either carries the row's whole map — read it back first, from
+`entities.get` or `relations.get`, which always answer with fields, or
+from the listings with `verbose`, and never from a listing that omitted
+them — or it sends `fields_mode: "merge"` and names only the fields it
+means to change. In merge mode an explicit `null` clears a field, which
+is the only way left to remove one.
+
+The version you send does not protect you from this. It guards against
+another writer, not against your own half-built payload: it is the
+correct version of a row you are about to empty. `name` is where the
+asymmetry gets easy to miss, because it is required and an item that
+forgot it is refused, while a field map missing a key looks exactly like
+a row that never had one.
+
+**A merge onto an invalid row is refused**, by the stale keys that row
+still carries from before a schema edit. That is the repair's job, not an
+update's: `entities.repair` and `relations.repair` first, or write the
+row whole.
 
 **An unknown field is an error.** It is never silently dropped, in a row
 or in a declaration. A key you did not declare comes back refused, and a

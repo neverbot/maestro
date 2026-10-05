@@ -146,6 +146,45 @@ func TestRelationsArea(t *testing.T) {
 		}
 	})
 
+	t.Run("a merged edge keeps the fields it does not name", func(t *testing.T) {
+		pool := a.pool
+		svc := metamodel.New(pool, nil)
+		ctx := context.Background()
+		project := newProject(t, pool)
+		seedWorld(t, svc, project)
+
+		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+			Key: "connects_to", Label: "connects to", SemanticRole: "spatial",
+			Schema: metamodel.Schema{
+				{Key: "requires_ability", Type: metamodel.FieldText},
+				{Key: "note", Type: metamodel.FieldText},
+			},
+		}); err != nil {
+			t.Fatalf("UpsertRelationType: %v", err)
+		}
+		edge := metamodel.RelationInput{
+			TypeKey: "connects_to",
+			Source:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			Fields:  map[string]any{"requires_ability": "mothwing_cloak", "note": "the long way round"},
+		}
+		if _, err := svc.UpsertRelation(ctx, project, edge); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		edge.Fields = map[string]any{"requires_ability": "crystal_dash"}
+		edge.FieldsMode = metamodel.FieldsMerge
+		edge.ExpectedVersion = ptrInt32(1)
+		rel, err := svc.UpsertRelation(ctx, project, edge)
+		assert.Must(t, err == nil, "merge: %v", err)
+		var stored map[string]any
+		if err := json.Unmarshal(rel.Fields, &stored); err != nil {
+			t.Fatalf("decode stored fields %s: %v", rel.Fields, err)
+		}
+		assert.Must(t, stored["note"] == "the long way round", "note = %v, want the stored one: a merged edge dropped a field it did not name", stored["note"])
+		assert.Must(t, stored["requires_ability"] == "crystal_dash", "requires_ability = %v, want the written one", stored["requires_ability"])
+	})
+
 	t.Run("relation carries its own fields", func(t *testing.T) {
 		pool := a.pool
 		svc := metamodel.New(pool, nil)

@@ -81,10 +81,12 @@ The same three steps work for edges, with `relations.list` and
 **A re-seed is not a partial update, and the difference is destructive.**
 A re-seed hands back every field it ever wrote, so replacing the row's
 whole map costs nothing. Changing one field and keeping the rest is a
-different call: a write replaces the whole map, so a field you leave out
-is cleared rather than left alone. Read the row first — `entities.get`,
-or the listing with `verbose` — change the one value inside the map you
-read, and send that map. `reference/fields.md` states the rule, and the
+different call: by default a write replaces the whole map, so a field you
+leave out is cleared rather than left alone. Two ways out, and the first
+is the one to reach for: send `fields_mode: "merge"` and name only the
+fields you are changing, or read the row first — `entities.get`, or the
+listing with `verbose` — change the value inside the map you read, and
+send that map whole. `reference/fields.md` states the rule, and the
 tool's own description states it for the call.
 
 ## Reading the shape back

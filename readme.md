@@ -294,8 +294,14 @@ minutes; a single test is seconds, so run the one you are working on.
 
 A run that is interrupted never reaches its own cleanup, so its database
 stays behind. The next run sweeps anything over an hour old, and
-`make clean-test-dbs` does it now. `make clean-docker` adds the images
-and the build cache that repeated `make dev` rebuilds leave behind.
+`make clean-test-dbs` does it now, against the container above.
+
+`make dev` keeps its own leftovers bounded: every rebuild leaves a
+~230MB snapshot of the Go build that exactly one build ever uses, so the
+target prunes Maestro's build cache older than half an hour, and the
+untagged image the rebuild replaced. Both are filtered to this project
+and leave another project's cache alone. `make clean-docker` does the
+same without the time bound, for when a session is over.
 
 ### A local instance while developing
 

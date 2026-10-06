@@ -179,11 +179,20 @@ demo:
 dev:
 	docker compose up --build -d
 	@# The rebuild leaves the image it replaced untagged, and an untagged
-	@# image keeps every layer it had. Fifteen rebuilds in an afternoon
-	@# was 4.4GB of build cache and 800MB of images that nothing could
-	@# name. Pruned by the label the Dockerfile sets, so this touches
-	@# Maestro's leftovers and no other project's.
+	@# image keeps every layer it had. Pruned by the label the Dockerfile
+	@# sets, so this touches Maestro's leftovers and no other project's.
 	@docker image prune -f --filter label=org.opencontainers.image.title=maestro >/dev/null 2>&1 || true
+	@# **And the build cache, which the line above does not touch.** The
+	@# comment here used to say it did, and it was measured false: every
+	@# rebuild leaves a ~230MB snapshot of the `go build` exec, each one
+	@# used by exactly one build, and fifteen rebuilds in an afternoon was
+	@# 8.8GB. Filtered by description so only Maestro's entries go, and
+	@# bounded by time rather than purged: an entry last used inside the
+	@# window is the one that makes the next build warm, and an entry
+	@# older than that was only ever used once. Half an hour because that
+	@# is the span of one sitting; it holds the builds of the session you
+	@# are in and nothing before it.
+	@docker buildx prune -f --filter 'description~=maestro' --filter until=30m >/dev/null 2>&1 || true
 	@echo "Maestro on http://localhost:$${MAESTRO_HOST_PORT:-8090} (admin@example.test / change-me-please)"
 
 dev-down:
@@ -206,18 +215,33 @@ dev-logs:
 # maintain for the sake of a cleanup command, which is the tail wagging
 # the dog. If the machine needs that space back, `docker builder prune`
 # is one command and the person running it knows what it costs.
+# **The test databases live in the test server, not in the dev one.** This
+# ran `docker compose exec db`, which is the instance you develop against
+# and the one place a `maestro_test_*` database never appears: the target
+# reported "0 left" for as long as it has existed, while the server the
+# readme tells you to start was holding 73 of them. The container name is
+# the readme's own, and a run with none of it is told so rather than
+# answering nothing.
+#
+# Leftovers are not a leak: internal/testutil sweeps anything over an hour
+# old at the start of the next run (staleAfter). This is the same thing
+# now, for when a session has just finished.
+TEST_PG ?= maestro-test-pg
+
 clean-test-dbs:
-	@docker compose exec -T db psql -U maestro -d maestro -tAc \
-		"select datname from pg_database where datname like 'maestro_test\_%'" 2>/dev/null \
-		| while read db; do \
-			[ -n "$$db" ] && docker compose exec -T db psql -U maestro -d maestro -q \
-				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null 2>&1; \
-		done; \
-		echo "test databases left: $$(docker compose exec -T db psql -U maestro -d maestro -tAc \
-			"select count(*) from pg_database where datname like 'maestro_test\_%'" 2>/dev/null)"
+	@docker exec $(TEST_PG) psql -U postgres -tAc \
+		"select string_agg(format('DROP DATABASE IF EXISTS %I WITH (FORCE);', datname), ' ') \
+		 from pg_database where datname like 'maestro\_test\_%'" 2>/dev/null \
+		| docker exec -i $(TEST_PG) psql -U postgres -q -f - >/dev/null 2>&1 || \
+		{ echo "no $(TEST_PG) container; nothing to clean"; exit 0; }
+	@left=$$(docker exec $(TEST_PG) psql -U postgres -tAc \
+		"select count(*) from pg_database where datname like 'maestro\_test\_%'" 2>/dev/null); \
+		[ -n "$$left" ] && echo "test databases left: $$left" || true
 
 clean-docker: clean-test-dbs
 	docker image prune -f --filter label=org.opencontainers.image.title=maestro
+	@# All of it, not the last half hour: this target is "clean now".
+	docker buildx prune -f --filter 'description~=maestro'
 
 dev-psql:
 	docker compose exec db psql -U maestro -d maestro

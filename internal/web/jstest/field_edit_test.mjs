@@ -198,7 +198,7 @@ check("an undeclared boolean is still a word a reader knows",
   const entity = { ...ENTITY, fields: { ...ENTITY.fields, repeatable: false } };
   const rows = fieldRows(SCHEMA, entity);
   const list = fieldList(doc, rows);
-  const cell = list.children[3 * 3 + 1];
+  const cell = cellOf(list, 3);
   check("a boolean field draws its value", [cell.textContent, cell.children.length], ["", 1]);
   check("and says what the drawing is", cell.getAttribute("aria-label"), "no");
 
@@ -217,10 +217,10 @@ check("an undeclared boolean is still a word a reader knows",
 {
   const rows = fieldRows(SCHEMA, ENTITY);
   const list = fieldList(doc, rows);
-  const cell = list.children[1 * 3 + 1];
+  const cell = cellOf(list, 1);
   check("a longtext cell says it is prose", cell.getAttribute("class"), "field-value field-prose");
   check("and holds the rendering rather than the source", cell.children[0].innerHTML, "<p>A gnoll.<br>\nIn Elwynn.</p>");
-  check("a field with no rendering is still text", list.children[0 * 3 + 1].textContent, "9");
+  check("a field with no rendering is still text", cellOf(list, 0).textContent, "9");
 
   // **The regression this is really here for.** editable() replaces the
   // cell's children with its own, so a page a member can edit flattened
@@ -238,11 +238,15 @@ check("an undeclared boolean is still a word a reader knows",
   check("and the cell still says it is prose", cell.getAttribute("class"), "field-value field-prose");
 }
 
-// The cells are found by position — label, value, type — so a change to
-// that shape is caught here rather than by a page that quietly wires
-// nothing.
+// A row is an element now, and its four cells are found by position —
+// label, value, type, the way to change it — so a change to that shape is
+// caught here rather than by a page that quietly wires nothing.
 function cellOf(list, index) {
-  return list.children[index * 3 + 1];
+  return list.children[index].children[1];
+}
+
+function actionOf(list, index) {
+  return list.children[index].children[3];
 }
 
 {
@@ -251,6 +255,16 @@ function cellOf(list, index) {
     reads: [],
   });
   check("every declared field is wired", wired.length, SCHEMA.length);
+  // **The way to change a value is in the row's own column**, not inside
+  // the value: the value cell holds what there is to read, and a control
+  // sitting in it is a control that cannot be revealed by the row without
+  // revealing the value's own layout with it.
+  check("a row is four cells", list.children[0].children.length, 4);
+  const inAction = actionOf(list, 0).children[0] || null;
+  check("and the control is in the last one",
+    [actionOf(list, 0).children.length, inAction ? inAction.getAttribute("class") : ""],
+    [1, "field-edit"]);
+  check("the value cell holds no control", cellOf(list, 0).children.length, 3);
 
   const editor = wired[0];
   editor.open.click();
@@ -326,7 +340,9 @@ function cellOf(list, index) {
   wired[0].open.click();
   wired[0].form.children[0].value = "0";
   await wired[0].form.dispatch("submit", { preventDefault() {} });
-  const error = cellOf(list, 0).children[3];
+  // The value cell holds the value, the form and the sentence; the way
+  // to change it has a column of its own.
+  const error = cellOf(list, 0).children[2];
   check("the server's sentence lands under the control it is about", error.textContent, "fields.min_level: must be at least 1");
   check("the edit is still there", wired[0].form.children[0].value, "0");
   check("and the page does not claim the value changed", cellOf(list, 0).children[0].textContent, "9");
@@ -339,7 +355,7 @@ function cellOf(list, index) {
   wired[0].form.children[0].value = "twelve";
   await wired[0].form.dispatch("submit", { preventDefault() {} });
   check("nothing was sent", opened.client.calls.length, 0);
-  check("and the reason is under the control", cellOf(list, 0).children[3].textContent, NOT_A_NUMBER);
+  check("and the reason is under the control", cellOf(list, 0).children[2].textContent, NOT_A_NUMBER);
 }
 
 // The conflict, about a value rather than a name.

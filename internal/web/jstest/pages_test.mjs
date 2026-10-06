@@ -1205,14 +1205,15 @@ check("bothDirectionsOfARelationAreListedSeparately", async () => {
   });
   await load("entity");
   const rendered = text(dom.elements["entity-content"]);
-  // The two headings are the game's direction in plain words now, not the
-  // model's: "Relations out" and "Relations in" are the shape of the
-  // query, and a designer reads which way an edge points.
-  const out = rendered.indexOf("Leading out of this");
-  const into = rendered.indexOf("Pointing at this");
-  assert(out > -1 && into > out, "the two directions are not two lists in order");
-  assert(rendered.indexOf("Cudgel") > out && rendered.indexOf("Cudgel") < into, "the outgoing edge is in the wrong list");
-  assert(rendered.indexOf("Wanted") > into, "the incoming edge is in the wrong list");
+  // One band, two halves, and each half says which way the arrow runs
+  // from where the reader is standing. **Incoming first**: what points at
+  // a thing is what a designer opens its page to find.
+  const band = rendered.indexOf("Related entities");
+  const into = rendered.indexOf("Pointing here");
+  const out = rendered.indexOf("Pointed at from here");
+  assert(band > -1 && into > band && out > into, "the two halves are not inside one band in order");
+  assert(rendered.indexOf("Wanted") > into && rendered.indexOf("Wanted") < out, "the incoming edge is in the wrong half");
+  assert(rendered.indexOf("Cudgel") > out, "the outgoing edge is in the wrong half");
   // Two calls, one per direction, each naming the endpoint it filters on.
   const asked = dom.requested.filter((url) => url.startsWith(base + "/relations"));
   assertEqual(asked.length, 2, "an entity's edges were asked for in one call and sorted afterwards");

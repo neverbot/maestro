@@ -1955,6 +1955,21 @@ dl.fields dd.field-value.marked {
   font-size: 0.85rem;
 }
 
+/* **The two halves of a thing's connections.** One band names what it
+   holds and each half says which way the arrow runs, so the heading
+   inside it is the Title role and not a second Headline: a band has one
+   Headline, and two of them under one heading would read as four bands
+   where there are two halves of one. */
+.related-half h3 {
+  font-family: var(--sans);
+  font-size: 1.125rem;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--ink);
+  margin: var(--s5) 0 var(--s3);
+}
+.related-half:first-of-type h3 { margin-top: var(--s4); }
+
 /* --- The reading view (document.html, doc.js) --- */
 
 /* The rendered document. Only the elements internal/markdown's renderer
@@ -2501,12 +2516,22 @@ dl.fields {
      same mistake the catalogue's row made with a name and its key.
      `start` rather than a spacer track here because these rows carry no
      rule of their own, so nothing looks cut short. */
-  grid-template-columns: auto fit-content(44rem) auto;
+  /* Four tracks: the label, the value, the type it was declared as, and
+     the way to change it. The fourth is **always the width of its
+     control**, filled or not, because a track that appeared with the
+     control would move the three beside it every time a pointer crossed
+     a row. */
+  grid-template-columns: auto fit-content(44rem) auto auto;
   justify-content: start;
   gap: 0.35rem 1rem;
   margin: 0;
   align-items: baseline;
 }
+
+/* A row with no box of its own: the four cells stay the grid's own
+   items, and the wrapper exists so a stylesheet has something to call a
+   row. */
+.field-row { display: contents; }
 dl.fields dt {
   font-weight: 600;
 }
@@ -2519,14 +2544,9 @@ dl.fields dd.absent {
 dl.fields dt.undeclared {
   color: var(--danger);
 }
-/* **The value, then the way to change it.** The edit control sits beside
-   the value it changes and is deliberately quiet: five bordered buttons
-   down a reading surface is a form pretending to be a page. It stays
-   visible rather than appearing on hover — an affordance that only
-   exists under a pointer is one a touch screen and a keyboard never
-   meet — and it is the ghost button's vocabulary at label size, which is
-   what this system already spends on "a control that is not the point of
-   the screen". */
+/* The value, and the form that replaces it while it is being changed.
+   The way to change it is not here any more: it has a column of its own
+   and belongs to the row, which is where the reveal is argued. */
 dl.fields dd.field-value {
   display: flex;
   flex-wrap: wrap;
@@ -2549,7 +2569,6 @@ dl.fields dd.field-prose {
    would be the Build It Once rule broken inside the rule's own system. */
 dl.fields dd.field-prose .prose > :first-child { margin-top: 0; }
 dl.fields dd.field-prose .prose > :last-child { margin-bottom: 0; }
-dl.fields dd.field-prose .field-edit { margin-top: var(--s2); }
 
 /* The quiet control: a button that is not the point of the screen. The
    field editor's "Edit" was the first, and the clause stack's "Remove"
@@ -2560,14 +2579,55 @@ dl.fields dd.field-prose .field-edit { margin-top: var(--s2); }
   border: 0;
   background: none;
   padding: 0;
+  height: auto;
+  box-shadow: none;
   font: 600 0.75rem/1 var(--sans);
   letter-spacing: 0.03em;
   color: var(--muted);
   cursor: pointer;
 }
 
+/* **A control that undresses the button undresses it under the pointer
+   too**, and this one did not: it wore `ghost field-edit`, two
+   vocabularies at once, so `.ghost:hover` answered with a fill, an ink
+   border and a 3px halo drawn around a 32-pixel box holding twelve
+   pixels of text. One vocabulary now, and the answer is the one thing a
+   word can change without becoming a box: its ink. */
+.field-edit:hover,
+.field-edit:active,
+.quiet:hover,
+.quiet:active {
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
 .field-edit:hover,
 .quiet:hover { color: var(--ink); }
+
+/* **The way to change a value belongs to its row.** It was on every line
+   at once, which is five controls down a reading surface before anybody
+   has decided to change anything. It is in the row's own column now and
+   it answers the row.
+   `opacity` and not `display`, for three reasons that are all the same
+   reason: a hidden control is out of the tab order, a control that
+   appears takes width the moment it appears, and an affordance that only
+   exists under a pointer is one a keyboard and a touch screen never
+   meet. So it keeps its place, keyboard focus brings it back through
+   `:focus-within`, and where there is no pointer at all it never
+   leaves. */
+dd.field-action { margin: 0; }
+.field-action .field-edit {
+  opacity: 0;
+  transition: opacity var(--dur-state) var(--ease);
+}
+.field-row:hover .field-action .field-edit,
+.field-row:focus-within .field-action .field-edit {
+  opacity: 1;
+}
+@media (hover: none) {
+  .field-action .field-edit { opacity: 1; }
+}
 
 /* The control, on its own line under the value: a textarea for a
    longtext is the width of the column and would otherwise push the

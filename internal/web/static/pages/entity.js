@@ -222,10 +222,20 @@ export function fieldList(doc, rows) {
   const list = doc.createElement("dl");
   list.className = "fields";
   for (const field of rows) {
+    // **A row element, inside a `dl` that HTML allows one in.** The four
+    // cells were siblings of the list, so there was nothing a stylesheet
+    // could call a row: the way to change a value had to be visible on
+    // every line at once because no line could answer the pointer. The
+    // wrapper draws no box of its own (`display: contents`), so the grid
+    // and its columns are the ones they were.
+    const line = doc.createElement("div");
+    line.className = "field-row";
+    list.append(line);
+
     const term = doc.createElement("dt");
     term.textContent = field.label;
     if (field.undeclared) term.className = "undeclared";
-    list.append(term);
+    line.append(term);
 
     const value = doc.createElement("dd");
     // `field-value` is what wireFieldEdits finds a cell by. The list
@@ -243,12 +253,20 @@ export function fieldList(doc, rows) {
     } else {
       value.textContent = field.cell.text;
     }
-    list.append(value);
+    line.append(value);
 
     const kind = doc.createElement("dd");
     kind.className = "field-type";
     kind.textContent = field.type;
-    list.append(kind);
+    line.append(kind);
+
+    // The column the way to change this value lives in, reserved whether
+    // or not anything is in it: a track that appears with the control
+    // would move the three columns beside it every time a pointer
+    // crossed a row.
+    const action = doc.createElement("dd");
+    action.className = "field-action";
+    line.append(action);
   }
   return list;
 }
@@ -353,10 +371,11 @@ export function entityBody(doc, slug, model) {
   root.className = "entity";
 
   const rows = fieldRows(model.schema, model.entity);
+  // **No heading over the fields.** This band is what the page is: the
+  // thing's own values, under the thing's own name, which the page title
+  // and the breadcrumb have already said. A heading here would name the
+  // subject twice and rank the content below the furniture around it.
   const fields = doc.createElement("section");
-  const fieldsHeading = doc.createElement("h2");
-  fieldsHeading.textContent = t("entity.fields");
-  fields.append(fieldsHeading);
   if (rows.length === 0) {
     // **The shared negative state, not a muted sentence.** This page
     // builds its own body and replaces the shell's content wholesale, so
@@ -384,28 +403,40 @@ export function entityBody(doc, slug, model) {
   }
   root.append(fields);
 
-  for (const [direction, heading, relations] of [
-    [DIRECTION_OUT, t("entity.leadingOut"), model.out],
-    [DIRECTION_IN, t("entity.pointingAt"), model.in],
+  // **One band for the edges, two halves inside it.** They were two
+  // sibling bands headed "Leading out of this" and "Pointing at this",
+  // which name a direction in the metamodel's terms and leave a reader
+  // working out which end they are standing on. The band names what it
+  // holds — the entities this one is connected to — and each half says
+  // which way the arrow runs, in the only words that are unambiguous
+  // from here: towards this, or away from it.
+  const related = doc.createElement("section");
+  const relatedHeading = doc.createElement("h2");
+  relatedHeading.textContent = t("entity.related");
+  related.append(relatedHeading);
+  // Incoming first: what points at a thing is what a designer opens its
+  // page to find — which guild grants this ability, which quest needs
+  // this item — and the other half is one click away on each row.
+  for (const [direction, heading, relations, absent] of [
+    [DIRECTION_IN, t("entity.pointingHere"), model.in,
+      { heading: t("entity.nothingIn.heading"), sentence: t("entity.nothingIn.sentence") }],
+    [DIRECTION_OUT, t("entity.pointedFromHere"), model.out,
+      { heading: t("entity.nothingOut.heading"), sentence: t("entity.nothingOut.sentence") }],
   ]) {
-    const section = doc.createElement("section");
-    const title = doc.createElement("h2");
+    const half = doc.createElement("section");
+    half.className = "related-half";
+    const title = doc.createElement("h3");
     title.textContent = heading;
-    section.append(title);
+    half.append(title);
     const groups = relationGroups(relations, direction, model.relationLabels);
     if (groups.length === 0) {
-      section.append(negativeState(doc, {
-        kind: STATE_EMPTY,
-        heading: direction === DIRECTION_OUT ? t("entity.nothingOut.heading") : t("entity.nothingIn.heading"),
-        sentence: direction === DIRECTION_OUT
-          ? t("entity.nothingOut.sentence")
-          : t("entity.nothingIn.sentence"),
-      }));
+      half.append(negativeState(doc, { kind: STATE_EMPTY, ...absent }));
     } else {
-      section.append(relationList(doc, slug, groups));
+      half.append(relationList(doc, slug, groups));
     }
-    root.append(section);
+    related.append(half);
   }
+  root.append(related);
 
   const docs = doc.createElement("section");
   const docsHeading = doc.createElement("h2");
@@ -567,10 +598,13 @@ export function wireFieldEdits(doc, opened, model, schema) {
   const kids = [...holder.children];
   const wired = [];
   rows.forEach((row, index) => {
-    const cell = kids[index * 3 + 1];
+    const line = kids[index];
+    const cells = line && line.children ? line.children : [];
+    const cell = cells[1];
+    const action = cells[3];
     const field = byKey.get(row.key);
-    if (!cell || !field || row.undeclared) return;
-    wired.push(editable(doc, opened, cell, field, {
+    if (!cell || !action || !field || row.undeclared) return;
+    wired.push(editable(doc, opened, cell, action, field, {
       current: () => entity,
       settled: (next) => {
         entity = next;
@@ -583,7 +617,7 @@ export function wireFieldEdits(doc, opened, model, schema) {
 // editable is one field's own little machine: the value, an Edit button,
 // and — once pressed — the control, Save, Cancel and a sentence of its
 // own.
-function editable(doc, opened, cell, field, hooks) {
+function editable(doc, opened, cell, action, field, hooks) {
   // **A prose field keeps its rendering when the page becomes writable.**
   // This function replaces the cell's children with its own, so without
   // the three lines below a longtext was rendered by fieldList and
@@ -604,7 +638,12 @@ function editable(doc, opened, cell, field, hooks) {
 
   const open = doc.createElement("button");
   open.type = "button";
-  open.className = "ghost field-edit";
+  // **Not a ghost.** It carried `ghost field-edit`, which is two
+  // vocabularies on one element: `.field-edit` strips the button to a
+  // word and `.ghost:hover` dressed it again, so the pointer drew a
+  // 32-pixel bordered box with a halo around twelve pixels of text. One
+  // vocabulary, and it answers the pointer itself.
+  open.className = "field-edit";
   open.textContent = EDIT_LABEL;
   // The name says which field, because "Edit" said eight times on one
   // page is eight controls a screen reader cannot tell apart.
@@ -634,7 +673,8 @@ function editable(doc, opened, cell, field, hooks) {
     cell.className = absent ? base + " absent" : base;
     if (mark) cell.setAttribute("aria-label", name || value);
     else if (cell.removeAttribute) cell.removeAttribute("aria-label");
-    cell.replaceChildren(shown, open, form, error);
+    cell.replaceChildren(shown, form, error);
+    action.replaceChildren(open);
   };
   draw(cell.textContent, wasAbsent, startHTML, startMark, startName);
 

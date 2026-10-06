@@ -840,6 +840,51 @@ export function client({
     return get(paged(base + "/docs/links", options, search));
   }
 
+  // --- The log beside the content -------------------------------------
+  //
+  // A target is the four shapes the server reads out of a query string;
+  // with none at all the answer is the game's whole log.
+  function commentQuery(target) {
+    const search = new URLSearchParams();
+    if (!target || typeof target !== "object") return search;
+    search.set("on", String(target.on || ""));
+    search.set("type_key", String(target.typeKey || ""));
+    if (target.key) search.set("key", String(target.key));
+    if (target.source) {
+      search.set("source_type", String(target.source.typeKey || ""));
+      search.set("source_key", String(target.source.key || ""));
+    }
+    if (target.target) {
+      search.set("target_type", String(target.target.typeKey || ""));
+      search.set("target_key", String(target.target.key || ""));
+    }
+    return search;
+  }
+
+  async function listComments(target) {
+    const search = commentQuery(target);
+    const query = search.toString();
+    return get(base + "/comments" + (query === "" ? "" : "?" + query));
+  }
+
+  async function addComment(target, body) {
+    const on = target && typeof target === "object" ? target : {};
+    return send(base + "/comments", {
+      target: {
+        on: String(on.on || ""),
+        type_key: String(on.typeKey || ""),
+        key: on.key ? String(on.key) : undefined,
+        source: on.source ? { type_key: on.source.typeKey, key: on.source.key } : undefined,
+        target: on.target ? { type_key: on.target.typeKey, key: on.target.key } : undefined,
+      },
+      body: String(body ?? ""),
+    });
+  }
+
+  async function removeComment(id) {
+    return request(base + "/comments/" + encodeURIComponent(String(id || "")), { method: "DELETE" });
+  }
+
   // paged appends the two arguments every listing on this surface takes,
   // onto whatever narrowing the caller already built.
   function paged(path, options, search) {
@@ -1048,6 +1093,9 @@ export function client({
     createView,
     listRelations,
     listEntityDocs,
+    listComments,
+    addComment,
+    removeComment,
     connect,
     disconnect,
     setDragging,

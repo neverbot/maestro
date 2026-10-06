@@ -4,6 +4,7 @@
 
 import {
   DESTINATION_CATALOGUE,
+  ROLE_VIEWER,
   STATE_REFUSED,
   countLabel,
   destinations,
@@ -23,7 +24,7 @@ import {
 import { ABSENT_MARK, nextCursorOf } from "../rows.js";
 import { t } from "../i18n.js";
 import { headerRow, row } from "../rows.js";
-import { BOOL_FALSE, BOOL_TRUE, FIELD_BOOL, FIELD_LONGTEXT, formatValue } from "./entity.js";
+import { BOOL_FALSE, BOOL_TRUE, FIELD_BOOL, FIELD_LONGTEXT, attachLog, formatValue } from "./entity.js";
 import { goToLogin } from "../app.js";
 
 
@@ -145,6 +146,13 @@ export async function cataloguePage(opened) {
     // "prose about code" defect. A name is the one thing a person can
     // change now, and it is changed one screen along.
     setReadOnly(doc, counts.result.role, "writes.entities");
+    // The log beside this type: what was thought about the kind of thing
+    // rather than about one of its rows.
+    const slot = doc.getElementById("log-slot");
+    if (slot) {
+      slot.replaceChildren(await attachLog(doc, opened, { on: "entity_type", typeKey },
+        counts.result.role !== ROLE_VIEWER, String(counts.result.role ?? "")));
+    }
     const found = (counts.result.entity_types || []).find((entry) => entry.key === typeKey);
     if (found && Number.isFinite(found.entity_count)) total = found.entity_count;
     // **A filter whose answer is always "none" teaches a reader to

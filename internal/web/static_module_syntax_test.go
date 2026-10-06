@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -67,20 +68,24 @@ func ownModules(t *testing.T) []string {
 // which is goldmark with no html.WithUnsafe and the scheme filter on
 // every destination. A third would be a decision, and this is where it
 // gets made.
+var innerHTMLWrite = regexp.MustCompile(`\.innerHTML\s*=[^=]`)
+
 func TestOnlyTheRenderedProseIsInsertedAsMarkup(t *testing.T) {
 	t.Parallel()
 	inserters := map[string]bool{
-		"static/doc.js":          true,
-		"static/pages/entity.js": true,
+		"static/doc.js":   true,
+		"static/prose.js": true,
 	}
 	found := map[string]bool{}
 	for _, module := range ownModules(t) {
 		source, err := os.ReadFile(module)
 		assert.Must(t, err == nil, "read %s: %v", module, err)
-		// `.innerHTML`, with the dot: two modules say "never innerHTML" in
-		// a comment about themselves, and a guard that read those as uses
-		// would report the opposite of what they are.
-		if !strings.Contains(string(source), ".innerHTML") {
+		// **An assignment, not a mention and not a read.** Two modules say
+		// "never innerHTML" in a comment about themselves, and the field
+		// editor *reads* one to carry a rendering across the wiring of its
+		// own cell — which parses nothing and cannot be the hole this
+		// guard is about. What makes a tag out of a string is the write.
+		if !innerHTMLWrite.MatchString(string(source)) {
 			continue
 		}
 		found[module] = true

@@ -2134,6 +2134,75 @@ table.edges tr.edge-invalid td {
   height: auto;
 }
 
+/* --- The log beside a thing's content (log.js) --- */
+
+/* **A margin note, not a chat.** No avatar, no bubble, no thread: the
+   references are a note in the margin of a working notebook and the
+   message column of a log. An entry is who and when on one line, the
+   note under it, and a hairline to the next. */
+ol.log-entries {
+  list-style: none;
+  margin: var(--s4) 0 0;
+  padding: 0;
+}
+.log-entry + .log-entry {
+  margin-top: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+.log-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  margin: 0 0 var(--s2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.log-author { color: var(--ink); }
+.log-when { font-weight: 400; }
+/* The way to take a note out belongs to the note, and appears with it —
+   the rule the field editor's own control carries, and for the same
+   reason: six controls down a reading surface before anybody has decided
+   to remove anything. */
+.log-remove {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--dur-state) var(--ease);
+}
+.log-entry:hover .log-remove,
+.log-entry:focus-within .log-remove { opacity: 1; }
+@media (hover: none) {
+  .log-remove { opacity: 1; }
+}
+
+/* **The tool's voice, not the game's.** `.prose` is the game's own
+   writing and wears the serif; a comment is what somebody thought about
+   the game and would not survive it shipping, so it is the same prose
+   vocabulary in the sans and at the body size. */
+.prose.tool {
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.prose.tool h1, .prose.tool h2, .prose.tool h3 { font-family: var(--sans); }
+.log-body .prose > :first-child { margin-top: 0; }
+.log-body .prose > :last-child { margin-bottom: 0; }
+
+/* The one write this band offers: a box the width of the measure, and
+   the button under it rather than beside it — a textarea and a control
+   on one line put the control at the bottom right of a box that grows. */
+.log-composer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  max-width: var(--measure);
+  margin-top: var(--s3);
+}
+.log-composer textarea { width: 100%; }
+
 /* --- The reading view (document.html, doc.js) --- */
 
 /* The rendered document. Only the elements internal/markdown's renderer

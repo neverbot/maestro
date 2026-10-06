@@ -55,6 +55,15 @@ log admits, and the tool that does it says what that costs.
 the entity does. There is no orphan to find later and nothing to clean
 up.
 
+## What no screen draws yet
+
+**A relation's log is written and read over the tools, and no page shows
+one.** An entity, an entity type and a relation type each carry a
+Comments band; an edge has no page of its own to carry one, so a note
+against an edge is reachable through `comments.list` and nowhere else
+today. Worth knowing before you put something there that a designer is
+meant to read.
+
 ## How to use it
 
 - **Arriving at a game you have not touched in a while**: `comments.list`

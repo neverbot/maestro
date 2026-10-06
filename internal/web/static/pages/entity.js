@@ -25,6 +25,8 @@ import {
   typesURL,
 } from "./page.js";
 import { goToLogin, setFormBusy } from "../app.js";
+import { logBand } from "../log.js";
+import { proseBlock } from "../prose.js";
 
 // The metamodel's declared field types, in its own spelling
 // (internal/metamodel/schema.go). They are constants because this module
@@ -294,20 +296,6 @@ export function fieldList(doc, rows) {
   return list;
 }
 
-// proseBlock is a longtext value, rendered. **This and doc.js are the
-// only two places in this product that insert markup**, and the
-// argument is the one doc.js states: the string comes from
-// internal/markdown, which is goldmark with no html.WithUnsafe, so a tag
-// a designer or an agent typed arrives as text and a link destination
-// whose scheme is not http, https or mailto arrives as "#". Nothing a
-// game holds can reach the parser through here.
-export function proseBlock(doc, html) {
-  const block = doc.createElement("div");
-  block.className = "prose";
-  block.innerHTML = html;
-  return block;
-}
-
 // relationList paints one direction: one table per relation type, with
 // the type's own name, key and count above it.
 //
@@ -444,6 +432,39 @@ export function relationList(doc, slug, groups) {
     holder.append(section);
   }
   return holder;
+}
+
+// attachLog reads one thing's log and builds its band. **One function,
+// three pages**: the entity, the type and the relation type each carry
+// the same band, and the target is the only thing that differs.
+export async function attachLog(doc, opened, target, mayWrite, role) {
+  const answer = await opened.client.listComments(target);
+  const band = logBand(doc, {
+    role,
+    comments: answer.ok ? answer.result.items : [],
+    write: mayWrite
+      ? async (body) => {
+        const written = await opened.client.addComment(target, body);
+        if (written.ok) await refreshLog(band, opened, target);
+        return written;
+      }
+      : undefined,
+    remove: mayWrite
+      ? async (comment) => {
+        const gone = await opened.client.removeComment(comment.id);
+        if (gone.ok) await refreshLog(band, opened, target);
+      }
+      : undefined,
+  });
+  return band;
+}
+
+// refreshLog re-reads rather than splicing the answer in: the server
+// renders the markdown, so the page has no way to draw a note it has not
+// been handed.
+async function refreshLog(band, opened, target) {
+  const again = await opened.client.listComments(target);
+  if (again.ok && typeof band.draw === "function") band.draw(again.result.items);
 }
 
 // entityBody is the whole page under the heading, and it is what the
@@ -1178,6 +1199,11 @@ export async function entityPage(opened) {
     if (mayWrite) {
       wireFieldEdits(doc, opened, { ...model, fieldsList: body.fieldsList, rows: body.fieldRows }, model.schema);
     }
+    // The log, after the content: the thing is the point of the page and
+    // what was thought about it comes after it.
+    body.append(await attachLog(doc, opened, {
+      on: "entity", typeKey: model.entity.type_key, key: model.entity.key,
+    }, mayWrite, role.ok ? role.result.role : ""));
   }
   if (model.entity.invalid === true) say(errorEl, INVALID_NOTE);
   return opened;

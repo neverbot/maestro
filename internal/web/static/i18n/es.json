@@ -707,5 +707,19 @@
   "column.name": "Nombre",
   "column.id": "id",
   "error.comment-not-an-id": "Eso no es el identificador de un comentario.",
-  "error.this-instance-keeps-no-comment-log": "Esta instancia no guarda registro de comentarios."
+  "error.this-instance-keeps-no-comment-log": "Esta instancia no guarda registro de comentarios.",
+  "log.heading": "Comentarios",
+  "log.note": "Esto es la bitácora: lo que se ha pensado al trabajar sobre esto. Lo que un jugador puede encontrarse va en un campo o en un texto.",
+  "log.empty.heading": "Sin comentarios",
+  "log.empty.sentence.agent": "Aquí no hay ninguna nota todavía. Escríbela tú o pídesela a un agente.",
+  "log.empty.sentence.viewer": "Aquí no hay ninguna nota todavía.",
+  "log.write": "Comentar",
+  "log.placeholder": "Qué has cambiado, qué has pensado, qué queda pendiente…",
+  "log.needsWords": "Un comentario vacío no dice nada.",
+  "log.remove": "Quitar",
+  "log.someone": "alguien",
+  "log.justNow": "ahora mismo",
+  "log.minutes": "hace {n} min",
+  "log.hours": "hace {n} h",
+  "log.days": "hace {n} días"
 }

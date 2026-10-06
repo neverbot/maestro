@@ -86,3 +86,33 @@ func TestEveryUndressedControlStaysUndressedUnderThePointer(t *testing.T) {
 		"%s reset the button's fill and say nothing about the pointer, so button:hover repaints them in ink",
 		strings.Join(bare, "; "))
 }
+
+// TestTheDrawnBooleanWearsTokensAndSitsWhereItIsRead holds the two
+// decisions a drawn boolean carries that no module test can see. The
+// colours, because a hex here is a ninth data colour nobody argued for;
+// and the two alignments, because the mark is centred under the heading
+// that names it in a column and stays beside its label on the page where
+// the label is the thing it belongs to.
+func TestTheDrawnBooleanWearsTokensAndSitsWhereItIsRead(t *testing.T) {
+	t.Parallel()
+	want := map[string]string{
+		".mark-yes":                       "color: var(--",
+		".mark-no":                        "color: var(--",
+		".catalogue-cell.marked":          "justify-content: center",
+		"dl.fields dd.field-value.marked": "justify-content: flex-start",
+	}
+	seen := map[string]bool{}
+	for _, rule := range cssRules(t, "styles.css") {
+		body, ok := want[rule[0]]
+		if !ok {
+			continue
+		}
+		seen[rule[0]] = true
+		flat := strings.Join(strings.Fields(rule[1]), " ")
+		assert.Should(t, strings.Contains(flat, body), "%s is %q, want it to carry %q", rule[0], flat, body)
+	}
+	for selector := range want {
+		assert.Should(t, seen[selector], "no rule in styles.css selects %s: the guard reads a selector the "+
+			"stylesheet no longer has", selector)
+	}
+}

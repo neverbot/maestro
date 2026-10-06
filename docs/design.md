@@ -308,6 +308,16 @@ help" but "is there a fact on screen that nothing else says". Colour is
 a channel the diagram already spends; the interface does not compete for
 it.
 
+**One use was admitted against that test and it is written here**, so
+the next one is argued rather than copied: a boolean column draws its two
+values in `data-5` and `danger`, the only green and the only red this
+product has. It is still two tokens and no new one, but it does spend
+`danger` on a value that is not an alarm, which costs that token some of
+its meaning everywhere else. What it buys is the one thing nothing else
+on that screen says: which way a column of three hundred rows mostly
+goes, without reading a row. The shape says true or false on its own, so
+nothing is carried by the hue alone.
+
 **The Ink Button Rule.** The primary button is ink on paper. A button
 filled with the accent is forbidden: it would spend the accent on a
 fourth meaning and make every screen with a form the loudest screen in
@@ -423,14 +433,17 @@ edit. **Two modules insert markup and a guard says which**, because a
 third one is how a name a designer typed becomes a tag.
 
 **The Drawn Boolean Rule.** A yes or a no is a mark and not a word: a
-check for true, a cross for false, the em dash of a Named Absence for a
-row that has no value at all. Three states, three shapes, and the shape
-alone carries the meaning — the cross is muted ink and never the alarm,
-because a false is an ordinary value and not something that needs
-attention. The word stays as the cell's accessible name, so a reader who
-cannot see the column hears "no" and not "graphic". It is drawn in the
-same spelling wherever the value appears, a catalogue column and a
-thing's own page alike.
+check in `data-5` for true, a cross in `danger` for false, the em dash of
+a Named Absence for a row that has no value at all. Three states, three
+shapes, **and the shape alone carries the meaning**: the hue is the
+second thing that says it, which is what keeps the column legible to a
+reader who sees no colour and what makes the red admissible at all. The
+word stays as the cell's accessible name, so a reader who cannot see the
+column hears "no" and not "graphic". It is drawn in the same spelling
+wherever the value appears, a catalogue column and a thing's own page
+alike — **centred under the heading that names it in a column**, where
+there is no word to align to an edge, and beside its label on a page,
+where the label is the thing it belongs to.
 
 **This product ships no icon set and this is not the start of one.** The
 two marks are two paths, held beside the share bar's rect, because the

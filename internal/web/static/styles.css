@@ -71,6 +71,13 @@
  * that one: not "would a colour help" but "is there a fact on screen
  * that nothing else says".
  *
+ * **One candidate cleared it**: a boolean column, which draws its check
+ * in --data-5 and its cross in --danger. It adds no token, and it does
+ * spend the alarm on a value that is not one, which is the cost. What it
+ * buys is the fact nothing else on that screen says — which way three
+ * hundred rows mostly go, without reading a row — and the shape carries
+ * the meaning on its own, so a reader who sees no colour loses nothing.
+ *
  * Every colour token is declared twice — once here for the warm paper
  * ground and once in the dark block at the end of this file — and
  * internal/web/static_tokens_test.go holds that the two sets are the same
@@ -157,8 +164,11 @@
   --dropped: #b0a89a;
 
   /* The eight categorical hues (spec §2.5), assigned to a value by
-     hashing its text — internal/web/static/palette.js is the only thing
-     that reads them, and its doc comment carries that argument.
+     hashing its text — palette.js reads them for that, and its doc
+     comment carries the argument. **One of them is also read by a rule in
+     this file**: a boolean's check is --data-5, the one green here, used
+     for a fixed meaning rather than a hashed one. That is the exception
+     and not the pattern; a view's hue still belongs to palette.js.
      Chosen by search rather than by eye, under three simultaneous
      constraints the test file re-checks on every run: at least 3:1
      against --ground, at least 28° apart on the hue wheel, and pairwise
@@ -1836,17 +1846,27 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 }
 
 /* **A drawn yes or no.** The mark is the whole cell, so it sits on the
-   row's own centre line and takes the width a short word would. The
-   false is muted and the true is ink: the shape already carries the
-   meaning, and the colour only says which of the two a long column is
-   mostly made of. */
+   row's own centre line, and in a column it is centred under the heading
+   that names it: there is no word to align to a left edge, and a mark
+   sitting left in a track the heading made wide reads as hanging off it.
+   On an entity's own page the value stays beside its label, where a
+   centred mark would float away from the thing it belongs to. */
 .catalogue-cell.marked {
   display: flex;
   align-items: center;
+  justify-content: center;
+  padding-right: var(--s2);
+}
+dl.fields dd.field-value.marked {
+  justify-content: flex-start;
 }
 .mark { display: block; }
-.mark-yes { color: var(--ink); }
-.mark-no { color: var(--muted); }
+/* **Green and red, and the colour is the second thing that says it.**
+   The shape carries the meaning on its own — which is what keeps the
+   column legible to a reader who sees no colour — and the hue is what
+   makes a long column scannable without reading a single row. */
+.mark-yes { color: var(--data-5); }
+.mark-no { color: var(--danger); }
 
 /* The italic is what tells a mark from a value. */
 .catalogue-cell.absent {

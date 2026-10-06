@@ -509,7 +509,7 @@
       },
       {
         "name": "The Drawn Boolean Rule",
-        "body": "A yes or a no is a mark and not a word: a check for true, a cross for false, the em dash of a Named Absence where there is no value. Three states, three shapes, and the shape carries the meaning — the cross is muted ink and never the alarm, since a false is an ordinary value. The word stays as the cell's accessible name, and the same spelling is used wherever the value appears. The two marks are two paths rather than an icon set: the shipped font subset carries no check, and two shapes do not justify a library.",
+        "body": "A yes or a no is a mark and not a word: a check in data-5 for true, a cross in danger for false, the em dash of a Named Absence where there is no value. Three states, three shapes, and the shape alone carries the meaning — the hue is the second thing that says it, which is what keeps the column legible without colour. The word stays as the cell's accessible name. The mark is centred under the heading that names it in a column and sits beside its label on a thing's own page. The two marks are two paths rather than an icon set: the shipped font subset carries no check, and two shapes do not justify a library.",
         "section": "components"
       },
       {

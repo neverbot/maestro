@@ -21,6 +21,19 @@ type ApiToken struct {
 	TokenHint  string
 }
 
+type Comment struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
 type Document struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID

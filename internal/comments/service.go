@@ -1,0 +1,228 @@
+// Package comments is the log a game's designers and their agents keep
+// beside the content: how a thing was imported, what was rewritten and
+// why, an idea about the philosophy of a type, something worth doing
+// later. Markdown, append-only, and about the work rather than about the
+// game.
+//
+// **It is not a fifth primitive.** A game's own model is four things and
+// this changes none of them: nothing here is something a player can be,
+// go to, do or unlock, and no view, query or analysis reads a comment. A
+// field holds the game; a comment holds what was thought about it.
+//
+// **It carries no state, and that is the line this package will not
+// cross.** No status, no assignee, no due date, no "done". The day one of
+// those appears, this has become a project tracker, which is the one
+// thing the product says it is not.
+package comments
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/neverbot/maestro/internal/db/dbq"
+	"github.com/neverbot/maestro/internal/metamodel"
+)
+
+// Actor is the metamodel's, aliased rather than redeclared: the audit
+// columns on a comment are filled from the same caller.
+type Actor = metamodel.Actor
+
+// MaxBodyRunes bounds one comment. **A comment is a note, not a page**:
+// prose that wants a title, a history and an address of its own is a
+// document, and the bundle draws that line. The bound is here so the
+// difference is a refusal rather than a habit.
+const MaxBodyRunes = 4000
+
+// DefaultPage and MaxPage bound a listing, the way every other listing on
+// this surface is bounded.
+const (
+	DefaultPage int32 = 50
+	MaxPage     int32 = 200
+)
+
+// Kind is what a comment is about.
+type Kind string
+
+// The four things that can carry one. **A document cannot**: it already
+// keeps a message per version, which is the same note in the place that
+// can say which change it was about.
+const (
+	OnEntity       Kind = "entity"
+	OnRelation     Kind = "relation"
+	OnEntityType   Kind = "entity_type"
+	OnRelationType Kind = "relation_type"
+)
+
+// Target addresses the one thing a comment is about, in the terms the
+// rest of this surface speaks: keys, never ids.
+type Target struct {
+	Kind Kind
+	// TypeKey is the entity type's key for an entity, the type's own key
+	// for a type, and the relation type's key for a relation or a
+	// relation type.
+	TypeKey string
+	// Key is an entity's own key, and is read for OnEntity alone.
+	Key string
+	// From and To are an edge's endpoints, read for OnRelation alone.
+	From metamodel.Ref
+	To   metamodel.Ref
+}
+
+// Service is the comment log.
+type Service struct {
+	pool *pgxpool.Pool
+	q    *dbq.Queries
+	meta *metamodel.Service
+}
+
+// New builds the service. meta is what resolves a target's address to the
+// row it names, so a comment cannot be written against a thing this game
+// does not have.
+func New(pool *pgxpool.Pool, meta *metamodel.Service) *Service {
+	if pool == nil {
+		return &Service{meta: meta}
+	}
+	return &Service{pool: pool, q: dbq.New(pool), meta: meta}
+}
+
+// Add writes one comment.
+func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, body string, actor Actor) (dbq.Comment, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return dbq.Comment{}, fmt.Errorf("%w: body: a comment with nothing in it says nothing", metamodel.ErrInvalidInput)
+	}
+	if utf8.RuneCountInString(trimmed) > MaxBodyRunes {
+		return dbq.Comment{}, fmt.Errorf("%w: body: a comment holds at most %d characters and this one holds %d; "+
+			"prose that wants a title and a history of its own is a document",
+			metamodel.ErrInvalidInput, MaxBodyRunes, utf8.RuneCountInString(trimmed))
+	}
+	id, err := s.resolve(ctx, projectID, target)
+	if err != nil {
+		return dbq.Comment{}, err
+	}
+	params := dbq.InsertCommentParams{
+		ProjectID: projectID,
+		Body:      trimmed,
+	}
+	switch target.Kind {
+	case OnEntity:
+		params.EntityID = &id
+	case OnRelation:
+		params.RelationID = &id
+	case OnEntityType:
+		params.EntityTypeID = &id
+	case OnRelationType:
+		params.RelationTypeID = &id
+	}
+	if actor.UserID != nil {
+		params.CreatedByUserID = actor.UserID
+	}
+	if actor.TokenID != nil {
+		params.CreatedByTokenID = actor.TokenID
+	}
+	row, err := s.q.InsertComment(ctx, params)
+	if err != nil {
+		return dbq.Comment{}, fmt.Errorf("write comment: %w", err)
+	}
+	return row, nil
+}
+
+// List reads one thing's log, newest first.
+func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, limit int32) ([]dbq.Comment, error) {
+	id, err := s.resolve(ctx, projectID, target)
+	if err != nil {
+		return nil, err
+	}
+	bound := page(limit)
+	switch target.Kind {
+	case OnEntity:
+		return s.q.ListCommentsOnEntity(ctx, dbq.ListCommentsOnEntityParams{ProjectID: projectID, EntityID: id, Lim: bound})
+	case OnRelation:
+		return s.q.ListCommentsOnRelation(ctx, dbq.ListCommentsOnRelationParams{ProjectID: projectID, RelationID: id, Lim: bound})
+	case OnEntityType:
+		return s.q.ListCommentsOnEntityType(ctx, dbq.ListCommentsOnEntityTypeParams{ProjectID: projectID, EntityTypeID: id, Lim: bound})
+	default:
+		return s.q.ListCommentsOnRelationType(ctx, dbq.ListCommentsOnRelationTypeParams{ProjectID: projectID, RelationTypeID: id, Lim: bound})
+	}
+}
+
+// ListGame reads the game's whole log, newest first, whatever each
+// comment is about.
+func (s *Service) ListGame(ctx context.Context, projectID uuid.UUID, limit int32) ([]dbq.Comment, error) {
+	return s.q.ListCommentsInProject(ctx, dbq.ListCommentsInProjectParams{ProjectID: projectID, Lim: page(limit)})
+}
+
+// Remove takes one comment out. There is no update: a log that can be
+// rewritten is not a log, and a note written against the wrong thing is
+// still worse than a gap.
+func (s *Service) Remove(ctx context.Context, projectID, id uuid.UUID) error {
+	_, err := s.q.DeleteComment(ctx, dbq.DeleteCommentParams{ID: id, ProjectID: projectID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: no comment %q in this game", metamodel.ErrNotFound, id)
+	}
+	if err != nil {
+		return fmt.Errorf("remove comment: %w", err)
+	}
+	return nil
+}
+
+// CountsForEntities is how many comments each of these entities carries.
+// It is one query for a page of rows rather than one per row.
+func (s *Service) CountsForEntities(ctx context.Context, projectID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]int64, error) {
+	out := map[uuid.UUID]int64{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.q.ListCommentCountsForEntities(ctx, dbq.ListCommentCountsForEntitiesParams{ProjectID: projectID, EntityIds: ids})
+	if err != nil {
+		return nil, fmt.Errorf("count comments: %w", err)
+	}
+	for _, row := range rows {
+		if row.EntityID != nil {
+			out[*row.EntityID] = row.Comments
+		}
+	}
+	return out, nil
+}
+
+// resolve turns the address a caller speaks into the row it names, and
+// refuses an address this game does not have. **The refusal is the
+// point**: without it a comment would be written against a uuid nobody
+// can reach, and the log would quietly fill with notes about nothing.
+func (s *Service) resolve(ctx context.Context, projectID uuid.UUID, target Target) (uuid.UUID, error) {
+	switch target.Kind {
+	case OnEntity:
+		row, err := s.meta.EntityByKey(ctx, projectID, target.TypeKey, target.Key)
+		return row.ID, err
+	case OnRelation:
+		row, err := s.meta.RelationByEdge(ctx, projectID, target.TypeKey, target.From, target.To)
+		return row.ID, err
+	case OnEntityType:
+		row, err := s.meta.EntityTypeByKey(ctx, projectID, target.TypeKey)
+		return row.ID, err
+	case OnRelationType:
+		row, err := s.meta.RelationTypeByKey(ctx, projectID, target.TypeKey)
+		return row.ID, err
+	default:
+		return uuid.Nil, fmt.Errorf("%w: target: must be one of %q, %q, %q, %q",
+			metamodel.ErrInvalidInput, OnEntity, OnRelation, OnEntityType, OnRelationType)
+	}
+}
+
+func page(limit int32) int32 {
+	switch {
+	case limit <= 0:
+		return DefaultPage
+	case limit > MaxPage:
+		return MaxPage
+	default:
+		return limit
+	}
+}

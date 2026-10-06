@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/assert"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -31,6 +32,7 @@ type restFixture struct {
 	proj     *projects.Service
 	mm       *metamodel.Service
 	md       *markdown.Service
+	log      *comments.Service
 	game     uuid.UUID
 	gameSlug string
 	ownerID  uuid.UUID
@@ -40,7 +42,7 @@ type restFixture struct {
 
 func newRESTFixture(t *testing.T) restFixture {
 	t.Helper()
-	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md, log := newMetamodelTestServer(t)
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -56,7 +58,7 @@ func newRESTFixture(t *testing.T) restFixture {
 	agent, err := web.CallerForToken(ctx, ids, token)
 	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	return restFixture{
-		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md,
+		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md, log: log,
 		game: game.ID, gameSlug: game.Slug, ownerID: owner.ID,
 		cookie: loginAs(t, srv, "owner@example.test"),
 		agent:  agent,
@@ -70,7 +72,8 @@ func newRESTFixture(t *testing.T) restFixture {
 // requireScope refuses a session one, which is the whole of what
 // separates the two surfaces at this layer.
 func (f restFixture) deps() web.MCPDeps {
-	return web.MCPDeps{Identity: f.ids, Projects: f.proj, Metamodel: f.mm, Markdown: f.md}
+	return web.MCPDeps{Identity: f.ids, Projects: f.proj, Metamodel: f.mm, Markdown: f.md,
+		Comments: f.log}
 }
 
 func (f restFixture) caller() web.Caller { return f.agent }

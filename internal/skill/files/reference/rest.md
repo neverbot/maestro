@@ -28,6 +28,12 @@ takes.
 - `POST /api/auth/logout`
 - `POST /api/auth/register`
 
+## comments
+
+- `GET /api/games/{game}/comments`
+- `POST /api/games/{game}/comments`
+- `DELETE /api/games/{game}/comments/{comment}`
+
 ## config
 
 - `GET /api/config`

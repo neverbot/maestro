@@ -705,5 +705,7 @@
   "entity.pointingHere": "Pointing here",
   "entity.pointedFromHere": "Pointed at from here",
   "column.name": "Name",
-  "column.id": "id"
+  "column.id": "id",
+  "error.comment-not-an-id": "comment: not an id",
+  "error.this-instance-keeps-no-comment-log": "this instance keeps no comment log"
 }

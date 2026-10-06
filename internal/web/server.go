@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -68,6 +69,12 @@ type Options struct {
 	// reads from. The eight analysis.* / routes.* MCP tools
 	// (mcp_analysis.go) and their REST mirror (api_analysis.go) read it.
 	Analysis *analysis.Service
+
+	// Comments is the log beside a game's content (internal/comments),
+	// served by the comments.* tools and their REST mirror. It shares the
+	// metamodel service this instance built, because resolving the thing
+	// a comment is about is a metamodel read.
+	Comments *comments.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the
 	// SSE endpoint (events.go) reads from. publish.go's own handlers
@@ -445,6 +452,14 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("DELETE /api/games/{game}/docs/links", s.handleRemoveDocLink)
 	s.registerContentRoute("GET /api/games/{game}/docs/rendered", s.handleRenderDoc)
 	s.registerContentRoute("GET /api/games/{game}/docs/comparison", s.handleCompareDoc)
+
+	// The log beside a game's content (api_comments.go). A comment is
+	// game content in the sense that matters here — it belongs to one
+	// game and only its members may read or write it — so these go
+	// through registerContentRoute like every other content route.
+	s.registerContentRoute("GET /api/games/{game}/comments", s.handleListComments)
+	s.registerContentRoute("POST /api/games/{game}/comments", s.handleAddComment)
+	s.registerContentRoute("DELETE /api/games/{game}/comments/{comment}", s.handleRemoveComment)
 
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call

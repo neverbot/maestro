@@ -11,7 +11,6 @@ import (
 
 	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/comments"
-	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
@@ -215,7 +214,7 @@ func TestCommentsArea(t *testing.T) {
 	})
 }
 
-func bodies(rows []dbq.Comment) []string {
+func bodies(rows []comments.Comment) []string {
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, row.Body)

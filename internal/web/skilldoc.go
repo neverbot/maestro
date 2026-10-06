@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -213,5 +214,6 @@ func NewToolReferenceServer() *Server {
 		Markdown:  markdown.New(nil, nil),
 		Views:     views.New(nil, nil),
 		Analysis:  analysis.New(nil, nil),
+		Comments:  comments.New(nil, nil),
 	})
 }

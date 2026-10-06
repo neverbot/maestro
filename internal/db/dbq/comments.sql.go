@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const deleteComment = `-- name: DeleteComment :one
@@ -33,17 +34,23 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (u
 
 const insertComment = `-- name: InsertComment :one
 
-INSERT INTO comments (project_id, entity_id, relation_id, entity_type_id, relation_type_id,
-                      body, created_by_user_id, created_by_token_id)
-VALUES ($1::uuid,
-        $2::uuid,
-        $3::uuid,
-        $4::uuid,
-        $5::uuid,
-        $6::text,
-        $7::uuid,
-        $8::uuid)
-RETURNING id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id
+WITH written AS (
+    INSERT INTO comments (project_id, entity_id, relation_id, entity_type_id, relation_type_id,
+                          body, created_by_user_id, created_by_token_id)
+    VALUES ($1::uuid,
+            $2::uuid,
+            $3::uuid,
+            $4::uuid,
+            $5::uuid,
+            $6::text,
+            $7::uuid,
+            $8::uuid)
+    RETURNING id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id
+)
+SELECT w.id, w.project_id, w.entity_id, w.relation_id, w.entity_type_id, w.relation_type_id, w.body, w.created_at, w.created_by_user_id, w.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author
+FROM written w
+LEFT JOIN users u ON u.id = w.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = w.created_by_token_id
 `
 
 type InsertCommentParams struct {
@@ -55,6 +62,20 @@ type InsertCommentParams struct {
 	Body             string
 	CreatedByUserID  *uuid.UUID
 	CreatedByTokenID *uuid.UUID
+}
+
+type InsertCommentRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	Author           string
 }
 
 // The log beside a game's content. Every statement carries the resolved
@@ -77,7 +98,11 @@ type InsertCommentParams struct {
 // The four target columns are a CHECK-constrained choice of one
 // (0017_comments.sql), so a listing filters on the one that is set and
 // the three nulls never match anything.
-func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (Comment, error) {
+// **The author comes back with the row**, from the same join every read
+// here makes: a log whose entries do not say who wrote them is half a
+// log, and the two kinds of author this product has are a person with a
+// display name and an agent with a token's label.
+func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (InsertCommentRow, error) {
 	row := q.db.QueryRow(ctx, insertComment,
 		arg.ProjectID,
 		arg.EntityID,
@@ -88,7 +113,7 @@ func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (C
 		arg.CreatedByUserID,
 		arg.CreatedByTokenID,
 	)
-	var i Comment
+	var i InsertCommentRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -100,6 +125,7 @@ func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (C
 		&i.CreatedAt,
 		&i.CreatedByUserID,
 		&i.CreatedByTokenID,
+		&i.Author,
 	)
 	return i, err
 }
@@ -145,9 +171,12 @@ func (q *Queries) ListCommentCountsForEntities(ctx context.Context, arg ListComm
 }
 
 const listCommentsInProject = `-- name: ListCommentsInProject :many
-SELECT id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id FROM comments
-WHERE project_id = $1::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = $1::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $2::integer
 `
 
@@ -156,17 +185,31 @@ type ListCommentsInProjectParams struct {
 	Lim       int32
 }
 
+type ListCommentsInProjectRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	Author           string
+}
+
 // The game's whole log: what has been thought about this game lately,
 // whatever it was about.
-func (q *Queries) ListCommentsInProject(ctx context.Context, arg ListCommentsInProjectParams) ([]Comment, error) {
+func (q *Queries) ListCommentsInProject(ctx context.Context, arg ListCommentsInProjectParams) ([]ListCommentsInProjectRow, error) {
 	rows, err := q.db.Query(ctx, listCommentsInProject, arg.ProjectID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Comment
+	var items []ListCommentsInProjectRow
 	for rows.Next() {
-		var i Comment
+		var i ListCommentsInProjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -178,6 +221,7 @@ func (q *Queries) ListCommentsInProject(ctx context.Context, arg ListCommentsInP
 			&i.CreatedAt,
 			&i.CreatedByUserID,
 			&i.CreatedByTokenID,
+			&i.Author,
 		); err != nil {
 			return nil, err
 		}
@@ -190,9 +234,12 @@ func (q *Queries) ListCommentsInProject(ctx context.Context, arg ListCommentsInP
 }
 
 const listCommentsOnEntity = `-- name: ListCommentsOnEntity :many
-SELECT id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id FROM comments
-WHERE project_id = $1::uuid AND entity_id = $2::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = $1::uuid AND c.entity_id = $2::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $3::integer
 `
 
@@ -202,16 +249,30 @@ type ListCommentsOnEntityParams struct {
 	Lim       int32
 }
 
+type ListCommentsOnEntityRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	Author           string
+}
+
 // Newest first, which is how a log is read, and one page at a time.
-func (q *Queries) ListCommentsOnEntity(ctx context.Context, arg ListCommentsOnEntityParams) ([]Comment, error) {
+func (q *Queries) ListCommentsOnEntity(ctx context.Context, arg ListCommentsOnEntityParams) ([]ListCommentsOnEntityRow, error) {
 	rows, err := q.db.Query(ctx, listCommentsOnEntity, arg.ProjectID, arg.EntityID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Comment
+	var items []ListCommentsOnEntityRow
 	for rows.Next() {
-		var i Comment
+		var i ListCommentsOnEntityRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -223,6 +284,7 @@ func (q *Queries) ListCommentsOnEntity(ctx context.Context, arg ListCommentsOnEn
 			&i.CreatedAt,
 			&i.CreatedByUserID,
 			&i.CreatedByTokenID,
+			&i.Author,
 		); err != nil {
 			return nil, err
 		}
@@ -235,9 +297,12 @@ func (q *Queries) ListCommentsOnEntity(ctx context.Context, arg ListCommentsOnEn
 }
 
 const listCommentsOnEntityType = `-- name: ListCommentsOnEntityType :many
-SELECT id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id FROM comments
-WHERE project_id = $1::uuid AND entity_type_id = $2::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = $1::uuid AND c.entity_type_id = $2::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $3::integer
 `
 
@@ -247,15 +312,29 @@ type ListCommentsOnEntityTypeParams struct {
 	Lim          int32
 }
 
-func (q *Queries) ListCommentsOnEntityType(ctx context.Context, arg ListCommentsOnEntityTypeParams) ([]Comment, error) {
+type ListCommentsOnEntityTypeRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	Author           string
+}
+
+func (q *Queries) ListCommentsOnEntityType(ctx context.Context, arg ListCommentsOnEntityTypeParams) ([]ListCommentsOnEntityTypeRow, error) {
 	rows, err := q.db.Query(ctx, listCommentsOnEntityType, arg.ProjectID, arg.EntityTypeID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Comment
+	var items []ListCommentsOnEntityTypeRow
 	for rows.Next() {
-		var i Comment
+		var i ListCommentsOnEntityTypeRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -267,6 +346,7 @@ func (q *Queries) ListCommentsOnEntityType(ctx context.Context, arg ListComments
 			&i.CreatedAt,
 			&i.CreatedByUserID,
 			&i.CreatedByTokenID,
+			&i.Author,
 		); err != nil {
 			return nil, err
 		}
@@ -279,9 +359,12 @@ func (q *Queries) ListCommentsOnEntityType(ctx context.Context, arg ListComments
 }
 
 const listCommentsOnRelation = `-- name: ListCommentsOnRelation :many
-SELECT id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id FROM comments
-WHERE project_id = $1::uuid AND relation_id = $2::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = $1::uuid AND c.relation_id = $2::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $3::integer
 `
 
@@ -291,15 +374,29 @@ type ListCommentsOnRelationParams struct {
 	Lim        int32
 }
 
-func (q *Queries) ListCommentsOnRelation(ctx context.Context, arg ListCommentsOnRelationParams) ([]Comment, error) {
+type ListCommentsOnRelationRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	Author           string
+}
+
+func (q *Queries) ListCommentsOnRelation(ctx context.Context, arg ListCommentsOnRelationParams) ([]ListCommentsOnRelationRow, error) {
 	rows, err := q.db.Query(ctx, listCommentsOnRelation, arg.ProjectID, arg.RelationID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Comment
+	var items []ListCommentsOnRelationRow
 	for rows.Next() {
-		var i Comment
+		var i ListCommentsOnRelationRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -311,6 +408,7 @@ func (q *Queries) ListCommentsOnRelation(ctx context.Context, arg ListCommentsOn
 			&i.CreatedAt,
 			&i.CreatedByUserID,
 			&i.CreatedByTokenID,
+			&i.Author,
 		); err != nil {
 			return nil, err
 		}
@@ -323,9 +421,12 @@ func (q *Queries) ListCommentsOnRelation(ctx context.Context, arg ListCommentsOn
 }
 
 const listCommentsOnRelationType = `-- name: ListCommentsOnRelationType :many
-SELECT id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id FROM comments
-WHERE project_id = $1::uuid AND relation_type_id = $2::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = $1::uuid AND c.relation_type_id = $2::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $3::integer
 `
 
@@ -335,15 +436,29 @@ type ListCommentsOnRelationTypeParams struct {
 	Lim            int32
 }
 
-func (q *Queries) ListCommentsOnRelationType(ctx context.Context, arg ListCommentsOnRelationTypeParams) ([]Comment, error) {
+type ListCommentsOnRelationTypeRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityID         *uuid.UUID
+	RelationID       *uuid.UUID
+	EntityTypeID     *uuid.UUID
+	RelationTypeID   *uuid.UUID
+	Body             string
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	Author           string
+}
+
+func (q *Queries) ListCommentsOnRelationType(ctx context.Context, arg ListCommentsOnRelationTypeParams) ([]ListCommentsOnRelationTypeRow, error) {
 	rows, err := q.db.Query(ctx, listCommentsOnRelationType, arg.ProjectID, arg.RelationTypeID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Comment
+	var items []ListCommentsOnRelationTypeRow
 	for rows.Next() {
-		var i Comment
+		var i ListCommentsOnRelationTypeRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -355,6 +470,7 @@ func (q *Queries) ListCommentsOnRelationType(ctx context.Context, arg ListCommen
 			&i.CreatedAt,
 			&i.CreatedByUserID,
 			&i.CreatedByTokenID,
+			&i.Author,
 		); err != nil {
 			return nil, err
 		}

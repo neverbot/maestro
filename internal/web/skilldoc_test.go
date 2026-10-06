@@ -10,6 +10,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/assert"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -48,6 +49,7 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 		Markdown:  markdown.New(nil, nil),
 		Views:     views.New(nil, nil),
 		Analysis:  analysis.New(nil, nil),
+		Comments:  comments.New(nil, nil),
 	})
 	registered := srv.ToolDescriptionsForTest()
 	assert.Must(t, len(registered) >= 40, "this server registered %d tools; the comparison below would be over "+
@@ -55,7 +57,7 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 	// Every domain this bundle routes through, asserted by hand. A
 	// service silently dropped from the Options above would otherwise
 	// take its whole domain out of *both* sides of the comparison.
-	for _, prefix := range []string{"analysis.", "docs.", "entities.", "games.",
+	for _, prefix := range []string{"analysis.", "comments.", "docs.", "entities.", "games.",
 		"relation_types.", "relations.", "routes.", "types.", "views."} {
 		assert.Must(t, anyToolHasPrefix(registered, prefix), "no registered tool starts with %q: this test's own server is missing a domain, "+
 			"so the comparison below cannot see whether the file is", prefix)

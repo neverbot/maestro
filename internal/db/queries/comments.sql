@@ -20,49 +20,74 @@
 -- the three nulls never match anything.
 
 -- name: InsertComment :one
-INSERT INTO comments (project_id, entity_id, relation_id, entity_type_id, relation_type_id,
-                      body, created_by_user_id, created_by_token_id)
-VALUES (sqlc.arg('project_id')::uuid,
-        sqlc.narg('entity_id')::uuid,
-        sqlc.narg('relation_id')::uuid,
-        sqlc.narg('entity_type_id')::uuid,
-        sqlc.narg('relation_type_id')::uuid,
-        sqlc.arg('body')::text,
-        sqlc.narg('created_by_user_id')::uuid,
-        sqlc.narg('created_by_token_id')::uuid)
-RETURNING *;
+-- **The author comes back with the row**, from the same join every read
+-- here makes: a log whose entries do not say who wrote them is half a
+-- log, and the two kinds of author this product has are a person with a
+-- display name and an agent with a token's label.
+WITH written AS (
+    INSERT INTO comments (project_id, entity_id, relation_id, entity_type_id, relation_type_id,
+                          body, created_by_user_id, created_by_token_id)
+    VALUES (sqlc.arg('project_id')::uuid,
+            sqlc.narg('entity_id')::uuid,
+            sqlc.narg('relation_id')::uuid,
+            sqlc.narg('entity_type_id')::uuid,
+            sqlc.narg('relation_type_id')::uuid,
+            sqlc.arg('body')::text,
+            sqlc.narg('created_by_user_id')::uuid,
+            sqlc.narg('created_by_token_id')::uuid)
+    RETURNING *
+)
+SELECT w.*, COALESCE(t.label, u.display_name, '')::text AS author
+FROM written w
+LEFT JOIN users u ON u.id = w.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = w.created_by_token_id;
 
 -- name: ListCommentsOnEntity :many
 -- Newest first, which is how a log is read, and one page at a time.
-SELECT * FROM comments
-WHERE project_id = sqlc.arg('project_id')::uuid AND entity_id = sqlc.arg('entity_id')::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.entity_id = sqlc.arg('entity_id')::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsOnRelation :many
-SELECT * FROM comments
-WHERE project_id = sqlc.arg('project_id')::uuid AND relation_id = sqlc.arg('relation_id')::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.relation_id = sqlc.arg('relation_id')::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsOnEntityType :many
-SELECT * FROM comments
-WHERE project_id = sqlc.arg('project_id')::uuid AND entity_type_id = sqlc.arg('entity_type_id')::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.entity_type_id = sqlc.arg('entity_type_id')::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsOnRelationType :many
-SELECT * FROM comments
-WHERE project_id = sqlc.arg('project_id')::uuid AND relation_type_id = sqlc.arg('relation_type_id')::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.relation_type_id = sqlc.arg('relation_type_id')::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsInProject :many
 -- The game's whole log: what has been thought about this game lately,
 -- whatever it was about.
-SELECT * FROM comments
-WHERE project_id = sqlc.arg('project_id')::uuid
-ORDER BY created_at DESC, id DESC
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+FROM comments c
+LEFT JOIN users u ON u.id = c.created_by_user_id
+LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+WHERE c.project_id = sqlc.arg('project_id')::uuid
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentCountsForEntities :many

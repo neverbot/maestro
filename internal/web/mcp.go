@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -59,6 +60,11 @@ type MCPDeps struct {
 	// present (TestTheAnalysisToolsAreAbsentWithoutAnAnalysisService).
 	// cmd/maestro always builds one.
 	Analysis *analysis.Service
+
+	// Comments is the log beside the content, served by mcp_comments.go.
+	// Optional in the same sense as the four above. cmd/maestro always
+	// builds one.
+	Comments *comments.Service
 }
 
 // WhoamiOutput is the shape returned by the whoami tool. Its ProjectID
@@ -415,6 +421,9 @@ func (s *Server) newMCPServer() *mcp.Server {
 	}
 
 	// The analysis tools, on the same terms — see MCPDeps.Analysis.
+	if deps.Comments != nil {
+		s.addCommentTools(srv, deps)
+	}
 	if deps.Analysis != nil {
 		s.addAnalysisTools(srv, deps)
 	}

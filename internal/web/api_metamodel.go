@@ -40,7 +40,7 @@ const maxContentRequestBodyBytes = 4 << 20
 func (s *Server) deps() MCPDeps {
 	return MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects,
 		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown, Views: s.opts.Views,
-		Analysis: s.opts.Analysis}
+		Analysis: s.opts.Analysis, Comments: s.opts.Comments}
 }
 
 // requireContentService refuses a game-content route on an instance

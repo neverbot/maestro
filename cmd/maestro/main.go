@@ -21,6 +21,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/backup"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/identity"
@@ -97,15 +98,20 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// web.Server.Close's own doc comment for why http.Server.Shutdown
 	// alone is not enough once an SSE stream is in the mix.
 	hub := realtime.NewHub()
+	// One metamodel service, shared: the comment log resolves the thing a
+	// comment is about through it, and two services over one pool would
+	// be two of everything that domain owns for no reason.
+	meta := metamodel.New(pool, hub)
 	webServer := web.NewServer(web.Options{
 		Version:   version.Version,
 		Config:    cfg,
 		Identity:  ids,
 		Projects:  projects.New(pool),
-		Metamodel: metamodel.New(pool, hub),
+		Metamodel: meta,
 		Markdown:  markdown.New(pool, hub),
 		Views:     views.New(pool, hub),
 		Analysis:  analysis.New(pool, hub),
+		Comments:  comments.New(pool, meta),
 		Hub:       hub,
 	})
 	srv := &http.Server{

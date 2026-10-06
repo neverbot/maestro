@@ -705,5 +705,7 @@
   "entity.pointingHere": "Apuntan aquí",
   "entity.pointedFromHere": "Apuntadas desde aquí",
   "column.name": "Nombre",
-  "column.id": "id"
+  "column.id": "id",
+  "error.comment-not-an-id": "Eso no es el identificador de un comentario.",
+  "error.this-instance-keeps-no-comment-log": "Esta instancia no guarda registro de comentarios."
 }

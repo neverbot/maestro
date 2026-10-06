@@ -84,7 +84,7 @@ func briefing(word string) string {
 func seedRacingGame(t *testing.T) *seeded {
 	t.Helper()
 	ctx := context.Background()
-	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md, _ := newMetamodelTestServer(t)
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",

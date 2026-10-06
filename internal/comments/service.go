@@ -20,10 +20,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
@@ -75,6 +77,38 @@ type Target struct {
 	To   metamodel.Ref
 }
 
+// Comment is one entry in the log, in the shape every surface reads: the
+// four target columns collapse to the one Kind they encode, and the two
+// audit columns collapse to the author's own name.
+type Comment struct {
+	ID        uuid.UUID
+	Kind      Kind
+	Body      string
+	CreatedAt time.Time
+	// Author is the token's label for an agent and the person's display
+	// name for a person. Empty when the row that wrote it is gone, which
+	// is what the audit columns do on a deleted user.
+	Author string
+}
+
+// entry folds any of the five generated row shapes into one Comment.
+// They are identical structs with five different names, which is what
+// sqlc emits for five statements over one table.
+func entry(id uuid.UUID, entityID, relationID, entityTypeID *uuid.UUID, body string,
+	createdAt pgtype.Timestamptz, author string,
+) Comment {
+	kind := OnRelationType
+	switch {
+	case entityID != nil:
+		kind = OnEntity
+	case relationID != nil:
+		kind = OnRelation
+	case entityTypeID != nil:
+		kind = OnEntityType
+	}
+	return Comment{ID: id, Kind: kind, Body: body, CreatedAt: createdAt.Time, Author: author}
+}
+
 // Service is the comment log.
 type Service struct {
 	pool *pgxpool.Pool
@@ -93,19 +127,19 @@ func New(pool *pgxpool.Pool, meta *metamodel.Service) *Service {
 }
 
 // Add writes one comment.
-func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, body string, actor Actor) (dbq.Comment, error) {
+func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, body string, actor Actor) (Comment, error) {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
-		return dbq.Comment{}, fmt.Errorf("%w: body: a comment with nothing in it says nothing", metamodel.ErrInvalidInput)
+		return Comment{}, refuse("body", "a comment with nothing in it says nothing")
 	}
 	if utf8.RuneCountInString(trimmed) > MaxBodyRunes {
-		return dbq.Comment{}, fmt.Errorf("%w: body: a comment holds at most %d characters and this one holds %d; "+
+		return Comment{}, refuse("body", fmt.Sprintf("holds at most %d characters and this one holds %d; "+
 			"prose that wants a title and a history of its own is a document",
-			metamodel.ErrInvalidInput, MaxBodyRunes, utf8.RuneCountInString(trimmed))
+			MaxBodyRunes, utf8.RuneCountInString(trimmed)))
 	}
 	id, err := s.resolve(ctx, projectID, target)
 	if err != nil {
-		return dbq.Comment{}, err
+		return Comment{}, err
 	}
 	params := dbq.InsertCommentParams{
 		ProjectID: projectID,
@@ -129,34 +163,68 @@ func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, b
 	}
 	row, err := s.q.InsertComment(ctx, params)
 	if err != nil {
-		return dbq.Comment{}, fmt.Errorf("write comment: %w", err)
+		return Comment{}, fmt.Errorf("write comment: %w", err)
 	}
-	return row, nil
+	return entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author), nil
 }
 
 // List reads one thing's log, newest first.
-func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, limit int32) ([]dbq.Comment, error) {
+func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, limit int32) ([]Comment, error) {
 	id, err := s.resolve(ctx, projectID, target)
 	if err != nil {
 		return nil, err
 	}
 	bound := page(limit)
+	out := []Comment{}
 	switch target.Kind {
 	case OnEntity:
-		return s.q.ListCommentsOnEntity(ctx, dbq.ListCommentsOnEntityParams{ProjectID: projectID, EntityID: id, Lim: bound})
+		rows, err := s.q.ListCommentsOnEntity(ctx, dbq.ListCommentsOnEntityParams{ProjectID: projectID, EntityID: id, Lim: bound})
+		if err != nil {
+			return nil, fmt.Errorf("read log: %w", err)
+		}
+		for _, row := range rows {
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+		}
 	case OnRelation:
-		return s.q.ListCommentsOnRelation(ctx, dbq.ListCommentsOnRelationParams{ProjectID: projectID, RelationID: id, Lim: bound})
+		rows, err := s.q.ListCommentsOnRelation(ctx, dbq.ListCommentsOnRelationParams{ProjectID: projectID, RelationID: id, Lim: bound})
+		if err != nil {
+			return nil, fmt.Errorf("read log: %w", err)
+		}
+		for _, row := range rows {
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+		}
 	case OnEntityType:
-		return s.q.ListCommentsOnEntityType(ctx, dbq.ListCommentsOnEntityTypeParams{ProjectID: projectID, EntityTypeID: id, Lim: bound})
+		rows, err := s.q.ListCommentsOnEntityType(ctx, dbq.ListCommentsOnEntityTypeParams{ProjectID: projectID, EntityTypeID: id, Lim: bound})
+		if err != nil {
+			return nil, fmt.Errorf("read log: %w", err)
+		}
+		for _, row := range rows {
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+		}
 	default:
-		return s.q.ListCommentsOnRelationType(ctx, dbq.ListCommentsOnRelationTypeParams{ProjectID: projectID, RelationTypeID: id, Lim: bound})
+		rows, err := s.q.ListCommentsOnRelationType(ctx, dbq.ListCommentsOnRelationTypeParams{ProjectID: projectID, RelationTypeID: id, Lim: bound})
+		if err != nil {
+			return nil, fmt.Errorf("read log: %w", err)
+		}
+		for _, row := range rows {
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+		}
 	}
+	return out, nil
 }
 
 // ListGame reads the game's whole log, newest first, whatever each
 // comment is about.
-func (s *Service) ListGame(ctx context.Context, projectID uuid.UUID, limit int32) ([]dbq.Comment, error) {
-	return s.q.ListCommentsInProject(ctx, dbq.ListCommentsInProjectParams{ProjectID: projectID, Lim: page(limit)})
+func (s *Service) ListGame(ctx context.Context, projectID uuid.UUID, limit int32) ([]Comment, error) {
+	rows, err := s.q.ListCommentsInProject(ctx, dbq.ListCommentsInProjectParams{ProjectID: projectID, Lim: page(limit)})
+	if err != nil {
+		return nil, fmt.Errorf("read the game's log: %w", err)
+	}
+	out := make([]Comment, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+	}
+	return out, nil
 }
 
 // Remove takes one comment out. There is no update: a log that can be
@@ -211,8 +279,19 @@ func (s *Service) resolve(ctx context.Context, projectID uuid.UUID, target Targe
 		row, err := s.meta.RelationTypeByKey(ctx, projectID, target.TypeKey)
 		return row.ID, err
 	default:
-		return uuid.Nil, fmt.Errorf("%w: target: must be one of %q, %q, %q, %q",
-			metamodel.ErrInvalidInput, OnEntity, OnRelation, OnEntityType, OnRelationType)
+		return uuid.Nil, refuse("target.on", fmt.Sprintf("must be %q, %q, %q or %q",
+			OnEntity, OnRelation, OnEntityType, OnRelationType))
+	}
+}
+
+// refuse is this package's one refusal shape. **A ValidationError and not
+// a wrapped sentinel**: both surfaces read the path out of it and report
+// it beside the argument it is about, and a message that merely names the
+// path leaves a client parsing prose.
+func refuse(path, problem string) error {
+	return &metamodel.ValidationError{
+		Code:   metamodel.CodeInvalidInput,
+		Fields: []metamodel.FieldError{{Path: path, Message: problem}},
 	}
 }
 

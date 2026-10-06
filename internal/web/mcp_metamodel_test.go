@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/assert"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -25,7 +26,7 @@ import (
 
 // newMetamodelTestServer wires a server with a metamodel service over the
 // same ephemeral database, and hands back both.
-func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service, *markdown.Service) {
+func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service, *markdown.Service, *comments.Service) {
 	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
@@ -40,6 +41,7 @@ func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *proj
 	// two indexes and a fixture holding only one of them cannot see the
 	// merge at all.
 	md := markdown.New(pool, nil)
+	log := comments.New(pool, mm)
 	srv := web.NewServer(web.Options{
 		Version:   "test",
 		Config:    cfg,
@@ -47,8 +49,14 @@ func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *proj
 		Projects:  projSvc,
 		Metamodel: mm,
 		Markdown:  md,
+		// The log shares the metamodel service, because resolving the
+		// thing a comment is about is a metamodel read. A fixture without
+		// one answers 404 on every comment route, which is the shape an
+		// instance built without the service has and not the one these
+		// tests are about.
+		Comments: log,
 	})
-	return srv, ids, projSvc, mm, md
+	return srv, ids, projSvc, mm, md, log
 }
 
 // metamodelFixture is everything a tool test needs: the deps struct the
@@ -71,7 +79,7 @@ type metamodelFixture struct {
 
 func newMetamodelFixture(t *testing.T) metamodelFixture {
 	t.Helper()
-	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md, _ := newMetamodelTestServer(t)
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{

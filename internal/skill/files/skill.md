@@ -9,10 +9,9 @@ Maestro records the **content design** of a game: what a player can be,
 where they can go, what they can do and what they unlock. It is not a
 task tracker and there is no kanban here.
 
-Maestro ships **no built-in game vocabulary**. There is no Quest, no Zone,
-no Class, no Circuit. A game declares its own, and that is the product
-rather than a gap. You will declare a vocabulary before you can write
-anything, and the shape you choose is expensive to change later.
+Maestro ships **no built-in game vocabulary**: no Quest, no Zone, no
+Class, no Circuit. A game declares its own, and that is the product
+rather than a gap; the shape you declare first is expensive to change.
 
 Every tool's full contract is in its own description, which your client
 already holds. These pages teach what no description can: the order, the
@@ -24,8 +23,8 @@ Call `whoami` first. It says who you act for and which single game your
 token is bound to; the slug it answers with is that game's address, and
 what the optional `game` argument on every other tool is checked against.
 One token, one game: a `scope_violation` answers a request naming a
-different one, and is not a bug to route around. Ask the human for the
-right token.
+different one, is not a bug to route around, and the human has the right
+token.
 
 ## 2. The four primitives
 
@@ -147,6 +146,7 @@ fields from the interface while you work.
 | read an error and pick a recovery | `reference/errors.md` |
 | write a query or a saved view | `reference/queries.md` |
 | attach prose to an entity | `reference/documents.md` |
+| leave a note about the work rather than about the game | `reference/comments.md` |
 | see a whole game modelled, in a genre near yours | `genres/mmorpg.md`, `genres/racing.md`, `genres/metroidvania.md` |
 | fill an empty game, or re-run a seed | `recipes/seeding-a-game.md` |
 | open a game somebody else designed | `recipes/joining-a-game.md` |

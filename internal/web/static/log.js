@@ -9,6 +9,7 @@
 // thread. A line of who and when, the note under it, and a hairline
 // between entries.
 import { t } from "./i18n.js";
+import { hueFor } from "./palette.js";
 import { STATE_EMPTY, negativeState, whoWrites } from "./pages/page.js";
 import { proseBlock } from "./prose.js";
 import { setFormBusy } from "./app.js";
@@ -32,6 +33,42 @@ export function when(now, iso) {
   return t("log.days").replace("{n}", String(days));
 }
 
+// MONOGRAM_LETTERS is how much of a name a chip carries. Two, because a
+// chip is for telling three or four authors apart down a column and not
+// for reading.
+const MONOGRAM_LETTERS = 2;
+
+// monogram is the initials of a name, in the one shape that works for
+// "Iván Alonso", "rl-aeternum" and "seed".
+export function monogram(name) {
+  const words = String(name || "").split(/[\s._-]+/).filter((word) => word !== "");
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, MONOGRAM_LETTERS).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+// chip is the author's mark. **Not a gravatar**: the content security
+// policy is `default-src 'self'` and a third-party avatar would be
+// blocked silently, and asking gravatar.com for one tells it the hash of
+// a designer's email on every page view, from a product whose whole
+// identity story is local accounts and no external anything. This is the
+// local answer: two letters on one of the eight data hues, which
+// palette.js already assigns by hashing text and which were chosen to
+// stay apart under deuteranopia and protanopia.
+//
+// **The hue is the owner's, for a person and for their agent alike**, so
+// a column of notes shows at a glance which of them trace back to the
+// same person. What kind of author it was is carried by the word beside
+// it, never by the colour.
+function chip(doc, comment) {
+  const of = comment.author_of || comment.author || "";
+  const mark = doc.createElement("span");
+  mark.className = "log-chip hue-" + (hueFor(of) + 1);
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = monogram(comment.author || t("log.someone"));
+  return mark;
+}
+
 // entry is one note.
 function entry(doc, comment, now, onRemove) {
   const item = doc.createElement("li");
@@ -39,10 +76,24 @@ function entry(doc, comment, now, onRemove) {
 
   const meta = doc.createElement("p");
   meta.className = "log-meta";
+  meta.append(chip(doc, comment));
   const who = doc.createElement("span");
   who.className = "log-author";
   who.textContent = comment.author || t("log.someone");
   meta.append(who);
+  // **"agente" is a word and not a badge.** A reader should not have to
+  // learn a mark to find out that a machine wrote this, and the token's
+  // label is a word somebody chose — "rl-aeternum" reads as a name. Whose
+  // agent it is comes with it, because in a game with two designers that
+  // is the question under "who wrote this".
+  if (comment.by_agent === true) {
+    const kind = doc.createElement("span");
+    kind.className = "log-agent";
+    kind.textContent = comment.author_of
+      ? t("log.agentOf").replace("{who}", comment.author_of)
+      : t("log.agent");
+    meta.append(kind);
+  }
   const stamp = doc.createElement("time");
   stamp.className = "log-when";
   stamp.setAttribute("datetime", String(comment.created_at || ""));
@@ -90,10 +141,6 @@ export function logBand(doc, spec) {
   note.textContent = t("log.note");
   section.append(note);
 
-  if (typeof spec.write === "function") {
-    section.append(composer(doc, spec));
-  }
-
   const list = doc.createElement("ol");
   list.className = "log-entries";
   section.append(list);
@@ -105,9 +152,23 @@ export function logBand(doc, spec) {
   });
   section.append(empty);
 
+  // **The box after the log, not before it.** A log is read down to the
+  // newest and written at the end, so the one write sits where your eye
+  // already is. It was the first thing in the band, which put an empty
+  // control above the content it is about.
+  if (typeof spec.write === "function") {
+    section.append(composer(doc, spec));
+  }
+
   const now = typeof spec.now === "number" ? spec.now : Date.now();
   const draw = (comments) => {
-    const rows = Array.isArray(comments) ? comments : [];
+    // **Oldest first, and the server answers newest first.** The server
+    // is the one with the limit, and a limit taken from the oldest end
+    // truncates the wrong end of a log; the order a person reads it in is
+    // the order it happened. There is no cap on what is drawn: a log that
+    // shows the last few hides exactly what a reader does not know is
+    // there.
+    const rows = Array.isArray(comments) ? [...comments].reverse() : [];
     list.replaceChildren(...rows.map((comment) => entry(doc, comment, now, spec.remove)));
     list.hidden = rows.length === 0;
     empty.hidden = rows.length !== 0;

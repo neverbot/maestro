@@ -67,7 +67,12 @@ function textOf(node) {
   const meta = entry.children[0];
   check("an entry says who and how long ago, and offers to take itself out",
     meta.children.map((part) => part.textContent),
-    ["Administrator", "1 h ago", "Remove"]);
+    ["AD", "Administrator", "1 h ago", "Remove"]);
+  // **The mark is drawn, not fetched**: a third-party avatar is blocked
+  // by `default-src 'self'` and would tell a stranger the hash of a
+  // designer's email on every page view.
+  check("the author's mark is two letters on a hue of the data palette",
+    meta.children[0].getAttribute("class"), "log-chip hue-3");
 
   // **The tool's voice, not the game's.** A comment is what somebody
   // thought about the game and would not survive it shipping, so it is
@@ -75,6 +80,38 @@ function textOf(node) {
   const body = entry.children[1].children[0];
   check("the note is rendered prose in the tool's voice", body.getAttribute("class"), "prose tool");
   check("and it is the rendering the server sent", body.innerHTML, "<p>Imported from the 1998 build.</p>");
+}
+
+// **An agent is said to be one, in a word.** The token's label is a word
+// somebody chose — "rl-aeternum" reads as a person — so the kind of
+// author is written out and the hue says whose it is, which is the one
+// thing a mark can carry without a legend.
+{
+  const byAgent = { ...ENTRY, author: "rl-aeternum", by_agent: true, author_of: "Administrator" };
+  const band = logBand(doc, { role: "editor", comments: [byAgent], now });
+  const meta = band.children.find((child) => child.tagName === "ol").children[0].children[0];
+  check("an agent's entry says so and says whose agent it is",
+    meta.children.map((part) => part.textContent),
+    ["RA", "rl-aeternum", "Administrator's agent", "1 h ago"]);
+  // The hue is the owner's, so a person and their agent share one.
+  const mine = logBand(doc, { role: "editor", comments: [{ ...ENTRY, author: "Administrator", author_of: "Administrator" }], now });
+  const hueOf = (b) => b.children.find((c) => c.tagName === "ol").children[0].children[0].children[0].getAttribute("class");
+  check("and wears the hue of the person it belongs to", hueOf(band), hueOf(mine));
+}
+
+// A log is read oldest first, whatever order the server answered in, and
+// nothing is left out: a cap would hide what a reader does not know is
+// there.
+{
+  const older = { ...ENTRY, id: "c0", body_html: "<p>first</p>", created_at: "2026-10-06T11:00:00Z" };
+  const newer = { ...ENTRY, id: "c1", body_html: "<p>second</p>", created_at: "2026-10-07T11:00:00Z" };
+  const band = logBand(doc, { role: "editor", comments: [newer, older], now, write: async () => ({ ok: true }) });
+  const list = band.children.find((child) => child.tagName === "ol");
+  check("the newest the server sent first is drawn last",
+    list.children.map((item) => item.children[1].children[0].innerHTML),
+    ["<p>first</p>", "<p>second</p>"]);
+  // And the one write sits at the end of what it writes into.
+  check("the box is the last thing in the band", band.children.at(-1).getAttribute("class"), "log-composer");
 }
 
 // A log nobody has written in says so, and says who would.
@@ -93,7 +130,7 @@ function textOf(node) {
   const list = band.children.find((child) => child.tagName === "ol");
   check("and the entry offers no way to remove itself",
     list.children[0].children[0].children.map((part) => part.textContent),
-    ["Administrator", "1 h ago"]);
+    ["AD", "Administrator", "1 h ago"]);
 }
 
 // The one write: an empty box is refused here rather than at the server,

@@ -2134,6 +2134,27 @@ table.edges tr.edge-invalid td {
   height: auto;
 }
 
+/* **The thing on the left, what was thought about it on the right.**
+   Measured on an entity with two longtext fields: the fields block ends
+   at 851px and leaves 556px of empty paper beside it for its whole
+   height, while the log was last on a 2966px page. The pairing is the
+   home's (`.lanes.pair`), at a wider breakpoint: these two want 851 plus
+   a column of prose at its measure, and below that the pair would narrow
+   the game's own prose to make room for the log, which is the wrong
+   trade. Below it they stack, and the log is still second rather than
+   last. */
+@media (min-width: 1400px) {
+  .entity.pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 34rem);
+    column-gap: var(--s7);
+    align-items: start;
+  }
+  .entity.pair > section:not(.paired) {
+    grid-column: 1 / -1;
+  }
+}
+
 /* --- The log beside a thing's content (log.js) --- */
 
 /* **A margin note, not a chat.** No avatar, no bubble, no thread: the
@@ -2161,6 +2182,47 @@ ol.log-entries {
   color: var(--muted);
 }
 .log-author { color: var(--ink); }
+
+/* **The author's mark, drawn here and fetched from nowhere.** Two letters
+   on one of the eight data hues, which palette.js assigns by hashing the
+   name and which were chosen to stay apart under deuteranopia and
+   protanopia. A gravatar would be a third-party image under
+   `default-src 'self'` — blocked silently — and a request telling
+   gravatar.com the hash of a designer's email on every page view, from a
+   product that keeps its accounts local on purpose.
+   **The hue is the owner's**, so a person and their agent share one, and
+   what kind of author it was is the word beside it rather than the
+   colour. */
+.log-chip {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--paper);
+}
+.log-chip.hue-1 { background: var(--data-1); }
+.log-chip.hue-2 { background: var(--data-2); }
+.log-chip.hue-3 { background: var(--data-3); }
+.log-chip.hue-4 { background: var(--data-4); }
+.log-chip.hue-5 { background: var(--data-5); }
+.log-chip.hue-6 { background: var(--data-6); }
+.log-chip.hue-7 { background: var(--data-7); }
+.log-chip.hue-8 { background: var(--data-8); }
+
+/* The word that says a machine wrote this. It is quiet because it is a
+   fact about the author and not a warning, and it is a word because a
+   mark would need a legend. */
+.log-agent {
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: normal;
+}
 .log-when { font-weight: 400; }
 /* The way to take a note out belongs to the note, and appears with it —
    the rule the field editor's own control carries, and for the same

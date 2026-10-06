@@ -89,13 +89,23 @@ type Comment struct {
 	// name for a person. Empty when the row that wrote it is gone, which
 	// is what the audit columns do on a deleted user.
 	Author string
+	// ByAgent says which kind of author that was. **It is a fact of its
+	// own and not a guess from the name**: a token's label is a word
+	// somebody chose, and "rl-aeternum" reads as a person to anyone who
+	// does not already know otherwise.
+	ByAgent bool
+	// AuthorOf is the person an agent's token traces back to, and the
+	// author themselves when a person wrote it. It is what makes "whose
+	// agent" answerable, which in a game with two designers is the
+	// question under "who wrote this".
+	AuthorOf string
 }
 
 // entry folds any of the five generated row shapes into one Comment.
 // They are identical structs with five different names, which is what
 // sqlc emits for five statements over one table.
-func entry(id uuid.UUID, entityID, relationID, entityTypeID *uuid.UUID, body string,
-	createdAt pgtype.Timestamptz, author string,
+func entry(id uuid.UUID, entityID, relationID, entityTypeID, tokenID *uuid.UUID, body string,
+	createdAt pgtype.Timestamptz, author, authorOf string,
 ) Comment {
 	kind := OnRelationType
 	switch {
@@ -106,7 +116,10 @@ func entry(id uuid.UUID, entityID, relationID, entityTypeID *uuid.UUID, body str
 	case entityTypeID != nil:
 		kind = OnEntityType
 	}
-	return Comment{ID: id, Kind: kind, Body: body, CreatedAt: createdAt.Time, Author: author}
+	return Comment{
+		ID: id, Kind: kind, Body: body, CreatedAt: createdAt.Time,
+		Author: author, ByAgent: tokenID != nil, AuthorOf: authorOf,
+	}
 }
 
 // Service is the comment log.
@@ -165,7 +178,7 @@ func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, b
 	if err != nil {
 		return Comment{}, fmt.Errorf("write comment: %w", err)
 	}
-	return entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author), nil
+	return entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf), nil
 }
 
 // List reads one thing's log, newest first.
@@ -183,7 +196,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	case OnRelation:
 		rows, err := s.q.ListCommentsOnRelation(ctx, dbq.ListCommentsOnRelationParams{ProjectID: projectID, RelationID: id, Lim: bound})
@@ -191,7 +204,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	case OnEntityType:
 		rows, err := s.q.ListCommentsOnEntityType(ctx, dbq.ListCommentsOnEntityTypeParams{ProjectID: projectID, EntityTypeID: id, Lim: bound})
@@ -199,7 +212,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	default:
 		rows, err := s.q.ListCommentsOnRelationType(ctx, dbq.ListCommentsOnRelationTypeParams{ProjectID: projectID, RelationTypeID: id, Lim: bound})
@@ -207,7 +220,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	}
 	return out, nil
@@ -222,7 +235,7 @@ func (s *Service) ListGame(ctx context.Context, projectID uuid.UUID, limit int32
 	}
 	out := make([]Comment, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.Body, row.CreatedAt, row.Author))
+		out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 	}
 	return out, nil
 }

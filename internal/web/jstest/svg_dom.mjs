@@ -183,6 +183,24 @@ export function createDocument() {
       return this.dispatch("click");
     }
 
+    // replaceWith puts other nodes where this one is. The entity page
+    // builds an empty section for its log and swaps the filled band into
+    // it once the server has answered, so the band's place in the page is
+    // decided by the builder and not by whichever call came back first.
+    replaceWith(...nodes) {
+      const parent = this.parentNode;
+      if (!parent) return;
+      const at = parent.childNodes.indexOf(this);
+      parent.removeChild(this);
+      let offset = 0;
+      for (const node of nodes) {
+        if (node.parentNode) node.parentNode.removeChild(node);
+        parent.childNodes.splice(at + offset, 0, node);
+        node.parentNode = parent;
+        offset += 1;
+      }
+    }
+
     replaceChildren(...kids) {
       for (const child of this.childNodes.slice()) this.removeChild(child);
       for (const kid of kids) this.appendChild(kid);

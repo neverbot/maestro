@@ -6,6 +6,13 @@
 --     handed back and names no parent, so nothing but this filter keeps
 --     a removal inside one game. Mutating it reddens TestCommentsArea's
 --     "one game's log is not another's" case.
+-- **The author comes back as three facts, not one.** `author` is what to
+-- print, `author_of` is the person a token traces back to, and which of
+-- the two audit columns is set says whether a person or an agent wrote
+-- it: a reader who cannot tell a machine from a colleague is reading a
+-- log that is lying to them by omission, and the token label alone
+-- ("rl-aeternum") reads as a name.
+--
 --   * **The listings' are defence in depth.** A listing is reached by a
 --     target the caller addressed by key, and resolving that address is
 --     already scoped to the game; the composite foreign keys mean a
@@ -37,44 +44,54 @@ WITH written AS (
             sqlc.narg('created_by_token_id')::uuid)
     RETURNING *
 )
-SELECT w.*, COALESCE(t.label, u.display_name, '')::text AS author
+SELECT w.*, COALESCE(t.label, u.display_name, '')::text AS author,
+       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM written w
 LEFT JOIN users u ON u.id = w.created_by_user_id
-LEFT JOIN api_tokens t ON t.id = w.created_by_token_id;
+LEFT JOIN api_tokens t ON t.id = w.created_by_token_id
+LEFT JOIN users owner ON owner.id = t.user_id;
 
 -- name: ListCommentsOnEntity :many
 -- Newest first, which is how a log is read, and one page at a time.
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
+       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
 LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+LEFT JOIN users owner ON owner.id = t.user_id
 WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.entity_id = sqlc.arg('entity_id')::uuid
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsOnRelation :many
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
+       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
 LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+LEFT JOIN users owner ON owner.id = t.user_id
 WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.relation_id = sqlc.arg('relation_id')::uuid
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsOnEntityType :many
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
+       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
 LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+LEFT JOIN users owner ON owner.id = t.user_id
 WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.entity_type_id = sqlc.arg('entity_type_id')::uuid
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 
 -- name: ListCommentsOnRelationType :many
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
+       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
 LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+LEFT JOIN users owner ON owner.id = t.user_id
 WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.relation_type_id = sqlc.arg('relation_type_id')::uuid
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
@@ -82,10 +99,12 @@ LIMIT sqlc.arg('lim')::integer;
 -- name: ListCommentsInProject :many
 -- The game's whole log: what has been thought about this game lately,
 -- whatever it was about.
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author
+SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
+       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
 LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
+LEFT JOIN users owner ON owner.id = t.user_id
 WHERE c.project_id = sqlc.arg('project_id')::uuid
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;

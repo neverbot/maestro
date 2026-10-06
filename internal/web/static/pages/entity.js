@@ -505,7 +505,18 @@ export function entityBody(doc, slug, model) {
     root.fieldRows = rows;
     fields.append(list);
   }
+  fields.className = "paired";
   root.append(fields);
+
+  // **The log's place, between the thing's own values and its edges.**
+  // It is filled by the page once the server has answered, and it is
+  // here rather than last because what was thought about a thing is not
+  // the least of what a page about it holds. On a wide window it sits
+  // beside the fields instead of under them.
+  const log = doc.createElement("section");
+  log.className = "paired";
+  root.logSlot = log;
+  root.append(log);
 
   // **One band for the edges, two halves inside it.** They were two
   // sibling bands headed "Leading out of this" and "Pointing at this",
@@ -1199,11 +1210,17 @@ export async function entityPage(opened) {
     if (mayWrite) {
       wireFieldEdits(doc, opened, { ...model, fieldsList: body.fieldsList, rows: body.fieldRows }, model.schema);
     }
-    // The log, after the content: the thing is the point of the page and
-    // what was thought about it comes after it.
-    body.append(await attachLog(doc, opened, {
+    const band = await attachLog(doc, opened, {
       on: "entity", typeKey: model.entity.type_key, key: model.entity.key,
-    }, mayWrite, role.ok ? role.result.role : ""));
+    }, mayWrite, role.ok ? role.result.role : "");
+    if (body.logSlot) {
+      body.logSlot.replaceWith(band);
+      band.classList.add("paired");
+      // The pair is set by the page and only when there is a log to pair
+      // with, so a body built for the panel over a canvas stays one
+      // column.
+      body.classList.add("pair");
+    }
   }
   if (model.entity.invalid === true) say(errorEl, INVALID_NOTE);
   return opened;

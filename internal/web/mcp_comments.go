@@ -61,10 +61,17 @@ type CommentOutput struct {
 	On        string    `json:"on"`
 	Body      string    `json:"body"`
 	CreatedAt string    `json:"created_at"`
-	// Author is who wrote it, in the one form both kinds of caller have:
-	// a display name for a person, the token's name for an agent, and
-	// empty for neither.
+	// Author is who wrote it: a display name for a person, the token's
+	// label for an agent, and empty for neither.
 	Author string `json:"author,omitempty"`
+	// ByAgent says which of the two that was, because the name alone
+	// cannot: a token's label is a word somebody chose, and a reader who
+	// cannot tell a machine from a colleague is reading a log that is
+	// lying to them by omission.
+	ByAgent bool `json:"by_agent"`
+	// AuthorOf is the person an agent's token belongs to, and the author
+	// themselves when a person wrote it.
+	AuthorOf string `json:"author_of,omitempty"`
 }
 
 // CommentsListOutput is a log, newest first.
@@ -117,6 +124,8 @@ func commentOf(row comments.Comment) CommentOutput {
 		Body:      row.Body,
 		CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
 		Author:    row.Author,
+		ByAgent:   row.ByAgent,
+		AuthorOf:  row.AuthorOf,
 	}
 }
 
@@ -257,13 +266,15 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 // inferred by reflection is a shape nobody read.
 var commentOutputSchema = &jsonschema.Schema{
 	Type:     "object",
-	Required: []string{"id", "on", "body", "created_at"},
+	Required: []string{"id", "on", "body", "created_at", "by_agent"},
 	Properties: map[string]*jsonschema.Schema{
 		"id":         stringSchema(),
 		"on":         stringSchema(),
 		"body":       stringSchema(),
 		"created_at": stringSchema(),
 		"author":     stringSchema(),
+		"by_agent":   boolSchema(),
+		"author_of":  stringSchema(),
 	},
 }
 

@@ -98,6 +98,19 @@ function fakeElement(tag = "div") {
       }
       this.children = [...nodes];
     },
+    // The entity page builds an empty section for its log and swaps the
+    // filled band into it once the server has answered, so the band's
+    // place in the page is the builder's decision and not a race.
+    replaceWith(...nodes) {
+      const parent = this.parentNode;
+      if (!parent) return;
+      const at = parent.children.indexOf(this);
+      if (at < 0) return;
+      for (const node of nodes) {
+        if (node && typeof node === "object") node.parentNode = parent;
+      }
+      parent.children.splice(at, 1, ...nodes);
+    },
     setAttribute(name, value) {
       this.attributes.set(name, String(value));
     },

@@ -721,5 +721,7 @@
   "log.justNow": "just now",
   "log.minutes": "{n} min ago",
   "log.hours": "{n} h ago",
-  "log.days": "{n} days ago"
+  "log.days": "{n} days ago",
+  "log.agent": "agent",
+  "log.agentOf": "{who}'s agent"
 }

@@ -721,5 +721,7 @@
   "log.justNow": "ahora mismo",
   "log.minutes": "hace {n} min",
   "log.hours": "hace {n} h",
-  "log.days": "hace {n} días"
+  "log.days": "hace {n} días",
+  "log.agent": "agente",
+  "log.agentOf": "agente de {who}"
 }

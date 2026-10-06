@@ -1996,6 +1996,12 @@ dl.fields dd.field-value.marked {
 caption.edge-head {
   text-align: left;
   padding: 0 11px;
+  /* **The two rows that name the table share a ground.** A header the
+     colour of the rows under it is another row, which is what this was
+     reported as twice: once about the line and once about the fill. The
+     desk under the sheet is the token this system already has for "not
+     the reading surface". */
+  background: var(--ground);
   border-bottom: 1px solid var(--line);
   font-family: var(--serif);
   font-size: 1rem;
@@ -2004,7 +2010,11 @@ caption.edge-head {
 }
 caption.edge-head > div {
   display: flex;
-  align-items: baseline;
+  /* **`center` and not `baseline`**, which is the measurement
+     `ul.catalogue li` already carries: three words of three sizes
+     aligned on their baselines sit at the top of a 36px box, with 5px
+     over them and 12px of empty paper under them. */
+  align-items: center;
   gap: var(--s3);
   min-height: var(--row-h);
 }
@@ -2061,6 +2071,7 @@ table.edges th {
   letter-spacing: 0.03em;
   color: var(--muted);
   white-space: nowrap;
+  background: var(--ground);
   /* **The line that separates the names from the values is the one line
      here that is signal.** Every row carries a hairline, so a header
      wearing the same one is another row: `line-strong` is the token this

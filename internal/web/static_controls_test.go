@@ -341,7 +341,7 @@ func TestEveryUndressedControlOutWeighsTheButtonItUndresses(t *testing.T) {
 func TestTheEdgeTablesHeaderIsSeparatedFromItsRows(t *testing.T) {
 	t.Parallel()
 	rules := cssRules(t, "styles.css")
-	var header, last, caption string
+	var header, last, caption, captionLine string
 	for _, rule := range rules {
 		switch strings.Join(strings.Fields(rule[0]), " ") {
 		case "table.edges th":
@@ -350,6 +350,8 @@ func TestTheEdgeTablesHeaderIsSeparatedFromItsRows(t *testing.T) {
 			last = strings.Join(strings.Fields(rule[1]), " ")
 		case "caption.edge-head":
 			caption = strings.Join(strings.Fields(rule[1]), " ")
+		case "caption.edge-head > div":
+			captionLine = strings.Join(strings.Fields(rule[1]), " ")
 		}
 		// The shape the defect had: a last-child rule that does not say
 		// which section of the table it is about.
@@ -364,4 +366,17 @@ func TestTheEdgeTablesHeaderIsSeparatedFromItsRows(t *testing.T) {
 	// the table-caption role and renders inside the table's own flow.
 	assert.Should(t, !strings.Contains(caption, "display: flex"),
 		"caption.edge-head is %q, which takes away its table-caption role and drops it under the column headings", caption)
+
+	// The two rows that name the table share a ground, because a header
+	// the colour of the rows under it is another row.
+	for what, body := range map[string]string{"caption.edge-head": caption, "table.edges th": header} {
+		assert.Should(t, strings.Contains(body, "background: var(--ground)"), "%s does not carry the header band's own ground: %q", what, body)
+	}
+
+	// **`center` and not `baseline`**, the measurement `ul.catalogue li`
+	// already carries: words of three sizes aligned on their baselines sit
+	// at the top of a 36px box with the empty paper under them.
+	assert.Must(t, captionLine != "", "no rule lays out the caption's own line")
+	assert.Should(t, strings.Contains(captionLine, "align-items: center"),
+		"the caption's line is %q, and a baseline alignment in a row-height box is top alignment", captionLine)
 }

@@ -3,7 +3,7 @@
 
 import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
 import { t } from "../i18n.js";
-import { CATALOGUE_CELLS, boolMark, row } from "../rows.js";
+import { ABSENT_MARK, boolMark } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
   ROLE_VIEWER,
@@ -160,10 +160,26 @@ export function relationGroups(relations, direction, labels) {
       // a row named "".
       far: far && typeof far === "object" ? { type: String(far.type_key ?? ""), key: String(far.key ?? ""), name: String(far.name ?? "") } : null,
       invalid: relation.invalid === true,
-      fields: Object.keys(fields)
-        .sort()
-        .map((key) => ({ key, cell: presentCell(key, formatValue("", fields[key]), fields[key]) })),
+      // **By key, not by position.** These were a positional list, and
+      // the edges of one type do not all carry the same fields: an edge
+      // with `acquisition` and one with `notes` put two different things
+      // in the same column of the same table, and no header could have
+      // been right for both.
+      values: new Map(Object.keys(fields).map((key) => [key, presentCell(key, formatValue("", fields[key]), fields[key])])),
     });
+  }
+  // The columns a group draws: every field key any of its edges carries,
+  // sorted. **Sorted and not first seen**, so two readings of the same
+  // game put the columns in the same order whatever order the rows came
+  // back in. The relation type's own declaration order would be better
+  // and is not here: this page reads the slim type listing, which
+  // carries no field schema.
+  for (const group of groups.values()) {
+    const keys = new Set();
+    for (const edge of group.rows) {
+      for (const key of edge.values.keys()) keys.add(key);
+    }
+    group.columns = [...keys].sort();
   }
   return [...groups.values()].sort((a, b) => (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
 }
@@ -285,82 +301,138 @@ export function proseBlock(doc, html) {
   return block;
 }
 
-// ROW_TEXT_MAX is how much text a row can hold and still be one line you
-// can compare with the row under it. **It is a length and not a declared
-// type**, unlike the catalogue's columns: this page lists edges, and the
-// slim relation type listing it reads carries no field schema, so what
-// it knows about a value is how long it is. A longtext on an edge wrapped
-// to six lines here, on the screen the catalogue's own fix was reported
-// from.
-const ROW_TEXT_MAX = 120;
-
-// relationList paints one direction. The relation type heads its group,
-// the far end is a link to that entity's own page, and the edge's fields
-// follow it as text.
+// relationList paints one direction: one table per relation type, with
+// the type's own name, key and count above it.
+//
+// **One table per type, and this reverses a decision taken here.** They
+// were one grid with a heading row per type, so that two groups on one
+// entity could not put their keys 25px apart. That was right while every
+// row carried the same three nameless cells, and it stopped being right
+// the moment the cells were named: `grants` declares five fields and
+// `open_to` two, so one shared column held `acquisition` in one group
+// and `original_muds` in the next — and, inside one group, an edge
+// without `acquisition` shifted every value it did carry one column to
+// the left. Columns that mean different things down one table cannot be
+// headed, and a table nobody can head is a table nobody can read. The
+// alignment that is lost was alignment between things that were never
+// the same measurement.
+//
+// A real `<table>`, because that is what this is: the column set belongs
+// to the relation type, so there is no fixed template to share with the
+// catalogue, and the browser sizes columns from the content for free.
+// `mst-twin` and `mst-table` already hold the same shape from the same
+// tokens; the row height and the rules are theirs.
 export function relationList(doc, slug, groups) {
-  // **One list, not one per relation type.** Each group used to build its
-  // own `ul.catalogue`, and sibling grids share nothing: two groups on
-  // one entity put their keys 25px apart, on a page whose whole claim is
-  // that a column is a column. They are one grid now, with a heading row
-  // per type inside it — the same shape `headerRow` gives a catalogue —
-  // so every row on the page lines up and a type with three edges costs
-  // one row of chrome instead of a heading, a count and a bordered box.
-  const list = doc.createElement("ul");
-  list.className = "catalogue";
+  const holder = doc.createElement("div");
+  holder.className = "edge-groups";
   for (const group of groups) {
-    const head = doc.createElement("li");
-    head.className = "catalogue-head";
+    const section = doc.createElement("section");
+    section.className = "edge-group";
 
-    // The label the game gave this connection, with the key an agent
-    // addresses it by beside it in mono — the same pair every row in
-    // this product shows, rather than the key alone at heading size.
+    // **The type, the key and the count, above the table and not in
+    // it.** The count was a row of the table it counted, which reads as
+    // a row of data with a number where a name should be.
+    const head = doc.createElement("h4");
+    head.className = "edge-head";
     const label = doc.createElement("span");
+    label.className = "edge-label";
     label.textContent = group.label || group.type;
     head.append(label);
-
     const key = doc.createElement("code");
-    key.className = "catalogue-key";
+    key.className = "edge-key";
     key.textContent = group.label && group.label !== group.type ? group.type : "";
     head.append(key);
-
-    // The three content tracks a row has, so the heading is a row of the
-    // same grid and not a shape of its own.
-    for (let i = 0; i < CATALOGUE_CELLS; i += 1) {
-      head.append(doc.createElement("span"));
-    }
-
     const tally = doc.createElement("span");
-    tally.className = "catalogue-count";
+    tally.className = "edge-count";
     tally.textContent = countLabel(group.rows.length, t("unit.relation"), t("unit.relations"));
     head.append(tally);
-    list.append(head);
+    section.append(head);
 
-    for (const edge of group.rows) {
-      // **The shared row.** These were hand-built with a variable number
-      // of children — one or two, plus a cell per relation field, plus a
-      // flag — into a list whose grid has six tracks, so the rows of one
-      // group did not line up with the rows of the next.
-      const item = row(doc, {
-        label: edge.far === null ? t("entity.endGone") : edge.far.name || edge.far.key,
-        key: edge.far === null ? "" : edge.far.type + "/" + edge.far.key,
-        cells: edge.fields.map((field) => {
-          const text = field.key + " " + field.cell.text;
-          return { text, oneline: text.length > ROW_TEXT_MAX };
-        }),
-        count: "",
-        flag: edge.invalid ? "invalid" : "",
-        href: edge.far === null ? "" : entityURL(slug, edge.far.type, edge.far.key),
-      });
-      // A row whose far end is gone is an absence and says so in the one
-      // treatment this product spends on one.
-      if (edge.far === null) {
-        const gone = item.querySelector ? item.querySelector(".catalogue-label") : null;
-        if (gone) gone.classList.add("absent");
-      }
-      list.append(item);
+    const table = doc.createElement("table");
+    table.className = "edges";
+
+    const header = doc.createElement("tr");
+    // The two columns every edge has, then one per field this type's
+    // edges carry. A field key is the game's own word and is never
+    // translated; the two that are Maestro's are.
+    for (const text of [t("column.name"), t("column.id")]) {
+      const cell = doc.createElement("th");
+      cell.setAttribute("scope", "col");
+      cell.textContent = text;
+      header.append(cell);
     }
+    for (const key of group.columns) {
+      const cell = doc.createElement("th");
+      cell.setAttribute("scope", "col");
+      cell.className = "edge-field";
+      cell.textContent = key;
+      header.append(cell);
+    }
+    const headRow = doc.createElement("thead");
+    headRow.append(header);
+    table.append(headRow);
+
+    const body = doc.createElement("tbody");
+    for (const edge of group.rows) {
+      const line = doc.createElement("tr");
+
+      const name = doc.createElement("td");
+      name.className = "edge-name";
+      if (edge.far === null) {
+        // A row whose far end is gone is an absence and says so in the
+        // one treatment this product spends on one.
+        name.classList.add("absent");
+        name.textContent = t("entity.endGone");
+      } else {
+        const link = doc.createElement("a");
+        link.href = entityURL(slug, edge.far.type, edge.far.key);
+        link.textContent = edge.far.name || edge.far.key;
+        name.append(link);
+      }
+      line.append(name);
+
+      const address = doc.createElement("td");
+      address.className = "edge-id";
+      address.textContent = edge.far === null ? "" : edge.far.type + "/" + edge.far.key;
+      line.append(address);
+
+      for (const column of group.columns) {
+        const cell = doc.createElement("td");
+        const value = edge.values.get(column);
+        if (!value) {
+          // An edge of this type that carries no value for this field.
+          // The mark, not a blank: a reader has to be able to tell an
+          // empty column from one that simply was not filled in here.
+          cell.className = "absent";
+          cell.textContent = ABSENT_MARK;
+        } else {
+          cell.textContent = value.text;
+        }
+        line.append(cell);
+      }
+      body.append(line);
+
+      if (edge.invalid) {
+        // The sentence this product already has for a row that stopped
+        // fitting its declaration, rather than the word "invalid", which
+        // is English on a screen that is not.
+        const note = doc.createElement("tr");
+        note.className = "edge-invalid";
+        const said = doc.createElement("td");
+        said.setAttribute("colspan", String(group.columns.length + 2));
+        said.textContent = t("entity.invalid");
+        note.append(said);
+        body.append(note);
+      }
+    }
+    table.append(body);
+    const scroller = doc.createElement("div");
+    scroller.className = "edge-scroll";
+    scroller.append(table);
+    section.append(scroller);
+    holder.append(section);
   }
-  return list;
+  return holder;
 }
 
 // entityBody is the whole page under the heading, and it is what the

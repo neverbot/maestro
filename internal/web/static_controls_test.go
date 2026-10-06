@@ -190,3 +190,143 @@ func TestTheRowsControlIsReachableWithoutAPointer(t *testing.T) {
 			"%s hides the control with %q, which takes it out of the tab order", rule[0], flat)
 	}
 }
+
+// cssSpecificity is (ids, classes, elements) for one compound selector,
+// which is all these guards compare. `:not()`, `:is()` and `:has()`
+// contribute the specificity of their argument and nothing of their own;
+// a pseudo-element counts as an element and a pseudo-class as a class.
+func cssSpecificity(selector string) [3]int {
+	var out [3]int
+	rest := selector
+	for {
+		open := strings.IndexAny(rest, "(")
+		if open < 0 {
+			break
+		}
+		// The functional pseudo-class this parenthesis belongs to.
+		head := rest[:open]
+		name := head[strings.LastIndexAny(head, " >+~,:")+1:]
+		depth, end := 0, -1
+		for i := open; i < len(rest); i++ {
+			switch rest[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					end = i
+				}
+			}
+			if end >= 0 {
+				break
+			}
+		}
+		if end < 0 {
+			break
+		}
+		inner := cssSpecificity(rest[open+1 : end])
+		switch name {
+		case "not", "is", "has":
+			for i := range out {
+				out[i] += inner[i]
+			}
+			// The pseudo-class itself counts for nothing; drop it and its
+			// argument from what is left to scan.
+			rest = rest[:open-len(name)-1] + rest[end+1:]
+			continue
+		default:
+			// nth-child and friends: the pseudo-class counts, its
+			// argument does not.
+			rest = rest[:open] + rest[end+1:]
+		}
+	}
+	out[0] += len(regexp.MustCompile(`#[\w-]+`).FindAllString(rest, -1))
+	out[2] += len(regexp.MustCompile(`::[\w-]+`).FindAllString(rest, -1))
+	withoutElements := regexp.MustCompile(`::[\w-]+`).ReplaceAllString(rest, " ")
+	out[1] += len(regexp.MustCompile(`\.[\w-]+`).FindAllString(withoutElements, -1))
+	out[1] += len(regexp.MustCompile(`:[\w-]+`).FindAllString(withoutElements, -1))
+	out[1] += len(regexp.MustCompile(`\[[^\]]+\]`).FindAllString(withoutElements, -1))
+	bare := regexp.MustCompile(`\.[\w-]+|#[\w-]+|:{1,2}[\w-]+|\[[^\]]+\]`).ReplaceAllString(withoutElements, " ")
+	out[2] += len(regexp.MustCompile(`[A-Za-z][\w-]*`).FindAllString(bare, -1))
+	return out
+}
+
+func cssBeats(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] > b[i]
+		}
+	}
+	return false
+}
+
+// TestEveryUndressedControlOutWeighsTheButtonItUndresses is the half the
+// guard above could not see. That one asks whether a reset exists; the
+// cascade asks which rule wins, and `.field-edit:hover` is (0,2,0)
+// against `button:hover:not(:disabled)` at (0,2,1) — so a control that
+// said "no background" was repainted the primary's ink the moment a
+// pointer touched it, with its own rule keeping the text ink too. A reset
+// that merely exists is not a reset.
+func TestEveryUndressedControlOutWeighsTheButtonItUndresses(t *testing.T) {
+	t.Parallel()
+	// The calculator first, against selectors this file does not contain:
+	// a wrong one would make every comparison below pass.
+	for selector, want := range map[string][3]int{
+		"button:hover:not(:disabled)":      {0, 2, 1},
+		".field-edit:hover":                {0, 2, 0},
+		".field-edit:hover:not(:disabled)": {0, 3, 0},
+		"#id .a b::before":                 {1, 1, 2},
+		"a":                                {0, 0, 1},
+		".a.b.c":                           {0, 3, 0},
+	} {
+		assert.Must(t, cssSpecificity(selector) == want, "specificity(%q) = %v, want %v", selector, cssSpecificity(selector), want)
+	}
+
+	var rules [][2]string
+	for _, sheet := range []string{"controls.css", "styles.css"} {
+		rules = append(rules, cssRules(t, sheet)...)
+	}
+	paints := regexp.MustCompile(`background`)
+
+	// The rules a bare `button` carries under the pointer, which every
+	// undressing control has to beat.
+	base := map[string][3]int{}
+	for _, rule := range rules {
+		for _, part := range strings.Split(rule[0], ",") {
+			part = strings.TrimSpace(part)
+			if !strings.HasPrefix(part, "button:") || !paints.MatchString(rule[1]) {
+				continue
+			}
+			for _, state := range []string{":hover", ":active"} {
+				if strings.Contains(part, state) {
+					base[state] = cssSpecificity(part)
+				}
+			}
+		}
+	}
+	assert.Must(t, len(base) == 2, "found %d bare-button pointer rules; this guard is reading the wrong place", len(base))
+
+	for _, class := range []string{"field-edit", "quiet", "ghost", "catalogue-sort"} {
+		for state, weight := range base {
+			best := [3]int{}
+			found := false
+			for _, rule := range rules {
+				for _, part := range strings.Split(rule[0], ",") {
+					part = strings.TrimSpace(part)
+					if !strings.Contains(part, "."+class) || !strings.Contains(part, state) || !paints.MatchString(rule[1]) {
+						continue
+					}
+					found = true
+					if got := cssSpecificity(part); cssBeats(got, best) {
+						best = got
+					}
+				}
+			}
+			if !found {
+				continue
+			}
+			assert.Should(t, cssBeats(best, weight), ".%s's %s rule is %v against button%s at %v, so the button's fill wins "+
+				"and the control is repainted under the pointer", class, state, best, state, weight)
+		}
+	}
+}

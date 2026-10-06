@@ -703,5 +703,7 @@
   "column.entity": "Entity",
   "entity.related": "Related entities",
   "entity.pointingHere": "Pointing here",
-  "entity.pointedFromHere": "Pointed at from here"
+  "entity.pointedFromHere": "Pointed at from here",
+  "column.name": "Name",
+  "column.id": "id"
 }

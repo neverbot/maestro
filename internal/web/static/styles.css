@@ -1970,6 +1970,122 @@ dl.fields dd.field-value.marked {
 }
 .related-half:first-of-type h3 { margin-top: var(--s4); }
 
+/* **A relation type's edges, as a table.** The column set belongs to the
+   type — `grants` declares five fields and `open_to` two — so there is no
+   fixed template to share with the catalogue and the browser sizes the
+   columns from what is in them. The shape is the one `mst-twin` and
+   `mst-table` already state from the same tokens: the row height token,
+   a hairline under every row, a mono muted header. */
+.edge-group + .edge-group { margin-top: var(--s5); }
+
+.edge-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  margin: 0 0 var(--s2);
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* The key an agent addresses this connection by, beside the word the
+   game gave it. */
+.edge-key {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+/* The count, pushed to the end of the line it heads: it belongs to the
+   table and is not one of its rows. */
+.edge-count {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* **The table takes the width it needs and scrolls inside its own box.**
+   `width: 100%` squeezed every column to fit, so a three-word value
+   broke over two lines while the page had room to spare. The page still
+   never scrolls sideways; this container does, which is the answer the
+   catalogue's `.scroller` already gives. */
+.edge-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+table.edges {
+  min-width: 100%;
+  border-collapse: collapse;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+table.edges th,
+table.edges td {
+  text-align: left;
+  vertical-align: middle;
+  height: var(--row-h);
+  padding: 0 11px;
+  border-bottom: 1px solid var(--line);
+}
+table.edges tr:last-child > * { border-bottom: 0; }
+/* **Two voices in one header row.** "Nombre" and "id" are Maestro's
+   words and wear the label role; every other column is a field key the
+   game declared, and a key is mono here as it is everywhere else. */
+table.edges th {
+  height: var(--row-compact-h);
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+table.edges th.edge-field {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+/* The far end is the game's own word, in the serif every other name in
+   this product wears. */
+table.edges td.edge-name {
+  font-family: var(--serif);
+  font-weight: 600;
+}
+table.edges td.edge-id {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  /* One line: an address broken over two is two things to read where
+     there is one, and the table has somewhere to put the width. */
+  white-space: nowrap;
+}
+table.edges td {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+table.edges a { text-decoration: none; }
+table.edges a:hover { text-decoration: underline; text-underline-offset: 2px; }
+table.edges td.absent {
+  font-style: italic;
+}
+/* **A long value wraps here and is clipped in a catalogue**, which is
+   not an inconsistency: a catalogue cell is a lead-in with the whole of
+   the value one click away on the thing's own page, and an edge has no
+   page of its own. Clipping here would be the only place in the product
+   where content is hidden with nowhere to go and see it. */
+/* A row that stopped fitting its declaration says so under itself. */
+table.edges tr.edge-invalid td {
+  color: var(--danger);
+  font-size: 0.85rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.4rem;
+  height: auto;
+}
+
 /* --- The reading view (document.html, doc.js) --- */
 
 /* The rendered document. Only the elements internal/markdown's renderer
@@ -2593,10 +2709,17 @@ dl.fields dd.field-prose .prose > :last-child { margin-bottom: 0; }
    border and a 3px halo drawn around a 32-pixel box holding twelve
    pixels of text. One vocabulary now, and the answer is the one thing a
    word can change without becoming a box: its ink. */
-.field-edit:hover,
-.field-edit:active,
-.quiet:hover,
-.quiet:active {
+/* **`:not(:disabled)`, and it is the whole fix.** The reset was written
+   as `.field-edit:hover`, which is (0,2,0), against the base rule's
+   `button:hover:not(:disabled)`, which is (0,2,1) — so the control was
+   undressed at rest and repainted the primary's ink the moment a pointer
+   touched it, with its own rule keeping the text ink too: a black box
+   with an invisible word in it. Matching the base rule's shape wins the
+   cascade at (0,3,0). A reset that merely exists is not a reset. */
+.field-edit:hover:not(:disabled),
+.field-edit:active:not(:disabled),
+.quiet:hover:not(:disabled),
+.quiet:active:not(:disabled) {
   background: none;
   border: 0;
   box-shadow: none;

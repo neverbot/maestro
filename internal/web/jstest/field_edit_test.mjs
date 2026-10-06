@@ -167,20 +167,35 @@ function stage(script) {
 
 // --- An edge's own fields, in a row -----------------------------------
 
-// The same rule the catalogue applies by declared type, applied here by
-// length: this page reads the slim relation type listing, which carries
-// no field schema, so what it knows about a value is how long it is.
+// **A column means one thing down the whole table.** The cells were
+// positional, so an edge carrying `notes` and one carrying `tier` put two
+// different fields under one nameless column — and an edge missing a
+// field shifted every value after it one column to the left. The columns
+// are the union of the group's keys, sorted, and a row with no value for
+// one says so where it would have been.
 {
-  const long = "notes ".padEnd(130, "x");
   const groups = relationGroups([
-    { type_key: "grants", source: { type_key: "guild", key: "zulk" }, target: { type_key: "ability", key: "invocar" },
-      fields: { notes: long, tier: "one" } },
+    // Incoming, so the far end of each edge is its source.
+    { type_key: "grants", source: { type_key: "guild", key: "zulk", name: "Shamans of Zulk" }, target: { type_key: "ability", key: "invocar" },
+      fields: { tier: "one" } },
+    { type_key: "grants", source: { type_key: "guild", key: "warriors", name: "Warriors" }, target: { type_key: "ability", key: "invocar" },
+      fields: { notes: "only this one has notes" } },
   ], "in", new Map([["grants", "otorga"]]));
-  const list = relationList(doc, "azeroth", groups);
-  const edge = list.children.find((child) => child.getAttribute("class") !== "catalogue-head");
-  const cells = edge.children.filter((child) => (child.getAttribute("class") || "").includes("catalogue-cell"));
-  const clipped = cells.filter((cell) => (cell.getAttribute("class") || "").includes("oneline"));
-  check("an edge field too long for a row is clipped, and a short one is not", clipped.length, 1);
+  check("a group's columns are every key its edges carry, sorted", groups[0].columns, ["notes", "tier"]);
+
+  const painted = relationList(doc, "azeroth", groups);
+  const table = painted.children[0].children[1].children[0];
+  const header = table.children[0].children[0];
+  check("the header names them, after the two every edge has",
+    header.children.map((cell) => cell.textContent),
+    ["Name", "id", "notes", "tier"]);
+  const rows = table.children[1].children;
+  check("and a row with no value for a column says so in its place",
+    rows.map((line) => line.children.map((cell) => cell.textContent)),
+    [
+      ["Shamans of Zulk", "guild/zulk", "\u2014", "one"],
+      ["Warriors", "guild/warriors", "only this one has notes", "\u2014"],
+    ]);
 }
 
 // A value whose declared type this page was never told — an edge's

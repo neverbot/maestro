@@ -1189,8 +1189,16 @@ check("relationRowsCarryTheRelationsOwnFields", async () => {
   const rendered = text(dom.elements["entity-content"]);
   assert(rendered.includes("rewards"), "the relation type does not head its group");
   assert(rendered.includes("Hogger's Cudgel"), "the far end of the relation is missing");
-  assert(rendered.includes("quantity 2"), `the relation's own field is missing: ${JSON.stringify(rendered)}`);
-  assert(rendered.includes("bind on_pickup"), "the relation's second field is missing");
+  // **The field key heads a column; the cell holds the value alone.** It
+  // was `quantity 2` in a nameless cell, which is a header spelled once
+  // per row and a column that could hold a different field on the row
+  // under it.
+  const head = rendered.indexOf("Nameidbindquantity");
+  assert(head > -1, `the columns are not named: ${JSON.stringify(rendered)}`);
+  assert(rendered.includes("item/cudgelon_pickup2"), `a cell repeats its own column's name: ${JSON.stringify(rendered)}`);
+  // And the count is above the table rather than a row of it.
+  const count = rendered.indexOf("1 relation");
+  assert(count > -1 && count < head, "the count is inside the table it counts");
 });
 
 check("bothDirectionsOfARelationAreListedSeparately", async () => {

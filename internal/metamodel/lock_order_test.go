@@ -166,7 +166,17 @@ func TestUpsertEntityAndACascadingRemovalDoNotDeadlock(t *testing.T) {
 	project := newProject(t, pool)
 
 	const workers = 8
-	deadline := time.Now().Add(3 * time.Second)
+	// **The budget is the work, not the clock.** This was three seconds
+	// flat and then asserted that both counters had passed fifty, which
+	// is a throughput claim about the machine rather than a claim about
+	// the lock order: on a loaded laptop the removals worker — whose turn
+	// costs a cascading delete and a re-declaration — came back with
+	// thirty-one, and the test failed having proved exactly what it was
+	// written to prove. The loop now runs until the race has happened
+	// enough times or the ceiling is reached, so a slow machine takes
+	// longer instead of being wrong.
+	const enough = 50
+	deadline := time.Now().Add(30 * time.Second)
 
 	var writes, removals atomic.Int64
 	var mu sync.Mutex
@@ -201,7 +211,8 @@ func TestUpsertEntityAndACascadingRemovalDoNotDeadlock(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; time.Now().Before(deadline); i++ {
+			for i := 0; time.Now().Before(deadline) &&
+				(writes.Load() < enough || removals.Load() < enough); i++ {
 				if w%2 == 0 {
 					// A small shared key space, so writers meet each
 					// other on the entity rows as well as meeting the
@@ -246,7 +257,10 @@ func TestUpsertEntityAndACascadingRemovalDoNotDeadlock(t *testing.T) {
 	}
 	// The race has to have actually happened. Both numbers being large
 	// is what says the workers were contending rather than, say, every
-	// write failing against a type that was never recreated.
-	assert.Must(t, writes.Load() >= 50 && removals.Load() >= 50, "the workers barely raced: %d entity writes, %d removals",
-		writes.Load(), removals.Load())
+	// write failing against a type that was never recreated. Reaching
+	// them is what ends the loop, so this fails only when the ceiling
+	// above ran out first — which is a machine so slow that the claim
+	// cannot be made, and is reported as that rather than as a defect.
+	assert.Must(t, writes.Load() >= enough && removals.Load() >= enough, "the workers barely raced in %s: %d entity writes, %d removals",
+		30*time.Second, writes.Load(), removals.Load())
 }

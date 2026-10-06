@@ -199,6 +199,11 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 			"idea about the philosophy of a type, something worth doing later. What a player can "+
 			"be, go to, do or unlock is a field or a document; nothing here is read by a query, a "+
 			"view or an analysis. "+
+			"**A person reads this.** Every comment is drawn on the thing's own page, under its "+
+			"content, newest first and with who wrote it; the game's designers write there too, in "+
+			"the same band, and what they write comes back from comments.list. Write for that "+
+			"reader: \"imported from the 1998 build, the damage formula is a guess from two log "+
+			"lines\" is worth opening a page for, and \"updated\" is not. "+
 			"target.on is %q, %q, %q or %q, and the rest of target is the address that kind takes: "+
 			"an entity is type_key plus key, an edge is the relation type's key plus source and "+
 			"target, and either type is type_key alone. An address this game does not have is "+

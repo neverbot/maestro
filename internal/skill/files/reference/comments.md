@@ -1,16 +1,29 @@
 # Comments
 
-A game's log. **A comment is markdown about the work, not about the
-game**: how a thing was imported, what was rewritten and why, an idea
-about the philosophy of a type, something worth doing later.
+A game's log, and **the one place you and the game's designers write to
+each other**. A comment is markdown about the work rather than about the
+game: how a thing was imported, what was rewritten and why, an idea about
+the philosophy of a type, something worth doing later.
 
 Three tools, and `reference/tools.md` routes to their contracts:
 `comments.add`, `comments.list`, `comments.remove`.
 
+## Somebody reads these
+
+**Every comment is drawn on the thing's own page**, under its content, in
+a band a designer sees whenever they open it: newest first, each with who
+wrote it and how long ago, the markdown rendered. A designer writes there
+too, in the same band, and you will read what they wrote the next time
+you call `comments.list`.
+
+So write for that reader and not for yourself. "Imported from the 1998
+build; the damage formula is a guess from two log lines" is worth opening
+a page for. "Updated" is a line somebody has to decide what to do with.
+
 ## What belongs here, and what does not
 
-> If a player could meet it, it is a field or a document. If it is what
-> you were thinking while you wrote one, it is a comment.
+> If a player could meet it, it is a field or a document. If the next
+> person to open this thing would want to be told it, it is a comment.
 
 A field holds the game: a quest's objective, a guild's vocation, the
 level a spell is granted at. A document holds the game's long prose: a
@@ -18,10 +31,10 @@ dialogue script, a chapter of lore. **Neither is the place for "imported
 this from the 1998 build, the damage formula is a guess"**, and that
 sentence is exactly what a comment is for.
 
-Nothing reads a comment but a person and you. No query selects on one,
-no view draws one, no analysis counts one. That is the point: the log
-can hold anything you can write, because nothing downstream depends on
-its shape.
+**No query selects on a comment, no view draws one, no analysis counts
+one.** That is what lets the log hold anything you can write: nothing
+downstream depends on its shape, and the only thing that reads it is
+somebody who came to find out what happened here.
 
 ## The four things that carry one
 
@@ -57,22 +70,21 @@ up.
 
 ## What no screen draws yet
 
-**A relation's log is written and read over the tools, and no page shows
-one.** An entity, an entity type and a relation type each carry a
-Comments band; an edge has no page of its own to carry one, so a note
-against an edge is reachable through `comments.list` and nowhere else
-today. Worth knowing before you put something there that a designer is
-meant to read.
+**A relation's log is the one nobody can read on a screen.** An entity,
+an entity type and a relation type each carry the band; an edge has no
+page of its own to carry one, so a note against an edge is reachable
+through `comments.list` and nowhere else today. Put a note a designer is
+meant to read on one of the three, not on the edge between them.
 
 ## How to use it
 
 - **Arriving at a game you have not touched in a while**: `comments.list`
-  with no target at all is the whole game's log, newest first. It is the
-  fastest answer to "what happened here since I was last in".
+  with no target at all is the whole game's log, newest first — yours and
+  the designers'. It is the fastest answer to "what happened here since I
+  was last in", and the designers' notes are where you learn what they
+  want that nothing in the model says.
 - **Writing one while you work**: short, one subject, and say the thing
-  rather than the category. "Imported from the 1998 build; the damage
-  formula is a guess from two log lines" is worth reading. "Updated" is
-  not.
+  rather than the category.
 - **Length**: a comment holds at most 4000 characters, and the bound is
   there to make a decision rather than to save bytes. Prose that wants a
   title, a history and an address of its own is a document.

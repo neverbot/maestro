@@ -1976,17 +1976,37 @@ dl.fields dd.field-value.marked {
    columns from what is in them. The shape is the one `mst-twin` and
    `mst-table` already state from the same tokens: the row height token,
    a hairline under every row, a mono muted header. */
+/* **One panel per relation type.** The name was a heading floating above
+   a bordered table: two objects where a reader sees one thing, and the
+   heading competed with the half's own at nearly its size. The border
+   closes around the name and the rows together, and a wide table scrolls
+   inside it rather than taking the page sideways. */
+.edge-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  max-width: 100%;
+  overflow-x: auto;
+}
 .edge-group + .edge-group { margin-top: var(--s5); }
 
-.edge-head {
+/* The table's own name. **The game's word in the serif**: a relation
+   type's label would survive the game shipping, which is the ownership
+   test the Two Voices Rule asks, and it was set in the tool's sans. */
+caption.edge-head {
+  text-align: left;
+  padding: 0 11px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--serif);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+caption.edge-head > div {
   display: flex;
   align-items: baseline;
   gap: var(--s3);
-  margin: 0 0 var(--s2);
-  font-family: var(--sans);
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--ink);
+  min-height: var(--row-h);
 }
 /* The key an agent addresses this connection by, beside the word the
    game gave it. */
@@ -1996,31 +2016,25 @@ dl.fields dd.field-value.marked {
   font-weight: 400;
   color: var(--muted);
 }
-/* The count, pushed to the end of the line it heads: it belongs to the
-   table and is not one of its rows. */
+/* **Beside the name, not at the far edge.** `margin-left: auto` is what
+   put the analysis screen's Check button 1300px from the question it
+   answered, and this file carries that argument already: a number a
+   reader has to cross the window to pair with its heading is a number
+   they will not pair. */
 .edge-count {
-  margin-left: auto;
+  white-space: nowrap;
+  font-family: var(--sans);
   font-weight: 400;
   font-size: 0.8125rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* **The table takes the width it needs and scrolls inside its own box.**
-   `width: 100%` squeezed every column to fit, so a three-word value
-   broke over two lines while the page had room to spare. The page still
-   never scrolls sideways; this container does, which is the answer the
-   catalogue's `.scroller` already gives. */
-.edge-scroll {
-  max-width: 100%;
-  overflow-x: auto;
-}
+/* The table takes the width it needs; the panel around it is what
+   scrolls when that is more than there is. */
 table.edges {
   min-width: 100%;
   border-collapse: collapse;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
 }
 table.edges th,
 table.edges td {
@@ -2030,7 +2044,12 @@ table.edges td {
   padding: 0 11px;
   border-bottom: 1px solid var(--line);
 }
-table.edges tr:last-child > * { border-bottom: 0; }
+/* **`tbody`, and that word is the whole of it.** Written as
+   `tr:last-child` this also matched the header row, which is the last
+   child of its own `thead`: the rule meant "the table ends here" and it
+   took away the line that says where the table *starts*. Reported as a
+   header that is not separated from the rows under it. */
+table.edges tbody tr:last-child > * { border-bottom: 0; }
 /* **Two voices in one header row.** "Nombre" and "id" are Maestro's
    words and wear the label role; every other column is a field key the
    game declared, and a key is mono here as it is everywhere else. */
@@ -2042,6 +2061,12 @@ table.edges th {
   letter-spacing: 0.03em;
   color: var(--muted);
   white-space: nowrap;
+  /* **The line that separates the names from the values is the one line
+     here that is signal.** Every row carries a hairline, so a header
+     wearing the same one is another row: `line-strong` is the token this
+     system keeps for a rule that means something, and it is what tells a
+     reader where the table starts. */
+  border-bottom: 1px solid var(--line-strong);
 }
 table.edges th.edge-field {
   font-family: var(--mono);
@@ -2725,8 +2750,17 @@ dl.fields dd.field-prose .prose > :last-child { margin-bottom: 0; }
   box-shadow: none;
 }
 
+/* **Muted to ink was a difference nobody saw**, which is the measurement
+   this file already made once about a 1.18:1 luminance change on a dark
+   button. A word that is a control answers the pointer the way every
+   other word that is a control answers it: the accent and an underline,
+   which is the link vocabulary two rules above. */
 .field-edit:hover,
-.quiet:hover { color: var(--ink); }
+.quiet:hover {
+  color: var(--focus);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 
 /* **The way to change a value belongs to its row.** It was on every line
    at once, which is five controls down a reading surface before anybody

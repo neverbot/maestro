@@ -330,3 +330,38 @@ func TestEveryUndressedControlOutWeighsTheButtonItUndresses(t *testing.T) {
 		}
 	}
 }
+
+// TestTheEdgeTablesHeaderIsSeparatedFromItsRows holds the two rules the
+// browser showed and the stylesheet did not: the line under a header is
+// the one line in that table that is signal, and "the table ends here"
+// is a statement about the body. Written as `tr:last-child` the second
+// one also matched the header row, which is the last child of its own
+// `thead` — so the rule that says where the table ends took away the one
+// that says where it starts, and the header read as another row.
+func TestTheEdgeTablesHeaderIsSeparatedFromItsRows(t *testing.T) {
+	t.Parallel()
+	rules := cssRules(t, "styles.css")
+	var header, last, caption string
+	for _, rule := range rules {
+		switch strings.Join(strings.Fields(rule[0]), " ") {
+		case "table.edges th":
+			header = strings.Join(strings.Fields(rule[1]), " ")
+		case "table.edges tbody tr:last-child > *":
+			last = strings.Join(strings.Fields(rule[1]), " ")
+		case "caption.edge-head":
+			caption = strings.Join(strings.Fields(rule[1]), " ")
+		}
+		// The shape the defect had: a last-child rule that does not say
+		// which section of the table it is about.
+		assert.Should(t, !strings.Contains(rule[0], "table.edges tr:last-child"),
+			"%s matches the header row too: it is the last child of its own thead", rule[0])
+	}
+	assert.Must(t, header != "" && last != "" && caption != "", "the three rules this guard reads are not all in styles.css")
+	assert.Should(t, strings.Contains(header, "border-bottom: 1px solid var(--line-strong)"),
+		"the header's rule is %q, and a hairline there is another row", header)
+	assert.Should(t, strings.Contains(last, "border-bottom: 0"), "the last row of the body keeps a rule under it: %q", last)
+	// A caption laid out as a flex box is no longer a caption: it loses
+	// the table-caption role and renders inside the table's own flow.
+	assert.Should(t, !strings.Contains(caption, "display: flex"),
+		"caption.edge-head is %q, which takes away its table-caption role and drops it under the column headings", caption)
+}

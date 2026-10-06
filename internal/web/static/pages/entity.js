@@ -80,6 +80,13 @@ export function formatValue(type, value) {
       // fields arrive, the relation type listing being slim enough to
       // carry no schema.
       if (typeof value === "boolean") return value ? BOOL_TRUE : BOOL_FALSE;
+      // And a list, for the same reason: `["rlmud","ancient-kingdoms"]`
+      // is JSON's punctuation around two words a reader wanted, and the
+      // same value one declared type away reads as `rlmud,
+      // ancient-kingdoms`. An edge's fields arrive here because the slim
+      // relation type listing carries no schema, not because the value
+      // is of an unknown kind.
+      if (Array.isArray(value)) return value.join(LIST_SEPARATOR);
       return typeof value === "string" ? value : JSON.stringify(value);
   }
 }
@@ -329,27 +336,34 @@ export function relationList(doc, slug, groups) {
     const section = doc.createElement("section");
     section.className = "edge-group";
 
-    // **The type, the key and the count, above the table and not in
-    // it.** The count was a row of the table it counted, which reads as
-    // a row of data with a number where a name should be.
-    const head = doc.createElement("h4");
+    const table = doc.createElement("table");
+    table.className = "edges";
+
+    // **The table names itself.** This was a heading floating above a
+    // bordered box, which is two objects where a reader sees one, and it
+    // left the table unnamed for anybody not looking at it. A caption is
+    // the table's own name; the panel's border closes around both.
+    const head = doc.createElement("caption");
     head.className = "edge-head";
+    // **The caption keeps its own display and the flex goes inside it.**
+    // `display: flex` on a `<caption>` takes away its table-caption role,
+    // and the box is then laid out inside the table's own flow: the name
+    // of the table rendered under its column headings.
+    const line = doc.createElement("div");
+    head.append(line);
     const label = doc.createElement("span");
     label.className = "edge-label";
     label.textContent = group.label || group.type;
-    head.append(label);
+    line.append(label);
     const key = doc.createElement("code");
     key.className = "edge-key";
     key.textContent = group.label && group.label !== group.type ? group.type : "";
-    head.append(key);
+    line.append(key);
     const tally = doc.createElement("span");
     tally.className = "edge-count";
     tally.textContent = countLabel(group.rows.length, t("unit.relation"), t("unit.relations"));
-    head.append(tally);
-    section.append(head);
-
-    const table = doc.createElement("table");
-    table.className = "edges";
+    line.append(tally);
+    table.append(head);
 
     const header = doc.createElement("tr");
     // The two columns every edge has, then one per field this type's
@@ -426,10 +440,7 @@ export function relationList(doc, slug, groups) {
       }
     }
     table.append(body);
-    const scroller = doc.createElement("div");
-    scroller.className = "edge-scroll";
-    scroller.append(table);
-    section.append(scroller);
+    section.append(table);
     holder.append(section);
   }
   return holder;

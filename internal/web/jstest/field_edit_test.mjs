@@ -184,12 +184,20 @@ function stage(script) {
   check("a group's columns are every key its edges carry, sorted", groups[0].columns, ["notes", "tier"]);
 
   const painted = relationList(doc, "azeroth", groups);
-  const table = painted.children[0].children[1].children[0];
-  const header = table.children[0].children[0];
+  const table = painted.children[0].children[0];
+  // **The table names itself, and the caption is its first child.** A
+  // caption laid out as a flex box loses its table-caption role and
+  // renders inside the table's own flow, under the column headings it is
+  // supposed to sit above.
+  check("the table is captioned", [table.tagName, table.children[0].tagName], ["table", "caption"]);
+  check("and the caption carries the type, its key and the count",
+    table.children[0].children[0].children.map((part) => part.textContent),
+    ["otorga", "grants", "2 relations"]);
+  const header = table.children[1].children[0];
   check("the header names them, after the two every edge has",
     header.children.map((cell) => cell.textContent),
     ["Name", "id", "notes", "tier"]);
-  const rows = table.children[1].children;
+  const rows = table.children[2].children;
   check("and a row with no value for a column says so in its place",
     rows.map((line) => line.children.map((cell) => cell.textContent)),
     [
@@ -205,6 +213,12 @@ function stage(script) {
 check("an undeclared boolean is still a word a reader knows",
   [formatValue("", true), formatValue("", false), formatValue("", 12)],
   [BOOL_TRUE, BOOL_FALSE, "12"]);
+
+// And a list is the words, not JSON's punctuation around them: the same
+// value one declared type away already reads this way.
+check("an undeclared list is the words a reader wanted",
+  [formatValue("", ["rlmud", "ancient-kingdoms"]), formatValue("list<text>", ["rlmud", "ancient-kingdoms"])],
+  ["rlmud, ancient-kingdoms", "rlmud, ancient-kingdoms"]);
 
 // --- A boolean, drawn on this screen too ------------------------------
 

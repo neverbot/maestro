@@ -114,18 +114,20 @@ can tell you that the mistake was made at declaration time.
   numbers and no list of enums — and it is the one field type whose
   membership test is indexed. A tag set belongs here; a set of
   references to other entities does not, because that is a relation.
-- **`longtext`** is prose, and **prose here is markdown**. A blank line
-  starts a paragraph, a single newline is a line break, and that is what
-  a person reads: every screen that shows one in full renders it. Write
-  the markdown, not the rendering — HTML is not admitted, a tag you write
-  arrives as the characters you typed, and a link whose scheme is not
-  `http`, `https` or `mailto` arrives pointing at nothing. **`text` is
-  one line and is never rendered**, so a value with a line break in it is
-  a `longtext` and not a long `text`. Keep it short enough that a listing
-  can carry it — a catalogue row shows its first line and the whole of it
-  is read on the thing's own page — and anything a query, a view or an
-  analysis would ever have to read **inside** is a document instead;
-  `reference/documents.md` draws that line.
+- **`longtext`** is prose, and **prose here is markdown**. Paragraphs
+  separated by a blank line, a line break on a single newline, `**bold**`
+  and `_italic_`, `` `code` ``, fenced blocks, bullet and numbered lists,
+  quotes, headings and links: all of it is read as markdown by every
+  screen that shows the value in full. Write the markdown, not the
+  rendering — HTML is not admitted, a tag you write arrives as the
+  characters you typed, and a link whose scheme is not `http`, `https` or
+  `mailto` arrives pointing at nothing. **`text` is one line and is never
+  rendered**, so a value with a line break in it is a `longtext` and not
+  a long `text`.
+
+  **Length is not what decides between a field and a document.** Ten
+  lines of notes with a list in them are a field. `reference/documents.md`
+  draws the line, and it is drawn by what each one can do.
 
 ## Where the caps and the exact refusals are
 

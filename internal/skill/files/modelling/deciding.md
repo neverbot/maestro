@@ -116,17 +116,20 @@ nobody does correctly, and every reader after you inherits the guess.
 ## Decision 4 — field, `longtext`, or document?
 
 If a query, a view or an analysis would ever need to read **inside** it,
-it does not belong in a document. `longtext` is prose short enough to
-sit in a table cell — a one-line objective, a flavour sentence. A
-dialogue script, a chapter of lore, the game bible: those are documents,
-attached to the entity they belong to. Both hold markdown, so this is a
-decision about cost and reach and not about formatting;
-`reference/fields.md` has what a `longtext` admits.
+it is a field. If its history is the point — you will want to know what
+it said last month — or it is a thing somebody would go and find on its
+own, it is a document. Both hold markdown, so this is never a decision
+about formatting, and **it is not a decision about length**: ten lines of
+notes with a list in them are a field.
 
-The cost of putting a novel in a `longtext` field is paid by everyone
-who lists that type afterwards. The cost of putting a queryable value in
-a document is that it is invisible to every view in the game.
-`reference/documents.md` has the sequence.
+A dialogue script, a chapter of lore, the game bible: documents, attached
+to the entity they belong to. An objective, a flavour paragraph, a note
+about how this rule behaves: fields.
+
+The cost of putting a queryable value in a document is that it is
+invisible to every view in the game. The cost of putting a document in a
+field is that there is no history: a write replaces the value and what
+was there is gone. `reference/documents.md` has both lists.
 
 ## When you are not sure
 

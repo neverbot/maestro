@@ -7,16 +7,33 @@ call.
 
 ## The line between a field and a document
 
-> If a query, a view or an analysis would ever need to read **inside**
-> it, it does not belong in a document.
+**Both are markdown and both are rendered, so the choice is never about
+what the prose may look like. It is about what each one can do**, and the
+two lists are short.
 
-`longtext` is for prose short enough to sit in a table cell. A quest's
-objective summary is a field, because somebody will want to filter or
-draw it; its dialogue script is a document, because nobody will ever
-query inside it and it would make every listing of that type expensive.
-**Both are markdown** and both are rendered for a reader, so the choice
-is about what the prose costs a listing and what a query can reach, never
-about what it may look like.
+> If a query, a view or an analysis would ever need to read **inside**
+> it, it is a field. If you will ever want to know what it said last
+> month, to find it as a thing in its own right, or to point several
+> entities at the same text, it is a document.
+
+A field is part of its row: `where` reads it, a view draws it, the search
+index carries it, `entities.repair` can rewrite it across a whole type.
+It has **no history at all** — a write replaces it and what was there is
+gone.
+
+A document is a thing with an address: a path, a title, a kind, a version
+per write with a message saying why, a diff against any earlier one and a
+revert. It is attached to the entities it is about, and it can be
+attached to several.
+
+**Length decides nothing.** A quest's objective summary is a field at one
+line and still a field at fifteen, because a view draws it. A dialogue
+script is a document at any length, because its history is the point and
+nothing queries inside it. The old rule here said a field was prose short
+enough to sit in a table cell; that was a statement about a screen that
+no longer needs it — a row shows the first line and the thing's own page
+shows all of it — and it was sending ten honest lines of notes to a
+document that did not want them.
 
 Frontmatter is stored and echoed back, never interpreted. It declares no
 fields and creates no attachments, so nothing you write there becomes

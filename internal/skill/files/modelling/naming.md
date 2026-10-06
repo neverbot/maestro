@@ -87,6 +87,28 @@ So the useful habit is not a ban on renaming. It is:
 > treat a type rename as a small, visible cost rather than an impossible
 > one.
 
+## A thing is one row for as long as it is the same thing
+
+**When what a thing *is* changes, update the row. Do not make a second
+one.** A command from an old build that is reimplemented as a skill is
+the same thing in the game's history: it keeps its key, its edges, its
+attachments and its place in every saved view, and what it used to be is
+written into its own fields — a `notes` or a `history` field saying it
+was a command until the rewrite. A second row says the game has two
+things where it has one, and every analysis then counts it twice.
+
+The name is the part that moves. **A row's name is editable and its key
+is not**, so when the thing's natural name changes you change the name
+and leave the key alone: `entities.upsert` writes the new name against
+the same address, and nothing that pointed at the row has to be touched.
+A key that no longer looks like the name is not a defect; it is the
+record of what the thing was called when it was created, and it is the
+reason every link to it still works.
+
+Two rows are right only when the game ends up with two things a player
+can meet. A spell that is split into a weak and a strong version is two
+rows; a spell that is rebalanced, renamed and reimplemented is one.
+
 A key derived from a display name is the classic version of getting this
 backwards. Titles get rewritten — that is what titles are for — and the
 key `the_dark_portal_part_1` outlives the quest that was renamed to

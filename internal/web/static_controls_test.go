@@ -367,16 +367,24 @@ func TestTheEdgeTablesHeaderIsSeparatedFromItsRows(t *testing.T) {
 	assert.Should(t, !strings.Contains(caption, "display: flex"),
 		"caption.edge-head is %q, which takes away its table-caption role and drops it under the column headings", caption)
 
-	// The two rows that name the table share a ground, because a header
-	// the colour of the rows under it is another row.
+	// **The two rows that name the table share a fill, and it is neither
+	// surface around them.** `var(--ground)` was the first answer and it
+	// is the page's own colour, so the band read as a hole in the panel.
 	for what, body := range map[string]string{"caption.edge-head": caption, "table.edges th": header} {
-		assert.Should(t, strings.Contains(body, "background: var(--ground)"), "%s does not carry the header band's own ground: %q", what, body)
+		assert.Should(t, strings.Contains(body, "background: color-mix("),
+			"%s does not carry the header band's own fill: %q", what, body)
+		assert.Should(t, !strings.Contains(body, "background: var(--ground)"),
+			"%s is filled with the page's own colour, which is what a reader sees through the panel: %q", what, body)
 	}
 
-	// **`center` and not `baseline`**, the measurement `ul.catalogue li`
-	// already carries: words of three sizes aligned on their baselines sit
-	// at the top of a 36px box with the empty paper under them.
+	// **Both of the obvious alignments are wrong on their own**, and this
+	// is the pair. `align-items: center` centres each word by its own box,
+	// so a serif, a mono and a sans at three sizes each sit at a different
+	// height; `align-items: baseline` alone puts the shared line at the
+	// top of a row-height box, which `ul.catalogue li` already records.
 	assert.Must(t, captionLine != "", "no rule lays out the caption's own line")
-	assert.Should(t, strings.Contains(captionLine, "align-items: center"),
-		"the caption's line is %q, and a baseline alignment in a row-height box is top alignment", captionLine)
+	assert.Should(t, strings.Contains(captionLine, "align-items: baseline"),
+		"the caption's line is %q, and centring each word by its own box staggers three faces", captionLine)
+	assert.Should(t, strings.Contains(captionLine, "align-content: center"),
+		"the caption's line is %q, so the words share a baseline and the line sits at the top of the row", captionLine)
 }

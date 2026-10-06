@@ -1996,25 +1996,37 @@ dl.fields dd.field-value.marked {
 caption.edge-head {
   text-align: left;
   padding: 0 11px;
-  /* **The two rows that name the table share a ground.** A header the
-     colour of the rows under it is another row, which is what this was
-     reported as twice: once about the line and once about the fill. The
-     desk under the sheet is the token this system already has for "not
-     the reading surface". */
-  background: var(--ground);
+  /* **The two rows that name the table share a fill, and it is neither
+     of the two surfaces around them.** `--ground` was the first answer
+     and it is the colour of the page itself, so the band read as a hole
+     in the panel rather than as a strip on it. This is the desk pulled
+     towards the hairline: darker than the page behind the panel and
+     darker than the paper the rows sit on, and derived from two tokens
+     rather than declared as a fifth surface, so it follows the theme
+     without anything new to keep in step. Measured at 4.6:1 against
+     `--muted`, which is what the column names are set in. */
+  background: color-mix(in oklab, var(--ground) 70%, var(--line));
   border-bottom: 1px solid var(--line);
   font-family: var(--serif);
   font-size: 1rem;
   font-weight: 600;
   color: var(--ink);
 }
+/* **Three words on one line, and the line centred in the row.** Both of
+   the obvious answers are wrong on their own: `align-items: baseline`
+   puts the group at the top of a 36px box (5px over it, 12px of paper
+   under it, which `ul.catalogue li` already records), and
+   `align-items: center` centres each word by its own box, so a serif at
+   1rem, a mono at 0.8125 and a sans at 0.8125 each sit at a different
+   height and the line reads as staggered.
+   A grid answers both at once: the words keep a shared baseline, and
+   `align-content` centres the one row they are in. */
 caption.edge-head > div {
-  display: flex;
-  /* **`center` and not `baseline`**, which is the measurement
-     `ul.catalogue li` already carries: three words of three sizes
-     aligned on their baselines sit at the top of a 36px box, with 5px
-     over them and 12px of empty paper under them. */
-  align-items: center;
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: baseline;
+  align-content: center;
   gap: var(--s3);
   min-height: var(--row-h);
 }
@@ -2071,7 +2083,7 @@ table.edges th {
   letter-spacing: 0.03em;
   color: var(--muted);
   white-space: nowrap;
-  background: var(--ground);
+  background: color-mix(in oklab, var(--ground) 70%, var(--line));
   /* **The line that separates the names from the values is the one line
      here that is signal.** Every row carries a hairline, so a header
      wearing the same one is another row: `line-strong` is the token this

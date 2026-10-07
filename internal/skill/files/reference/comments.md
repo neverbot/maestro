@@ -37,6 +37,13 @@ one.** That is what lets the log hold anything you can write: nothing
 downstream depends on its shape, and the only thing that reads it is
 somebody who came to find out what happened here.
 
+It is also why the division runs the way it does. **The model is the
+design as it stands and the log is how it got there**: a thing's fields
+say what it is and how it works today, and what it used to be, what
+changed, why, and what might come next are comments.
+`modelling/deciding.md` argues it, and says why the convention is one to
+propose to a game's designers rather than to apply.
+
 ## The three things that carry one
 
 An entity, an entity type and a relation type: **the three that have a

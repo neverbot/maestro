@@ -131,6 +131,48 @@ invisible to every view in the game. The cost of putting a document in a
 field is that there is no history: a write replaces the value and what
 was there is gone. `reference/documents.md` has both lists.
 
+## Decision 5 — the model is the present tense
+
+**Maestro holds the design as it stands.** An entity's fields say what
+the thing *is* and how it *works*, now: what a player meets if they meet
+it today. Everything about how it got there — what it used to be, what
+changed and why, the thinking behind a decision, an idea for later — is
+the log, and `comments.add` is where it goes.
+
+The split pays for itself in both directions. A field that accumulates
+"was X until the rewrite, then Y, now Z" stops answering the question a
+view asks it, and the row's own page stops being readable as a statement
+of the game. A log that holds the current design instead is worse: no
+query selects on a comment, no view draws one, no analysis counts one, so
+a rule written there is a rule the game does not have.
+
+A habit that follows from it, **and that the designers have to agree to
+before you adopt it**:
+
+> One own field — `notes` is the usual name — carrying the design
+> decisions that are true now and that no other field holds: how this
+> thing behaves, what it is for, the constraint a reader has to know.
+> And a comment for each change to that: what it was before, what moved
+> and why.
+
+This is useful often and it is not a law, because it is a decision about
+*their* game's schema and not about the metamodel. Propose it, say what
+it buys, and work to the answer you get: a game may want the design
+spread across several named fields rather than one `notes`, may want a
+document instead because the prose is long and its history is the point,
+or may want neither. What does not change with the answer is the
+direction: the current state in the model, the record of change in the
+log.
+
+Two consequences worth stating, because both have been got wrong:
+
+- **When what a thing is changes, update the row and write a comment.**
+  Not a second row, and not a `history` field growing inside the first.
+  `modelling/naming.md` argues the one-row half.
+- **A document is not the log either.** It keeps a version per write with
+  a message, which is the history *of that prose*; it is not where the
+  philosophy of a change to the model belongs.
+
 ## When you are not sure
 
 Prefer the relation. Turning a relation into a field later is one read

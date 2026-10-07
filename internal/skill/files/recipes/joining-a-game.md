@@ -45,6 +45,12 @@ thing is called and not what type it is. `views.list` shows what
 questions the designers already ask of this game, and a saved view's
 query is often the clearest statement of how they think about it.
 
+**Then read the log.** `comments.list` with no target at all is the whole
+game's, newest first: what the designers and the agents before you
+thought they were doing. The model tells you what the game is and the log
+tells you how it got there and what is still unsettled, and the second is
+the half you cannot derive from the first.
+
 ## The judgement: a non-zero invalid count is information, not a task
 
 Rows a schema edit stopped fitting are kept and flagged, deliberately —
@@ -85,3 +91,5 @@ session. That is `recipes/seeding-a-game.md`.
   somebody a rewrite, before you build on it.
 - `recipes/composing-a-view.md` — answering a question about the game
   you just read.
+- `reference/comments.md` — the log you have just read, and what belongs
+  in it rather than in the model.

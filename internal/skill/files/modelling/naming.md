@@ -92,10 +92,13 @@ So the useful habit is not a ban on renaming. It is:
 **When what a thing *is* changes, update the row. Do not make a second
 one.** A command from an old build that is reimplemented as a skill is
 the same thing in the game's history: it keeps its key, its edges, its
-attachments and its place in every saved view, and what it used to be is
-written into its own fields — a `notes` or a `history` field saying it
-was a command until the rewrite. A second row says the game has two
-things where it has one, and every analysis then counts it twice.
+attachments and its place in every saved view, and its fields are
+rewritten to say what it is now. What it used to be goes in a comment —
+`comments.add` on the row, saying it was a command until the rewrite —
+and not into a `history` field growing inside the row, which would leave
+every view drawing a value that is half a changelog. A second row says
+the game has two things where it has one, and every analysis then counts
+it twice. `modelling/deciding.md` argues the division.
 
 The name is the part that moves. **A row's name is editable and its key
 is not**, so when the thing's natural name changes you change the name

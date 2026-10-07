@@ -2264,16 +2264,23 @@ ol.log-entries {
    something stuck on the end of the band rather than as the place the
    next note goes. The rule is the one between entries. */
 .log-composer {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s2);
   max-width: var(--measure);
   margin-top: var(--s4);
   padding-top: var(--s4);
   border-top: 1px solid var(--line);
 }
-.log-composer textarea { width: 100%; }
+/* Closed, the band's one write costs the page a word. */
+.log-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+.log-form textarea {
+  width: 100%;
+  flex-basis: 100%;
+}
+.log-form .error:empty { display: none; }
 
 /* --- The reading view (document.html, doc.js) --- */
 

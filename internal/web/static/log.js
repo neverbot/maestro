@@ -185,10 +185,29 @@ export function logBand(doc, spec) {
   return section;
 }
 
-// composer is the one write: a box, and a button under it.
+// composer is the one write: a quiet word, and the box it opens.
+//
+// **Closed until somebody wants it**, which is the shape this page
+// already uses for a write that is not the point of the screen: the
+// field editor is a word, and the control appears when it is reached
+// for. A box and a filled button standing open were the loudest thing
+// on a reading page for its most secondary act — measured, the "Comment"
+// button wore the primary's ink fill and shadow while "Rename", which is
+// what this page is actually for, wore the ghost's. Almost every note
+// here is written by an agent over MCP; the person's way in should cost
+// the page a word.
 function composer(doc, spec) {
+  const holder = doc.createElement("div");
+  holder.className = "log-composer";
+
+  const open = doc.createElement("button");
+  open.type = "button";
+  open.className = "quiet log-open";
+  open.textContent = t("log.write");
+
   const form = doc.createElement("form");
-  form.className = "log-composer";
+  form.className = "log-form";
+  form.hidden = true;
 
   const box = doc.createElement("textarea");
   box.rows = 3;
@@ -199,10 +218,32 @@ function composer(doc, spec) {
   const error = doc.createElement("p");
   error.className = "error";
 
+  // **Inside the form the save is the primary, legitimately**: while the
+  // box is open, writing the note is what the screen is for.
   const save = doc.createElement("button");
   save.type = "submit";
-  save.textContent = t("log.write");
-  form.append(save, error);
+  save.textContent = t("entity.save");
+  const cancel = doc.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = t("entity.cancel");
+  form.append(save, cancel, error);
+  holder.append(open, form);
+
+  const close = () => {
+    form.hidden = true;
+    open.hidden = false;
+    error.textContent = "";
+  };
+  open.addEventListener("click", () => {
+    form.hidden = false;
+    open.hidden = true;
+    if (typeof box.focus === "function") box.focus();
+  });
+  cancel.addEventListener("click", () => {
+    box.value = "";
+    close();
+  });
 
   form.addEventListener("submit", async (event) => {
     if (event && typeof event.preventDefault === "function") event.preventDefault();
@@ -220,6 +261,7 @@ function composer(doc, spec) {
       return;
     }
     box.value = "";
+    close();
   });
-  return form;
+  return holder;
 }

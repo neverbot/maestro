@@ -118,7 +118,7 @@ function textOf(node) {
     list.children.map((item) => item.children[1].children[0].innerHTML),
     ["<p>first</p>", "<p>second</p>"]);
   // And the one write sits at the end of what it writes into.
-  check("the box is the last thing in the band", band.children.at(-1).getAttribute("class"), "log-composer");
+  check("the way to write one is the last thing in the band", band.children.at(-1).getAttribute("class"), "log-composer");
 }
 
 // A log nobody has written in says so, and says who would.
@@ -145,7 +145,18 @@ function textOf(node) {
 {
   const sent = [];
   const band = logBand(doc, { role: "editor", comments: [], now, write: async (body) => { sent.push(body); return { ok: true }; } });
-  const form = band.children.find((child) => child.tagName === "form");
+  const holder = band.children.at(-1);
+  const [open, form] = holder.children;
+
+  // **Closed until somebody wants it.** A box and a filled button
+  // standing open were the loudest thing on a reading page, for the act
+  // the page is least about: almost every note here is written by an
+  // agent, and the person's way in is the quiet word this page already
+  // uses for a write that is not the point.
+  check("the band offers a word, not a box", [open.getAttribute("class"), form.hidden], ["quiet log-open", true]);
+  open.dispatch("click", {});
+  check("and the box appears when it is reached for", [form.hidden, open.hidden], [false, true]);
+
   const box = form.children[0];
   box.value = "   ";
   await form.dispatch("submit", { preventDefault() {} });
@@ -153,7 +164,7 @@ function textOf(node) {
   box.value = "  Imported from the 1998 build.  ";
   await form.dispatch("submit", { preventDefault() {} });
   check("and a written one arrives trimmed", sent, ["Imported from the 1998 build."]);
-  check("and the box is cleared for the next one", box.value, "");
+  check("and the box is cleared and closed again", [box.value, form.hidden], ["", true]);
 }
 
 if (failures > 0) {

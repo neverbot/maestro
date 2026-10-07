@@ -709,7 +709,6 @@
   "error.comment-not-an-id": "Eso no es el identificador de un comentario.",
   "error.this-instance-keeps-no-comment-log": "Esta instancia no guarda registro de comentarios.",
   "log.heading": "Comentarios",
-  "log.note": "Esto es la bitácora: lo que se ha pensado al trabajar sobre esto. Lo que un jugador puede encontrarse va en un campo o en un texto.",
   "log.empty.heading": "Sin comentarios",
   "log.empty.sentence.agent": "Aquí no hay ninguna nota todavía. Escríbela tú o pídesela a un agente.",
   "log.empty.sentence.viewer": "Aquí no hay ninguna nota todavía.",

@@ -709,7 +709,6 @@
   "error.comment-not-an-id": "comment: not an id",
   "error.this-instance-keeps-no-comment-log": "this instance keeps no comment log",
   "log.heading": "Comments",
-  "log.note": "The log: what was thought while working on this. What a player can meet belongs in a field or a document.",
   "log.empty.heading": "No comments",
   "log.empty.sentence.agent": "Nothing has been written here yet. Write one, or ask an agent for it.",
   "log.empty.sentence.viewer": "Nothing has been written here yet.",

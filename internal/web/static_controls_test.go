@@ -388,3 +388,39 @@ func TestTheEdgeTablesHeaderIsSeparatedFromItsRows(t *testing.T) {
 	assert.Should(t, strings.Contains(captionLine, "align-content: center"),
 		"the caption's line is %q, so the words share a baseline and the line sits at the top of the row", captionLine)
 }
+
+// **A control that draws itself is not a box you type in.** The
+// vocabulary gives every `input` a 32-pixel box, nine pixels of side
+// padding, a border and a paper fill, and all four are wrong for a
+// checkbox or a radio: one came out thirteen wide and thirty-two tall,
+// in the operating system's blue, beside the Save button of the bool
+// field editor. The reset existed twice before this guard — `.choices`
+// for the account page's radios and `.tools-check` for the catalogue's
+// one checkbox — which is why the other three toggles in the product
+// never got it, and why this is one rule in controls.css now and a
+// second copy nowhere.
+func TestTheControlsThatDrawThemselvesAreNotDressedAsBoxes(t *testing.T) {
+	t.Parallel()
+	const reset = `input[type="checkbox"], input[type="radio"]`
+	found := ""
+	for _, rule := range cssRules(t, "controls.css") {
+		if rule[0] == reset {
+			found = strings.Join(strings.Fields(rule[1]), " ")
+		}
+	}
+	assert.Must(t, found != "", "no rule in controls.css selects %s: a checkbox wears the box the generic "+
+		"input rule gives it", reset)
+	for _, want := range []string{"width: auto", "height: auto", "padding: 0", "accent-color: var(--"} {
+		assert.Should(t, strings.Contains(found, want), "%s is %q, want it to carry %q", reset, found, want)
+	}
+	// One statement, not three. A page that resets a toggle of its own
+	// is the divergence this file exists to end.
+	for _, rule := range cssRules(t, "styles.css") {
+		if !strings.Contains(rule[0], `[type="checkbox"]`) && !strings.Contains(rule[0], `[type="radio"]`) {
+			continue
+		}
+		flat := strings.Join(strings.Fields(rule[1]), " ")
+		assert.Should(t, !strings.Contains(flat, "accent-color") && !strings.Contains(flat, "height: auto"),
+			"%s in styles.css restates the toggle reset controls.css already makes: %q", rule[0], flat)
+	}
+}

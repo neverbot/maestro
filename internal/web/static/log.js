@@ -140,14 +140,6 @@ export function logBand(doc, spec) {
   heading.textContent = t("log.heading");
   section.append(heading);
 
-  const note = doc.createElement("p");
-  note.className = "band-note";
-  // The band says what it is for, because a log nobody knows the rules of
-  // fills with the wrong thing: the game's own content belongs in a field
-  // or a document, and this is what was thought about it.
-  note.textContent = t("log.note");
-  section.append(note);
-
   const list = doc.createElement("ol");
   list.className = "log-entries";
   section.append(list);

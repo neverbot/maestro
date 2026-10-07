@@ -35,15 +35,58 @@
    the light DOM, so the two version pickers on the prose page rendered
    as `2px inset` browser defaults in `#e9e9ed` — a cold blue-grey that
    exists nowhere in this palette — 300px from a serif page title. */
+/* **And `textarea` was never written here either**, which is the same
+   failure this file already records for `select`, one control along: the
+   comment box and both field editors rendered as the browser's default —
+   a pure white box with a cold `#767676` border and square corners, in a
+   product whose paper is `#f7f3e9` and which forbids `#fff` by name. It
+   was reported as "the focus ring does not follow the rounding", because
+   there was no rounding to follow. The height is the one thing a
+   textarea does not take from this rule: its own is the rows it was
+   given. */
 input,
-select {
-  height: var(--control-h);
+select,
+textarea {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--raised);
   color: inherit;
   font: inherit;
+}
+
+input,
+select {
+  height: var(--control-h);
+}
+
+/* **A box you tick is not a box you type in.** The rule above gives
+   every input a 32px box, nine pixels of side padding, a border and a
+   paper fill, and all four are wrong for a control that draws itself
+   and is square: a checkbox came out thirteen wide and thirty-two tall,
+   in the operating system's blue, beside a Save button it no longer
+   lined up with. This was already known and written down twice —
+   `.choices` for the account page's radios and `.tools-check` for the
+   catalogue's one checkbox, each a private copy of this reset — and
+   false everywhere else: the bool field editor, the invite form's
+   administrator tick and the save-as dialog's bool parameter. Stated
+   here it reaches the shadow roots too. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--focus);
+}
+
+textarea {
+  padding: 6px 9px;
+  line-height: 1.5;
+  /* Sideways it would break the column it sits in; downwards is the one
+     direction a box of prose wants to grow. */
+  resize: vertical;
 }
 
 /* A field says it is writable before it is focused. Nothing in this
@@ -56,7 +99,8 @@ textarea:hover:not(:disabled):not(:focus) {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--focus);
 }
 

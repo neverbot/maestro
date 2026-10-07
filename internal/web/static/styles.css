@@ -366,6 +366,16 @@
   outline-offset: 2px;
 }
 
+/* **The ring is specified for a control the size of a button.** Two
+   pixels held two pixels off a 32px button is a mark beside it; the same
+   rule around a textarea four times that size draws a frame around the
+   whole box, and it was reported as exactly that. The accent still says
+   where the keyboard is, hugging the control instead of enclosing it. */
+textarea:focus-visible {
+  outline-width: 1px;
+  outline-offset: 0;
+}
+
 ::selection {
   background: var(--focus);
   color: var(--focus-ink);
@@ -1297,14 +1307,6 @@ form label {
   margin: 0;
 }
 
-/* A radio is the one control that must not be 32px tall. */
-.choices input[type="radio"] {
-  height: auto;
-  width: auto;
-  padding: 0;
-  accent-color: var(--focus);
-}
-
 /* A label in a catalogue row that is not the game's word: an email
    address, a filename, anything belonging to the instance rather than to
    the world being designed. */
@@ -1439,13 +1441,6 @@ form label {
   font-size: 0.875rem;
   color: var(--ink);
   white-space: nowrap;
-}
-
-.tools-check input[type="checkbox"] {
-  width: auto;
-  height: auto;
-  padding: 0;
-  accent-color: var(--focus);
 }
 
 .tools-note {

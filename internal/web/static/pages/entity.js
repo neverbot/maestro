@@ -82,10 +82,10 @@ export function formatValue(type, value) {
       // fields arrive, the relation type listing being slim enough to
       // carry no schema.
       if (typeof value === "boolean") return value ? BOOL_TRUE : BOOL_FALSE;
-      // And a list, for the same reason: `["rlmud","ancient-kingdoms"]`
-      // is JSON's punctuation around two words a reader wanted, and the
-      // same value one declared type away reads as `rlmud,
-      // ancient-kingdoms`. An edge's fields arrive here because the slim
+      // And a list, for the same reason: `["one","another"]` is JSON's
+      // punctuation around two words a reader wanted, and the same value
+      // one declared type away reads as `one, another`. An edge's fields
+      // arrive here because the slim
       // relation type listing carries no schema, not because the value
       // is of an unknown kind.
       if (Array.isArray(value)) return value.join(LIST_SEPARATOR);

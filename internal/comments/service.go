@@ -90,8 +90,8 @@ type Comment struct {
 	Author string
 	// ByAgent says which kind of author that was. **It is a fact of its
 	// own and not a guess from the name**: a token's label is a word
-	// somebody chose, and "rl-aeternum" reads as a person to anyone who
-	// does not already know otherwise.
+	// somebody chose, and a game's own name reads as a person to anyone
+	// who does not already know otherwise.
 	ByAgent bool
 	// AuthorOf is the person an agent's token traces back to, and the
 	// author themselves when a person wrote it. It is what makes "whose

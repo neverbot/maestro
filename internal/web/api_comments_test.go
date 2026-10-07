@@ -29,7 +29,7 @@ func TestTheCommentLogReachesBothSurfaces(t *testing.T) {
 	// The browser's half: a POST with the target in the body.
 	rec = f.as(t, http.MethodPost, "/comments", map[string]any{
 		"target": map[string]any{"on": "entity", "type_key": "quest", "key": "hogger"},
-		"body":   "Imported from the 1998 build; the damage formula is a guess.",
+		"body":   "Imported from the old engine; the damage formula is a guess.",
 	})
 	assert.Must(t, rec.Code == http.StatusOK, "add = %d: %s", rec.Code, rec.Body.String())
 	var written struct {
@@ -48,12 +48,12 @@ func TestTheCommentLogReachesBothSurfaces(t *testing.T) {
 	// and should not need a body.
 	read := f.as(t, http.MethodGet, "/comments?on=entity&type_key=quest&key=hogger", nil)
 	assert.Must(t, read.Code == http.StatusOK, "list = %d: %s", read.Code, read.Body.String())
-	assert.Must(t, strings.Contains(read.Body.String(), "1998 build"), "the log came back without the comment: %s", read.Body.String())
+	assert.Must(t, strings.Contains(read.Body.String(), "old engine"), "the log came back without the comment: %s", read.Body.String())
 
 	// The game's whole log is the same route with no target at all.
 	whole := f.as(t, http.MethodGet, "/comments", nil)
 	assert.Must(t, whole.Code == http.StatusOK, "the game's log = %d: %s", whole.Code, whole.Body.String())
-	assert.Must(t, strings.Contains(whole.Body.String(), "1998 build"), "the game's log is empty: %s", whole.Body.String())
+	assert.Must(t, strings.Contains(whole.Body.String(), "old engine"), "the game's log is empty: %s", whole.Body.String())
 
 	// The agent's half, through the tool entry point.
 	out, err := web.MCPCommentsList(context.Background(), f.deps(), f.caller(), f.game, web.CommentsListInput{
@@ -66,7 +66,7 @@ func TestTheCommentLogReachesBothSurfaces(t *testing.T) {
 	gone := f.as(t, http.MethodDelete, "/comments/"+written.ID.String(), nil)
 	assert.Must(t, gone.Code == http.StatusOK, "remove = %d: %s", gone.Code, gone.Body.String())
 	after := f.as(t, http.MethodGet, "/comments?on=entity&type_key=quest&key=hogger", nil)
-	assert.Must(t, !strings.Contains(after.Body.String(), "1998 build"), "the comment survived its removal: %s", after.Body.String())
+	assert.Must(t, !strings.Contains(after.Body.String(), "old engine"), "the comment survived its removal: %s", after.Body.String())
 }
 
 // TestACommentOnAThingThisGameDoesNotHaveIsNotFound pins the refusal on

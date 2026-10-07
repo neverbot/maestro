@@ -38,8 +38,8 @@ export function when(now, iso) {
 // for reading.
 const MONOGRAM_LETTERS = 2;
 
-// monogram is the initials of a name, in the one shape that works for
-// "Iván Alonso", "rl-aeternum" and "seed".
+// monogram is the initials of a name, in the one shape that works for a
+// person's two names, a hyphenated token label and a single word.
 export function monogram(name) {
   const words = String(name || "").split(/[\s._-]+/).filter((word) => word !== "");
   if (words.length === 0) return "?";
@@ -92,7 +92,7 @@ function entry(doc, comment, now, onRemove) {
   meta.append(who);
   // **"agente" is a word and not a badge.** A reader should not have to
   // learn a mark to find out that a machine wrote this, and the token's
-  // label is a word somebody chose — "rl-aeternum" reads as a name. Whose
+  // label is a word somebody chose, which reads as a name. Whose
   // agent it is comes with it, because in a game with two designers that
   // is the question under "who wrote this".
   if (comment.by_agent === true) {

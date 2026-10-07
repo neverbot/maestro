@@ -53,9 +53,9 @@ export function boolMark(doc, kind) {
 
 
 // byWeight orders a catalogue by how much of the game each row is, and
-// shares out the proportion. Alphabetical order hid the shape: in
-// RL-Aeternum `rinde culto a` is 45 of 95 connections, nearly half the
-// game's graph, and it sat ninth of twelve under the Spanish alphabet.
+// shares out the proportion. Alphabetical order hid the shape: a seeded
+// game's commonest verb was 45 of its 95 connections, nearly half the
+// graph, and it sat ninth of twelve under that language's alphabet.
 export function byWeight(rows, count) {
   const sorted = [...rows].sort((a, b) => Number(count(b)) - Number(count(a)));
   const total = sorted.reduce((n, r) => n + Number(count(r)), 0);
@@ -168,9 +168,9 @@ export function row(doc, spec) {
 
   // **The share of the whole, drawn.** A catalogue of counts answers
   // "how many" and never "how much of this game", which is the question
-  // a designer opens the page with: `worships` is 45, and 45 is half of
-  // RL-Aeternum's connections. The number alone does not say that and
-  // the order alone does not say by how much.
+  // a designer opens the page with: a verb is 45, and 45 is half of that
+  // game's connections. The number alone does not say that and the order
+  // alone does not say by how much.
   //
   // An SVG rect and not a styled div: `default-src 'self'` admits no
   // inline style attribute, so a width written as CSS would be dropped

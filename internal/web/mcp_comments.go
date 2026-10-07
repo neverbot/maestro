@@ -193,8 +193,8 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 			"**A person reads this.** Every comment is drawn on the thing's own page, under its "+
 			"content, newest first and with who wrote it; the game's designers write there too, in "+
 			"the same band, and what they write comes back from comments.list. Write for that "+
-			"reader: \"imported from the 1998 build, the damage formula is a guess from two log "+
-			"lines\" is worth opening a page for, and \"updated\" is not. "+
+			"reader: \"imported from the old engine's data files, the damage formula is a guess "+
+			"from two log lines\" is worth opening a page for, and \"updated\" is not. "+
 			"target.on is %q, %q or %q, and the rest of target is the address that kind takes: "+
 			"an entity is type_key plus key and either type is type_key alone. An address this "+
 			"game does not have is not_found rather than a comment nothing can ever read. "+

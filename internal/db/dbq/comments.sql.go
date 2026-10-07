@@ -92,7 +92,7 @@ type InsertCommentRow struct {
 // the two audit columns is set says whether a person or an agent wrote
 // it: a reader who cannot tell a machine from a colleague is reading a
 // log that is lying to them by omission, and the token label alone
-// ("rl-aeternum") reads as a name.
+// (a game's own name) reads as a name.
 //
 //   - **The listings' are defence in depth.** A listing is reached by a
 //     target the caller addressed by key, and resolving that address is

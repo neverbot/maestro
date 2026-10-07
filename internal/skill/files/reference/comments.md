@@ -16,19 +16,20 @@ wrote it and how long ago, the markdown rendered. A designer writes there
 too, in the same band, and you will read what they wrote the next time
 you call `comments.list`.
 
-So write for that reader and not for yourself. "Imported from the 1998
-build; the damage formula is a guess from two log lines" is worth opening
-a page for. "Updated" is a line somebody has to decide what to do with.
+So write for that reader and not for yourself. "Imported from the old
+engine's data files; the damage formula is a guess from two log lines" is
+worth opening a page for. "Updated" is a line somebody has to decide what
+to do with.
 
 ## What belongs here, and what does not
 
 > If a player could meet it, it is a field or a document. If the next
 > person to open this thing would want to be told it, it is a comment.
 
-A field holds the game: a quest's objective, a guild's vocation, the
-level a spell is granted at. A document holds the game's long prose: a
+A field holds the game: a quest's objective, a circuit's length, the
+level something is granted at. A document holds the game's long prose: a
 dialogue script, a chapter of lore. **Neither is the place for "imported
-this from the 1998 build, the damage formula is a guess"**, and that
+this from the old engine, the damage formula is a guess"**, and that
 sentence is exactly what a comment is for.
 
 **No query selects on a comment, no view draws one, no analysis counts
@@ -48,13 +49,13 @@ note left on one would be reachable by `comments.list` and by nothing a
 designer opens: a place to write where nothing reads. What was going
 there belongs in one of two places instead.
 
-- **A fact a player could meet is a field on the edge.** "rlmud: level 1;
-  iluminado: level 5" is the level this guild grants this ability at, and
-  in a field a `where` reads it, a view draws it and `relations.repair`
-  can rewrite it across the type. In a comment it is out of reach of all
-  three, forever. If the fact is per-something and the field is single
-  valued, that is a modelling decision to make, not a reason to put game
-  content in the log.
+- **A fact a player could meet is a field on the edge.** The level a
+  connection grants something at, the lap count a championship entry is
+  worth: in a field a `where` reads it, a view draws it and
+  `relations.repair` can rewrite it across the type. In a comment it is
+  out of reach of all three, forever. If the fact is per-something and
+  the field is single valued, that is a modelling decision to make, not a
+  reason to put game content in the log.
 - **A note about how a kind of connection changed goes on the relation
   type**, which has a page, or on one of the entities the edge joins.
 

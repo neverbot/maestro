@@ -61,14 +61,7 @@ func targetFromQuery(r *http.Request) *CommentTargetInput {
 		return nil
 	}
 	q := r.URL.Query()
-	target := &CommentTargetInput{On: on, TypeKey: q.Get("type_key"), Key: q.Get("key")}
-	if source := q.Get("source_key"); source != "" {
-		target.Source = &RefInput{TypeKey: q.Get("source_type"), Key: source}
-	}
-	if to := q.Get("target_key"); to != "" {
-		target.Target = &RefInput{TypeKey: q.Get("target_type"), Key: to}
-	}
-	return target
+	return &CommentTargetInput{On: on, TypeKey: q.Get("type_key"), Key: q.Get("key")}
 }
 
 func (s *Server) handleListComments(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {

@@ -36,13 +36,31 @@ one.** That is what lets the log hold anything you can write: nothing
 downstream depends on its shape, and the only thing that reads it is
 somebody who came to find out what happened here.
 
-## The four things that carry one
+## The three things that carry one
 
-An entity, a relation, an entity type and a relation type. Each is
-addressed the way the rest of this surface addresses it — by keys, never
-by ids — and the target's own `on` says which of the four it is. The
-tool's description carries the four spellings and the arguments each one
-takes.
+An entity, an entity type and a relation type: **the three that have a
+page**. Each is addressed the way the rest of this surface addresses it —
+by keys, never by ids — and the target's own `on` says which. The tool's
+description carries the three spellings and the arguments each takes.
+
+**One relation carries none, deliberately.** An edge has no page, so a
+note left on one would be reachable by `comments.list` and by nothing a
+designer opens: a place to write where nothing reads. What was going
+there belongs in one of two places instead.
+
+- **A fact a player could meet is a field on the edge.** "rlmud: level 1;
+  iluminado: level 5" is the level this guild grants this ability at, and
+  in a field a `where` reads it, a view draws it and `relations.repair`
+  can rewrite it across the type. In a comment it is out of reach of all
+  three, forever. If the fact is per-something and the field is single
+  valued, that is a modelling decision to make, not a reason to put game
+  content in the log.
+- **A note about how a kind of connection changed goes on the relation
+  type**, which has a page, or on one of the entities the edge joins.
+
+**A document carries none** either: it already keeps a message per
+version, which is the same note in the place that can say which change it
+was about.
 
 An address this game does not have is `not_found`. A comment against a
 row nobody can reach is a note the log fills with and nothing ever reads,
@@ -67,14 +85,6 @@ log admits, and the tool that does it says what that costs.
 **Removing the thing removes its log.** The comments on an entity go when
 the entity does. There is no orphan to find later and nothing to clean
 up.
-
-## What no screen draws yet
-
-**A relation's log is the one nobody can read on a screen.** An entity,
-an entity type and a relation type each carry the band; an edge has no
-page of its own to carry one, so a note against an edge is reachable
-through `comments.list` and nowhere else today. Put a note a designer is
-meant to read on one of the three, not on the edge between them.
 
 ## How to use it
 

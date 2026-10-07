@@ -723,5 +723,6 @@
   "log.hours": "{n} h ago",
   "log.days": "{n} days ago",
   "log.agent": "agent",
-  "log.agentOf": "{who}'s agent"
+  "log.agentOf": "{who}'s agent",
+  "entity.info": "Information"
 }

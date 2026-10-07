@@ -475,11 +475,16 @@ export function entityBody(doc, slug, model) {
   root.className = "entity";
 
   const rows = fieldRows(model.schema, model.entity);
-  // **No heading over the fields.** This band is what the page is: the
-  // thing's own values, under the thing's own name, which the page title
-  // and the breadcrumb have already said. A heading here would name the
-  // subject twice and rank the content below the furniture around it.
+  // **The heading came back when the page grew a second column.** It was
+  // dropped because a band under the thing's own name does not need to
+  // say what it is; with the log beside it, a named column next to an
+  // unnamed one reads as crooked, and the two now start on the same line.
+  // "Information" and not "Fields": a field is the metamodel's word and
+  // this screen speaks the designer's.
   const fields = doc.createElement("section");
+  const fieldsHeading = doc.createElement("h2");
+  fieldsHeading.textContent = t("entity.info");
+  fields.append(fieldsHeading);
   if (rows.length === 0) {
     // **The shared negative state, not a muted sentence.** This page
     // builds its own body and replaces the shell's content wholesale, so

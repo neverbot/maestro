@@ -35,19 +35,18 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (u
 const insertComment = `-- name: InsertComment :one
 
 WITH written AS (
-    INSERT INTO comments (project_id, entity_id, relation_id, entity_type_id, relation_type_id,
+    INSERT INTO comments (project_id, entity_id, entity_type_id, relation_type_id,
                           body, created_by_user_id, created_by_token_id)
     VALUES ($1::uuid,
             $2::uuid,
             $3::uuid,
             $4::uuid,
-            $5::uuid,
-            $6::text,
-            $7::uuid,
-            $8::uuid)
-    RETURNING id, project_id, entity_id, relation_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id
+            $5::text,
+            $6::uuid,
+            $7::uuid)
+    RETURNING id, project_id, entity_id, entity_type_id, relation_type_id, body, created_at, created_by_user_id, created_by_token_id
 )
-SELECT w.id, w.project_id, w.entity_id, w.relation_id, w.entity_type_id, w.relation_type_id, w.body, w.created_at, w.created_by_user_id, w.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
+SELECT w.id, w.project_id, w.entity_id, w.entity_type_id, w.relation_type_id, w.body, w.created_at, w.created_by_user_id, w.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
        COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM written w
 LEFT JOIN users u ON u.id = w.created_by_user_id
@@ -58,7 +57,6 @@ LEFT JOIN users owner ON owner.id = t.user_id
 type InsertCommentParams struct {
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string
@@ -70,7 +68,6 @@ type InsertCommentRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string
@@ -117,7 +114,6 @@ func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (I
 	row := q.db.QueryRow(ctx, insertComment,
 		arg.ProjectID,
 		arg.EntityID,
-		arg.RelationID,
 		arg.EntityTypeID,
 		arg.RelationTypeID,
 		arg.Body,
@@ -129,7 +125,6 @@ func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (I
 		&i.ID,
 		&i.ProjectID,
 		&i.EntityID,
-		&i.RelationID,
 		&i.EntityTypeID,
 		&i.RelationTypeID,
 		&i.Body,
@@ -183,7 +178,7 @@ func (q *Queries) ListCommentCountsForEntities(ctx context.Context, arg ListComm
 }
 
 const listCommentsInProject = `-- name: ListCommentsInProject :many
-SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
+SELECT c.id, c.project_id, c.entity_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
        COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
@@ -203,7 +198,6 @@ type ListCommentsInProjectRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string
@@ -229,7 +223,6 @@ func (q *Queries) ListCommentsInProject(ctx context.Context, arg ListCommentsInP
 			&i.ID,
 			&i.ProjectID,
 			&i.EntityID,
-			&i.RelationID,
 			&i.EntityTypeID,
 			&i.RelationTypeID,
 			&i.Body,
@@ -250,7 +243,7 @@ func (q *Queries) ListCommentsInProject(ctx context.Context, arg ListCommentsInP
 }
 
 const listCommentsOnEntity = `-- name: ListCommentsOnEntity :many
-SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
+SELECT c.id, c.project_id, c.entity_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
        COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
@@ -271,7 +264,6 @@ type ListCommentsOnEntityRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string
@@ -296,7 +288,6 @@ func (q *Queries) ListCommentsOnEntity(ctx context.Context, arg ListCommentsOnEn
 			&i.ID,
 			&i.ProjectID,
 			&i.EntityID,
-			&i.RelationID,
 			&i.EntityTypeID,
 			&i.RelationTypeID,
 			&i.Body,
@@ -317,7 +308,7 @@ func (q *Queries) ListCommentsOnEntity(ctx context.Context, arg ListCommentsOnEn
 }
 
 const listCommentsOnEntityType = `-- name: ListCommentsOnEntityType :many
-SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
+SELECT c.id, c.project_id, c.entity_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
        COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
@@ -338,7 +329,6 @@ type ListCommentsOnEntityTypeRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string
@@ -362,73 +352,6 @@ func (q *Queries) ListCommentsOnEntityType(ctx context.Context, arg ListComments
 			&i.ID,
 			&i.ProjectID,
 			&i.EntityID,
-			&i.RelationID,
-			&i.EntityTypeID,
-			&i.RelationTypeID,
-			&i.Body,
-			&i.CreatedAt,
-			&i.CreatedByUserID,
-			&i.CreatedByTokenID,
-			&i.Author,
-			&i.AuthorOf,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCommentsOnRelation = `-- name: ListCommentsOnRelation :many
-SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
-       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
-FROM comments c
-LEFT JOIN users u ON u.id = c.created_by_user_id
-LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
-LEFT JOIN users owner ON owner.id = t.user_id
-WHERE c.project_id = $1::uuid AND c.relation_id = $2::uuid
-ORDER BY c.created_at DESC, c.id DESC
-LIMIT $3::integer
-`
-
-type ListCommentsOnRelationParams struct {
-	ProjectID  uuid.UUID
-	RelationID uuid.UUID
-	Lim        int32
-}
-
-type ListCommentsOnRelationRow struct {
-	ID               uuid.UUID
-	ProjectID        uuid.UUID
-	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
-	EntityTypeID     *uuid.UUID
-	RelationTypeID   *uuid.UUID
-	Body             string
-	CreatedAt        pgtype.Timestamptz
-	CreatedByUserID  *uuid.UUID
-	CreatedByTokenID *uuid.UUID
-	Author           string
-	AuthorOf         string
-}
-
-func (q *Queries) ListCommentsOnRelation(ctx context.Context, arg ListCommentsOnRelationParams) ([]ListCommentsOnRelationRow, error) {
-	rows, err := q.db.Query(ctx, listCommentsOnRelation, arg.ProjectID, arg.RelationID, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListCommentsOnRelationRow
-	for rows.Next() {
-		var i ListCommentsOnRelationRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ProjectID,
-			&i.EntityID,
-			&i.RelationID,
 			&i.EntityTypeID,
 			&i.RelationTypeID,
 			&i.Body,
@@ -449,7 +372,7 @@ func (q *Queries) ListCommentsOnRelation(ctx context.Context, arg ListCommentsOn
 }
 
 const listCommentsOnRelationType = `-- name: ListCommentsOnRelationType :many
-SELECT c.id, c.project_id, c.entity_id, c.relation_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
+SELECT c.id, c.project_id, c.entity_id, c.entity_type_id, c.relation_type_id, c.body, c.created_at, c.created_by_user_id, c.created_by_token_id, COALESCE(t.label, u.display_name, '')::text AS author,
        COALESCE(owner.display_name, u.display_name, '')::text AS author_of
 FROM comments c
 LEFT JOIN users u ON u.id = c.created_by_user_id
@@ -470,7 +393,6 @@ type ListCommentsOnRelationTypeRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string
@@ -494,7 +416,6 @@ func (q *Queries) ListCommentsOnRelationType(ctx context.Context, arg ListCommen
 			&i.ID,
 			&i.ProjectID,
 			&i.EntityID,
-			&i.RelationID,
 			&i.EntityTypeID,
 			&i.RelationTypeID,
 			&i.Body,

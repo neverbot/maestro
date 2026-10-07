@@ -90,9 +90,16 @@ function textOf(node) {
   const byAgent = { ...ENTRY, author: "rl-aeternum", by_agent: true, author_of: "Administrator" };
   const band = logBand(doc, { role: "editor", comments: [byAgent], now });
   const meta = band.children.find((child) => child.tagName === "ol").children[0].children[0];
-  check("an agent's entry says so and says whose agent it is",
+  check("an agent's entry says a machine wrote it, in a word",
     meta.children.map((part) => part.textContent),
-    ["RA", "rl-aeternum", "Administrator's agent", "1 h ago"]);
+    ["RA", "rl-aeternum", "agent", "1 h ago"]);
+  // **Whose agent is on the chip, not on the line.** It is the next
+  // question down and does not have to cost the line a second name, and
+  // it is the chip's accessible name as well as its tooltip so it is not
+  // a hover-only fact.
+  check("and whose agent it is, where it costs no width",
+    [meta.children[0].getAttribute("title"), meta.children[0].getAttribute("aria-label")],
+    ["Administrator's agent", "Administrator's agent"]);
   // The hue is the owner's, so a person and their agent share one.
   const mine = logBand(doc, { role: "editor", comments: [{ ...ENTRY, author: "Administrator", author_of: "Administrator" }], now });
   const hueOf = (b) => b.children.find((c) => c.tagName === "ol").children[0].children[0].children[0].getAttribute("class");

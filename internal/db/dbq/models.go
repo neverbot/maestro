@@ -25,7 +25,6 @@ type Comment struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	EntityID         *uuid.UUID
-	RelationID       *uuid.UUID
 	EntityTypeID     *uuid.UUID
 	RelationTypeID   *uuid.UUID
 	Body             string

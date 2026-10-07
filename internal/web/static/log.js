@@ -64,8 +64,17 @@ function chip(doc, comment) {
   const of = comment.author_of || comment.author || "";
   const mark = doc.createElement("span");
   mark.className = "log-chip hue-" + (hueFor(of) + 1);
-  mark.setAttribute("aria-hidden", "true");
   mark.textContent = monogram(comment.author || t("log.someone"));
+  // **Whose agent it is lives here**, not on the line. The line already
+  // says who wrote it and that a machine did; which person's token that
+  // was is the next question down and does not have to cost the line the
+  // width of a second name. It is the chip's accessible name as well as
+  // its tooltip, so it is not a hover-only fact.
+  const says = comment.by_agent === true && comment.author_of
+    ? t("log.agentOf").replace("{who}", comment.author_of)
+    : comment.author || t("log.someone");
+  mark.setAttribute("title", says);
+  mark.setAttribute("aria-label", says);
   return mark;
 }
 
@@ -89,9 +98,7 @@ function entry(doc, comment, now, onRemove) {
   if (comment.by_agent === true) {
     const kind = doc.createElement("span");
     kind.className = "log-agent";
-    kind.textContent = comment.author_of
-      ? t("log.agentOf").replace("{who}", comment.author_of)
-      : t("log.agent");
+    kind.textContent = t("log.agent");
     meta.append(kind);
   }
   const stamp = doc.createElement("time");

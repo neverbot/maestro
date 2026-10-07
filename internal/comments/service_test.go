@@ -79,23 +79,14 @@ func onEntity() comments.Target {
 	return comments.Target{Kind: comments.OnEntity, TypeKey: "quest", Key: "hogger"}
 }
 
-func onEdge() comments.Target {
-	return comments.Target{
-		Kind: comments.OnRelation, TypeKey: "takes_place_in",
-		From: metamodel.Ref{TypeKey: "quest", Key: "hogger"},
-		To:   metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
-	}
-}
-
 func TestCommentsArea(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	t.Run("a comment lands on each of the four things that can carry one", func(t *testing.T) {
+	t.Run("a comment lands on each of the three things that can carry one", func(t *testing.T) {
 		g, _ := newGame(t)
 		for _, target := range []comments.Target{
 			onEntity(),
-			onEdge(),
 			{Kind: comments.OnEntityType, TypeKey: "quest"},
 			{Kind: comments.OnRelationType, TypeKey: "takes_place_in"},
 		} {
@@ -120,6 +111,15 @@ func TestCommentsArea(t *testing.T) {
 		assert.Must(t, err == nil, "list: %v", err)
 		assert.Must(t, len(got) == 3 && got[0].Body == "third" && got[2].Body == "first",
 			"a log read oldest first is a log nobody reads: %v", bodies(got))
+	})
+
+	t.Run("an edge carries no log, because nothing could read it", func(t *testing.T) {
+		g, _ := newGame(t)
+		_, err := g.log.Add(ctx, g.projectID,
+			comments.Target{Kind: "relation", TypeKey: "takes_place_in"},
+			"about an edge", comments.Actor{})
+		assert.Must(t, errors.Is(err, metamodel.ErrInvalidInput), "err = %v, want ErrInvalidInput: an edge has no page, so a "+
+			"note left on one is a place to write where nothing reads", err)
 	})
 
 	t.Run("a comment about a thing this game does not have is refused", func(t *testing.T) {
@@ -185,14 +185,14 @@ func TestCommentsArea(t *testing.T) {
 
 	t.Run("the game's whole log is every comment whatever it is about", func(t *testing.T) {
 		g, _ := newGame(t)
-		for _, target := range []comments.Target{onEntity(), onEdge(), {Kind: comments.OnEntityType, TypeKey: "quest"}} {
+		for _, target := range []comments.Target{onEntity(), {Kind: comments.OnEntityType, TypeKey: "quest"}} {
 			if _, err := g.log.Add(ctx, g.projectID, target, "a note", comments.Actor{}); err != nil {
 				t.Fatalf("add on %s: %v", target.Kind, err)
 			}
 		}
 		got, err := g.log.ListGame(ctx, g.projectID, 0)
 		assert.Must(t, err == nil, "list the game: %v", err)
-		assert.Must(t, len(got) == 3, "the game's log holds %d, want 3", len(got))
+		assert.Must(t, len(got) == 2, "the game's log holds %d, want 2", len(got))
 	})
 
 	t.Run("a page of rows is counted in one query", func(t *testing.T) {

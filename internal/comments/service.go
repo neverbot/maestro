@@ -52,12 +52,15 @@ const (
 // Kind is what a comment is about.
 type Kind string
 
-// The four things that can carry one. **A document cannot**: it already
-// keeps a message per version, which is the same note in the place that
-// can say which change it was about.
+// The three things that can carry one, and they are the three with a
+// page. **A relation cannot**, since 0018: an edge has no screen, so a
+// note left on one was reachable by this package and by nothing a
+// designer opens, which is a place to write where nothing reads. **A
+// document cannot** either: it already keeps a message per version,
+// which is the same note in the place that can say which change it was
+// about.
 const (
 	OnEntity       Kind = "entity"
-	OnRelation     Kind = "relation"
 	OnEntityType   Kind = "entity_type"
 	OnRelationType Kind = "relation_type"
 )
@@ -66,15 +69,11 @@ const (
 // rest of this surface speaks: keys, never ids.
 type Target struct {
 	Kind Kind
-	// TypeKey is the entity type's key for an entity, the type's own key
-	// for a type, and the relation type's key for a relation or a
-	// relation type.
+	// TypeKey is the entity type's key for an entity, and the type's own
+	// key for either kind of type.
 	TypeKey string
 	// Key is an entity's own key, and is read for OnEntity alone.
 	Key string
-	// From and To are an edge's endpoints, read for OnRelation alone.
-	From metamodel.Ref
-	To   metamodel.Ref
 }
 
 // Comment is one entry in the log, in the shape every surface reads: the
@@ -104,15 +103,13 @@ type Comment struct {
 // entry folds any of the five generated row shapes into one Comment.
 // They are identical structs with five different names, which is what
 // sqlc emits for five statements over one table.
-func entry(id uuid.UUID, entityID, relationID, entityTypeID, tokenID *uuid.UUID, body string,
+func entry(id uuid.UUID, entityID, entityTypeID, tokenID *uuid.UUID, body string,
 	createdAt pgtype.Timestamptz, author, authorOf string,
 ) Comment {
 	kind := OnRelationType
 	switch {
 	case entityID != nil:
 		kind = OnEntity
-	case relationID != nil:
-		kind = OnRelation
 	case entityTypeID != nil:
 		kind = OnEntityType
 	}
@@ -161,8 +158,6 @@ func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, b
 	switch target.Kind {
 	case OnEntity:
 		params.EntityID = &id
-	case OnRelation:
-		params.RelationID = &id
 	case OnEntityType:
 		params.EntityTypeID = &id
 	case OnRelationType:
@@ -178,7 +173,7 @@ func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, b
 	if err != nil {
 		return Comment{}, fmt.Errorf("write comment: %w", err)
 	}
-	return entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf), nil
+	return entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf), nil
 }
 
 // List reads one thing's log, newest first.
@@ -196,15 +191,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
-		}
-	case OnRelation:
-		rows, err := s.q.ListCommentsOnRelation(ctx, dbq.ListCommentsOnRelationParams{ProjectID: projectID, RelationID: id, Lim: bound})
-		if err != nil {
-			return nil, fmt.Errorf("read log: %w", err)
-		}
-		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
+			out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	case OnEntityType:
 		rows, err := s.q.ListCommentsOnEntityType(ctx, dbq.ListCommentsOnEntityTypeParams{ProjectID: projectID, EntityTypeID: id, Lim: bound})
@@ -212,7 +199,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
+			out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	default:
 		rows, err := s.q.ListCommentsOnRelationType(ctx, dbq.ListCommentsOnRelationTypeParams{ProjectID: projectID, RelationTypeID: id, Lim: bound})
@@ -220,7 +207,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 			return nil, fmt.Errorf("read log: %w", err)
 		}
 		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
+			out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 		}
 	}
 	return out, nil
@@ -235,7 +222,7 @@ func (s *Service) ListGame(ctx context.Context, projectID uuid.UUID, limit int32
 	}
 	out := make([]Comment, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, entry(row.ID, row.EntityID, row.RelationID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
+		out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 	}
 	return out, nil
 }
@@ -282,9 +269,6 @@ func (s *Service) resolve(ctx context.Context, projectID uuid.UUID, target Targe
 	case OnEntity:
 		row, err := s.meta.EntityByKey(ctx, projectID, target.TypeKey, target.Key)
 		return row.ID, err
-	case OnRelation:
-		row, err := s.meta.RelationByEdge(ctx, projectID, target.TypeKey, target.From, target.To)
-		return row.ID, err
 	case OnEntityType:
 		row, err := s.meta.EntityTypeByKey(ctx, projectID, target.TypeKey)
 		return row.ID, err
@@ -292,8 +276,8 @@ func (s *Service) resolve(ctx context.Context, projectID uuid.UUID, target Targe
 		row, err := s.meta.RelationTypeByKey(ctx, projectID, target.TypeKey)
 		return row.ID, err
 	default:
-		return uuid.Nil, refuse("target.on", fmt.Sprintf("must be %q, %q, %q or %q",
-			OnEntity, OnRelation, OnEntityType, OnRelationType))
+		return uuid.Nil, refuse("target.on", fmt.Sprintf("must be %q, %q or %q",
+			OnEntity, OnEntityType, OnRelationType))
 	}
 }
 

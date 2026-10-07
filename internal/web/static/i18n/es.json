@@ -723,5 +723,6 @@
   "log.hours": "hace {n} h",
   "log.days": "hace {n} días",
   "log.agent": "agente",
-  "log.agentOf": "agente de {who}"
+  "log.agentOf": "agente de {who}",
+  "entity.info": "Información"
 }

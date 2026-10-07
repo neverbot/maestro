@@ -22,16 +22,13 @@ import (
 // a (kind, id) pair: a tool whose arguments depend on a string argument
 // is a tool an agent gets wrong once per session.
 
-// CommentTargetInput is the thing a comment is about. Exactly one shape
-// is filled: an entity (type_key and key), an edge (type_key and both
-// endpoints), an entity type (type_key alone, with on: "entity_type") or
-// a relation type (type_key alone, with on: "relation_type").
+// CommentTargetInput is the thing a comment is about: an entity
+// (type_key and key), an entity type or a relation type (type_key
+// alone), said by `on`.
 type CommentTargetInput struct {
-	On      string    `json:"on"`
-	TypeKey string    `json:"type_key"`
-	Key     string    `json:"key,omitempty"`
-	Source  *RefInput `json:"source,omitempty"`
-	Target  *RefInput `json:"target,omitempty"`
+	On      string `json:"on"`
+	TypeKey string `json:"type_key"`
+	Key     string `json:"key,omitempty"`
 }
 
 // CommentsAddInput is the argument shape of comments.add.
@@ -89,30 +86,15 @@ func targetOf(in CommentTargetInput) (comments.Target, error) {
 	kind := comments.Kind(in.On)
 	switch kind {
 	case comments.OnEntity, comments.OnEntityType, comments.OnRelationType:
-	case comments.OnRelation:
-		if in.Source == nil || in.Target == nil {
-			return comments.Target{}, &metamodel.ValidationError{
-				Code: metamodel.CodeInvalidInput,
-				Fields: []metamodel.FieldError{{Path: "target.source",
-					Message: "an edge is addressed by its relation type and both of its endpoints"}},
-			}
-		}
 	default:
 		return comments.Target{}, &metamodel.ValidationError{
 			Code: metamodel.CodeInvalidInput,
 			Fields: []metamodel.FieldError{{Path: "target.on",
-				Message: fmt.Sprintf("must be %q, %q, %q or %q", comments.OnEntity, comments.OnRelation,
+				Message: fmt.Sprintf("must be %q, %q or %q", comments.OnEntity,
 					comments.OnEntityType, comments.OnRelationType)}},
 		}
 	}
-	out := comments.Target{Kind: kind, TypeKey: in.TypeKey, Key: in.Key}
-	if in.Source != nil {
-		out.From = metamodel.Ref{TypeKey: in.Source.TypeKey, Key: in.Source.Key}
-	}
-	if in.Target != nil {
-		out.To = metamodel.Ref{TypeKey: in.Target.TypeKey, Key: in.Target.Key}
-	}
-	return out, nil
+	return comments.Target{Kind: kind, TypeKey: in.TypeKey, Key: in.Key}, nil
 }
 
 // commentOf is one entry on the wire. The time is RFC 3339, as every
@@ -213,10 +195,14 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 			"the same band, and what they write comes back from comments.list. Write for that "+
 			"reader: \"imported from the 1998 build, the damage formula is a guess from two log "+
 			"lines\" is worth opening a page for, and \"updated\" is not. "+
-			"target.on is %q, %q, %q or %q, and the rest of target is the address that kind takes: "+
-			"an entity is type_key plus key, an edge is the relation type's key plus source and "+
-			"target, and either type is type_key alone. An address this game does not have is "+
-			"not_found rather than a comment nothing can ever read. "+
+			"target.on is %q, %q or %q, and the rest of target is the address that kind takes: "+
+			"an entity is type_key plus key and either type is type_key alone. An address this "+
+			"game does not have is not_found rather than a comment nothing can ever read. "+
+			"**One relation cannot carry one**, deliberately: an edge has no page of its own, so "+
+			"a note left there would be reachable by comments.list and by nothing a designer "+
+			"opens. A fact a player could meet is a field on the edge, where a query, a view and "+
+			"relations.repair can all reach it; a note about how a kind of connection changed goes "+
+			"on the relation type or on one of the entities. "+
 			"body is markdown and holds at most %d characters — prose that wants a title, a "+
 			"history and an address of its own is a document. "+
 			"**There is no state on a comment and there will not be one**: no status, no assignee, "+
@@ -224,7 +210,7 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 			"it has become a project tracker, which this product is not. "+
 			"**There is no edit, either.** A log that can be rewritten is not a log; comments.remove "+
 			"takes one out whole.",
-			comments.OnEntity, comments.OnRelation, comments.OnEntityType, comments.OnRelationType,
+			comments.OnEntity, comments.OnEntityType, comments.OnRelationType,
 			comments.MaxBodyRunes),
 		OutputSchema: commentOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in CommentsAddInput) (CommentOutput, error) {

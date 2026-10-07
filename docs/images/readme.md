@@ -38,8 +38,11 @@ in different themes look like two different products.
 
 ## The index
 
-Two images, both taken on 2026-09-15 from the `demo` game at 1440x900
-in the light theme.
+Two images, both retaken on 2026-10-07 from the `demo` game at 1440x900
+in the light theme. The pair before them was five months old and showed
+a navigation that has since been renamed and a catalogue that has since
+lost its standing sentence and two of its filters: a screenshot of a
+screen that has moved looks right, which is what this index is for.
 
 | File | Shows | Taken from |
 | :--- | :--- | :--- |

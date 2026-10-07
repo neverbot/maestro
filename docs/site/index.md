@@ -46,6 +46,21 @@ Lore and mission scripts as versioned markdown, attached to the
 entities they describe, with a diff between any two versions and a
 record of who wrote each one.
 
+### The log
+
+Maestro holds the design as it stands: what a thing *is* today. How it
+got there is a separate thing, and it is a log. Beside the content of
+any kind of thing, of any one thing, and of any kind of connection,
+there is a band of notes in date order: what was imported from where,
+what was rewritten and why, the thinking behind a decision, something
+worth doing later.
+
+You write there, and so do your agents, and each note says which of you
+it was. It is the one place in the product where the two of you write to
+each other rather than both writing the game. Nothing queries a note,
+nothing draws one and no analysis counts one, which is what lets it hold
+whatever needed saying.
+
 ![The catalogue of one declared type: three hundred creatures with their keys and a declared field.](images/catalogue.png)
 
 *Three hundred rows of one type in the same example game. The columns
@@ -76,6 +91,11 @@ from a value the writer forgot to carry. If content vanishes from a row
 an agent has just touched, that is the shape of the accident. The row's
 version is what stops two writers doing it to each other, and it is no
 help at all against one writer sending half a row.
+
+A note in the log is the fourth thing, and it works differently on
+purpose: it is added rather than edited, so there is no version to
+conflict and nothing to overwrite. Taking one out is the only change a
+log admits, because a log that can be rewritten is not one.
 
 A view can also be composed in the browser, clause by clause, for the
 half of the query language a sentence can hold. The other half is a

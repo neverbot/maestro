@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -372,13 +373,18 @@ func TestEveryWrittenPageIsAMarkdownFile(t *testing.T) {
 func TestAPictureOnItsOwnLineIsAFigure(t *testing.T) {
 	front := buildSite(t)["index.html"]
 	assert.Should(t, !strings.Contains(front, "<p><img"), "an image is still a bare paragraph: the figure transform did not run")
-	for _, want := range []string{"<figure><img ", "<figcaption>", `width="1440" height="815"`} {
+	for _, want := range []string{"<figure><img ", "<figcaption>"} {
 		assert.Should(t, strings.Contains(front, want), "the front page's figures carry no %s", want)
 	}
-	// The size is read and not written down: a picture of another size
-	// gets its own.
+	// **The size is read off the file, and this guard reads it off the
+	// file too.** It used to assert the two numbers the screenshots
+	// happened to have, which is the same picture written down twice:
+	// retaking them at the size the recipe asks for turned a correct page
+	// red and said nothing about what was wrong.
 	w, h, ok := pngSize(filepath.Join("..", "..", "docs", "images", "quest-chain.png"))
-	assert.Should(t, ok && w == 1440 && h == 815, "pngSize read %dx%d (ok=%v) from a 1440x815 screenshot", w, h, ok)
+	assert.Must(t, ok, "pngSize could not read quest-chain.png at all")
+	assert.Should(t, strings.Contains(front, fmt.Sprintf(`width="%d" height="%d"`, w, h)),
+		"the front page's figure does not carry the picture's own %dx%d", w, h)
 }
 
 // **The design system is three files that move together, and nothing

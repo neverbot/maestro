@@ -140,6 +140,13 @@ export async function typesPage(opened) {
         }),
       )),
     );
+    // The same condition the home sets this on: a pair stands side by
+    // side only when both halves have rows, so an empty game states its
+    // absence once rather than twice across the window.
+    const bands = doc.getElementById("catalogue-bands");
+    if (bands) {
+      bands.classList.toggle("pair", things.sorted.length > 0 && links.sorted.length > 0);
+    }
   }
 
   await load();

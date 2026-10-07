@@ -41,17 +41,30 @@
 </div>
 <p class="muted" id="catalogue-note" aria-live="polite" data-i18n="content.loading"></p>
 
-<h2 data-i18n="home.band.content"></h2>
-<ul class="catalogue" id="types"></ul>
-<!-- The hole a negative state is built into. The words live in
-     pages/types.js, because the second half of this one depends on who
-     is reading and because eight shells carrying eight copies of one
-     shape is the shared class without the shared component. -->
-<div id="types-empty" hidden></div>
+<!-- **The same two bands as the game's first page, in the same shape.**
+     This screen and that one draw the same two catalogues from the same
+     call; the columns and their names were carried across and the layout
+     was not, so one page stood the pair side by side and the other made a
+     reader scroll between them. `pair` is set by pages/types.js on the
+     same condition the home uses — both halves have rows — and the
+     breakpoint is the stylesheet's. -->
+<div id="catalogue-bands" class="lanes">
+  <section class="lane lane-paired" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
+    <h2 id="lane-catalogue-heading" data-i18n="home.band.content"></h2>
+    <ul class="catalogue" id="types"></ul>
+    <!-- The hole a negative state is built into. The words live in
+         pages/types.js, because the second half of this one depends on who
+         is reading and because eight shells carrying eight copies of one
+         shape is the shared class without the shared component. -->
+    <div id="types-empty" hidden></div>
+  </section>
 
-<h2 data-i18n="home.band.connections"></h2>
-<ul class="catalogue" id="relation-types"></ul>
-<div id="relation-types-empty" hidden></div>
+  <section class="lane lane-paired" id="lane-connections" aria-labelledby="lane-connections-heading">
+    <h2 id="lane-connections-heading" data-i18n="home.band.connections"></h2>
+    <ul class="catalogue" id="relation-types"></ul>
+    <div id="relation-types-empty" hidden></div>
+  </section>
+</div>
 <p class="error" id="catalogue-error" hidden></p>
 
 </main>

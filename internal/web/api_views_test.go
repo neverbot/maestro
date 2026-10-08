@@ -142,13 +142,13 @@ func (f viewsRESTFixture) uploadAsset(t *testing.T, filename string) string {
 	t.Helper()
 	body := bytes.NewReader(testPNG(t, 24, 16))
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/games/"+f.gameSlug+"/view-assets?filename="+filename, body)
+		"/api/games/"+f.gameSlug+"/assets?filename="+filename, body)
 	req.Header.Set("Content-Type", "image/png")
 	req.AddCookie(f.cookie)
 	rec := httptest.NewRecorder()
 	f.srv.ServeHTTP(rec, req)
 	assert.Must(t, rec.Code == http.StatusCreated || rec.Code == http.StatusOK, "upload %s = %d: %s", filename, rec.Code, rec.Body.String())
-	var asset web.ViewAssetOutput
+	var asset web.AssetOutput
 	decodeInto(t, rec, &asset)
 	assert.Must(t, asset.ID != "", "upload %s answered no id: %s", filename, rec.Body.String())
 	return asset.ID

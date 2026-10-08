@@ -271,7 +271,7 @@ func TestAnAssetIsReadBackThroughTheToolWithItsDecodedShape(t *testing.T) {
 	assert.Should(t, asset.Mime == "image/png" && asset.Width == 8 && asset.Height == 4, "asset = %+v, want the decoded 8x4 png", asset)
 	// The URL is what makes the id usable at all: a client draws the
 	// background from it, and it has to name this game.
-	assert.Should(t, strings.Contains(asset.URL, "/api/games/azeroth/view-assets/"+id), "url = %q, want this game's own serving route", asset.URL)
+	assert.Should(t, strings.Contains(asset.URL, "/api/games/azeroth/assets/"+id), "url = %q, want this game's own serving route", asset.URL)
 }
 
 // TestEveryViewsToolRefusesAnotherGamesToken is the isolation sweep for
@@ -854,7 +854,7 @@ func TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces(t *testing.T) {
 }
 
 // TestTheAssetListingToolPagesWithItsOwnCursor is the gap the REST twin
-// hides. The browser's asset listing is its own handler (api_view_assets.go)
+// hides. The browser's asset listing is its own handler (api_assets.go)
 // and is paged by its own test; this tool's core is a second
 // implementation of the same read, and dropping its cursor and limit
 // left the whole web suite green — an agent asking for a page would
@@ -887,7 +887,7 @@ func TestTheAssetListingToolPagesWithItsOwnCursor(t *testing.T) {
 	// The walk saw each asset once: a cursor that started over would
 	// satisfy every count above and hand the same page back forever.
 	seen := map[string]bool{}
-	for _, item := range append(append([]web.ViewAssetOutput{}, page.Items...), next.Items...) {
+	for _, item := range append(append([]web.AssetOutput{}, page.Items...), next.Items...) {
 		assert.Must(t, !(seen[item.ID]), "asset %s came back on both pages", item.ID)
 		seen[item.ID] = true
 	}

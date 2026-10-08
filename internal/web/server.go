@@ -55,7 +55,7 @@ type Options struct {
 	// Metamodel and Markdown and for the same reason it is a field here:
 	// whoever constructs the service has to hand this package the same
 	// instance, over the same pool and the same hub. Today only the
-	// background-asset routes (api_view_assets.go), the ten views.* MCP
+	// background-asset routes (api_assets.go), the ten views.* MCP
 	// tools (mcp_views.go) and their REST mirror (api_views.go) all read
 	// it.
 	Views *views.Service
@@ -399,10 +399,10 @@ func NewServer(opts Options) *Server {
 	// parameter and never as a URL segment — see api_docs.go's header
 	// for why, and for what that buys over the metamodel's by-key/by-id
 	// discriminators.
-	s.registerContentRoute("GET /api/games/{game}/view-assets", s.handleListViewAssets)
-	s.registerContentRoute("POST /api/games/{game}/view-assets", s.handleUploadViewAsset)
-	s.registerContentRoute("GET /api/games/{game}/view-assets/{id}", s.handleServeViewAsset)
-	s.registerContentRoute("DELETE /api/games/{game}/view-assets/{id}", s.handleRemoveViewAsset)
+	s.registerContentRoute("GET /api/games/{game}/assets", s.handleListAssets)
+	s.registerContentRoute("POST /api/games/{game}/assets", s.handleUploadAsset)
+	s.registerContentRoute("GET /api/games/{game}/assets/{id}", s.handleServeAsset)
+	s.registerContentRoute("DELETE /api/games/{game}/assets/{id}", s.handleRemoveAsset)
 	// The saved-view surface (api_views.go), registered unconditionally
 	// for the reason the two blocks around it are: a registration gated
 	// on the service being present is invisible to

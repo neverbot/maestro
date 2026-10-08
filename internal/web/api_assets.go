@@ -18,8 +18,8 @@ func (s *Server) requireViewsService(w http.ResponseWriter) bool {
 	return true
 }
 
-// ViewAssetOutput is one asset as a picker reads it.
-type ViewAssetOutput struct {
+// AssetOutput is one asset as a picker reads it.
+type AssetOutput struct {
 	ID        string    `json:"id"`
 	Filename  string    `json:"filename"`
 	Mime      string    `json:"mime"`
@@ -35,16 +35,16 @@ type ViewAssetOutput struct {
 // ProjectScope, which carries no slug: the URL a client is handed has to
 // be the URL it asked through, or a token caller and a session caller
 // would be told different addresses for one image.
-func viewAssetOutput(game string, a views.Asset) ViewAssetOutput {
-	return ViewAssetOutput{
+func viewAssetOutput(game string, a views.Asset) AssetOutput {
+	return AssetOutput{
 		ID: a.ID.String(), Filename: a.Filename, Mime: a.Mime,
 		Width: a.Width, Height: a.Height, CreatedAt: a.CreatedAt,
-		URL: fmt.Sprintf("/api/games/%s/view-assets/%s", game, a.ID),
+		URL: fmt.Sprintf("/api/games/%s/assets/%s", game, a.ID),
 	}
 }
 
-// handleUploadViewAsset stores one background image.
-func (s *Server) handleUploadViewAsset(w http.ResponseWriter, r *http.Request,
+// handleUploadAsset stores one background image.
+func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request,
 	caller Caller, scope ProjectScope,
 ) {
 	if !s.requireViewsService(w) {
@@ -66,8 +66,8 @@ func (s *Server) handleUploadViewAsset(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, viewAssetOutput(r.PathValue("game"), asset))
 }
 
-// handleListViewAssets lists one page of this game's assets.
-func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
+// handleListAssets lists one page of this game's assets.
+func (s *Server) handleListAssets(w http.ResponseWriter, r *http.Request,
 	_ Caller, scope ProjectScope,
 ) {
 	if !s.requireViewsService(w) {
@@ -87,7 +87,7 @@ func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
 		s.writeDomainError(w, r, err)
 		return
 	}
-	out := make([]ViewAssetOutput, 0, len(page.Assets))
+	out := make([]AssetOutput, 0, len(page.Assets))
 	for _, a := range page.Assets {
 		out = append(out, viewAssetOutput(r.PathValue("game"), a))
 	}
@@ -96,8 +96,8 @@ func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// handleServeViewAsset writes one asset's bytes.
-func (s *Server) handleServeViewAsset(w http.ResponseWriter, r *http.Request,
+// handleServeAsset writes one asset's bytes.
+func (s *Server) handleServeAsset(w http.ResponseWriter, r *http.Request,
 	_ Caller, scope ProjectScope,
 ) {
 	if !s.requireViewsService(w) {
@@ -120,8 +120,8 @@ func (s *Server) handleServeViewAsset(w http.ResponseWriter, r *http.Request,
 	_, _ = w.Write(asset.Bytes)
 }
 
-// handleRemoveViewAsset deletes one asset.
-func (s *Server) handleRemoveViewAsset(w http.ResponseWriter, r *http.Request,
+// handleRemoveAsset deletes one asset.
+func (s *Server) handleRemoveAsset(w http.ResponseWriter, r *http.Request,
 	_ Caller, scope ProjectScope,
 ) {
 	if !s.requireViewsService(w) {

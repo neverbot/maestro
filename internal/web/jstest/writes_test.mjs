@@ -280,7 +280,7 @@ function gridScene(nodes, extra = []) {
   return [...extra, ...marks];
 }
 
-const GROUND_HREF = "/api/games/azeroth/view-assets/9f1c";
+const GROUND_HREF = "/api/games/azeroth/assets/9f1c";
 
 function groundMark() {
   return {
@@ -792,7 +792,7 @@ check("aRefusedUploadShowsTheServerSentence", async () => {
   const { server, ground } = groundStage();
   const sentence =
     "look like an SVG, which Maestro does not accept as a background: an SVG served to a browser can carry script";
-  server.answer("/view-assets", jsonResponse(400, { error: "invalid_input", message: sentence }));
+  server.answer("/assets", jsonResponse(400, { error: "invalid_input", message: sentence }));
   ground.choose({ name: "world-map.png", size: 12 });
   const answer = await ground.upload();
   assertEqual(answer.ok, false, "the upload was refused");
@@ -800,7 +800,7 @@ check("aRefusedUploadShowsTheServerSentence", async () => {
   assert(ground.root.textContent.includes(sentence), "rendered verbatim");
   assertEqual(ground.asset, null, "nothing was placed");
   assertEqual(server.countOf("/background"), 0, "and no background write followed a failed upload");
-  const upload = server.calls.find((call) => call.path.includes("/view-assets"));
+  const upload = server.calls.find((call) => call.path.includes("/assets"));
   assert(upload.path.includes("filename=world-map.png"), `the filename rides in the query string: ${upload.path}`);
 });
 
@@ -888,7 +888,7 @@ check("adjustingANewImageDoesNotInheritThePreviousOnesArithmetic", async () => {
   assertEqual(same.scale, 2, "adjusting the same image starts from where it is");
   assertDeepEqual(same.offset, { x: 5, y: 6 }, "offset included");
 
-  const other = { id: "aa02", url: "/api/games/azeroth/view-assets/aa02", width: 400, height: 300 };
+  const other = { id: "aa02", url: "/api/games/azeroth/assets/aa02", width: 400, height: 300 };
   const fresh = ground.adjust(other);
   assertEqual(fresh.scale, 1, "a new image starts from the defaults");
   assertDeepEqual(fresh.offset, { x: 0, y: 0 }, "at the origin");

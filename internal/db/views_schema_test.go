@@ -52,7 +52,7 @@ func seedViewGame(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug st
 		t.Fatalf("insert relation type in %s: %v", slug, err)
 	}
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+		`INSERT INTO assets (project_id, filename, mime, width, height, bytes)
 		 VALUES ($1, 'map.png', 'image/png', 4, 4, '\x00'::bytea) RETURNING id`,
 		g.projectID).Scan(&g.assetID); err != nil {
 		t.Fatalf("insert asset in %s: %v", slug, err)
@@ -203,7 +203,7 @@ func TestRevokingATokenNullsOnlyTheTokenColumnOfAView(t *testing.T) {
 		t.Fatalf("stamp the audit columns: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`UPDATE view_assets SET created_by_token_id = $1 WHERE id = $2`, tokenID, a.assetID); err != nil {
+		`UPDATE assets SET created_by_token_id = $1 WHERE id = $2`, tokenID, a.assetID); err != nil {
 		t.Fatalf("stamp the asset's audit column: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM api_tokens WHERE id = $1`, tokenID); err != nil {
@@ -226,11 +226,11 @@ func TestRevokingATokenNullsOnlyTheTokenColumnOfAView(t *testing.T) {
 	assert.Must(t, gotUser != nil && *gotUser == userID, "updated_by_user_id must be untouched, got %v", gotUser)
 	assert.Must(t, gotProject == a.projectID, "project_id must be untouched by the SET NULL, got %v want %v", gotProject, a.projectID)
 
-	// The same key on view_assets, which is a separate constraint.
+	// The same key on assets, which is a separate constraint.
 	var assetToken *string
 	var assetProject string
 	if err := pool.QueryRow(ctx,
-		`SELECT created_by_token_id, project_id FROM view_assets WHERE id = $1`,
+		`SELECT created_by_token_id, project_id FROM assets WHERE id = $1`,
 		a.assetID).Scan(&assetToken, &assetProject); err != nil {
 		t.Fatalf("read the asset back: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestDeletingAnAssetNullsTheBackgroundOfEveryView(t *testing.T) {
 	countRows(t, ctx, pool,
 		`SELECT count(*) FROM views WHERE background_asset_id = $1`, []any{a.assetID}, 2)
 
-	if _, err := pool.Exec(ctx, `DELETE FROM view_assets WHERE id = $1`, a.assetID); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM assets WHERE id = $1`, a.assetID); err != nil {
 		t.Fatalf("deleting an asset a view points at must be allowed: %v", err)
 	}
 
@@ -485,7 +485,7 @@ func TestAnAssetMimeOutsideTheClosedListIsRefused(t *testing.T) {
 	ctx := context.Background()
 	a := seedViewGame(t, ctx, pool, "game-a")
 
-	insert := `INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+	insert := `INSERT INTO assets (project_id, filename, mime, width, height, bytes)
 	           VALUES ($1, 'map', $2, 4, 4, '\x00'::bytea)`
 	for _, mime := range []string{"image/png", "image/jpeg", "image/webp"} {
 		if _, err := pool.Exec(ctx, insert, a.projectID, mime); err != nil {
@@ -494,7 +494,7 @@ func TestAnAssetMimeOutsideTheClosedListIsRefused(t *testing.T) {
 	}
 	// Three here plus the one seedViewGame wrote.
 	countRows(t, ctx, pool,
-		`SELECT count(*) FROM view_assets WHERE project_id = $1`, []any{a.projectID}, 4)
+		`SELECT count(*) FROM assets WHERE project_id = $1`, []any{a.projectID}, 4)
 
 	for _, mime := range []string{"image/svg+xml", "text/html", "IMAGE/PNG", ""} {
 		t.Run(mime, func(t *testing.T) {
@@ -505,7 +505,7 @@ func TestAnAssetMimeOutsideTheClosedListIsRefused(t *testing.T) {
 
 	// A non-positive dimension is refused by the same kind of CHECK.
 	_, err := pool.Exec(ctx,
-		`INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+		`INSERT INTO assets (project_id, filename, mime, width, height, bytes)
 		 VALUES ($1, 'map', 'image/png', 0, 4, '\x00'::bytea)`, a.projectID)
 	assertCheckViolation(t, err)
 }
@@ -702,9 +702,9 @@ func TestNoViewsRowReachesIntoAnotherGame(t *testing.T) {
 			[]any{tokenA, a.viewID}, []any{tokenB, a.viewID},
 			`SELECT count(*) FROM views WHERE id = $1 AND updated_by_token_id = $2`, []any{a.viewID, tokenA}},
 		{"an asset recording another game's token",
-			`UPDATE view_assets SET created_by_token_id = $1 WHERE id = $2`,
+			`UPDATE assets SET created_by_token_id = $1 WHERE id = $2`,
 			[]any{tokenA, a.assetID}, []any{tokenB, a.assetID},
-			`SELECT count(*) FROM view_assets WHERE id = $1 AND created_by_token_id = $2`, []any{a.assetID, tokenA}},
+			`SELECT count(*) FROM assets WHERE id = $1 AND created_by_token_id = $2`, []any{a.assetID, tokenA}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Each case stages its writes in a transaction of its own and

@@ -628,7 +628,7 @@ func TestViewsArea(t *testing.T) {
 		// asset row has to exist because the key to it is a real one.
 		var asset uuid.UUID
 		if err := g.pool.QueryRow(ctx,
-			`INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+			`INSERT INTO assets (project_id, filename, mime, width, height, bytes)
 			 VALUES ($1, 'azeroth.png', 'image/png', 1024, 768, '\x00') RETURNING id`,
 			g.projectID).Scan(&asset); err != nil {
 			t.Fatalf("insert the background asset: %v", err)

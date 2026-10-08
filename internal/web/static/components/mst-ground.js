@@ -66,7 +66,7 @@ export class MstGround extends HTMLElement {
     // The chosen file, before it is anything on the server.
     this.file = null;
     // The uploaded asset this view would point at: `{id, url, width,
-    // height}` as api_view_assets.go answers it.
+    // height}` as api_assets.go answers it.
     this.asset = options.asset || null;
     // What the view already says about its ground: the scale and the
     // offset it is drawn at now. Adjusting the *same* image starts from

@@ -39,10 +39,10 @@ func TestTheServingRoutesNoSniffHeaderIsItsOwn(t *testing.T) {
 	assert.Must(t, err == nil, "upload: %v", err)
 
 	s := &Server{opts: Options{Views: svc}}
-	req := httptest.NewRequest(http.MethodGet, "/api/games/azeroth/view-assets/"+asset.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/azeroth/assets/"+asset.ID.String(), nil)
 	req.SetPathValue("id", asset.ID.String())
 	rec := httptest.NewRecorder()
-	s.handleServeViewAsset(rec, req, Caller{}, ProjectScope{ProjectID: project})
+	s.handleServeAsset(rec, req, Caller{}, ProjectScope{ProjectID: project})
 
 	assert.Must(t, rec.Code == http.StatusOK, "serve = %d: %s", rec.Code, rec.Body.String())
 	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {

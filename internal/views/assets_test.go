@@ -373,7 +373,7 @@ func TestAssetsArea(t *testing.T) {
 		assert.Must(t, err == nil, "upload: %v", err)
 		var gotUser, gotToken *uuid.UUID
 		if err := azeroth.pool.QueryRow(ctx,
-			`SELECT created_by_user_id, created_by_token_id FROM view_assets WHERE id = $1`,
+			`SELECT created_by_user_id, created_by_token_id FROM assets WHERE id = $1`,
 			asset.ID).Scan(&gotUser, &gotToken); err != nil {
 			t.Fatalf("read the audit columns: %v", err)
 		}
@@ -389,7 +389,7 @@ func TestAssetsArea(t *testing.T) {
 	})
 
 	// TestAssetsArea's "assets of another game are not listed" case and its
-	// positive control. The project filter on ListViewAssets is the whole
+	// positive control. The project filter on ListAssets is the whole
 	// mechanism: an asset has no key and names no parent that could scope the
 	// read.
 	t.Run("assets of another game are not listed", func(t *testing.T) {
@@ -822,7 +822,7 @@ func TestAssetsArea(t *testing.T) {
 
 		// The control every row shares: not one of them was stored. Without
 		// it the VP8 row would pass on the refusal alone while a widened
-		// check quietly wrote garbage into view_assets.
+		// check quietly wrote garbage into assets.
 		assets := listedAssets(t, g)
 		assert.Must(t, len(assets) == 0, "%d assets stored, want none: %v", len(assets), assets)
 
@@ -894,7 +894,7 @@ func TestAssetsArea(t *testing.T) {
 		filler := pngBytes(t, 8, 8)
 		for i := 0; i < MaxAssetsPerGame; i++ {
 			if _, err := azeroth.pool.Exec(ctx,
-				`INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+				`INSERT INTO assets (project_id, filename, mime, width, height, bytes)
 				 VALUES ($1, $2, 'image/png', 8, 8, $3)`,
 				azeroth.projectID, fmt.Sprintf("map-%03d.png", i), filler); err != nil {
 				t.Fatalf("seed asset %d: %v", i, err)

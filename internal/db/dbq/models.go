@@ -21,6 +21,19 @@ type ApiToken struct {
 	TokenHint  string
 }
 
+type Asset struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Filename         string
+	Mime             string
+	Width            int32
+	Height           int32
+	Bytes            []byte
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
 type Comment struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
@@ -235,19 +248,6 @@ type View struct {
 	UpdatedAt         pgtype.Timestamptz
 	UpdatedByUserID   *uuid.UUID
 	UpdatedByTokenID  *uuid.UUID
-}
-
-type ViewAsset struct {
-	ID               uuid.UUID
-	ProjectID        uuid.UUID
-	Filename         string
-	Mime             string
-	Width            int32
-	Height           int32
-	Bytes            []byte
-	CreatedAt        pgtype.Timestamptz
-	CreatedByUserID  *uuid.UUID
-	CreatedByTokenID *uuid.UUID
 }
 
 type ViewPosition struct {

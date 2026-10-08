@@ -63,8 +63,8 @@ func (q *Queries) ClearBackgroundKnobsForAsset(ctx context.Context, arg ClearBac
 	return err
 }
 
-const countViewAssets = `-- name: CountViewAssets :one
-SELECT count(*) FROM view_assets
+const countAssets = `-- name: CountAssets :one
+SELECT count(*) FROM assets
 WHERE project_id = $1::uuid
 `
 
@@ -77,15 +77,43 @@ WHERE project_id = $1::uuid
 // stored image on every upload: up to the whole game's worth of pixels
 // read and decompressed to decide whether to accept eight megabytes.
 // This statement reads no image at all; it is answered from
-// view_assets_project_idx, whose leading column is project_id. What a
+// assets_project_idx, whose leading column is project_id. What a
 // count buys instead is a stated worst case rather than a measured one:
 // MaxAssetsPerGame times MaxAssetBytes, which is the number assets.go
 // writes down.
-func (q *Queries) CountViewAssets(ctx context.Context, projectID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countViewAssets, projectID)
+func (q *Queries) CountAssets(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAssets, projectID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteAsset = `-- name: DeleteAsset :execrows
+DELETE FROM assets
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type DeleteAssetParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+// One asset. Every view pointing at it keeps its row and loses its
+// background: 0008_views.sql's composite FOREIGN KEY carries
+// ON DELETE SET NULL (background_asset_id), so the picture goes and the
+// view does not.
+//
+// execrows because zero rows is the answer to "was it there": a caller
+// that resolved the asset a moment earlier and deleted nothing raced
+// another remover, and hears not_found rather than a success.
+//
+// The project filter is load-bearing exactly as GetAsset's is.
+func (q *Queries) DeleteAsset(ctx context.Context, arg DeleteAssetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAsset, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteView = `-- name: DeleteView :execrows
@@ -106,34 +134,6 @@ type DeleteViewParams struct {
 // a success it can publish an event about.
 func (q *Queries) DeleteView(ctx context.Context, arg DeleteViewParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteView, arg.ProjectID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteViewAsset = `-- name: DeleteViewAsset :execrows
-DELETE FROM view_assets
-WHERE project_id = $1::uuid AND id = $2::uuid
-`
-
-type DeleteViewAssetParams struct {
-	ProjectID uuid.UUID
-	ID        uuid.UUID
-}
-
-// One asset. Every view pointing at it keeps its row and loses its
-// background: 0008_views.sql's composite FOREIGN KEY carries
-// ON DELETE SET NULL (background_asset_id), so the picture goes and the
-// view does not.
-//
-// execrows because zero rows is the answer to "was it there": a caller
-// that resolved the asset a moment earlier and deleted nothing raced
-// another remover, and hears not_found rather than a success.
-//
-// The project filter is load-bearing exactly as GetViewAsset's is.
-func (q *Queries) DeleteViewAsset(ctx context.Context, arg DeleteViewAssetParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteViewAsset, arg.ProjectID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -211,12 +211,12 @@ func (q *Queries) DeleteViewRefs(ctx context.Context, arg DeleteViewRefsParams) 
 	return err
 }
 
-const getViewAsset = `-- name: GetViewAsset :one
-SELECT id, project_id, filename, mime, width, height, bytes, created_at, created_by_user_id, created_by_token_id FROM view_assets
+const getAsset = `-- name: GetAsset :one
+SELECT id, project_id, filename, mime, width, height, bytes, created_at, created_by_user_id, created_by_token_id FROM assets
 WHERE project_id = $1::uuid AND id = $2::uuid
 `
 
-type GetViewAssetParams struct {
+type GetAssetParams struct {
 	ProjectID uuid.UUID
 	ID        uuid.UUID
 }
@@ -228,9 +228,9 @@ type GetViewAssetParams struct {
 // asset id would otherwise serve another game's world map to anyone holding
 // it. TestAssetsArea's "an asset of another game is not served" case pins
 // it.
-func (q *Queries) GetViewAsset(ctx context.Context, arg GetViewAssetParams) (ViewAsset, error) {
-	row := q.db.QueryRow(ctx, getViewAsset, arg.ProjectID, arg.ID)
-	var i ViewAsset
+func (q *Queries) GetAsset(ctx context.Context, arg GetAssetParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, getAsset, arg.ProjectID, arg.ID)
+	var i Asset
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -246,19 +246,19 @@ func (q *Queries) GetViewAsset(ctx context.Context, arg GetViewAssetParams) (Vie
 	return i, err
 }
 
-const getViewAssetMeta = `-- name: GetViewAssetMeta :one
+const getAssetMeta = `-- name: GetAssetMeta :one
 SELECT id, project_id, filename, mime, width, height, created_at,
        created_by_user_id, created_by_token_id
-FROM view_assets
+FROM assets
 WHERE project_id = $1::uuid AND id = $2::uuid
 `
 
-type GetViewAssetMetaParams struct {
+type GetAssetMetaParams struct {
 	ProjectID uuid.UUID
 	ID        uuid.UUID
 }
 
-type GetViewAssetMetaRow struct {
+type GetAssetMetaRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	Filename         string
@@ -272,12 +272,12 @@ type GetViewAssetMetaRow struct {
 
 // The same row without its bytes, for the callers that only need to know
 // the asset exists inside this game: SetBackground's own lookup, and the
-// REST layer's after-delete check. Separate from GetViewAsset rather
+// REST layer's after-delete check. Separate from GetAsset rather
 // than a column list chosen in Go, because sqlc decides a statement's
 // columns and a caller that "just ignores" a bytea has still read it.
-func (q *Queries) GetViewAssetMeta(ctx context.Context, arg GetViewAssetMetaParams) (GetViewAssetMetaRow, error) {
-	row := q.db.QueryRow(ctx, getViewAssetMeta, arg.ProjectID, arg.ID)
-	var i GetViewAssetMetaRow
+func (q *Queries) GetAssetMeta(ctx context.Context, arg GetAssetMetaParams) (GetAssetMetaRow, error) {
+	row := q.db.QueryRow(ctx, getAssetMeta, arg.ProjectID, arg.ID)
+	var i GetAssetMetaRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -413,8 +413,8 @@ func (q *Queries) GetViewByKeyForUpdate(ctx context.Context, arg GetViewByKeyFor
 	return i, err
 }
 
-const insertViewAsset = `-- name: InsertViewAsset :one
-INSERT INTO view_assets (project_id, filename, mime, width, height, bytes,
+const insertAsset = `-- name: InsertAsset :one
+INSERT INTO assets (project_id, filename, mime, width, height, bytes,
                          created_by_user_id, created_by_token_id)
 VALUES ($1::uuid, $2::text, $3::text,
         $4::integer, $5::integer, $6::bytea,
@@ -423,7 +423,7 @@ RETURNING id, project_id, filename, mime, width, height, created_at,
           created_by_user_id, created_by_token_id
 `
 
-type InsertViewAssetParams struct {
+type InsertAssetParams struct {
 	ProjectID        uuid.UUID
 	Filename         string
 	Mime             string
@@ -434,7 +434,7 @@ type InsertViewAssetParams struct {
 	CreatedByTokenID *uuid.UUID
 }
 
-type InsertViewAssetRow struct {
+type InsertAssetRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	Filename         string
@@ -470,10 +470,10 @@ type InsertViewAssetRow struct {
 //
 // The returned row deliberately does not carry bytes: this statement's
 // caller has just handed those bytes in and every other reader of this
-// table but GetViewAsset avoids them, because a listing that hauled
+// table but GetAsset avoids them, because a listing that hauled
 // megabytes per row would be a listing nobody could call.
-func (q *Queries) InsertViewAsset(ctx context.Context, arg InsertViewAssetParams) (InsertViewAssetRow, error) {
-	row := q.db.QueryRow(ctx, insertViewAsset,
+func (q *Queries) InsertAsset(ctx context.Context, arg InsertAssetParams) (InsertAssetRow, error) {
+	row := q.db.QueryRow(ctx, insertAsset,
 		arg.ProjectID,
 		arg.Filename,
 		arg.Mime,
@@ -483,7 +483,7 @@ func (q *Queries) InsertViewAsset(ctx context.Context, arg InsertViewAssetParams
 		arg.CreatedByUserID,
 		arg.CreatedByTokenID,
 	)
-	var i InsertViewAssetRow
+	var i InsertAssetRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -542,10 +542,10 @@ func (q *Queries) InsertViewRef(ctx context.Context, arg InsertViewRefParams) er
 	return err
 }
 
-const listViewAssetsPage = `-- name: ListViewAssetsPage :many
+const listAssetsPage = `-- name: ListAssetsPage :many
 SELECT id, project_id, filename, mime, width, height, created_at,
        created_by_user_id, created_by_token_id
-FROM view_assets
+FROM assets
 WHERE project_id = $1::uuid
   AND ($2::uuid IS NULL
        OR (created_at, id) > ($3::timestamptz,
@@ -554,14 +554,14 @@ ORDER BY created_at, id
 LIMIT $4::int
 `
 
-type ListViewAssetsPageParams struct {
+type ListAssetsPageParams struct {
 	ProjectID      uuid.UUID
 	AfterID        *uuid.UUID
 	AfterCreatedAt pgtype.Timestamptz
 	Limit          int32
 }
 
-type ListViewAssetsPageRow struct {
+type ListAssetsPageRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	Filename         string
@@ -573,7 +573,7 @@ type ListViewAssetsPageRow struct {
 	CreatedByTokenID *uuid.UUID
 }
 
-// One page of a game's assets, oldest first, in view_assets_project_idx's
+// One page of a game's assets, oldest first, in assets_project_idx's
 // own order (project_id, created_at, id) so the index serves the sort
 // and the keyset seek.
 //
@@ -604,8 +604,8 @@ type ListViewAssetsPageRow struct {
 // a full page of them would be read out of the database, marshalled and
 // thrown away by every caller but the serving route. width, height and
 // mime are what a picker needs.
-func (q *Queries) ListViewAssetsPage(ctx context.Context, arg ListViewAssetsPageParams) ([]ListViewAssetsPageRow, error) {
-	rows, err := q.db.Query(ctx, listViewAssetsPage,
+func (q *Queries) ListAssetsPage(ctx context.Context, arg ListAssetsPageParams) ([]ListAssetsPageRow, error) {
+	rows, err := q.db.Query(ctx, listAssetsPage,
 		arg.ProjectID,
 		arg.AfterID,
 		arg.AfterCreatedAt,
@@ -615,9 +615,9 @@ func (q *Queries) ListViewAssetsPage(ctx context.Context, arg ListViewAssetsPage
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListViewAssetsPageRow
+	var items []ListAssetsPageRow
 	for rows.Next() {
-		var i ListViewAssetsPageRow
+		var i ListAssetsPageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -972,7 +972,7 @@ type SetViewBackgroundParams struct {
 // redundant.** The project filter scopes which *view* is written -- a view
 // id is a value a previous answer handed back, so without it a caller
 // repaints another game's picture. 0008_views.sql's composite FOREIGN KEY
-// (background_asset_id, project_id) into view_assets is what refuses
+// (background_asset_id, project_id) into assets is what refuses
 // another game's *asset*: this statement's own WHERE cannot see that
 // argument at all, so the constraint is the only thing standing between a
 // leaked asset id and a cross-game image. TestAssetsArea's "an asset of

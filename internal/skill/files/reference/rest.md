@@ -22,6 +22,13 @@ takes.
 - `POST /api/games/{game}/analysis/orphans`
 - `POST /api/games/{game}/analysis/unreachable`
 
+## assets
+
+- `GET /api/games/{game}/assets`
+- `POST /api/games/{game}/assets`
+- `DELETE /api/games/{game}/assets/{id}`
+- `GET /api/games/{game}/assets/{id}`
+
 ## auth
 
 - `POST /api/auth/login`
@@ -151,13 +158,6 @@ takes.
 
 - `GET /api/users`
 - `PATCH /api/users/{user}`
-
-## view-assets
-
-- `GET /api/games/{game}/view-assets`
-- `POST /api/games/{game}/view-assets`
-- `DELETE /api/games/{game}/view-assets/{id}`
-- `GET /api/games/{game}/view-assets/{id}`
 
 ## views
 

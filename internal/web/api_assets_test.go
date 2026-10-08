@@ -88,18 +88,18 @@ func (f assetFixture) send(t *testing.T, cookie *http.Cookie, method, path strin
 }
 
 func (f assetFixture) uploadPath(gameSlug, filename string) string {
-	return "/api/games/" + gameSlug + "/view-assets?filename=" + filename
+	return "/api/games/" + gameSlug + "/assets?filename=" + filename
 }
 
 // upload posts one image and returns the decoded answer.
 func (f assetFixture) upload(t *testing.T, gameSlug, filename, contentType string,
 	raw []byte,
-) web.ViewAssetOutput {
+) web.AssetOutput {
 	t.Helper()
 	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(gameSlug, filename),
 		contentType, raw)
 	assert.Must(t, rec.Code == http.StatusOK, "upload %s = %d: %s", filename, rec.Code, rec.Body.String())
-	var out web.ViewAssetOutput
+	var out web.AssetOutput
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode upload answer: %v", err)
 	}
@@ -183,10 +183,10 @@ func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 		"tried to upload", rec.Body.String())
 	// Nothing was stored, so a second request cannot serve it.
 	rec = f.send(t, f.cookie, http.MethodGet,
-		"/api/games/"+f.gameSlug+"/view-assets", "", nil)
+		"/api/games/"+f.gameSlug+"/assets", "", nil)
 	assert.Must(t, rec.Code == http.StatusOK, "list = %d: %s", rec.Code, rec.Body.String())
 	var listing struct {
-		Assets []web.ViewAssetOutput `json:"assets"`
+		Assets []web.AssetOutput `json:"assets"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
 		t.Fatalf("decode listing: %v", err)
@@ -221,7 +221,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	f := newAssetFixture(t)
 	theirs := f.upload(t, f.otherSlug, "le-mans.png", "image/png", testPNG(t, 12, 8))
 
-	crossed := "/api/games/" + f.gameSlug + "/view-assets/" + theirs.ID
+	crossed := "/api/games/" + f.gameSlug + "/assets/" + theirs.ID
 	if rec := f.send(t, f.cookie, http.MethodGet, crossed, "", nil); rec.Code !=
 		http.StatusNotFound {
 		t.Fatalf("serving across games = %d, want 404: %s", rec.Code, rec.Body.String())
@@ -232,7 +232,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	}
 	// The control: the same id under its own game is served and then
 	// deleted, so the two refusals above are about the game.
-	own := "/api/games/" + f.otherSlug + "/view-assets/" + theirs.ID
+	own := "/api/games/" + f.otherSlug + "/assets/" + theirs.ID
 	if rec := f.send(t, f.cookie, http.MethodGet, own, "", nil); rec.Code != http.StatusOK {
 		t.Fatalf("serving its own game = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -245,9 +245,9 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	}
 	// The listing is scoped the same way.
 	rec := f.send(t, f.cookie, http.MethodGet,
-		"/api/games/"+f.gameSlug+"/view-assets", "", nil)
+		"/api/games/"+f.gameSlug+"/assets", "", nil)
 	var listing struct {
-		Assets []web.ViewAssetOutput `json:"assets"`
+		Assets []web.AssetOutput `json:"assets"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
 		t.Fatalf("decode listing: %v", err)
@@ -299,10 +299,10 @@ func TestTheAssetRoutesAreVisibleToTheConventionTests(t *testing.T) {
 		// Deliberately no Views: this is stubOptions' own shape.
 	})
 	want := []string{
-		"GET /api/games/{game}/view-assets",
-		"POST /api/games/{game}/view-assets",
-		"GET /api/games/{game}/view-assets/{id}",
-		"DELETE /api/games/{game}/view-assets/{id}",
+		"GET /api/games/{game}/assets",
+		"POST /api/games/{game}/assets",
+		"GET /api/games/{game}/assets/{id}",
+		"DELETE /api/games/{game}/assets/{id}",
 	}
 	content := map[string]bool{}
 	for _, pattern := range srv.ContentPatternsForTest() {
@@ -335,7 +335,7 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 		Projects: f.proj,
 	})
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/games/"+f.gameSlug+"/view-assets", nil)
+		"/api/games/"+f.gameSlug+"/assets", nil)
 	req.AddCookie(loginAs(t, bare, "owner@example.test"))
 	rec := httptest.NewRecorder()
 	bare.ServeHTTP(rec, req)
@@ -356,11 +356,11 @@ func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 	list := func(query string) (ids []string, next string) {
 		t.Helper()
 		rec := f.send(t, f.cookie, http.MethodGet,
-			"/api/games/"+f.gameSlug+"/view-assets"+query, "", nil)
+			"/api/games/"+f.gameSlug+"/assets"+query, "", nil)
 		assert.Must(t, rec.Code == http.StatusOK, "list%s = %d: %s", query, rec.Code, rec.Body.String())
 		var listing struct {
-			Assets     []web.ViewAssetOutput `json:"assets"`
-			NextCursor string                `json:"next_cursor"`
+			Assets     []web.AssetOutput `json:"assets"`
+			NextCursor string            `json:"next_cursor"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
 			t.Fatalf("decode listing: %v", err)

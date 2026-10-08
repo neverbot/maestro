@@ -366,7 +366,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND view_id = sqlc.arg('view_id')::uuid
   AND entity_id = sqlc.arg('entity_id')::uuid;
 
--- name: InsertViewAsset :one
+-- name: InsertAsset :one
 -- One background image, stored whole.
 --
 -- **An insert, with no ON CONFLICT arm and no update path at all.** An
@@ -391,9 +391,9 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 --
 -- The returned row deliberately does not carry bytes: this statement's
 -- caller has just handed those bytes in and every other reader of this
--- table but GetViewAsset avoids them, because a listing that hauled
+-- table but GetAsset avoids them, because a listing that hauled
 -- megabytes per row would be a listing nobody could call.
-INSERT INTO view_assets (project_id, filename, mime, width, height, bytes,
+INSERT INTO assets (project_id, filename, mime, width, height, bytes,
                          created_by_user_id, created_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('filename')::text, sqlc.arg('mime')::text,
         sqlc.arg('width')::integer, sqlc.arg('height')::integer, sqlc.arg('bytes')::bytea,
@@ -401,7 +401,7 @@ VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('filename')::text, sqlc.arg('mime
 RETURNING id, project_id, filename, mime, width, height, created_at,
           created_by_user_id, created_by_token_id;
 
--- name: CountViewAssets :one
+-- name: CountAssets :one
 -- How many assets one game holds, for the per-game cap.
 --
 -- **A count rather than a sum of octet_length(bytes), and the reason is
@@ -411,15 +411,15 @@ RETURNING id, project_id, filename, mime, width, height, created_at,
 -- stored image on every upload: up to the whole game's worth of pixels
 -- read and decompressed to decide whether to accept eight megabytes.
 -- This statement reads no image at all; it is answered from
--- view_assets_project_idx, whose leading column is project_id. What a
+-- assets_project_idx, whose leading column is project_id. What a
 -- count buys instead is a stated worst case rather than a measured one:
 -- MaxAssetsPerGame times MaxAssetBytes, which is the number assets.go
 -- writes down.
-SELECT count(*) FROM view_assets
+SELECT count(*) FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid;
 
--- name: ListViewAssetsPage :many
--- One page of a game's assets, oldest first, in view_assets_project_idx's
+-- name: ListAssetsPage :many
+-- One page of a game's assets, oldest first, in assets_project_idx's
 -- own order (project_id, created_at, id) so the index serves the sort
 -- and the keyset seek.
 --
@@ -452,7 +452,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid;
 -- mime are what a picker needs.
 SELECT id, project_id, filename, mime, width, height, created_at,
        created_by_user_id, created_by_token_id
-FROM view_assets
+FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (created_at, id) > (sqlc.narg('after_created_at')::timestamptz,
@@ -460,7 +460,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 ORDER BY created_at, id
 LIMIT sqlc.arg('limit')::int;
 
--- name: GetViewAsset :one
+-- name: GetAsset :one
 -- One asset with its bytes, for the serving route and for nothing else.
 --
 -- The project filter is load-bearing for the reason GetViewByID's is: an id
@@ -468,18 +468,18 @@ LIMIT sqlc.arg('limit')::int;
 -- asset id would otherwise serve another game's world map to anyone holding
 -- it. TestAssetsArea's "an asset of another game is not served" case pins
 -- it.
-SELECT * FROM view_assets
+SELECT * FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
--- name: GetViewAssetMeta :one
+-- name: GetAssetMeta :one
 -- The same row without its bytes, for the callers that only need to know
 -- the asset exists inside this game: SetBackground's own lookup, and the
--- REST layer's after-delete check. Separate from GetViewAsset rather
+-- REST layer's after-delete check. Separate from GetAsset rather
 -- than a column list chosen in Go, because sqlc decides a statement's
 -- columns and a caller that "just ignores" a bytea has still read it.
 SELECT id, project_id, filename, mime, width, height, created_at,
        created_by_user_id, created_by_token_id
-FROM view_assets
+FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: ClearBackgroundKnobsForAsset :exec
@@ -522,7 +522,7 @@ SET background_scale = DEFAULT, background_offset = DEFAULT
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND background_asset_id = sqlc.arg('background_asset_id')::uuid;
 
--- name: DeleteViewAsset :execrows
+-- name: DeleteAsset :execrows
 -- One asset. Every view pointing at it keeps its row and loses its
 -- background: 0008_views.sql's composite FOREIGN KEY carries
 -- ON DELETE SET NULL (background_asset_id), so the picture goes and the
@@ -532,8 +532,8 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- that resolved the asset a moment earlier and deleted nothing raced
 -- another remover, and hears not_found rather than a success.
 --
--- The project filter is load-bearing exactly as GetViewAsset's is.
-DELETE FROM view_assets
+-- The project filter is load-bearing exactly as GetAsset's is.
+DELETE FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: SetViewBackground :execrows
@@ -551,7 +551,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 -- redundant.** The project filter scopes which *view* is written -- a view
 -- id is a value a previous answer handed back, so without it a caller
 -- repaints another game's picture. 0008_views.sql's composite FOREIGN KEY
--- (background_asset_id, project_id) into view_assets is what refuses
+-- (background_asset_id, project_id) into assets is what refuses
 -- another game's *asset*: this statement's own WHERE cannot see that
 -- argument at all, so the constraint is the only thing standing between a
 -- leaked asset id and a cross-game image. TestAssetsArea's "an asset of

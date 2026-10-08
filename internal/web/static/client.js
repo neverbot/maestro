@@ -567,7 +567,7 @@ export function client({
 
   // uploadAsset sends the image's bytes.
   async function uploadAsset(file, filename) {
-    const path = base + "/view-assets?filename=" + encodeURIComponent(String(filename || ""));
+    const path = base + "/assets?filename=" + encodeURIComponent(String(filename || ""));
     return counted(() => request(path, { method: "POST", body: file }));
   }
 
@@ -579,7 +579,7 @@ export function client({
     if (typeof opts.cursor === "string" && opts.cursor !== "") search.set("cursor", opts.cursor);
     if (Number.isFinite(opts.limit)) search.set("limit", String(opts.limit));
     const query = search.toString();
-    return get(base + "/view-assets" + (query === "" ? "" : "?" + query));
+    return get(base + "/assets" + (query === "" ? "" : "?" + query));
   }
 
   // --- The reads the pages navigate by --------------------------------

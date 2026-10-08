@@ -311,8 +311,8 @@ type ViewsPositionsRemovedOutput struct {
 
 // ViewsAssetsOutput is one page of this game's uploaded images.
 type ViewsAssetsOutput struct {
-	Items      []ViewAssetOutput `json:"items"`
-	NextCursor *string           `json:"next_cursor,omitempty"`
+	Items      []AssetOutput `json:"items"`
+	NextCursor *string       `json:"next_cursor,omitempty"`
 }
 
 // --- Conversions ---
@@ -667,7 +667,7 @@ func viewsListAssets(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	if err != nil {
 		return ViewsAssetsOutput{}, err
 	}
-	out := ViewsAssetsOutput{Items: make([]ViewAssetOutput, 0, len(page.Assets))}
+	out := ViewsAssetsOutput{Items: make([]AssetOutput, 0, len(page.Assets))}
 	for _, asset := range page.Assets {
 		out.Items = append(out.Items, viewAssetOutput(game, asset))
 	}

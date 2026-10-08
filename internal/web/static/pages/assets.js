@@ -91,7 +91,7 @@ export async function assetsPage(opened) {
     const body = answer.result;
     // **`assets`, which is what the server writes.** This read was
     // `body.items` and the handler has always answered under `assets`
-    // (api_view_assets.go), so the page rendered "No images yet" over a
+    // (api_assets.go), so the page rendered "No images yet" over a
     // game whose map view was drawing one of these files at the time.
     // Everything below this line had therefore never run in a browser,
     // and two of its lines were separately wrong: the row it built by

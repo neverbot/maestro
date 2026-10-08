@@ -125,7 +125,7 @@ func (s *Service) CreateAsset(ctx context.Context, projectID uuid.UUID, actor Ac
 		return Asset{}, err
 	}
 
-	var row dbq.InsertViewAssetRow
+	var row dbq.InsertAssetRow
 	err = s.withTx(ctx, func(q *dbq.Queries) error {
 		// **The per-game cap, counted in the transaction that inserts.**
 		// Not because that makes it exact -- two uploads racing each
@@ -138,7 +138,7 @@ func (s *Service) CreateAsset(ctx context.Context, projectID uuid.UUID, actor Ac
 		// browsers a game has open at once still stops that. Locking the
 		// game to make it exact would serialise every upload in it
 		// against a number nobody reads.
-		held, err := q.CountViewAssets(ctx, projectID)
+		held, err := q.CountAssets(ctx, projectID)
 		if err != nil {
 			return fmt.Errorf("count view assets: %w", err)
 		}
@@ -155,7 +155,7 @@ func (s *Service) CreateAsset(ctx context.Context, projectID uuid.UUID, actor Ac
 			}
 		}
 
-		row, err = q.InsertViewAsset(ctx, dbq.InsertViewAssetParams{
+		row, err = q.InsertAsset(ctx, dbq.InsertAssetParams{
 			ProjectID: projectID, Filename: filename, Mime: mime,
 			Width: width, Height: height, Bytes: raw,
 			CreatedByUserID: actor.UserID, CreatedByTokenID: actor.TokenID,
@@ -206,7 +206,7 @@ func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID,
 		return AssetPage{}, err
 	}
 
-	params := dbq.ListViewAssetsPageParams{ProjectID: projectID, Limit: limit}
+	params := dbq.ListAssetsPageParams{ProjectID: projectID, Limit: limit}
 	if after.ID != uuid.Nil {
 		at, err := time.Parse(time.RFC3339Nano, after.Sort)
 		if err != nil {
@@ -220,7 +220,7 @@ func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID,
 		params.AfterID = &after.ID
 	}
 
-	rows, err := s.q.ListViewAssetsPage(ctx, params)
+	rows, err := s.q.ListAssetsPage(ctx, params)
 	if err != nil {
 		return AssetPage{}, fmt.Errorf("list view assets: %w", err)
 	}
@@ -246,12 +246,12 @@ func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID,
 
 // assetListingFingerprint digests the listing a cursor was issued under.
 func assetListingFingerprint(projectID uuid.UUID) string {
-	return paging.Fingerprint(projectID.String(), "view_assets")
+	return paging.Fingerprint(projectID.String(), "assets")
 }
 
 // ReadAsset loads one asset with its bytes, for the serving route.
 func (s *Service) ReadAsset(ctx context.Context, projectID, id uuid.UUID) (AssetBytes, error) {
-	row, err := s.q.GetViewAsset(ctx, dbq.GetViewAssetParams{ProjectID: projectID, ID: id})
+	row, err := s.q.GetAsset(ctx, dbq.GetAssetParams{ProjectID: projectID, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AssetBytes{}, ErrNotFound
 	}
@@ -276,7 +276,7 @@ func (s *Service) RemoveAsset(ctx context.Context, projectID, id uuid.UUID) erro
 		}); err != nil {
 			return fmt.Errorf("clear background knobs: %w", err)
 		}
-		removed, err := q.DeleteViewAsset(ctx, dbq.DeleteViewAssetParams{
+		removed, err := q.DeleteAsset(ctx, dbq.DeleteAssetParams{
 			ProjectID: projectID, ID: id,
 		})
 		if err != nil {
@@ -310,7 +310,7 @@ func (s *Service) SetBackground(ctx context.Context, projectID uuid.UUID, viewKe
 		}
 	}
 	if in.AssetID != nil {
-		if _, err := s.q.GetViewAssetMeta(ctx, dbq.GetViewAssetMetaParams{
+		if _, err := s.q.GetAssetMeta(ctx, dbq.GetAssetMetaParams{
 			ProjectID: projectID, ID: *in.AssetID,
 		}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

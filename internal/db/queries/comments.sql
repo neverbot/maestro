@@ -22,9 +22,9 @@
 --     work, and no test can tell them apart -- which is this comment's
 --     reason for existing.
 --
--- The four target columns are a CHECK-constrained choice of one
--- (0017_comments.sql), so a listing filters on the one that is set and
--- the three nulls never match anything.
+-- There is one target column and it is NOT NULL
+-- (0019_comments_only_on_entities.sql): a comment is about an entity,
+-- and a type's declaration is not a thing a log is read beside.
 
 -- name: InsertComment :one
 -- **The author comes back with the row**, from the same join every read
@@ -32,12 +32,10 @@
 -- log, and the two kinds of author this product has are a person with a
 -- display name and an agent with a token's label.
 WITH written AS (
-    INSERT INTO comments (project_id, entity_id, entity_type_id, relation_type_id,
+    INSERT INTO comments (project_id, entity_id,
                           body, created_by_user_id, created_by_token_id)
     VALUES (sqlc.arg('project_id')::uuid,
-            sqlc.narg('entity_id')::uuid,
-            sqlc.narg('entity_type_id')::uuid,
-            sqlc.narg('relation_type_id')::uuid,
+            sqlc.arg('entity_id')::uuid,
             sqlc.arg('body')::text,
             sqlc.narg('created_by_user_id')::uuid,
             sqlc.narg('created_by_token_id')::uuid)
@@ -59,28 +57,6 @@ LEFT JOIN users u ON u.id = c.created_by_user_id
 LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
 LEFT JOIN users owner ON owner.id = t.user_id
 WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.entity_id = sqlc.arg('entity_id')::uuid
-ORDER BY c.created_at DESC, c.id DESC
-LIMIT sqlc.arg('lim')::integer;
-
--- name: ListCommentsOnEntityType :many
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
-       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
-FROM comments c
-LEFT JOIN users u ON u.id = c.created_by_user_id
-LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
-LEFT JOIN users owner ON owner.id = t.user_id
-WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.entity_type_id = sqlc.arg('entity_type_id')::uuid
-ORDER BY c.created_at DESC, c.id DESC
-LIMIT sqlc.arg('lim')::integer;
-
--- name: ListCommentsOnRelationType :many
-SELECT c.*, COALESCE(t.label, u.display_name, '')::text AS author,
-       COALESCE(owner.display_name, u.display_name, '')::text AS author_of
-FROM comments c
-LEFT JOIN users u ON u.id = c.created_by_user_id
-LEFT JOIN api_tokens t ON t.id = c.created_by_token_id
-LEFT JOIN users owner ON owner.id = t.user_id
-WHERE c.project_id = sqlc.arg('project_id')::uuid AND c.relation_type_id = sqlc.arg('relation_type_id')::uuid
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg('lim')::integer;
 

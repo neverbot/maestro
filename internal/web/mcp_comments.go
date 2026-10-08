@@ -19,13 +19,13 @@ import (
 // it is addressed the way everything else on this surface is addressed:
 // by keys, never by ids.
 //
-// **The target is one of four and the arguments say which**, rather than
-// a (kind, id) pair: a tool whose arguments depend on a string argument
-// is a tool an agent gets wrong once per session.
+// **The target still says what kind of thing it is**, although there is
+// only one kind left: the wire names it in every answer, and a surface
+// that stops saying what a comment is about cannot grow a second kind
+// back without breaking its clients.
 
-// CommentTargetInput is the thing a comment is about: an entity
-// (type_key and key), an entity type or a relation type (type_key
-// alone), said by `on`.
+// CommentTargetInput is the thing a comment is about: an entity, by its
+// type's key and its own.
 type CommentTargetInput struct {
 	On      string `json:"on"`
 	TypeKey string `json:"type_key"`
@@ -102,14 +102,11 @@ type CommentRemovedOutput struct {
 
 func targetOf(in CommentTargetInput) (comments.Target, error) {
 	kind := comments.Kind(in.On)
-	switch kind {
-	case comments.OnEntity, comments.OnEntityType, comments.OnRelationType:
-	default:
+	if kind != comments.OnEntity {
 		return comments.Target{}, &metamodel.ValidationError{
 			Code: metamodel.CodeInvalidInput,
 			Fields: []metamodel.FieldError{{Path: "target.on",
-				Message: fmt.Sprintf("must be %q, %q or %q", comments.OnEntity,
-					comments.OnEntityType, comments.OnRelationType)}},
+				Message: fmt.Sprintf("must be %q", comments.OnEntity)}},
 		}
 	}
 	return comments.Target{Kind: kind, TypeKey: in.TypeKey, Key: in.Key}, nil
@@ -217,14 +214,15 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 			"the same band, and what they write comes back from comments.list. Write for that "+
 			"reader: \"imported from the old engine's data files, the damage formula is a guess "+
 			"from two log lines\" is worth opening a page for, and \"updated\" is not. "+
-			"target.on is %q, %q or %q, and the rest of target is the address that kind takes: "+
-			"an entity is type_key plus key and either type is type_key alone. An address this "+
-			"game does not have is not_found rather than a comment nothing can ever read. "+
-			"**One relation cannot carry one**, deliberately: an edge has no page of its own, so "+
-			"a note left there would be reachable by comments.list and by nothing a designer "+
-			"opens. A fact a player could meet is a field on the edge, where a query, a view and "+
-			"relations.repair can all reach it; a note about how a kind of connection changed goes "+
-			"on the relation type or on one of the entities. "+
+			"target.on is %q, and the rest of target is that entity's address: type_key plus "+
+			"key. An address this game does not have is not_found rather than a comment nothing "+
+			"can ever read. "+
+			"**An entity is the only thing that carries a log**, deliberately. A relation has no "+
+			"page of its own, so a note left there would be reachable by comments.list and by "+
+			"nothing a designer opens: a fact a player could meet is a field on the edge, where a "+
+			"query, a view and relations.repair can all reach it. A type is a declaration, and a "+
+			"note about a declaration is a note about the rows that instance it — write it on "+
+			"those, or put it in a field of the type itself. "+
 			"body is markdown and holds at most %d characters — prose that wants a title, a "+
 			"history and an address of its own is a document. "+
 			"**There is no state on a comment and there will not be one**: no status, no assignee, "+
@@ -232,8 +230,7 @@ func (s *Server) addCommentTools(srv *mcp.Server, deps MCPDeps) {
 			"it has become a project tracker, which this product is not. "+
 			"**There is no edit, either.** A log that can be rewritten is not a log; comments.remove "+
 			"takes one out whole.",
-			comments.OnEntity, comments.OnEntityType, comments.OnRelationType,
-			comments.MaxBodyRunes),
+			comments.OnEntity, comments.MaxBodyRunes),
 		OutputSchema: commentOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in CommentsAddInput) (CommentOutput, error) {
 		caller, _ := CallerFrom(ctx)

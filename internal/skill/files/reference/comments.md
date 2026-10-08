@@ -44,15 +44,22 @@ changed, why, and what might come next are comments.
 `modelling/deciding.md` argues it, and says why the convention is one to
 propose to a game's designers rather than to apply.
 
-## The three things that carry one
+## An entity, and nothing else
 
-An entity, an entity type and a relation type: **the three that have a
-page**. Each is addressed the way the rest of this surface addresses it —
-by keys, never by ids — and the target's own `on` says which. The tool's
-description carries the three spellings and the arguments each takes.
+**A comment is about one entity**, addressed the way the rest of this
+surface addresses one — by its type's key and its own, never by ids — and
+the target's `on` says so. The tool's description carries the spelling
+and the arguments.
 
-**One relation carries none, deliberately.** An edge has no page, so a
-note left on one would be reachable by `comments.list` and by nothing a
+**A type carries none**, of either kind. A type is a declaration, and a
+note about a declaration is a note about the rows that instance it: write
+it on those, or, if it is a standing fact about the kind rather than
+about the work, put it in a field of the type itself. A band of notes on
+the page that lists three hundred rows is a thing nobody is looking for
+while they are looking at any one of them.
+
+**A relation carries none, deliberately.** An edge has no page, so a note
+left on one would be reachable by `comments.list` and by nothing a
 designer opens: a place to write where nothing reads. What was going
 there belongs in one of two places instead.
 
@@ -63,20 +70,16 @@ there belongs in one of two places instead.
   out of reach of all three, forever. If the fact is per-something and
   the field is single valued, that is a modelling decision to make, not a
   reason to put game content in the log.
-- **A note about how a kind of connection changed goes on the relation
-  type**, which has a page, or on one of the entities the edge joins.
-
-**A document carries none** either: it already keeps a message per
-version, which is the same note in the place that can say which change it
-was about.
-
-An address this game does not have is `not_found`. A comment against a
-row nobody can reach is a note the log fills with and nothing ever reads,
-so it is refused rather than stored.
+- **A note about how a kind of connection changed goes on one of the
+  entities the edge joins.**
 
 **A document carries none.** It already keeps a message per version,
 which is the same note in the one place that can say which change it was
 about.
+
+An address this game does not have is `not_found`. A comment against a
+row nobody can reach is a note the log fills with and nothing ever reads,
+so it is refused rather than stored.
 
 ## What a log is not
 

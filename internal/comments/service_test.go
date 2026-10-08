@@ -83,12 +83,11 @@ func TestCommentsArea(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	t.Run("a comment lands on each of the three things that can carry one", func(t *testing.T) {
+	t.Run("a comment lands on the one thing that can carry one", func(t *testing.T) {
 		g, _ := newGame(t)
 		for _, target := range []comments.Target{
 			onEntity(),
-			{Kind: comments.OnEntityType, TypeKey: "quest"},
-			{Kind: comments.OnRelationType, TypeKey: "takes_place_in"},
+			{Kind: comments.OnEntity, TypeKey: "zone", Key: "elwynn"},
 		} {
 			row, err := g.log.Add(ctx, g.projectID, target, "imported from the old build", comments.Actor{})
 			assert.Must(t, err == nil, "add on %s: %v", target.Kind, err)
@@ -185,7 +184,7 @@ func TestCommentsArea(t *testing.T) {
 
 	t.Run("the game's whole log is every comment whatever it is about", func(t *testing.T) {
 		g, _ := newGame(t)
-		for _, target := range []comments.Target{onEntity(), {Kind: comments.OnEntityType, TypeKey: "quest"}} {
+		for _, target := range []comments.Target{onEntity(), {Kind: comments.OnEntity, TypeKey: "zone", Key: "elwynn"}} {
 			if _, err := g.log.Add(ctx, g.projectID, target, "a note", comments.Actor{}); err != nil {
 				t.Fatalf("add on %s: %v", target.Kind, err)
 			}

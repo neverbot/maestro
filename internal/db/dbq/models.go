@@ -24,9 +24,7 @@ type ApiToken struct {
 type Comment struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
-	EntityID         *uuid.UUID
-	EntityTypeID     *uuid.UUID
-	RelationTypeID   *uuid.UUID
+	EntityID         uuid.UUID
 	Body             string
 	CreatedAt        pgtype.Timestamptz
 	CreatedByUserID  *uuid.UUID

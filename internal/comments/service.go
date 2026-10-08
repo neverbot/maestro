@@ -52,33 +52,34 @@ const (
 // Kind is what a comment is about.
 type Kind string
 
-// The three things that can carry one, and they are the three with a
-// page. **A relation cannot**, since 0018: an edge has no screen, so a
-// note left on one was reachable by this package and by nothing a
-// designer opens, which is a place to write where nothing reads. **A
-// document cannot** either: it already keeps a message per version,
-// which is the same note in the place that can say which change it was
-// about.
+// The one thing that carries a log. **A relation cannot**, since 0018:
+// an edge has no screen, so a note left on one was reachable by this
+// package and by nothing a designer opens. **A type cannot**, of either
+// kind, since 0019: a type is a declaration, and a note about a
+// declaration is a note about the rows that instance it. **A document
+// cannot** either: it already keeps a message per version, which is the
+// same note in the place that can say which change it was about.
+//
+// The constant stays, rather than collapsing into nothing, because the
+// wire names the kind in every answer and a surface that stops saying
+// what a comment is about is a surface that cannot grow a second kind
+// back without breaking its clients.
 const (
-	OnEntity       Kind = "entity"
-	OnEntityType   Kind = "entity_type"
-	OnRelationType Kind = "relation_type"
+	OnEntity Kind = "entity"
 )
 
 // Target addresses the one thing a comment is about, in the terms the
 // rest of this surface speaks: keys, never ids.
 type Target struct {
 	Kind Kind
-	// TypeKey is the entity type's key for an entity, and the type's own
-	// key for either kind of type.
+	// TypeKey is the key of the entity's type, and Key the entity's own.
+	// An entity needs both, because a key is unique within its type.
 	TypeKey string
-	// Key is an entity's own key, and is read for OnEntity alone.
-	Key string
+	Key     string
 }
 
 // Comment is one entry in the log, in the shape every surface reads: the
-// four target columns collapse to the one Kind they encode, and the two
-// audit columns collapse to the author's own name.
+// two audit columns collapse to the author's own name.
 type Comment struct {
 	ID        uuid.UUID
 	Kind      Kind
@@ -100,21 +101,14 @@ type Comment struct {
 	AuthorOf string
 }
 
-// entry folds any of the five generated row shapes into one Comment.
-// They are identical structs with five different names, which is what
-// sqlc emits for five statements over one table.
-func entry(id uuid.UUID, entityID, entityTypeID, tokenID *uuid.UUID, body string,
+// entry folds any of the generated row shapes into one Comment. They are
+// identical structs with different names, which is what sqlc emits for
+// several statements over one table.
+func entry(id uuid.UUID, tokenID *uuid.UUID, body string,
 	createdAt pgtype.Timestamptz, author, authorOf string,
 ) Comment {
-	kind := OnRelationType
-	switch {
-	case entityID != nil:
-		kind = OnEntity
-	case entityTypeID != nil:
-		kind = OnEntityType
-	}
 	return Comment{
-		ID: id, Kind: kind, Body: body, CreatedAt: createdAt.Time,
+		ID: id, Kind: OnEntity, Body: body, CreatedAt: createdAt.Time,
 		Author: author, ByAgent: tokenID != nil, AuthorOf: authorOf,
 	}
 }
@@ -153,15 +147,8 @@ func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, b
 	}
 	params := dbq.InsertCommentParams{
 		ProjectID: projectID,
+		EntityID:  id,
 		Body:      trimmed,
-	}
-	switch target.Kind {
-	case OnEntity:
-		params.EntityID = &id
-	case OnEntityType:
-		params.EntityTypeID = &id
-	case OnRelationType:
-		params.RelationTypeID = &id
 	}
 	if actor.UserID != nil {
 		params.CreatedByUserID = actor.UserID
@@ -173,7 +160,7 @@ func (s *Service) Add(ctx context.Context, projectID uuid.UUID, target Target, b
 	if err != nil {
 		return Comment{}, fmt.Errorf("write comment: %w", err)
 	}
-	return entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf), nil
+	return entry(row.ID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf), nil
 }
 
 // List reads one thing's log, newest first.
@@ -182,33 +169,15 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, target Target, 
 	if err != nil {
 		return nil, err
 	}
-	bound := page(limit)
-	out := []Comment{}
-	switch target.Kind {
-	case OnEntity:
-		rows, err := s.q.ListCommentsOnEntity(ctx, dbq.ListCommentsOnEntityParams{ProjectID: projectID, EntityID: id, Lim: bound})
-		if err != nil {
-			return nil, fmt.Errorf("read log: %w", err)
-		}
-		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
-		}
-	case OnEntityType:
-		rows, err := s.q.ListCommentsOnEntityType(ctx, dbq.ListCommentsOnEntityTypeParams{ProjectID: projectID, EntityTypeID: id, Lim: bound})
-		if err != nil {
-			return nil, fmt.Errorf("read log: %w", err)
-		}
-		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
-		}
-	default:
-		rows, err := s.q.ListCommentsOnRelationType(ctx, dbq.ListCommentsOnRelationTypeParams{ProjectID: projectID, RelationTypeID: id, Lim: bound})
-		if err != nil {
-			return nil, fmt.Errorf("read log: %w", err)
-		}
-		for _, row := range rows {
-			out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
-		}
+	rows, err := s.q.ListCommentsOnEntity(ctx, dbq.ListCommentsOnEntityParams{
+		ProjectID: projectID, EntityID: id, Lim: page(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read log: %w", err)
+	}
+	out := make([]Comment, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, entry(row.ID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 	}
 	return out, nil
 }
@@ -222,7 +191,7 @@ func (s *Service) ListGame(ctx context.Context, projectID uuid.UUID, limit int32
 	}
 	out := make([]Comment, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, entry(row.ID, row.EntityID, row.EntityTypeID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
+		out = append(out, entry(row.ID, row.CreatedByTokenID, row.Body, row.CreatedAt, row.Author, row.AuthorOf))
 	}
 	return out, nil
 }
@@ -253,9 +222,7 @@ func (s *Service) CountsForEntities(ctx context.Context, projectID uuid.UUID, id
 		return nil, fmt.Errorf("count comments: %w", err)
 	}
 	for _, row := range rows {
-		if row.EntityID != nil {
-			out[*row.EntityID] = row.Comments
-		}
+		out[row.EntityID] = row.Comments
 	}
 	return out, nil
 }
@@ -265,20 +232,11 @@ func (s *Service) CountsForEntities(ctx context.Context, projectID uuid.UUID, id
 // point**: without it a comment would be written against a uuid nobody
 // can reach, and the log would quietly fill with notes about nothing.
 func (s *Service) resolve(ctx context.Context, projectID uuid.UUID, target Target) (uuid.UUID, error) {
-	switch target.Kind {
-	case OnEntity:
-		row, err := s.meta.EntityByKey(ctx, projectID, target.TypeKey, target.Key)
-		return row.ID, err
-	case OnEntityType:
-		row, err := s.meta.EntityTypeByKey(ctx, projectID, target.TypeKey)
-		return row.ID, err
-	case OnRelationType:
-		row, err := s.meta.RelationTypeByKey(ctx, projectID, target.TypeKey)
-		return row.ID, err
-	default:
-		return uuid.Nil, refuse("target.on", fmt.Sprintf("must be %q, %q or %q",
-			OnEntity, OnEntityType, OnRelationType))
+	if target.Kind != OnEntity {
+		return uuid.Nil, refuse("target.on", fmt.Sprintf("must be %q", OnEntity))
 	}
+	row, err := s.meta.EntityByKey(ctx, projectID, target.TypeKey, target.Key)
+	return row.ID, err
 }
 
 // refuse is this package's one refusal shape. **A ValidationError and not

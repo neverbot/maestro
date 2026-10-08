@@ -49,11 +49,10 @@ record of who wrote each one.
 ### The log
 
 Maestro holds the design as it stands: what a thing *is* today. How it
-got there is a separate thing, and it is a log. Beside the content of
-any kind of thing, of any one thing, and of any kind of connection,
-there is a band of notes in date order: what was imported from where,
-what was rewritten and why, the thinking behind a decision, something
-worth doing later.
+got there is a separate thing, and it is a log. Beside any one thing's
+content there is a band of notes in date order: what was imported from
+where, what was rewritten and why, the thinking behind a decision,
+something worth doing later.
 
 You write there, and so do your agents, and each note says which of you
 it was. It is the one place in the product where the two of you write to

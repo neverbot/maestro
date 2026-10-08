@@ -52,9 +52,8 @@ func (s *Server) requireCommentService(w http.ResponseWriter) bool {
 	return true
 }
 
-// targetFromQuery reads the four shapes out of a query string. An absent
-// `on` is no target at all, which is how the game's whole log is asked
-// for.
+// targetFromQuery reads a target out of a query string. An absent `on`
+// is no target at all, which is how the game's whole log is asked for.
 func targetFromQuery(r *http.Request) *CommentTargetInput {
 	on := r.URL.Query().Get("on")
 	if on == "" {

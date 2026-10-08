@@ -3,7 +3,6 @@
 
 import {
   DESTINATION_CATALOGUE,
-  ROLE_VIEWER,
   countLabel,
   expired,
   fillState,
@@ -19,7 +18,6 @@ import {
 import { headerRow, row } from "../rows.js";
 import { t } from "../i18n.js";
 import { goToLogin } from "../app.js";
-import { attachLog } from "./entity.js";
 
 // The empty state, in the page rather than in the shell. It is not an
 // omission being reported: a relation type with no fields is the ordinary
@@ -227,11 +225,6 @@ export async function relationTypePage(opened) {
   const summary = await opened.client.summary();
   if (summary.ok) {
     setReadOnly(doc, String(summary.result.role ?? ""), "writes.declaresTypes");
-    const slot = doc.getElementById("log-slot");
-    if (slot) {
-      slot.replaceChildren(await attachLog(doc, opened, { on: "relation_type", typeKey: type.key },
-        String(summary.result.role ?? "") !== ROLE_VIEWER, String(summary.result.role ?? "")));
-    }
     // The count belongs beside the key, and the summary is the one call
     // that has it: a relation type with no edges reads differently from
     // one with four hundred.

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -49,7 +50,24 @@ type CommentsListInput struct {
 // CommentsRemoveInput is the argument shape of comments.remove.
 type CommentsRemoveInput struct {
 	ScopedArgs
-	ID uuid.UUID `json:"id"`
+	// **Text, not a uuid.UUID.** The MCP SDK builds a tool's schema by
+	// reflecting this struct, and a uuid.UUID is a [16]byte: the tool
+	// went out declaring id as an array of sixteen numbers, which the
+	// server then refused because its own decoder wants the text. An
+	// agent could satisfy the schema or the server and never both.
+	ID string `json:"id"`
+}
+
+// commentID reads the one id this surface takes as an argument.
+func commentID(raw string) (uuid.UUID, error) {
+	id, err := uuid.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return uuid.Nil, &metamodel.ValidationError{
+			Code:   metamodel.CodeInvalidInput,
+			Fields: []metamodel.FieldError{{Path: "id", Message: "must be the text of a UUID, as comments.list answers with"}},
+		}
+	}
+	return id, nil
 }
 
 // CommentOutput is one comment.
@@ -175,10 +193,14 @@ func MCPCommentsRemove(ctx context.Context, deps MCPDeps, caller Caller, project
 }
 
 func commentsRemove(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.UUID, in CommentsRemoveInput) (CommentRemovedOutput, error) {
-	if err := deps.Comments.Remove(ctx, projectID, in.ID); err != nil {
+	id, err := commentID(in.ID)
+	if err != nil {
 		return CommentRemovedOutput{}, err
 	}
-	return CommentRemovedOutput{ID: in.ID, Removed: true}, nil
+	if err := deps.Comments.Remove(ctx, projectID, id); err != nil {
+		return CommentRemovedOutput{}, err
+	}
+	return CommentRemovedOutput{ID: id, Removed: true}, nil
 }
 
 // addCommentTools registers the three.

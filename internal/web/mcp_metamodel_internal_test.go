@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/assert"
+	"github.com/neverbot/maestro/internal/comments"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -28,6 +29,30 @@ import (
 // would be reading another game's content.
 func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 	t.Parallel()
+	srv, session := everyToolOverTheWire(t)
+	ctx := context.Background()
+
+	tools, err := session.ListTools(ctx, nil)
+	assert.Must(t, err == nil, "ListTools: %v", err)
+	assert.Must(t, len(tools.Tools) != 0, "the server served no tools at all; this test would pass vacuously")
+	for _, tool := range tools.Tools {
+		assert.Must(t, srv.mcpScopedTools[tool.Name], "tool %q is served but was not registered through addScopedTool, "+
+			"so nothing checks the caller's game binding before it runs", tool.Name)
+	}
+	// And the recorded set is not larger than what is served: a name in
+	// the map that no client can see would mean the map had drifted into
+	// a wish list rather than a record.
+	assert.Must(t, len(srv.mcpScopedTools) == len(tools.Tools), "addScopedTool recorded %d tools but %d are served",
+		len(srv.mcpScopedTools), len(tools.Tools))
+}
+
+// everyToolOverTheWire stands up the build carrying every tool this
+// product has and connects an agent's own client to it. It is a helper
+// rather than a block inside one test because the second guard that
+// needs it would otherwise have copied this Options literal, and a
+// second copy is how a domain goes missing from one of them.
+func everyToolOverTheWire(t *testing.T) (*Server, *mcp.ClientSession) {
+	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
 		SessionTTL: 24 * time.Hour,
@@ -58,6 +83,13 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 		// Every new domain service belongs in this Options literal in the
 		// commit that adds it.
 		Views: views.New(pool, nil),
+		// **And the comment above went false the day after it was
+		// written.** The comments domain shipped with three tools and
+		// did not reach this literal, so comments.* was outside every
+		// comparison built on "the build with the most tools on it" —
+		// which is how comments.remove reached the wire advertising an
+		// argument nothing could send.
+		Comments: comments.New(pool, metamodel.New(pool, nil)),
 	})
 
 	ctx := context.Background()
@@ -73,7 +105,7 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 	assert.Must(t, err == nil, "CreateAPIToken: %v", err)
 
 	httpSrv := httptest.NewServer(srv)
-	defer httpSrv.Close()
+	t.Cleanup(httpSrv.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "convention-test", Version: "0.0.1"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
@@ -82,20 +114,8 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 		DisableStandaloneSSE: true,
 	}, nil)
 	assert.Must(t, err == nil, "Connect: %v", err)
-	defer func() { _ = session.Close() }()
-
-	tools, err := session.ListTools(ctx, nil)
-	assert.Must(t, err == nil, "ListTools: %v", err)
-	assert.Must(t, len(tools.Tools) != 0, "the server served no tools at all; this test would pass vacuously")
-	for _, tool := range tools.Tools {
-		assert.Must(t, srv.mcpScopedTools[tool.Name], "tool %q is served but was not registered through addScopedTool, "+
-			"so nothing checks the caller's game binding before it runs", tool.Name)
-	}
-	// And the recorded set is not larger than what is served: a name in
-	// the map that no client can see would mean the map had drifted into
-	// a wish list rather than a record.
-	assert.Must(t, len(srv.mcpScopedTools) == len(tools.Tools), "addScopedTool recorded %d tools but %d are served",
-		len(srv.mcpScopedTools), len(tools.Tools))
+	t.Cleanup(func() { _ = session.Close() })
+	return srv, session
 }
 
 // tokenRoundTripper authenticates every request with a bearer token, the

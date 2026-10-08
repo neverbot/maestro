@@ -111,12 +111,15 @@ func (s *Server) handleRemoveComment(w http.ResponseWriter, r *http.Request, cal
 	if !s.requireCommentService(w) {
 		return
 	}
+	// The path segment is checked here so the refusal can name *it*, and
+	// handed on as text because that is what the argument is on both
+	// surfaces now.
 	id, err := uuid.Parse(r.PathValue("comment"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, errCodeInvalidInput, "comment: not an id")
 		return
 	}
-	out, removeErr := commentsRemove(r.Context(), s.deps(), caller, scope.ProjectID, CommentsRemoveInput{ID: id})
+	out, removeErr := commentsRemove(r.Context(), s.deps(), caller, scope.ProjectID, CommentsRemoveInput{ID: id.String()})
 	if removeErr != nil {
 		s.writeDomainError(w, r, removeErr)
 		return

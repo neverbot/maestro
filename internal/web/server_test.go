@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/neverbot/maestro/internal/assert"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
@@ -77,6 +79,44 @@ func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
 	assert.Must(t, len(s.projectScopedPatterns) != 0, "no project-scoped patterns were recorded — this test would pass vacuously")
 	for _, pattern := range s.registeredPatterns {
 		assert.Should(t, !strings.Contains(pattern, "{game}") || s.projectScopedPatterns[pattern], "pattern %q contains {game} but was not registered through registerProjectRoute", pattern)
+	}
+}
+
+// **The signed routes are the third kind, and they are named here rather
+// than inferred.** Two routes on this server carry a game's data and go
+// through neither requireProject nor any caller check: the skill bundle
+// and one image, each admitted by an HMAC this process minted over the
+// path. That is a real authorisation and it is not the one the test
+// above enforces, so a route that quietly stopped checking its signature
+// would look exactly like one that never had to. This list is what makes
+// adding a third a decision somebody makes on purpose.
+func TestEverySignedRouteChecksItsSignature(t *testing.T) {
+	t.Parallel()
+	s := NewServer(stubOptions("test"))
+
+	signed := map[string]bool{
+		"GET " + skillZipPath:                 true,
+		"GET " + imagePath + "{project}/{id}": true,
+	}
+	for pattern := range signed {
+		found := false
+		for _, registered := range s.registeredPatterns {
+			if registered == pattern {
+				found = true
+			}
+		}
+		assert.Should(t, found, "%q is listed as a signed route and is not registered: this guard is reading a route that moved", pattern)
+	}
+	// Every signed route refuses an unsigned request, which is the thing
+	// the list exists to keep true.
+	for pattern := range signed {
+		path := strings.TrimPrefix(pattern, "GET ")
+		path = strings.ReplaceAll(path, "{project}", uuid.New().String())
+		path = strings.ReplaceAll(path, "{id}", uuid.New().String())
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Should(t, rec.Code == http.StatusUnauthorized,
+			"%s answered %d to a request carrying no signature, want 401", path, rec.Code)
 	}
 }
 

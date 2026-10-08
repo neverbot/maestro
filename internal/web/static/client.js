@@ -582,6 +582,37 @@ export function client({
     return get(base + "/assets" + (query === "" ? "" : "?" + query));
   }
 
+  // The images attached to one entity. **Three calls and no MCP mirror
+  // for the two writes**: a file arrives by a person choosing one, and
+  // an agent is told what is attached when it reads the entity.
+  function entityImagesPath(typeKey, key) {
+    return base + "/entities/by-key/" + encodeURIComponent(String(typeKey || "")) +
+      "/" + encodeURIComponent(String(key || "")) + "/images";
+  }
+
+  async function listEntityImages(typeKey, key) {
+    return get(entityImagesPath(typeKey, key));
+  }
+
+  // attachEntityImage hangs an image already in the library on an
+  // entity. Uploading is uploadAsset, one call earlier: the library is
+  // the game's, so a file becomes an image first and this entity's
+  // second.
+  async function attachEntityImage(typeKey, key, assetID) {
+    return counted(() => request(entityImagesPath(typeKey, key), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ asset_id: String(assetID || "") }),
+    }));
+  }
+
+  async function detachEntityImage(typeKey, key, assetID) {
+    return counted(() => request(
+      entityImagesPath(typeKey, key) + "/" + encodeURIComponent(String(assetID || "")),
+      { method: "DELETE" },
+    ));
+  }
+
   // --- The reads the pages navigate by --------------------------------
   async function games() {
     return get("/api/games");
@@ -1058,6 +1089,9 @@ export function client({
     saveViewAs,
     renderers,
     uploadAsset,
+    listEntityImages,
+    attachEntityImage,
+    detachEntityImage,
     listAssets,
     games,
     summary,

@@ -21,12 +21,13 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
+	"github.com/neverbot/maestro/internal/views"
 	"github.com/neverbot/maestro/internal/web"
 )
 
 // newMetamodelTestServer wires a server with a metamodel service over the
 // same ephemeral database, and hands back both.
-func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service, *markdown.Service, *comments.Service) {
+func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service, *markdown.Service, *comments.Service, *views.Service) {
 	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
@@ -42,6 +43,10 @@ func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *proj
 	// merge at all.
 	md := markdown.New(pool, nil)
 	log := comments.New(pool, mm)
+	// And the image library, because an entity's answer names what is
+	// attached to it: a fixture without one answers every entity with no
+	// images and cannot tell "none attached" from "no library here".
+	lib := views.New(pool, nil)
 	srv := web.NewServer(web.Options{
 		Version:   "test",
 		Config:    cfg,
@@ -55,8 +60,9 @@ func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *proj
 		// instance built without the service has and not the one these
 		// tests are about.
 		Comments: log,
+		Views:    lib,
 	})
-	return srv, ids, projSvc, mm, md, log
+	return srv, ids, projSvc, mm, md, log, lib
 }
 
 // metamodelFixture is everything a tool test needs: the deps struct the
@@ -79,7 +85,7 @@ type metamodelFixture struct {
 
 func newMetamodelFixture(t *testing.T) metamodelFixture {
 	t.Helper()
-	srv, ids, projSvc, mm, md, _ := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md, _, _ := newMetamodelTestServer(t)
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{

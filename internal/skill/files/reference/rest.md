@@ -70,6 +70,9 @@ takes.
 - `POST /api/games/{game}/entities`
 - `DELETE /api/games/{game}/entities/by-key/{type}/{key}`
 - `GET /api/games/{game}/entities/by-key/{type}/{key}`
+- `GET /api/games/{game}/entities/by-key/{type}/{key}/images`
+- `POST /api/games/{game}/entities/by-key/{type}/{key}/images`
+- `DELETE /api/games/{game}/entities/by-key/{type}/{key}/images/{image}`
 - `POST /api/games/{game}/entities/repair`
 
 ## events

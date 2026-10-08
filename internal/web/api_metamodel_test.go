@@ -19,6 +19,7 @@ import (
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/views"
 	"github.com/neverbot/maestro/internal/web"
 )
 
@@ -38,11 +39,12 @@ type restFixture struct {
 	ownerID  uuid.UUID
 	cookie   *http.Cookie
 	agent    web.Caller
+	lib      *views.Service
 }
 
 func newRESTFixture(t *testing.T) restFixture {
 	t.Helper()
-	srv, ids, projSvc, mm, md, log := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md, log, lib := newMetamodelTestServer(t)
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -58,7 +60,7 @@ func newRESTFixture(t *testing.T) restFixture {
 	agent, err := web.CallerForToken(ctx, ids, token)
 	assert.Must(t, err == nil, "CallerForToken: %v", err)
 	return restFixture{
-		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md, log: log,
+		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md, log: log, lib: lib,
 		game: game.ID, gameSlug: game.Slug, ownerID: owner.ID,
 		cookie: loginAs(t, srv, "owner@example.test"),
 		agent:  agent,
@@ -73,7 +75,7 @@ func newRESTFixture(t *testing.T) restFixture {
 // separates the two surfaces at this layer.
 func (f restFixture) deps() web.MCPDeps {
 	return web.MCPDeps{Identity: f.ids, Projects: f.proj, Metamodel: f.mm, Markdown: f.md,
-		Comments: f.log}
+		Comments: f.log, Views: f.lib}
 }
 
 func (f restFixture) caller() web.Caller { return f.agent }

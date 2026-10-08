@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
@@ -347,6 +348,30 @@ type EntityOutput struct {
 	Version int32          `json:"version"`
 	Invalid bool           `json:"invalid"`
 	Fields  map[string]any `json:"fields,omitempty"`
+
+	// Images are the files a designer attached to this row. **Only
+	// entities.get fills this**, and a listing never does: it is one
+	// query per entity, and a page of fifty rows would pay fifty of them
+	// to answer a question nobody asked of a listing.
+	Images []EntityImageRef `json:"images,omitempty"`
+}
+
+// EntityImageRef is one attached image as an agent reads it: enough to
+// say what it is, and a URL to fetch it with.
+//
+// **No bytes.** An image is worth tens of thousands of tokens and is
+// almost never what the agent was asked about; what it needs is to know
+// the picture exists, be able to name it, and be able to go and get it
+// when the work is actually about it.
+type EntityImageRef struct {
+	ID       uuid.UUID `json:"id"`
+	Filename string    `json:"filename"`
+	Mime     string    `json:"mime"`
+	Width    int32     `json:"width"`
+	Height   int32     `json:"height"`
+	// DownloadURL needs no credentials and stops working within the
+	// hour: fetch it with curl, or read it again for a fresh one.
+	DownloadURL string `json:"download_url"`
 }
 
 // EntitiesListOutput is one page of entities.
@@ -960,7 +985,38 @@ func entitiesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uui
 	if err != nil {
 		return EntityOutput{}, err
 	}
-	return entityOf(row, names, true)
+	out, err := entityOf(row, names, true)
+	if err != nil {
+		return EntityOutput{}, err
+	}
+	// The images hanging on it, if this instance keeps a library at all.
+	// **A failure here is not a failure to read the entity**: the row is
+	// what was asked for, and answering `not_found` because a second
+	// query tripped would be a lie about the first.
+	if deps.Views != nil {
+		attached, err := deps.Views.Attachments(ctx, projectID, row.ID)
+		if err == nil && len(attached) > 0 {
+			out.Images = imageRefs(ctx, deps, projectID, attached)
+		}
+	}
+	return out, nil
+}
+
+// imageRefs is one entity's attachments as an agent reads them, each
+// with a URL it can fetch without credentials. The signing key is the
+// server's, so this is a method's worth of work hanging off deps rather
+// than a package function.
+func imageRefs(ctx context.Context, deps MCPDeps, projectID uuid.UUID, rows []views.Attachment) []EntityImageRef {
+	out := make([]EntityImageRef, 0, len(rows))
+	exp := time.Now().Add(imageURLTTL).Unix()
+	for _, row := range rows {
+		out = append(out, EntityImageRef{
+			ID: row.ID, Filename: row.Filename, Mime: row.Mime,
+			Width: row.Width, Height: row.Height,
+			DownloadURL: signedImageURL(deps.DownloadURLKey, externalBaseURLFrom(ctx), projectID, row.ID, exp),
+		})
+	}
+	return out
 }
 
 // MCPEntitiesRemove implements entities.remove.
@@ -1734,7 +1790,13 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 		Name: "entities.get",
 		Description: "Read one entity by its address — its type's key plus its own key — with " +
 			"all of its fields. Keys are matched without regard to case. An unknown type key " +
-			"and an unknown entity key are both not_found, and the message says which.",
+			"and an unknown entity key are both not_found, and the message says which. " +
+			"**images lists the files a designer attached to this row** — a map, a reference " +
+			"picture — with each one's name, type, pixel size and a download_url that needs no " +
+			"credentials and stops working within the hour: fetch it with curl when the work is " +
+			"about the picture, and read this again for a fresh URL. The bytes are never in this " +
+			"answer. Only a person attaches one, from the entity's page in a browser; there is " +
+			"no tool here that uploads, and a listing does not carry images at all.",
 		OutputSchema: entityOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in EntitiesGetInput) (EntityOutput, error) {
@@ -2091,6 +2153,21 @@ var entityOutputSchema = &jsonschema.Schema{
 		"version":  {Type: "integer"},
 		"invalid":  boolSchema(),
 		"fields":   objectSchema(),
+		"images": {
+			Type: "array",
+			Items: &jsonschema.Schema{
+				Type:     "object",
+				Required: []string{"id", "filename", "mime", "width", "height", "download_url"},
+				Properties: map[string]*jsonschema.Schema{
+					"id":           stringSchema(),
+					"filename":     stringSchema(),
+					"mime":         stringSchema(),
+					"width":        {Type: "integer"},
+					"height":       {Type: "integer"},
+					"download_url": stringSchema(),
+				},
+			},
+		},
 	},
 }
 

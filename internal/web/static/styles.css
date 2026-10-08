@@ -3116,3 +3116,89 @@ pre.document {
   .scroller { overflow-x: auto; }
   ul.catalogue li.catalogue-head { top: 0; }
 }
+
+/* --- The images attached to one entity --------------------------------
+ *
+ * A row per file, the shared catalogue row, with the thumbnail the
+ * images page already prepends. What is new here is the preview under
+ * the pointer, and the one thing worth stating about it is how it is
+ * positioned: **by this stylesheet and by nothing else.** The policy is
+ * `default-src 'self'` with no `style-src`, so there is no
+ * `unsafe-inline` and an inline style attribute is refused — which means
+ * a tooltip placed by script would have had its placement dropped in
+ * silence and sat wherever it happened to land. The same lesson
+ * rows.js's share bar carries, one component along.
+ */
+.entity-images .catalogue.images > li {
+  /* The preview is absolute against the row, so it follows the row it
+     belongs to and needs no arithmetic from anybody. */
+  position: relative;
+}
+
+.image-link {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* **Hidden by visibility and opacity, not by `display`.** A preview that
+   is laid out only when it appears cannot be transitioned and makes the
+   browser do layout under the pointer; this one has its box all along
+   and is simply not painted. */
+.image-preview {
+  position: absolute;
+  left: 0;
+  /* **Upward, and that is not a preference.** Opening downward put the
+     preview half outside the window and over the attach control: this
+     section is the last one on the page, so below the row is where the
+     page ends. Above it there is always the rest of the entity. CSS
+     cannot ask whether a box would overflow -- anchor positioning can,
+     and is not in every browser this product is opened in -- so the
+     direction is the one that is right by construction rather than the
+     one that is right when it is measured. */
+  bottom: calc(100% + var(--s2));
+  z-index: 20;
+  max-width: min(32rem, 70vw);
+  max-height: 24rem;
+  width: auto;
+  height: auto;
+  padding: var(--s2);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-state) var(--ease), visibility var(--dur-state) var(--ease);
+  /* The pointer must not be able to land on it: a preview that can be
+     hovered keeps itself open under a pointer that has left the row. */
+  pointer-events: none;
+}
+
+/* `:focus-within` and not `:hover` alone. A preview reachable only by
+   pointer is a preview a keyboard never sees, and the row's own link is
+   what takes the focus. */
+.entity-images .catalogue.images > li:hover .image-preview,
+.entity-images .catalogue.images > li:focus-within .image-preview {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The one write on this page an agent cannot make. Its opener is a word,
+   for the reason the log's is: this page is read, and two filled buttons
+   on it would be two primaries. */
+.attach {
+  margin-top: var(--s3);
+}
+
+.attach-form {
+  display: grid;
+  gap: var(--s2);
+  justify-items: start;
+  margin-top: var(--s2);
+}
+
+.attach-bounds {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}

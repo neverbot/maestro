@@ -882,45 +882,6 @@ func TestAssetsArea(t *testing.T) {
 		}
 	})
 
-	// TestAssetsArea's "a game cannot hold more assets than the cap" case is
-	// the bound that was missing while every other bound in this file was
-	// present.
-	t.Run("a game cannot hold more assets than the cap", func(t *testing.T) {
-		azeroth, outland := a.games(t)
-		ctx := context.Background()
-
-		// The cap is a hundred, so this fills it through the pool rather
-		// than through a hundred image encodings.
-		filler := pngBytes(t, 8, 8)
-		for i := 0; i < MaxAssetsPerGame; i++ {
-			if _, err := azeroth.pool.Exec(ctx,
-				`INSERT INTO assets (project_id, filename, mime, width, height, bytes)
-				 VALUES ($1, $2, 'image/png', 8, 8, $3)`,
-				azeroth.projectID, fmt.Sprintf("map-%03d.png", i), filler); err != nil {
-				t.Fatalf("seed asset %d: %v", i, err)
-			}
-		}
-		assertRefused(t, createAsset(t, azeroth, "one-too-many.png", filler),
-			pointer("bytes"), fmt.Sprintf("a game may hold %d", MaxAssetsPerGame))
-
-		// The cap is per game and not per instance: the other game is
-		// untouched, which is the control that stops a global counter from
-		// passing this test.
-		if err := createAsset(t, outland, "outland.png", filler); err != nil {
-			t.Fatalf("another game must still be able to upload: %v", err)
-		}
-
-		// And the recovery the message names works: delete one, upload one.
-		page, err := azeroth.views.ListAssets(ctx, azeroth.projectID, AssetFilter{Limit: 1})
-		assert.Must(t, err == nil, "list: %v", err)
-		if err := azeroth.views.RemoveAsset(ctx, azeroth.projectID, page.Assets[0].ID); err != nil {
-			t.Fatalf("remove: %v", err)
-		}
-		if err := createAsset(t, azeroth, "room-for-one-more.png", filler); err != nil {
-			t.Fatalf("after a deletion the upload must land: %v", err)
-		}
-	})
-
 	// TestAssetsArea's "the asset listing is paged and its cursor is its own"
 	// case pins the limit and the keyset the listing did not have.
 	t.Run("the asset listing is paged and its cursor is its own", func(t *testing.T) {

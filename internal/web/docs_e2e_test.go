@@ -125,7 +125,7 @@ func (w proseWorld) rest(t *testing.T, method, suffix string, body any) *httptes
 func newProseWorld(t *testing.T) *proseWorld {
 	t.Helper()
 	ctx := context.Background()
-	srv, ids, projSvc, mm, md, _ := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md, _, _ := newMetamodelTestServer(t)
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "lead@example.test", DisplayName: "Lead", Password: "password12345",

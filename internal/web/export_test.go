@@ -139,14 +139,14 @@ func ErrorCodesForTest() []string {
 // prove a *foreign* signature is refused have to be able to mint one
 // from a second server.
 func (s *Server) SignedSkillURLForTest(base string, exp int64) string {
-	return signedSkillURL(s.skillURLKey, base, exp)
+	return signedSkillURL(s.downloadURLKey, base, exp)
 }
 
 // SkillURLSignatureForTest is the raw signature over one path and one
 // expiry, for the test that presents a signature minted for a different
 // path.
 func (s *Server) SkillURLSignatureForTest(path string, exp int64) string {
-	return signSkillURL(s.skillURLKey, path, exp)
+	return signDownloadURL(s.downloadURLKey, path, exp)
 }
 
 // SkillZipPathForTest is the download route, so a test names it from the

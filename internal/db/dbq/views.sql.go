@@ -12,6 +12,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const attachAssetToEntity = `-- name: AttachAssetToEntity :one
+
+INSERT INTO entity_assets (project_id, asset_id, entity_id, created_by_user_id)
+VALUES ($1::uuid, $2::uuid,
+        $3::uuid, $4::uuid)
+ON CONFLICT (entity_id, asset_id) DO UPDATE SET entity_id = excluded.entity_id
+RETURNING id, created_at
+`
+
+type AttachAssetToEntityParams struct {
+	ProjectID       uuid.UUID
+	AssetID         uuid.UUID
+	EntityID        uuid.UUID
+	CreatedByUserID *uuid.UUID
+}
+
+type AttachAssetToEntityRow struct {
+	ID        uuid.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
+// The images attached to one entity (0021_entity_assets.sql). They are
+// documents a designer puts beside a thing, so none of them is the main
+// one and the only order that means anything is the order they arrived
+// in.
+// **Attaching twice is the attachment that is already there**, not a
+// second row and not an error: a designer who clicks the same picture
+// again means the same thing they meant the first time. The unique key
+// on (entity_id, asset_id) is what makes that expressible, and the
+// DO UPDATE is what makes the row come back either way -- ON CONFLICT DO
+// NOTHING returns nothing at all, so a caller could not tell "already
+// attached" from "the entity is not there".
+func (q *Queries) AttachAssetToEntity(ctx context.Context, arg AttachAssetToEntityParams) (AttachAssetToEntityRow, error) {
+	row := q.db.QueryRow(ctx, attachAssetToEntity,
+		arg.ProjectID,
+		arg.AssetID,
+		arg.EntityID,
+		arg.CreatedByUserID,
+	)
+	var i AttachAssetToEntityRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
 const clearBackgroundKnobsForAsset = `-- name: ClearBackgroundKnobsForAsset :exec
 UPDATE views
 SET background_scale = DEFAULT, background_offset = DEFAULT
@@ -68,24 +112,60 @@ SELECT count(*) FROM assets
 WHERE project_id = $1::uuid
 `
 
-// How many assets one game holds, for the per-game cap.
+// How many images one game's library holds.
 //
-// **A count rather than a sum of octet_length(bytes), and the reason is
-// the bytea.** The bound this serves is on disk, so an aggregate byte
-// total looks like the more honest question -- but bytes is a toasted,
-// compressed column, and summing its length makes Postgres detoast every
-// stored image on every upload: up to the whole game's worth of pixels
-// read and decompressed to decide whether to accept eight megabytes.
-// This statement reads no image at all; it is answered from
-// assets_project_idx, whose leading column is project_id. What a
-// count buys instead is a stated worst case rather than a measured one:
-// MaxAssetsPerGame times MaxAssetBytes, which is the number assets.go
-// writes down.
+// **A count and not a sum of octet_length(bytes).** It served a per-game
+// cap, which is gone; it now answers the line the library prints about
+// itself, and the reason it counts rather than weighs is unchanged: bytes
+// is a toasted column, and summing its length makes Postgres fetch every
+// stored image to answer. This statement reads no image at all, being
+// answered from assets_project_idx, whose leading column is project_id.
 func (q *Queries) CountAssets(ctx context.Context, projectID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countAssets, projectID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countAssetsForEntities = `-- name: CountAssetsForEntities :many
+SELECT entity_id, count(*)::bigint AS attached
+FROM entity_assets
+WHERE project_id = $1::uuid
+  AND entity_id = ANY ($2::uuid[])
+GROUP BY entity_id
+`
+
+type CountAssetsForEntitiesParams struct {
+	ProjectID uuid.UUID
+	EntityIds []uuid.UUID
+}
+
+type CountAssetsForEntitiesRow struct {
+	EntityID uuid.UUID
+	Attached int64
+}
+
+// How many images each of these entities carries, for a listing that
+// wants to say which rows have one without reading every row's
+// attachments. The shape internal/comments answers the same question in.
+func (q *Queries) CountAssetsForEntities(ctx context.Context, arg CountAssetsForEntitiesParams) ([]CountAssetsForEntitiesRow, error) {
+	rows, err := q.db.Query(ctx, countAssetsForEntities, arg.ProjectID, arg.EntityIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountAssetsForEntitiesRow
+	for rows.Next() {
+		var i CountAssetsForEntitiesRow
+		if err := rows.Scan(&i.EntityID, &i.Attached); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteAsset = `-- name: DeleteAsset :execrows
@@ -209,6 +289,29 @@ type DeleteViewRefsParams struct {
 func (q *Queries) DeleteViewRefs(ctx context.Context, arg DeleteViewRefsParams) error {
 	_, err := q.db.Exec(ctx, deleteViewRefs, arg.ProjectID, arg.ViewID)
 	return err
+}
+
+const detachAssetFromEntity = `-- name: DetachAssetFromEntity :execrows
+DELETE FROM entity_assets
+WHERE project_id = $1::uuid
+  AND entity_id = $2::uuid
+  AND asset_id = $3::uuid
+`
+
+type DetachAssetFromEntityParams struct {
+	ProjectID uuid.UUID
+	EntityID  uuid.UUID
+	AssetID   uuid.UUID
+}
+
+// The image survives: the library is the game's, and this row is only
+// the statement that one entity referred to it.
+func (q *Queries) DetachAssetFromEntity(ctx context.Context, arg DetachAssetFromEntityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, detachAssetFromEntity, arg.ProjectID, arg.EntityID, arg.AssetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getAsset = `-- name: GetAsset :one
@@ -540,6 +643,59 @@ func (q *Queries) InsertViewRef(ctx context.Context, arg InsertViewRefParams) er
 		arg.Pointer,
 	)
 	return err
+}
+
+const listAssetsForEntity = `-- name: ListAssetsForEntity :many
+SELECT a.id, a.filename, a.mime, a.width, a.height, a.created_at
+FROM entity_assets l
+JOIN assets a ON a.id = l.asset_id AND a.project_id = l.project_id
+WHERE l.project_id = $1::uuid
+  AND l.entity_id = $2::uuid
+ORDER BY l.created_at, l.id
+`
+
+type ListAssetsForEntityParams struct {
+	ProjectID uuid.UUID
+	EntityID  uuid.UUID
+}
+
+type ListAssetsForEntityRow struct {
+	ID        uuid.UUID
+	Filename  string
+	Mime      string
+	Width     int32
+	Height    int32
+	CreatedAt pgtype.Timestamptz
+}
+
+// One entity's attachments, oldest first, without their bytes. The join
+// reads the metadata from assets rather than copying any of it into the
+// link row, so a renamed file is renamed everywhere it is attached.
+func (q *Queries) ListAssetsForEntity(ctx context.Context, arg ListAssetsForEntityParams) ([]ListAssetsForEntityRow, error) {
+	rows, err := q.db.Query(ctx, listAssetsForEntity, arg.ProjectID, arg.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAssetsForEntityRow
+	for rows.Next() {
+		var i ListAssetsForEntityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Filename,
+			&i.Mime,
+			&i.Width,
+			&i.Height,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAssetsPage = `-- name: ListAssetsPage :many

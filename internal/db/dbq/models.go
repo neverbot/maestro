@@ -106,6 +106,15 @@ type Entity struct {
 	UpdatedByTokenID *uuid.UUID
 }
 
+type EntityAsset struct {
+	ID              uuid.UUID
+	ProjectID       uuid.UUID
+	AssetID         uuid.UUID
+	EntityID        uuid.UUID
+	CreatedAt       pgtype.Timestamptz
+	CreatedByUserID *uuid.UUID
+}
+
 type EntityType struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID

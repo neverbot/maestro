@@ -194,16 +194,18 @@ export function relationGroups(relations, direction, labels) {
 }
 
 // readEntity is every call this page and the panel make, and there are
-// four: the entity, its type's schema, the edges either side of it and
-// the documents attached to it. **None of them is a view run.**
+// six: the entity, its type's schema, the edges either side of it, the
+// documents attached to it and the images attached to it. **None of
+// them is a view run.**
 export async function readEntity(client, typeKey, key) {
   const entity = await client.getEntity(typeKey, key);
   if (!entity.ok) return { ok: false, error: entity.error };
-  const [type, out, into, docs, relationTypes] = await Promise.all([
+  const [type, out, into, docs, images, relationTypes] = await Promise.all([
     client.getType(typeKey),
     client.listRelations({ sourceType: typeKey, sourceKey: key, verbose: true }),
     client.listRelations({ targetType: typeKey, targetKey: key, verbose: true }),
     client.listEntityDocs(typeKey, key, {}),
+    client.listEntityImages(typeKey, key),
     // The fifth call, and it buys the page the game's own words for its
     // connections: this screen headed each group with the raw key,
     // `preys_on`, in monospace at heading size, while the catalogue one
@@ -234,6 +236,10 @@ export async function readEntity(client, typeKey, key) {
     out: out.ok && Array.isArray(out.result.items) ? out.result.items : [],
     in: into.ok && Array.isArray(into.result.items) ? into.result.items : [],
     documents: docs.ok && Array.isArray(docs.result.documents) ? docs.result.documents : [],
+    // An instance built without an image library answers 404 here, and
+    // that is no images rather than a broken page: the section states
+    // its own absence and the rest of the entity is unaffected.
+    images: images.ok && Array.isArray(images.result.items) ? images.result.items : [],
   };
 }
 
@@ -593,7 +599,194 @@ export function entityBody(doc, slug, model) {
   }
   root.append(docs);
 
+  root.append(imageSection(doc, model));
+
   return root;
+}
+
+// imageSection is the files a designer attached to this thing: a map,
+// a reference picture. **The thumbnail is the content and not
+// decoration**: a list of filenames is a list that hides what it lists,
+// and the one question a reader has here is which of these three maps is
+// the one they meant.
+//
+// It is the catalogue row every other listing uses, with the thumbnail
+// the images page already prepends, so a designer recognises this
+// because they have seen it. The preview under the pointer is this
+// page's own, and it is **pure CSS**: the policy admits no inline style
+// attribute, so a tooltip positioned by script would have its placement
+// dropped in silence and sit wherever the stylesheet left it.
+function imageSection(doc, model) {
+  const section = doc.createElement("section");
+  section.className = "entity-images";
+  const heading = doc.createElement("h2");
+  heading.textContent = t("entity.images");
+  section.append(heading);
+
+  const images = Array.isArray(model.images) ? model.images : [];
+  if (images.length === 0) {
+    section.append(negativeState(doc, {
+      kind: STATE_EMPTY,
+      heading: t("entity.noImages.heading"),
+      // **The one negative state on this page that does not name an
+      // agent.** Everything else here arrives over MCP; an image arrives
+      // because a person chose a file, so the sentence says so rather
+      // than telling a designer to go and ask.
+      sentence: t("entity.noImages.sentence"),
+    }));
+    return section;
+  }
+
+  const list = doc.createElement("ul");
+  list.className = "catalogue images";
+  for (const image of images) {
+    const item = doc.createElement("li");
+    item.className = "image-row";
+
+    const anchor = doc.createElement("a");
+    anchor.className = "catalogue-label image-link";
+    anchor.href = String(image.url ?? "");
+    anchor.textContent = String(image.filename ?? "");
+
+    const thumb = doc.createElement("img");
+    thumb.className = "asset-thumb";
+    thumb.src = String(image.url ?? "");
+    // **Empty, on purpose**, the reason the images page gives: the
+    // filename beside it is the row's accessible name, and alt text
+    // repeating it makes a screen reader say the same words twice.
+    thumb.alt = "";
+    anchor.prepend(thumb);
+    item.append(anchor);
+
+    // The preview, shown by `:hover` and by `:focus-within` so it is
+    // reachable from the keyboard. `aria-hidden`, because it carries
+    // nothing the link's own text does not and a screen reader that
+    // announced it would announce the file twice.
+    const preview = doc.createElement("img");
+    preview.className = "image-preview";
+    preview.src = String(image.url ?? "");
+    preview.alt = "";
+    preview.setAttribute("aria-hidden", "true");
+    // Dimensions as attributes and not as CSS: the browser holds the
+    // right box before the bytes land, and a geometry attribute is not
+    // a style attribute, which is what the policy refuses.
+    if (Number.isFinite(image.width)) preview.setAttribute("width", String(image.width));
+    if (Number.isFinite(image.height)) preview.setAttribute("height", String(image.height));
+    preview.setAttribute("loading", "lazy");
+    item.append(preview);
+
+    const size = doc.createElement("span");
+    size.className = "catalogue-count";
+    size.textContent = [image.width, image.height].every(Number.isFinite)
+      ? image.width + "\u00d7" + image.height
+      : String(image.mime ?? "");
+    item.append(size);
+
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+// redrawImages replaces one entity's image section in place, from the
+// listing an attach or a detach answered with. **Not a page reload**:
+// the reader is looking at the thing they just changed.
+function redrawImages(doc, root, model, images) {
+  const fresh = imageSection(doc, { ...model, images });
+  const current = root.querySelector("section.entity-images");
+  if (current) current.replaceWith(fresh);
+  return fresh;
+}
+
+// attachControl is the one write a person makes here that no agent can:
+// a file input, the bounds said before anything is chosen, and a button
+// that commits.
+//
+// **Quiet, like the log's.** This page spends its one ink button on
+// nothing at all, deliberately — reading is what it is for — and a page
+// with two filled buttons has two primaries. The opener is a word; the
+// control appears when it is reached for.
+//
+// **Two calls, in this order**: the file becomes an image in the game's
+// library, then the image is hung on this entity. If the second fails
+// the first still happened, which is recoverable and visible — the file
+// is in the library — rather than lost.
+export function attachControl(doc, opened, typeKey, key, onDone) {
+  const holder = doc.createElement("div");
+  holder.className = "attach";
+
+  const open = doc.createElement("button");
+  open.type = "button";
+  open.className = "quiet attach-open";
+  open.textContent = t("entity.attach");
+
+  const form = doc.createElement("form");
+  form.className = "attach-form";
+  form.hidden = true;
+
+  const file = doc.createElement("input");
+  file.type = "file";
+  file.accept = "image/png,image/jpeg,image/webp";
+  file.setAttribute("aria-label", t("entity.attach"));
+
+  // The bounds, before a file is chosen rather than after one is
+  // refused: the same decision the ground control made, and the reason
+  // is that a refusal a person could have avoided is a refusal that
+  // should not have had to happen.
+  const bounds = doc.createElement("p");
+  bounds.className = "attach-bounds";
+  bounds.textContent = t("entity.attachBounds");
+
+  const error = doc.createElement("p");
+  error.className = "error";
+
+  const send = doc.createElement("button");
+  send.type = "submit";
+  send.textContent = t("entity.attachDo");
+  const cancel = doc.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = t("entity.cancel");
+
+  form.append(file, bounds, send, cancel, error);
+  holder.append(open, form);
+
+  const close = () => {
+    form.hidden = true;
+    open.hidden = false;
+    error.textContent = "";
+    form.reset();
+  };
+  open.addEventListener("click", () => {
+    open.hidden = true;
+    form.hidden = false;
+    file.focus();
+  });
+  cancel.addEventListener("click", close);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const chosen = file.files && file.files[0];
+    if (!chosen) return;
+    error.textContent = "";
+    setFormBusy(form, true, t("entity.attaching"));
+    const uploaded = await opened.client.uploadAsset(chosen, chosen.name);
+    if (!uploaded.ok) {
+      setFormBusy(form, false);
+      error.textContent = uploaded.error.message;
+      return;
+    }
+    const attached = await opened.client.attachEntityImage(typeKey, key, uploaded.result.id);
+    setFormBusy(form, false);
+    if (!attached.ok) {
+      error.textContent = attached.error.message;
+      return;
+    }
+    close();
+    if (typeof onDone === "function") onDone(attached.result.items);
+  });
+
+  return holder;
 }
 
 // --- The one write a person makes here --------------------------------
@@ -1214,6 +1407,20 @@ export async function entityPage(opened) {
     // version read for a different purpose.
     if (mayWrite) {
       wireFieldEdits(doc, opened, { ...model, fieldsList: body.fieldsList, rows: body.fieldRows }, model.schema);
+    }
+    // **The one write on this page an agent cannot make.** It is wired
+    // only for a person who may write, like every other control here,
+    // and the section redraws itself from the answer rather than
+    // reloading a page the reader is in the middle of.
+    if (mayWrite) {
+      const images = body.querySelector("section.entity-images");
+      if (images) {
+        const redraw = (items) => {
+          const fresh = redrawImages(doc, body, model, items);
+          fresh.append(attachControl(doc, opened, model.entity.type_key, model.entity.key, redraw));
+        };
+        images.append(attachControl(doc, opened, model.entity.type_key, model.entity.key, redraw));
+      }
     }
     const band = await attachLog(doc, opened, {
       on: "entity", typeKey: model.entity.type_key, key: model.entity.key,

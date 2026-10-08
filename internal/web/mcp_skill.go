@@ -49,7 +49,7 @@ type skillInstallInput struct{ ScopedArgs }
 func MCPSkillInstall(ctx context.Context, s *Server) SkillInstallOutput {
 	expiry := time.Now().Add(skillURLTTL)
 	return SkillInstallOutput{
-		DownloadURL:   signedSkillURL(s.skillURLKey, externalBaseURLFrom(ctx), expiry.Unix()),
+		DownloadURL:   signedSkillURL(s.downloadURLKey, externalBaseURLFrom(ctx), expiry.Unix()),
 		ExpiresAt:     expiry.UTC().Format(time.RFC3339),
 		Format:        "zip",
 		BundleVersion: skill.Version(),

@@ -402,19 +402,14 @@ RETURNING id, project_id, filename, mime, width, height, created_at,
           created_by_user_id, created_by_token_id;
 
 -- name: CountAssets :one
--- How many assets one game holds, for the per-game cap.
+-- How many images one game's library holds.
 --
--- **A count rather than a sum of octet_length(bytes), and the reason is
--- the bytea.** The bound this serves is on disk, so an aggregate byte
--- total looks like the more honest question -- but bytes is a toasted,
--- compressed column, and summing its length makes Postgres detoast every
--- stored image on every upload: up to the whole game's worth of pixels
--- read and decompressed to decide whether to accept eight megabytes.
--- This statement reads no image at all; it is answered from
--- assets_project_idx, whose leading column is project_id. What a
--- count buys instead is a stated worst case rather than a measured one:
--- MaxAssetsPerGame times MaxAssetBytes, which is the number assets.go
--- writes down.
+-- **A count and not a sum of octet_length(bytes).** It served a per-game
+-- cap, which is gone; it now answers the line the library prints about
+-- itself, and the reason it counts rather than weighs is unchanged: bytes
+-- is a toasted column, and summing its length makes Postgres fetch every
+-- stored image to answer. This statement reads no image at all, being
+-- answered from assets_project_idx, whose leading column is project_id.
 SELECT count(*) FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid;
 
@@ -587,3 +582,51 @@ SET background_asset_id = sqlc.narg('background_asset_id')::uuid,
     background_scale    = sqlc.arg('background_scale')::double precision,
     background_offset   = sqlc.arg('background_offset')::jsonb
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- The images attached to one entity (0021_entity_assets.sql). They are
+-- documents a designer puts beside a thing, so none of them is the main
+-- one and the only order that means anything is the order they arrived
+-- in.
+
+-- name: AttachAssetToEntity :one
+-- **Attaching twice is the attachment that is already there**, not a
+-- second row and not an error: a designer who clicks the same picture
+-- again means the same thing they meant the first time. The unique key
+-- on (entity_id, asset_id) is what makes that expressible, and the
+-- DO UPDATE is what makes the row come back either way -- ON CONFLICT DO
+-- NOTHING returns nothing at all, so a caller could not tell "already
+-- attached" from "the entity is not there".
+INSERT INTO entity_assets (project_id, asset_id, entity_id, created_by_user_id)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('asset_id')::uuid,
+        sqlc.arg('entity_id')::uuid, sqlc.narg('created_by_user_id')::uuid)
+ON CONFLICT (entity_id, asset_id) DO UPDATE SET entity_id = excluded.entity_id
+RETURNING id, created_at;
+
+-- name: DetachAssetFromEntity :execrows
+-- The image survives: the library is the game's, and this row is only
+-- the statement that one entity referred to it.
+DELETE FROM entity_assets
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_id = sqlc.arg('entity_id')::uuid
+  AND asset_id = sqlc.arg('asset_id')::uuid;
+
+-- name: ListAssetsForEntity :many
+-- One entity's attachments, oldest first, without their bytes. The join
+-- reads the metadata from assets rather than copying any of it into the
+-- link row, so a renamed file is renamed everywhere it is attached.
+SELECT a.id, a.filename, a.mime, a.width, a.height, a.created_at
+FROM entity_assets l
+JOIN assets a ON a.id = l.asset_id AND a.project_id = l.project_id
+WHERE l.project_id = sqlc.arg('project_id')::uuid
+  AND l.entity_id = sqlc.arg('entity_id')::uuid
+ORDER BY l.created_at, l.id;
+
+-- name: CountAssetsForEntities :many
+-- How many images each of these entities carries, for a listing that
+-- wants to say which rows have one without reading every row's
+-- attachments. The shape internal/comments answers the same question in.
+SELECT entity_id, count(*)::bigint AS attached
+FROM entity_assets
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_id = ANY (sqlc.arg('entity_ids')::uuid[])
+GROUP BY entity_id;

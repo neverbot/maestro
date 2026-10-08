@@ -53,17 +53,22 @@ const (
 	// a mime hint. It is capped in runes, through metamodel.LengthProblem,
 	// for the reason MaxViewNameLen is.
 	MaxAssetFilenameLen = 200
-	// MaxAssetsPerGame is how many background images one game may hold,
-	// and it is the bound every other bound in this file was missing.
-	MaxAssetsPerGame = 100
 )
 
-// The bounds on one asset listing. A game holds tens of assets rather
-// than thousands -- MaxAssetsPerGame is a hundred -- so the default page
-// shows most games' whole library in one call and the cap is a little
-// above the per-game limit, which means a caller that asks for
-// everything gets everything and still gets a cursor if the cap ever
-// rises.
+// **There is no per-game cap, deliberately.** There was one, a hundred,
+// and it was the right number while the only thing an image could be was
+// the ground under a map. An entity can attach one now, so a game with
+// seven hundred entities and a reference picture on a tenth of them is
+// past that bound doing nothing unusual, and a quota a designer trips by
+// working is a quota that teaches them to work around it.
+//
+// What is left holding the size down is MaxAssetBytes per file, and what
+// replaces the cap is that the library says what it weighs: a number
+// somebody can see beats a number that stops them.
+
+// The bounds on one asset listing. The library is paged like every other
+// listing here, which is what makes it safe for it to have no cap of its
+// own: a game that holds a thousand images answers a page at a time.
 const (
 	defaultAssetPage int32 = 50
 	maxAssetPage     int32 = 200
@@ -127,34 +132,6 @@ func (s *Service) CreateAsset(ctx context.Context, projectID uuid.UUID, actor Ac
 
 	var row dbq.InsertAssetRow
 	err = s.withTx(ctx, func(q *dbq.Queries) error {
-		// **The per-game cap, counted in the transaction that inserts.**
-		// Not because that makes it exact -- two uploads racing each
-		// other both count MaxAssetsPerGame-1 and both land, so the
-		// stored total can overshoot by the number of concurrent
-		// uploaders -- but because a count taken outside the transaction
-		// can be stale by any amount at all. This is a quota rather than
-		// a security boundary: what it exists to stop is unbounded
-		// growth, and a bound that can be exceeded by the handful of
-		// browsers a game has open at once still stops that. Locking the
-		// game to make it exact would serialise every upload in it
-		// against a number nobody reads.
-		held, err := q.CountAssets(ctx, projectID)
-		if err != nil {
-			return fmt.Errorf("count view assets: %w", err)
-		}
-		if held >= MaxAssetsPerGame {
-			return &metamodel.ValidationError{
-				Code: metamodel.CodeInvalidInput,
-				Fields: []metamodel.FieldError{{
-					Path: pointer("bytes"),
-					Message: fmt.Sprintf("would be background image %d and a game may "+
-						"hold %d: delete an image this game no longer draws over, with "+
-						"the asset route, before uploading another",
-						held+1, MaxAssetsPerGame),
-				}},
-			}
-		}
-
 		row, err = q.InsertAsset(ctx, dbq.InsertAssetParams{
 			ProjectID: projectID, Filename: filename, Mime: mime,
 			Width: width, Height: height, Bytes: raw,

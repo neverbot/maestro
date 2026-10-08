@@ -46,6 +46,18 @@ Lore and mission scripts as versioned markdown, attached to the
 entities they describe, with a diff between any two versions and a
 record of who wrote each one.
 
+### Attachments
+
+Prose is not the only thing that belongs beside a thing. A map of the
+region a mission happens in, a reference picture of what a place is
+meant to feel like: choose a file on the thing's own page and it is
+there, with the rest of the game's images, from then on. Hovering a name
+shows the picture without leaving the page.
+
+This is the one thing on this site an agent cannot do. A file arrives
+because a person chose it; an agent is told what is attached when it
+reads the thing, and can fetch a picture when the work is about it.
+
 ### The log
 
 Maestro holds the design as it stands: what a thing *is* today. How it

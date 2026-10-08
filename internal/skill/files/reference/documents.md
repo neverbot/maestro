@@ -78,3 +78,29 @@ filtering `docs.list` or `search` by one: filtering by a kind nobody
 used answers with an empty page rather than telling you that you guessed
 wrong, which is the same silent-empty failure `reference/queries.md`
 warns about in view queries.
+
+## Images are attached too, and you do not attach them
+
+An entity can carry image files as well as prose: a map, a reference
+picture, a sketch somebody wants beside the thing while they work. They
+are attachments in the same sense a document is, and they are not art
+for a build.
+
+**Only a person attaches one**, from the entity's page in a browser.
+There is no tool here that uploads a file and there will not be one: a
+file arrives by somebody choosing it.
+
+What you get is told to you. `entities.get` answers with an `images`
+array when there are any, each entry naming the file, its type, its
+pixel size and a `download_url`:
+
+- **The bytes are never in the answer.** An image is worth tens of
+  thousands of tokens and is almost never what you were asked about.
+- **The URL needs no credentials and stops working within the hour.**
+  Fetch it with `curl` when the work is actually about the picture, and
+  read the entity again for a fresh one.
+- A listing does not carry images at all. Read the entity.
+
+If a designer asks you to add a picture, say that you cannot and that
+the page for that thing has the control. Telling them to hand you a file
+is telling them to do a thing this surface does not admit.

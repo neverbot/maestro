@@ -53,6 +53,14 @@ type MCPDeps struct {
 	// always builds one.
 	Views *views.Service
 
+	// DownloadURLKey signs the unauthenticated image URLs an entity's
+	// answer carries (api_image_download.go). It is the server's own
+	// key, handed over rather than reached for, because these cores are
+	// called directly by tests and by the REST mirror as well as by a
+	// tool handler. A zero key signs nothing anybody can verify, which
+	// is the right behaviour for a build with no server behind it.
+	DownloadURLKey []byte
+
 	// Analysis is the analysis domain the tools in mcp_analysis.go
 	// serve. Optional in the same sense as the three above: a Server
 	// built without one still starts and still answers every other tool,

@@ -72,6 +72,32 @@ export function createDocument() {
       this.setAttribute("class", value);
     }
 
+    // **The reflected attributes, which a browser reads both ways and
+    // this stub read only one.** The product writes `img.src = url` and
+    // `a.href = url` as properties, the way every front end does, and a
+    // stub that stored those as plain fields answered `getAttribute`
+    // with null — so a test asserting the url a row points at failed
+    // against code that was correct. The list is the handful this front
+    // end actually assigns; a property not here is still an ordinary
+    // field, which is what it was before.
+    get src() { return this.attributes.get("src") ?? ""; }
+    set src(value) { this.setAttribute("src", String(value)); }
+
+    get href() { return this.attributes.get("href") ?? ""; }
+    set href(value) { this.setAttribute("href", String(value)); }
+
+    get alt() { return this.attributes.get("alt") ?? ""; }
+    set alt(value) { this.setAttribute("alt", String(value)); }
+
+    get id() { return this.attributes.get("id") ?? ""; }
+    set id(value) { this.setAttribute("id", String(value)); }
+
+    get type() { return this.attributes.get("type") ?? ""; }
+    set type(value) { this.setAttribute("type", String(value)); }
+
+    get accept() { return this.attributes.get("accept") ?? ""; }
+    set accept(value) { this.setAttribute("accept", String(value)); }
+
     get classList() {
       const owner = this;
       const names = () => (owner.className === "" ? [] : owner.className.split(" "));
@@ -118,6 +144,19 @@ export function createDocument() {
     // pushes its own shape into the product's code.
     append(...kids) {
       for (const kid of kids) this.appendChild(kid);
+    }
+
+    // prepend is append at the other end. The images page and the
+    // entity page both put a thumbnail in front of a row's label with
+    // it, and a stub missing it fails inside the product's code rather
+    // than saying what it does not have.
+    prepend(...kids) {
+      for (const kid of [...kids].reverse()) {
+        if (!(kid instanceof StubElement)) throw new Error("stub: only elements can be prepended");
+        if (kid.parentNode) kid.parentNode.removeChild(kid);
+        this.childNodes.unshift(kid);
+        kid.parentNode = this;
+      }
     }
 
     appendChild(child) {
@@ -181,6 +220,24 @@ export function createDocument() {
 
     click() {
       return this.dispatch("click");
+    }
+
+    // focus records where the focus went, on the document, because
+    // where focus lands after a control hides itself is a thing worth
+    // asserting and a thing no test could see.
+    focus() {
+      if (this.ownerDocument) this.ownerDocument.activeElement = this;
+    }
+
+    // reset is a form's own: it puts every field back to the markup's
+    // value. The stub keeps the one piece of state a test can observe,
+    // which is whichever file an input was handed.
+    reset() {
+      const clear = (node) => {
+        if (node.tagName === "input") node.files = null;
+        for (const kid of node.childNodes) clear(kid);
+      };
+      clear(this);
     }
 
     // replaceWith puts other nodes where this one is. The entity page
@@ -282,11 +339,19 @@ export function createDocument() {
   }
 
   const document = {
+    // activeElement is where focus() last landed. A browser owns this;
+    // here it is the only way a test can assert that a control which
+    // hid itself handed the focus somewhere rather than dropping it.
+    activeElement: null,
     createElementNS(namespaceURI, tagName) {
-      return new StubElement(tagName, namespaceURI);
+      const el = new StubElement(tagName, namespaceURI);
+      el.ownerDocument = document;
+      return el;
     },
     createElement(tagName) {
-      return new StubElement(tagName, HTML_NS);
+      const el = new StubElement(tagName, HTML_NS);
+      el.ownerDocument = document;
+      return el;
     },
   };
 

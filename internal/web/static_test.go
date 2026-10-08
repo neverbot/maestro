@@ -68,10 +68,25 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 	// importMapHashes), so it is asserted by its parts rather than by a
 	// literal that would have to be re-typed on every vendored change.
 	policy := rec.Header().Get("Content-Security-Policy")
-	for _, directive := range []string{"default-src 'self'", "frame-ancestors 'none'", "script-src 'self' "} {
+	for _, directive := range []string{
+		"default-src 'self'", "frame-ancestors 'none'", "script-src 'self' ",
+		// **The one widening, named.** A person attaching an image is
+		// shown it before it is sent, from a blob URL this page's own
+		// script minted; `default-src 'self'` refuses that and says so
+		// only in the console. Named here so a second widening is a
+		// decision somebody makes rather than a line somebody adds.
+		"img-src 'self' blob:",
+	} {
 		assert.Should(t, strings.Contains(policy, directive), "Content-Security-Policy = %q, which does not carry %q", policy, directive)
 	}
 	assert.Should(t, !strings.Contains(policy, "unsafe-inline"), "Content-Security-Policy = %q: 'unsafe-inline' re-admits every injected script this policy exists to refuse", policy)
+	// **blob: is admitted for images and for nothing else.** It is the
+	// narrowest form of what the preview needs: a URL script on this
+	// origin created. `data:` would let any string become a resource,
+	// and neither belongs anywhere but img-src.
+	for _, directive := range []string{"script-src 'self' blob:", "default-src 'self' blob:", "data:"} {
+		assert.Should(t, !strings.Contains(policy, directive), "Content-Security-Policy = %q carries %q", policy, directive)
+	}
 }
 
 // TestConfigEndpointIsPublicAndMinimal pins GET /api/config: reachable

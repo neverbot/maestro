@@ -14,7 +14,7 @@ import {
   setReadOnly,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
-import { t } from "../i18n.js";
+import { locale, t } from "../i18n.js";
 import { headerRow, nextCursorOf, row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
@@ -43,6 +43,31 @@ export function describeAsset(asset) {
   }
   if (typeof from.mime === "string" && from.mime !== "") parts.push(from.mime);
   return parts.join(" · ");
+}
+
+// weigh turns a byte count into the shortest honest line about it.
+//
+// **The units are symbols and not words**, so they do not pass through
+// the catalogue: kB and MB read the same in both languages and a
+// translated "MB" would be a mistranslation waiting to happen. The
+// number does go through the reader's locale, because a decimal comma
+// and a decimal point are not the same number to the person reading it.
+export function weigh(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const units = ["B", "kB", "MB", "GB"];
+  let step = 0;
+  let size = n;
+  while (size >= 1000 && step < units.length - 1) {
+    size /= 1000;
+    step += 1;
+  }
+  // Whole bytes and kilobytes; one decimal from a megabyte up, where it
+  // is the digit that distinguishes two libraries.
+  const digits = step >= 2 && size < 100 ? 1 : 0;
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits, maximumFractionDigits: digits,
+  }).format(size) + "\u00a0" + units[step];
 }
 
 export async function assetsPage(opened) {
@@ -131,7 +156,18 @@ export async function assetsPage(opened) {
     }
     rendered += items.length;
     emptyOrRows(listEl, emptyEl, rendered);
-    say(noteEl, rendered === 0 ? "" : countLabel(rendered, t("unit.image"), t("unit.images")));
+    // **The whole library, not this page.** The count used to be the
+    // rows rendered so far, which climbed as a reader pressed "show
+    // more" and never said how much there was. With no cap on how many
+    // images a game may hold, what took the cap's place is being able
+    // to see what it is carrying, so the line is the library's own
+    // count and the library's own weight.
+    const held = Number(body.held);
+    const line = Number.isFinite(held) && held > 0
+      ? [countLabel(held, t("unit.image"), t("unit.images")), weigh(body.bytes)]
+        .filter((part) => part !== "").join(" \u00b7 ")
+      : "";
+    say(noteEl, line);
     cursor = nextCursorOf(body);
     if (moreEl) {
       // **A pager on an empty list is a control with nothing to fetch.**

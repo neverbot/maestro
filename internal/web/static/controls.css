@@ -274,3 +274,116 @@ a.button:active {
   color: var(--focus);
   text-decoration-thickness: 2px;
 }
+
+/* **A control that is only disabled in the DOM is not disabled to a
+   reader.** `button:disabled` has worn 0.6 opacity since the first pass
+   and no field ever did: a form put busy by setFormBusy greyed its
+   submit and left every input at full ink, so the one state that says
+   "wait" said it on one control out of four. */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  background: var(--ground);
+  cursor: default;
+}
+
+/* **The file picker is the one control whose words are not ours.**
+   `::file-selector-button` can be painted and cannot be renamed: the
+   pseudo-element admits no `content`, and the "no file chosen" half is
+   not inside it at all. Both strings come from the *browser's* UI
+   language, which has nothing to do with the catalogue this product
+   chose, so a Spanish instance on an English browser reads "Choose
+   file" and the same instance on a German one reads something else
+   again. That is the argument design.md already made for self-hosting
+   the fonts, one control along: a designer getting a different product
+   depending on whose laptop is open.
+ *
+   So the picker is worn, not painted: `.file-pick` hides the input
+   where it still takes focus and still answers the keyboard, and a
+   `<label>` beside it carries a word from the catalogue. This rule
+   stays anyway, as the floor under a file input nobody has wrapped
+   yet — a painted default beats a 1990s bevel — and it is not the
+   answer anywhere a person reads it. */
+::file-selector-button {
+  height: calc(var(--control-h) - 8px);
+  margin-right: 9px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* **Clipped, never `display: none` and never `hidden`.** Both take the
+   control out of the tab order, which for a file input means the
+   keyboard loses the only thing that opens the picker. This keeps it
+   focusable and keeps the label's `for` pointing at a real control, so
+   the accessible name, the click target and the focus ring are the
+   browser's own and not three things reimplemented. */
+.file-pick input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.file-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* The label is the button now, so it wears the ghost's shape. It cannot
+   inherit it from `.ghost` alone, which resets a `button`'s fill and
+   assumes a button's box. */
+.file-pick label {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+  margin: 0;
+  cursor: pointer;
+}
+
+.file-pick:hover label {
+  background: var(--raised);
+  box-shadow: var(--shadow-1);
+}
+
+/* **The ring is drawn on the label, because the input is the thing that
+   has focus and the thing nobody can see.** Without this a keyboard
+   reaches the picker and the screen says nothing at all. */
+.file-pick input[type="file"]:focus-visible + label {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.file-pick input[type="file"]:disabled + label {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Two or three controls on one line, which every form here wants and
+   each one was spelling for itself. */
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}

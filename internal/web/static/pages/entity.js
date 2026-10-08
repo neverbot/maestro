@@ -616,7 +616,7 @@ export function entityBody(doc, slug, model) {
 // page's own, and it is **pure CSS**: the policy admits no inline style
 // attribute, so a tooltip positioned by script would have its placement
 // dropped in silence and sit wherever the stylesheet left it.
-function imageSection(doc, model) {
+function imageSection(doc, model, detach) {
   const section = doc.createElement("section");
   section.className = "entity-images";
   const heading = doc.createElement("h2");
@@ -682,6 +682,22 @@ function imageSection(doc, model) {
       : String(image.mime ?? "");
     item.append(size);
 
+    // **Taking one off, which nothing could do.** The client has had a
+    // detach since the day this shipped and no caller: a person who
+    // attached the wrong map could not remove it and neither could an
+    // agent, the writes having no MCP mirror on purpose. A method
+    // nothing calls is the mechanism-nobody-reads defect in its
+    // plainest form.
+    if (typeof detach === "function") {
+      const off = doc.createElement("button");
+      off.type = "button";
+      off.className = "quiet image-detach";
+      off.textContent = t("entity.detach");
+      off.setAttribute("aria-label", t("entity.detach") + " " + String(image.filename ?? ""));
+      off.addEventListener("click", () => detach(image, off));
+      item.append(off);
+    }
+
     list.append(item);
   }
   section.append(list);
@@ -691,26 +707,40 @@ function imageSection(doc, model) {
 // redrawImages replaces one entity's image section in place, from the
 // listing an attach or a detach answered with. **Not a page reload**:
 // the reader is looking at the thing they just changed.
-function redrawImages(doc, root, model, images) {
-  const fresh = imageSection(doc, { ...model, images });
+function redrawImages(doc, root, model, images, detach) {
+  const fresh = imageSection(doc, { ...model, images }, detach);
   const current = root.querySelector("section.entity-images");
   if (current) current.replaceWith(fresh);
   return fresh;
 }
 
+// What the server admits, said once: the picker offers these and
+// internal/views/assets.go refuses everything else.
+const ACCEPTED_IMAGES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
 // attachControl is the one write a person makes here that no agent can:
-// a file input, the bounds said before anything is chosen, and a button
-// that commits.
+// choose a file, see what was chosen, and commit it.
 //
-// **Quiet, like the log's.** This page spends its one ink button on
-// nothing at all, deliberately — reading is what it is for — and a page
-// with two filled buttons has two primaries. The opener is a word; the
-// control appears when it is reached for.
+// **Quiet, like the log's.** Reading is what this page is for, so the
+// way in is a word and the control appears when it is reached for. The
+// form's own submit is ink, legitimately: once the form is open,
+// attaching the file is what the screen is for.
+//
+// **The picker is worn rather than painted.** A bare file input renders
+// the browser's own button, in the browser's own language: a Spanish
+// instance on an English browser says "Choose file", and
+// `::file-selector-button` cannot rename it, since the pseudo-element
+// admits no `content` and the "no file chosen" half is not inside it at
+// all. So the input is clipped where it keeps focus and the keyboard,
+// a label carries the word, and the chosen file is drawn here where it
+// can be translated and, being an image, seen.
 //
 // **Two calls, in this order**: the file becomes an image in the game's
 // library, then the image is hung on this entity. If the second fails
-// the first still happened, which is recoverable and visible — the file
-// is in the library — rather than lost.
+// the first still happened, and the form says so rather than leaving a
+// person to wonder, because an upload that landed and did not attach is
+// the one state a reader cannot deduce from the screen.
 export function attachControl(doc, opened, typeKey, key, onDone) {
   const holder = doc.createElement("div");
   holder.className = "attach";
@@ -724,21 +754,46 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
   form.className = "attach-form";
   form.hidden = true;
 
+  const pick = doc.createElement("div");
+  pick.className = "file-pick";
   const file = doc.createElement("input");
   file.type = "file";
-  file.accept = "image/png,image/jpeg,image/webp";
-  file.setAttribute("aria-label", t("entity.attach"));
+  file.id = "attach-file";
+  file.accept = ACCEPTED_IMAGES.join(",");
+  const label = doc.createElement("label");
+  label.setAttribute("for", "attach-file");
+  label.textContent = t("entity.chooseFile");
+  // The chosen file, in words this product owns. It is the Named
+  // Absence rule in the one place the browser was satisfying it by
+  // accident and in the wrong language.
+  const chosenName = doc.createElement("span");
+  chosenName.className = "catalogue-count";
+  chosenName.textContent = t("entity.noFileChosen");
+  pick.append(file, label, chosenName);
 
   // The bounds, before a file is chosen rather than after one is
-  // refused: the same decision the ground control made, and the reason
-  // is that a refusal a person could have avoided is a refusal that
-  // should not have had to happen.
+  // refused, and tied to the field so a screen reader reads them as
+  // part of it rather than as a sentence further down the page.
   const bounds = doc.createElement("p");
   bounds.className = "attach-bounds";
+  bounds.id = "attach-bounds";
   bounds.textContent = t("entity.attachBounds");
+  file.setAttribute("aria-describedby", "attach-bounds");
+
+  // **What is about to be attached, shown.** This section argues that a
+  // list of filenames hides what it lists; a form that takes an image
+  // and shows only its name makes the same mistake one step earlier.
+  const chosenThumb = doc.createElement("img");
+  chosenThumb.className = "asset-thumb attach-thumb";
+  chosenThumb.alt = "";
+  chosenThumb.hidden = true;
 
   const error = doc.createElement("p");
   error.className = "error";
+  // The same treatment the rename error on this page carries. It was
+  // the only refusal here a screen reader was never told about.
+  error.setAttribute("role", "alert");
+  error.setAttribute("aria-live", "assertive");
 
   const send = doc.createElement("button");
   send.type = "submit";
@@ -747,16 +802,38 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
   cancel.type = "button";
   cancel.className = "ghost";
   cancel.textContent = t("entity.cancel");
+  const actions = doc.createElement("div");
+  actions.className = "form-actions";
+  actions.append(send, cancel);
 
-  form.append(file, bounds, send, cancel, error);
+  form.append(pick, chosenThumb, bounds, actions, error);
   holder.append(open, form);
+
+  // The object URL of whatever is being previewed, so it can be handed
+  // back: a blob URL held after its image is gone is a leak nothing
+  // collects.
+  let preview = "";
+  const forget = () => {
+    if (preview !== "" && globalThis.URL && typeof globalThis.URL.revokeObjectURL === "function") {
+      globalThis.URL.revokeObjectURL(preview);
+    }
+    preview = "";
+  };
 
   const close = () => {
     form.hidden = true;
     open.hidden = false;
     error.textContent = "";
+    chosenName.textContent = t("entity.noFileChosen");
+    chosenThumb.hidden = true;
+    forget();
     form.reset();
+    // **Focus goes back to the word that opened the form.** Hiding the
+    // control a person is standing on leaves the focus nowhere, and a
+    // keyboard starts again from the top of the document.
+    open.focus();
   };
+
   open.addEventListener("click", () => {
     open.hidden = true;
     form.hidden = false;
@@ -764,10 +841,35 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
   });
   cancel.addEventListener("click", close);
 
+  file.addEventListener("change", () => {
+    const chosen = file.files && file.files[0];
+    error.textContent = "";
+    forget();
+    if (!chosen) {
+      chosenName.textContent = t("entity.noFileChosen");
+      chosenThumb.hidden = true;
+      return;
+    }
+    chosenName.textContent = chosen.name;
+    if (globalThis.URL && typeof globalThis.URL.createObjectURL === "function") {
+      preview = globalThis.URL.createObjectURL(chosen);
+      chosenThumb.src = preview;
+      chosenThumb.hidden = false;
+    }
+  });
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const chosen = file.files && file.files[0];
     if (!chosen) return;
+    // **The bound is checked here and not only at the server.** The
+    // sentence above the field promises it, and promising a limit while
+    // sending the bytes anyway makes a person wait out an upload to be
+    // told what the form already knew.
+    if (Number.isFinite(chosen.size) && chosen.size > MAX_IMAGE_BYTES) {
+      error.textContent = t("entity.attachTooBig");
+      return;
+    }
     error.textContent = "";
     setFormBusy(form, true, t("entity.attaching"));
     const uploaded = await opened.client.uploadAsset(chosen, chosen.name);
@@ -779,7 +881,10 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
     const attached = await opened.client.attachEntityImage(typeKey, key, uploaded.result.id);
     setFormBusy(form, false);
     if (!attached.ok) {
-      error.textContent = attached.error.message;
+      // The upload landed and the attach did not, which is the one
+      // state a reader cannot deduce from the screen: the file is in
+      // the game's library and on nothing.
+      error.textContent = attached.error.message + " " + t("entity.attachLanded");
       return;
     }
     close();
@@ -1413,13 +1518,28 @@ export async function entityPage(opened) {
     // and the section redraws itself from the answer rather than
     // reloading a page the reader is in the middle of.
     if (mayWrite) {
+      const { type_key: typeKey, key } = model.entity;
+      // The two writes and the redraw are one knot: detaching redraws
+      // the section, and the fresh section needs both of them again.
+      const wire = (items) => {
+        const fresh = redrawImages(doc, body, model, items, detach);
+        fresh.append(attachControl(doc, opened, typeKey, key, wire));
+      };
+      const detach = async (image, button) => {
+        button.disabled = true;
+        const gone = await opened.client.detachEntityImage(typeKey, key, image.id);
+        if (!gone.ok) {
+          button.disabled = false;
+          say(errorEl, gone.error.message);
+          return;
+        }
+        wire(gone.result.items);
+      };
       const images = body.querySelector("section.entity-images");
       if (images) {
-        const redraw = (items) => {
-          const fresh = redrawImages(doc, body, model, items);
-          fresh.append(attachControl(doc, opened, model.entity.type_key, model.entity.key, redraw));
-        };
-        images.append(attachControl(doc, opened, model.entity.type_key, model.entity.key, redraw));
+        // The section was built before the writes existed, so it is
+        // rebuilt once with them rather than patched.
+        wire(model.images);
       }
     }
     const band = await attachLog(doc, opened, {

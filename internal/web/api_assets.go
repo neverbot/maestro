@@ -91,8 +91,12 @@ func (s *Server) handleListAssets(w http.ResponseWriter, r *http.Request,
 	for _, a := range page.Assets {
 		out = append(out, viewAssetOutput(r.PathValue("game"), a))
 	}
+	// held and bytes describe the whole library and not this page: with
+	// no cap on how many images a game may keep, being able to see what
+	// it is carrying is what took the cap's place.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"assets": out, "next_cursor": page.NextCursor,
+		"held": page.Held, "bytes": page.Bytes,
 	})
 }
 

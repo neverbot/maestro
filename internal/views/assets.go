@@ -170,6 +170,12 @@ type AssetFilter struct {
 type AssetPage struct {
 	Assets     []Asset
 	NextCursor string
+	// Held and Bytes are the whole library, not this page: what replaced
+	// the per-game cap is a reader being able to see how much the game
+	// is carrying. Both are answered by one statement that reads no
+	// image at all; the queries file measures it.
+	Held  int64
+	Bytes int64
 }
 
 // ListAssets is one page of a game's assets, oldest first, without bytes.
@@ -181,6 +187,11 @@ func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID,
 	after, err := paging.Decode(f.Cursor, fingerprint, refuseViewCursor)
 	if err != nil {
 		return AssetPage{}, err
+	}
+
+	total, err := s.q.CountAssets(ctx, projectID)
+	if err != nil {
+		return AssetPage{}, fmt.Errorf("weigh the library: %w", err)
 	}
 
 	params := dbq.ListAssetsPageParams{ProjectID: projectID, Limit: limit}
@@ -201,7 +212,7 @@ func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID,
 	if err != nil {
 		return AssetPage{}, fmt.Errorf("list view assets: %w", err)
 	}
-	page := AssetPage{Assets: make([]Asset, 0, len(rows))}
+	page := AssetPage{Assets: make([]Asset, 0, len(rows)), Held: total.Held, Bytes: total.Bytes}
 	for _, row := range rows {
 		page.Assets = append(page.Assets, Asset{
 			ID: row.ID, Filename: row.Filename, Mime: row.Mime,

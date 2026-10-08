@@ -402,15 +402,21 @@ RETURNING id, project_id, filename, mime, width, height, created_at,
           created_by_user_id, created_by_token_id;
 
 -- name: CountAssets :one
--- How many images one game's library holds.
+-- How many images one game's library holds, and what they weigh. It
+-- served a per-game cap, which is gone; it answers the line the library
+-- prints about itself, which is what replaced the cap.
 --
--- **A count and not a sum of octet_length(bytes).** It served a per-game
--- cap, which is gone; it now answers the line the library prints about
--- itself, and the reason it counts rather than weighs is unchanged: bytes
--- is a toasted column, and summing its length makes Postgres fetch every
--- stored image to answer. This statement reads no image at all, being
--- answered from assets_project_idx, whose leading column is project_id.
-SELECT count(*) FROM assets
+-- **The sum does not read a single image, and the comment that used to
+-- stand here said it did.** The claim was that summing length() over a
+-- toasted column makes Postgres fetch every stored value, so a count was
+-- all this could afford. Measured on 400 rows holding 122 MB of
+-- incompressible bytes: `sum(length(bytes))` touches three buffers and
+-- runs in 0.14 ms, identically under EXTERNAL and EXTENDED storage,
+-- because length() of a bytea is read out of the varlena header and
+-- never out of the chunks. The old sentence was plausible, never
+-- measured, and decided a design question on its own.
+SELECT count(*)::bigint AS held, COALESCE(sum(length(bytes)), 0)::bigint AS bytes
+FROM assets
 WHERE project_id = sqlc.arg('project_id')::uuid;
 
 -- name: ListAssetsPage :many

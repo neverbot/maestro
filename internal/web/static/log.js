@@ -203,6 +203,10 @@ function composer(doc, spec) {
 
   const box = doc.createElement("textarea");
   box.rows = 3;
+  // A name as well as the label: the label is what a screen reader
+  // reads, and a form field with neither an id nor a name is a field
+  // the browser itself reports as malformed.
+  box.name = "comment";
   box.setAttribute("aria-label", t("log.write"));
   box.setAttribute("placeholder", t("log.placeholder"));
   form.append(box);

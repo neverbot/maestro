@@ -3197,8 +3197,30 @@ pre.document {
   margin-top: var(--s2);
 }
 
+/* **The row the two buttons were missing.** `justify-items: start` on
+   the grid above put Attach above Cancel in two rows, where every other
+   form in this product pairs them; the grid is right for the field and
+   the bounds and the message, and wrong for the pair. */
+.attach-form .form-actions {
+  justify-self: stretch;
+}
+
 .attach-bounds {
   margin: 0;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+/* The chosen file, before it is sent. Same box as the row's thumbnail,
+   because it is about to become one. */
+.attach-thumb {
+  display: block;
+  height: 4rem;
+  max-width: 12rem;
+}
+
+/* Taking an image off, in the row it is in. A word, like every other
+   secondary write on this page. */
+.image-detach {
+  margin-left: auto;
 }

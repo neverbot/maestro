@@ -135,5 +135,19 @@ func ImportMapHashesForTest() []string {
 }
 
 // contentSecurityPolicy is the policy every response carries.
-var contentSecurityPolicy = "default-src 'self'; script-src 'self' " +
+//
+// **img-src names blob: and nothing else does.** A person choosing a
+// file to attach is shown the picture before it is sent, which is the
+// same argument the images section itself makes: a form that takes an
+// image and shows only its filename hides the one thing the person is
+// checking. The preview is a blob URL this page's own script minted
+// from the file the person picked, and `default-src 'self'` refuses it
+// — silently, in the console, with the image simply not appearing,
+// which is the failure mode this repository already writes down twice.
+//
+// The widening is narrow on purpose: `blob:` admits only URLs created
+// by script already running on this origin, so it reaches nothing a
+// caller can point at and nothing that crosses the network. It is not
+// `data:`, which would let any string become an image.
+var contentSecurityPolicy = "default-src 'self'; img-src 'self' blob:; script-src 'self' " +
 	strings.Join(importMapHashes, " ") + "; frame-ancestors 'none'"

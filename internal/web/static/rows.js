@@ -239,6 +239,57 @@ export function row(doc, spec) {
 // header is a number a reader has to guess at**: the quests catalogue
 // shipped `ash 210 350` per row with nothing saying which was the region,
 // which the reward and which the requirement.
+// **One image row, used by both lists that have one.** The thumbnail and
+// the preview under the pointer were written into the entity page and
+// not into the images page, which is the same catalogue of the same
+// files one screen along: a reader who learned the gesture on one list
+// found it dead on the other. The rule was established and not carried
+// one step, which is the defect this project names as its second most
+// repeated, landing inside the correction that established it.
+//
+// `up` is the caller's to state, and it is not a preference. A preview
+// has to open where there is room: the entity's section is the last
+// thing on its page, so below the row is where the page ends; the
+// images page is a long list starting near the top, so above the first
+// row is off the window. CSS cannot ask whether a box would overflow —
+// anchor positioning can and is not in every browser this is opened in
+// — so the side that is right by construction is named by the only code
+// that knows which construction it is in.
+export function imageRow(doc, item, image, { up = false } = {}) {
+  const url = String((image && image.url) || "");
+  if (url === "") return item;
+  item.classList.add("image-row");
+  if (up) item.classList.add("preview-up");
+
+  const thumb = doc.createElement("img");
+  thumb.className = "asset-thumb";
+  thumb.src = url;
+  // **Empty, on purpose.** The filename beside it is the row's
+  // accessible name, and alt text repeating it makes a screen reader
+  // say the same words twice.
+  thumb.alt = "";
+  const label = item.firstChild;
+  if (label && typeof label.prepend === "function") label.prepend(thumb);
+  else item.prepend(thumb);
+
+  // Shown by `:hover` and by `:focus-within`, so it is reachable from
+  // the keyboard and not only from a pointer. `aria-hidden`, because it
+  // carries nothing the row's own text does not.
+  const preview = doc.createElement("img");
+  preview.className = "image-preview";
+  preview.src = url;
+  preview.alt = "";
+  preview.setAttribute("aria-hidden", "true");
+  // The box as geometry attributes and not as CSS: the browser holds
+  // the space before the bytes land, and a geometry attribute is not
+  // the style attribute the policy refuses.
+  if (Number.isFinite(image.width)) preview.setAttribute("width", String(image.width));
+  if (Number.isFinite(image.height)) preview.setAttribute("height", String(image.height));
+  preview.setAttribute("loading", "lazy");
+  item.append(preview);
+  return item;
+}
+
 export function headerRow(doc, spec) {
   const item = doc.createElement("li");
   item.className = "catalogue-head";

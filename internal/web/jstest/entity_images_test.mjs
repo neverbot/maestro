@@ -96,6 +96,11 @@ const IMAGE = {
   check("the preview is drawn with the row and hidden by the stylesheet",
     [preview.getAttribute("src"), preview.getAttribute("aria-hidden")],
     [IMAGE.url, "true"]);
+  // **The same builder the images page uses**, and this list says which
+  // way the preview opens because it is the one that knows it is last
+  // on the page.
+  check("the row is the shared image row, opening upward here",
+    rows[0].getAttribute("class"), "image-row preview-up");
   // Its box is stated as geometry attributes, which are not CSS: the
   // browser holds the space before the bytes land and nothing jumps.
   check("and holds its own box before it loads",

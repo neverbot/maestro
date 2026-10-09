@@ -232,6 +232,48 @@ check("the share heading is placed, not left-aligned",
   shareCell ? [...shareCell.children].map((child) => child.className || child.textContent) : null,
   ["share-pct", "Of the total"]);
 
+// --- The image row, which both lists of images are made of ------------
+
+// **This existed on one screen and not the other.** The entity page drew
+// a thumbnail and a preview under the pointer; the images page, which
+// lists the same files, drew a thumbnail and nothing. A reader learned
+// the gesture on one and found it dead on the next, and the rule was
+// established and not carried one step along — which this project names
+// as its second most repeated defect. One builder now, and this is what
+// holds both callers to it.
+{
+  const { imageRow } = await import("../static/rows.js");
+  const IMG = { url: "/api/games/azeroth/assets/a1", width: 640, height: 480 };
+
+  const plain = imageRow(doc, row(doc, { label: "map.png", key: "a1" }), IMG);
+  const kids = [...plain.children];
+  const thumb = kids[0].children.find((el) => el.getAttribute("class") === "asset-thumb")
+    ?? plain.children.find((el) => el.getAttribute("class") === "asset-thumb");
+  check("the thumbnail goes in front of the row's own label", thumb.getAttribute("src"), IMG.url);
+  check("and says nothing a screen reader would hear twice", thumb.getAttribute("alt"), "");
+
+  const preview = plain.children.find((el) => el.getAttribute("class") === "image-preview");
+  check("the preview rides with the row, from the same file",
+    [preview.getAttribute("src"), preview.getAttribute("aria-hidden")], [IMG.url, "true"]);
+  check("and holds its own box before the bytes land",
+    [preview.getAttribute("width"), preview.getAttribute("height")], ["640", "480"]);
+
+  // The direction is the caller's to state, because only the caller
+  // knows whether its list has room above its first row or below its
+  // last one.
+  check("a row opens its preview downward unless it says otherwise",
+    plain.getAttribute("class"), "image-row");
+  check("and upward where the caller knows the page ends below it",
+    imageRow(doc, row(doc, { label: "map.png", key: "a1" }), IMG, { up: true }).getAttribute("class"),
+    "image-row preview-up");
+
+  // A row with nowhere to point is left alone rather than given a
+  // broken picture.
+  const none = imageRow(doc, row(doc, { label: "gone.png", key: "a2" }), { url: "" });
+  check("a row with no url is not given a picture at all",
+    none.children.some((el) => (el.getAttribute("class") || "").startsWith("image-")), false);
+}
+
 if (failures > 0) {
   console.log(failures + " failed");
   process.exit(1);

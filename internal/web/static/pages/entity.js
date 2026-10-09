@@ -3,7 +3,7 @@
 
 import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
 import { t } from "../i18n.js";
-import { ABSENT_MARK, boolMark } from "../rows.js";
+import { ABSENT_MARK, boolMark, imageRow } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
   ROLE_VIEWER,
@@ -648,32 +648,11 @@ function imageSection(doc, model, detach) {
     anchor.href = String(image.url ?? "");
     anchor.textContent = String(image.filename ?? "");
 
-    const thumb = doc.createElement("img");
-    thumb.className = "asset-thumb";
-    thumb.src = String(image.url ?? "");
-    // **Empty, on purpose**, the reason the images page gives: the
-    // filename beside it is the row's accessible name, and alt text
-    // repeating it makes a screen reader say the same words twice.
-    thumb.alt = "";
-    anchor.prepend(thumb);
     item.append(anchor);
-
-    // The preview, shown by `:hover` and by `:focus-within` so it is
-    // reachable from the keyboard. `aria-hidden`, because it carries
-    // nothing the link's own text does not and a screen reader that
-    // announced it would announce the file twice.
-    const preview = doc.createElement("img");
-    preview.className = "image-preview";
-    preview.src = String(image.url ?? "");
-    preview.alt = "";
-    preview.setAttribute("aria-hidden", "true");
-    // Dimensions as attributes and not as CSS: the browser holds the
-    // right box before the bytes land, and a geometry attribute is not
-    // a style attribute, which is what the policy refuses.
-    if (Number.isFinite(image.width)) preview.setAttribute("width", String(image.width));
-    if (Number.isFinite(image.height)) preview.setAttribute("height", String(image.height));
-    preview.setAttribute("loading", "lazy");
-    item.append(preview);
+    // The thumbnail and the preview, from the builder the images page
+    // uses too. `up`, because this section is the last thing on the
+    // page: below the row is where the page ends.
+    imageRow(doc, item, image, { up: true });
 
     const size = doc.createElement("span");
     size.className = "catalogue-count";

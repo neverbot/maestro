@@ -15,7 +15,7 @@ import {
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
 import { locale, t } from "../i18n.js";
-import { headerRow, nextCursorOf, row } from "../rows.js";
+import { headerRow, imageRow, nextCursorOf, row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // The empty state, in the page rather than in the shell. It names where
@@ -142,15 +142,12 @@ export async function assetsPage(opened) {
         href: source === "" ? "" : source,
       });
 
-      const thumb = doc.createElement("img");
-      thumb.className = "asset-thumb";
-      if (source !== "") thumb.src = source;
-      // **Empty, on purpose.** The filename sits beside it in the label
-      // and is the row's accessible name; alt text repeating it makes a
-      // screen reader say the same words twice, and the picture carries
-      // nothing the name does not.
-      thumb.alt = "";
-      item.firstChild.prepend(thumb);
+      // The same row the entity page draws, from the same builder: the
+      // thumbnail, and the preview under the pointer. This list had the
+      // first and not the second while the entity's had both, over the
+      // same files, and a reader who learned the gesture on one screen
+      // found it dead on the other.
+      imageRow(doc, item, { url: source, width: asset.width, height: asset.height });
 
       listEl.append(item);
     }

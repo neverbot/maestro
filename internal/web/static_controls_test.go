@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -423,4 +424,72 @@ func TestTheControlsThatDrawThemselvesAreNotDressedAsBoxes(t *testing.T) {
 		assert.Should(t, !strings.Contains(flat, "accent-color") && !strings.Contains(flat, "height: auto"),
 			"%s in styles.css restates the toggle reset controls.css already makes: %q", rule[0], flat)
 	}
+}
+
+// **A gesture a reader learns on one screen works on the next.** The
+// entity page drew a thumbnail and a preview under the pointer; the
+// images page, which lists the same files from the same library, drew
+// the thumbnail and nothing. Both were written by hand, a fortnight
+// apart, and the second one was never given the half the first had
+// grown — the rule established and not carried one step along, which
+// this repository names as its second most repeated defect and which
+// landed here inside the correction that established the rule.
+//
+// There is one builder now, in rows.js, and this is what holds the
+// lists to it: a third list of images is a decision somebody makes by
+// adding a line here, not a fourth hand-rolled row.
+func TestEveryListOfImagesIsBuiltByTheOneThatDrawsThem(t *testing.T) {
+	t.Parallel()
+	const builder = "static/rows.js"
+
+	source := func(name string) string {
+		raw, err := os.ReadFile(filepath.Join("static", name))
+		assert.NoErr(t, err, "read "+name)
+		return string(raw)
+	}
+
+	// The builder really is the builder, so a guard reading it is not
+	// asserting over an empty file.
+	rows := source("rows.js")
+	for _, want := range []string{"export function imageRow(", "asset-thumb", "image-preview", "image-row"} {
+		assert.Must(t, strings.Contains(rows, want), "%s does not carry %q: the image row moved and this guard did not", builder, want)
+	}
+
+	// Every list of images, named. Each one hands its row to the builder
+	// rather than making the picture itself.
+	for _, page := range []string{"pages/assets.js", "pages/entity.js"} {
+		body := source(page)
+		assert.Should(t, strings.Contains(body, "imageRow("),
+			"%s lists images and does not use rows.js's imageRow: a list that builds its own row is a list "+
+				"the next gesture will not reach", page)
+	}
+
+	// And nobody else draws one. A module naming these classes is a
+	// module building a picture of its own, which is how the two lists
+	// came to disagree.
+	walked := 0
+	err := filepath.WalkDir("static", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".js") {
+			return err
+		}
+		if filepath.ToSlash(path) == builder || strings.Contains(path, "vendor") {
+			return nil
+		}
+		walked++
+		body := string(mustRead(t, path))
+		for _, class := range []string{`"asset-thumb"`, `"image-preview"`} {
+			assert.Should(t, !strings.Contains(body, class),
+				"%s builds %s itself; rows.js's imageRow is the one place an image row is made", path, class)
+		}
+		return nil
+	})
+	assert.NoErr(t, err, "walk static")
+	assert.Must(t, walked > 10, "walked %d modules: this guard is reading the wrong tree", walked)
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	assert.NoErr(t, err, "read "+path)
+	return raw
 }

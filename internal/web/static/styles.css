@@ -2249,7 +2249,6 @@ ol.log-entries {
 }
 .prose.tool h1, .prose.tool h2, .prose.tool h3 { font-family: var(--sans); }
 .log-body .prose > :first-child { margin-top: 0; }
-.log-body .prose > :last-child { margin-bottom: 0; }
 
 /* The one write this band offers: a box the width of the measure, and
    the button under it rather than beside it — a textarea and a control
@@ -2330,6 +2329,50 @@ ol.log-entries {
   border-radius: var(--radius);
   overflow-x: auto;
 }
+/* **Rendered markdown states its own rhythm, because otherwise the
+   browser states it and says something different in each place.**
+   Nothing here declared a margin for a paragraph or a list, so a
+   `.prose` block took whatever the user agent gave it in whatever
+   container it landed in — and the user agent has a rule most people
+   never meet:
+
+     :is(ul, ol, dir, menu) :is(ul, ol, dir, menu) { margin-block: 0 }
+
+   A *descendant* combinator, not a child one. The comment log is an
+   `ol`, so every list inside a comment lost both its margins: the
+   paragraph above a list owned a 12px gap and the paragraph below it
+   sat flush against the last bullet, touching. The same markdown in a
+   field value, which is inside no list, got 15.2px instead — one em of
+   the prose size. Two rhythms for one kind of content, neither of them
+   a number this file contains, and the difference decided by what the
+   block happened to be nested in.
+
+   A reader reported the symptom: the sentence after a list looked stuck
+   to it. */
+.prose p,
+.prose ul,
+.prose ol {
+  margin: 0 0 var(--s3);
+}
+/* The indent is the scale's, not the user agent's 40px — far enough to
+   read as a list and not so far that a nested one walks off the
+   measure. */
+.prose ul,
+.prose ol {
+  padding-left: var(--s5);
+}
+/* A nested list belongs to the item above it, so it opens no gap of its
+   own; the browser's own rule had this right and was taking the outer
+   list's margins with it. */
+.prose li > ul,
+.prose li > ol {
+  margin: var(--s1) 0 0;
+}
+.prose li + li { margin-top: var(--s1); }
+/* **Nothing hangs off the bottom of a block.** The log and a field
+   value each wrote this for themselves, which left every other place
+   prose is rendered without it. */
+.prose > :last-child { margin-bottom: 0; }
 .prose img { max-width: 100%; height: auto; }
 .prose table { border-collapse: collapse; }
 .prose th, .prose td { border: 1px solid var(--line); padding: 0.3rem 0.5rem; }
@@ -2875,7 +2918,6 @@ dl.fields dd.field-prose {
    statement of what the game's writing looks like, and a second one here
    would be the Build It Once rule broken inside the rule's own system. */
 dl.fields dd.field-prose .prose > :first-child { margin-top: 0; }
-dl.fields dd.field-prose .prose > :last-child { margin-bottom: 0; }
 
 /* The quiet control: a button that is not the point of the screen. The
    field editor's "Edit" was the first, and the clause stack's "Remove"

@@ -493,3 +493,56 @@ func mustRead(t *testing.T, path string) []byte {
 	assert.NoErr(t, err, "read "+path)
 	return raw
 }
+
+// **Rendered markdown states its own vertical rhythm.** Nothing in this
+// stylesheet declared a margin for a paragraph or a list inside
+// `.prose`, so each block took the user agent's — and the user agent
+// has a rule with a descendant combinator that most people never meet:
+// `:is(ul, ol, dir, menu) :is(ul, ol, dir, menu) { margin-block: 0 }`.
+// The comment log is an `ol`, so a list inside a comment lost both
+// margins and the paragraph after it sat flush against the last bullet,
+// while the same markdown in a field value got one em instead. Two
+// rhythms for one kind of content, chosen by what the block happened to
+// be nested in, and neither of them a number this file contains.
+//
+// A reader reported the symptom. This is what stops the declaration
+// going away again: the elements markdown is made of are named here,
+// and `.prose` has to have an opinion about each.
+func TestRenderedMarkdownDeclaresItsOwnRhythm(t *testing.T) {
+	t.Parallel()
+	rules := cssRules(t, "styles.css")
+
+	// Which selectors carry a margin for each element markdown renders.
+	declared := map[string]bool{}
+	for _, rule := range rules {
+		body := strings.Join(strings.Fields(rule[1]), " ")
+		if !strings.Contains(body, "margin") {
+			continue
+		}
+		for _, selector := range strings.Split(rule[0], ",") {
+			selector = strings.TrimSpace(selector)
+			for _, element := range []string{"p", "ul", "ol"} {
+				if selector == ".prose "+element {
+					declared[element] = true
+				}
+			}
+		}
+	}
+	for _, element := range []string{"p", "ul", "ol"} {
+		assert.Should(t, declared[element], ".prose %s declares no margin, so the user agent decides it — and what the "+
+			"user agent decides depends on what the block is nested in", element)
+	}
+
+	// And the bottom of a block is flat wherever prose is rendered,
+	// rather than each caller remembering to flatten it: the log and a
+	// field value each wrote that rule for themselves, which left every
+	// other place prose appears without it.
+	flat := false
+	for _, rule := range rules {
+		if strings.TrimSpace(rule[0]) == ".prose > :last-child" && strings.Contains(rule[1], "margin-bottom: 0") {
+			flat = true
+		}
+	}
+	assert.Should(t, flat, "nothing flattens the last child of a .prose block, so the margin under the last "+
+		"paragraph hangs off the bottom of whatever is rendering it")
+}

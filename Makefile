@@ -23,7 +23,14 @@ VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 TEST_DATABASE_URL ?= postgres://maestro:maestro@localhost:$(MAESTRO_DB_HOST_PORT)/maestro?sslmode=disable
 MAESTRO_DB_HOST_PORT ?= 5433
 
-GOLANGCI_LINT_VERSION ?= v2.13.2
+# **The linter tracks Go, so this moves when Go does.** v2.13.2 passed
+# against Go 1.27.1 and failed against 1.27.2 — not over any code, but
+# with `could not load export data: export data version 5 is greater
+# than maximum supported version 4` on the standard library, because the
+# x/tools it carries predates the format that patch release emits. CI
+# took the newer Go before this pin took the newer linter, and the
+# failure named internal/goarch rather than anything in this repository.
+GOLANGCI_LINT_VERSION ?= v2.14.0
 SQLC_VERSION          ?= v1.31.1
 
 # Where `go install` drops binaries, inside CI and out.
@@ -60,9 +67,22 @@ vet:
 # broken repository rather than as a machine that has not run `make
 # tools` — or, worse, as a lint failure. The check is on the binary, not
 # on PATH, because the answer is the same either way.
+# **The pin is checked here, where the tool is used.** `make tools`
+# reinstalls a binary that is not the pin, which only helps somebody who
+# runs it: `lint` ran whatever `golangci-lint` was on PATH, so a machine
+# carrying a different build linted with a different tool and said
+# nothing. That is not hypothetical — it is how a green `make check`
+# sat beside a red CI over this exact tool, with the gate and the gate
+# disagreeing about which binary they meant.
 lint:
 	@command -v golangci-lint >/dev/null || { \
 		echo "golangci-lint not found: run 'make tools', and put $$($(GO) env GOPATH)/bin on your PATH"; \
+		exit 1; \
+	}
+	@golangci-lint version 2>/dev/null | grep -qF ' $(GOLANGCI_LINT_VERSION:v%=%) ' || { \
+		echo "golangci-lint on your PATH is $$(golangci-lint version 2>/dev/null | head -1)"; \
+		echo "this repository pins $(GOLANGCI_LINT_VERSION), which is what CI runs."; \
+		echo "run 'make tools', and make sure $$($(GO) env GOPATH)/bin comes first on your PATH"; \
 		exit 1; \
 	}
 	golangci-lint run

@@ -976,10 +976,24 @@ var viewOutputSchema = &jsonschema.Schema{
 // queryDocumentInput is the input schema of a tool that takes a query
 // document, and it exists because the SDK infers a schema from the Go
 // type and json.RawMessage is a []byte.
+//
+// **It mapped the type to an empty schema, which is not "an object" but
+// "anything".** An empty schema marshals to `true`, so the three tools
+// that take a query published their most important argument as a hole,
+// and a client with nothing to go on serialised the object the agent
+// wrote as a string. The server then refused the string — correctly,
+// and with a message about Go types — so views.validate, views.upsert
+// and views.run could not be called at all from a client that trusts
+// the schema, which is every client. Nothing was wrong with the
+// handlers: an object had simply never reached one.
+//
+// The lesson is narrower than "describe your arguments": the override
+// was *there*, written by somebody who had seen the problem. It is the
+// difference between saying nothing and saying nothing in particular.
 func queryDocumentInput[T any](tool string) *jsonschema.Schema {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-			reflect.TypeFor[json.RawMessage](): {},
+			reflect.TypeFor[json.RawMessage](): queryArgumentSchema,
 		},
 	})
 	if err != nil {
@@ -989,6 +1003,16 @@ func queryDocumentInput[T any](tool string) *jsonschema.Schema {
 		panic(fmt.Sprintf("input schema for %s: %v", tool, err))
 	}
 	return schema
+}
+
+// queryArgumentSchema is what a query argument is: a JSON object, sent
+// as an object. The shape inside it is the query language's, which
+// reference/queries.md teaches and ParseQuery enforces key by key —
+// spelling it out here would be a second statement of a language that
+// already has one, and one of the two would go stale.
+var queryArgumentSchema = &jsonschema.Schema{
+	Type:        "object",
+	Description: "the query document itself, as a JSON object and not as a string containing one",
 }
 
 var viewsRemovedOutputSchema = &jsonschema.Schema{

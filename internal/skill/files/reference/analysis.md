@@ -49,6 +49,30 @@ analyses without an edit. The translation is printed in the trait table
 the analyses carry in their own descriptions, and the refusal above
 names it too.
 
+## When no semantic role fits
+
+Plenty of edges are not about progression at all: a shrine dedicated to
+a deity, a character who serves a faction, an item made of a material.
+The six roles are prerequisite, unlock, containment, spatial,
+availability and reward, and none of those is a dedication. **That is
+not a gap in the vocabulary**, and the reason is what a role is *for*: a
+role exists only to be translated into traits for a type that declares
+none. A seventh role would have to translate into something, and what a
+dedication translates into is "nothing follows this edge" — which the
+trait vocabulary already says, in a word.
+
+So: **leave `semantic_role` empty and declare
+`analysis_traits: ["annotation"]`.**
+
+The second half is the part worth getting right, because leaving both
+empty is a different statement and it is the wrong one. `annotation`
+means the type is deliberately inert, and the orphan check reads it: an
+entity reachable only through an annotated edge is still reported as
+one, which is true, because a dedication is not a way a player arrives
+anywhere. Declare nothing instead and that edge counts as a way in, so
+a shrine nothing leads to looks connected and the check that would have
+told you stays quiet.
+
 **A type with neither is not walked at all.** It is not treated as inert
 and it is not guessed at; it is an edge the engine was told nothing
 about. Silence is the one thing never read as a statement — except in

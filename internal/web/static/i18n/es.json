@@ -736,5 +736,8 @@
   "log.days": "hace {n} días",
   "log.agent": "agente",
   "log.agentOf": "agente de {who}",
-  "entity.info": "Información"
+  "entity.info": "Información",
+  "error.content-the-upload-ended-before-the-body-did": "La subida ha terminado antes que el cuerpo.",
+  "error.content-these-bytes-are-not-the-ones-this-url-was-signed-for-and-nothing": "Estos bytes no son para los que se firmó la URL, y no se ha escrito nada.",
+  "error.version-not-a-number": "La versión no es un número."
 }

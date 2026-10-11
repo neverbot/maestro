@@ -273,6 +273,10 @@ func NewServer(opts Options) *Server {
 	// One image, over a signed URL, for an agent with a command line
 	// and no session (api_image_download.go).
 	s.routeFunc("GET "+imagePath+"{project}/{id}", s.handleImageDownload)
+	// One document, written from a file over a signed URL, so long
+	// prose never passes through an agent's context
+	// (api_doc_upload.go). PUT, because the request *is* the document.
+	s.routeFunc("PUT "+docUploadPath+"{project}", s.handleDocUpload)
 	s.route("GET /version", requireCaller(s.handleVersion))
 	s.route("GET /api/me", requireCaller(s.handleMe))
 	s.routeFunc("POST /api/auth/login", s.handleLogin)
@@ -406,9 +410,13 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)
 	s.registerContentRoute("GET /api/games/{game}/summary", s.handleGameSummary)
 
-	// The prose surface (api_docs.go), mirroring the twelve docs.* MCP
-	// tools plus the two things an agent never needs: a rendered reading
-	// view and a rendered comparison. A document path travels as a query
+	// The prose surface (api_docs.go), mirroring the docs.* MCP tools
+	// plus the two things an agent never needs: a rendered reading view
+	// and a rendered comparison. **docs.upload_url is the one with no
+	// mirror**: it exists to keep a document's bytes out of an agent's
+	// context, and a browser posting a form has no context to spare.
+	// The count used to be written here as "the twelve", and was wrong
+	// by two before anybody noticed. A document path travels as a query
 	// parameter and never as a URL segment — see api_docs.go's header
 	// for why, and for what that buys over the metamodel's by-key/by-id
 	// discriminators.

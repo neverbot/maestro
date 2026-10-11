@@ -69,6 +69,11 @@ var composedMessages = []string{
 	"this instance reads ",
 	"your role in this game is ",
 	"that token belongs to somebody else; it is revoked by the person who created it ",
+	// The document upload's size refusal. **Nothing in a browser can
+	// reach it** — the route is a PUT behind a signature only
+	// docs.upload_url mints — so its English reaches an agent's shell,
+	// which is where the rest of the wire's English goes too.
+	"content: holds at most ",
 }
 
 // serverMessages reads every message this package's handlers write,

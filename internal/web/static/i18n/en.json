@@ -736,5 +736,8 @@
   "log.days": "{n} days ago",
   "log.agent": "agent",
   "log.agentOf": "{who}'s agent",
-  "entity.info": "Information"
+  "entity.info": "Information",
+  "error.content-the-upload-ended-before-the-body-did": "content: the upload ended before the body did",
+  "error.content-these-bytes-are-not-the-ones-this-url-was-signed-for-and-nothing": "content: these bytes are not the ones this URL was signed for, and nothing was written",
+  "error.version-not-a-number": "version: not a number"
 }

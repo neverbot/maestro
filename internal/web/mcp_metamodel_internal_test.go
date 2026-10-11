@@ -68,9 +68,11 @@ func everyToolOverTheWire(t *testing.T) (*Server, *mcp.ClientSession) {
 		Projects:  projSvc,
 		Metamodel: metamodel.New(pool, nil),
 		// And a markdown service, because this is the build with the
-		// most tools on it and the docs.* twelve must be inside the
-		// comparison: a docs tool registered with mcp.AddTool directly
-		// would otherwise never be seen here.
+		// most tools on it and every docs.* tool must be inside the
+		// comparison: one registered with mcp.AddTool directly would
+		// otherwise never be seen here. **No count here**: it said
+		// "the docs.* twelve" and was wrong by two, which is what a
+		// number in a comment does while nothing counts it.
 		Markdown: markdown.New(pool, nil),
 		// And a views service, for the same reason and one domain along.
 		// **This is the shape of the defect this test exists to catch,

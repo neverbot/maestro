@@ -862,6 +862,13 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 			_, err := web.MCPSearch(ctx, w.deps, w.guest, w.game, web.SearchInput{Query: e2eDialogueWord})
 			return err
 		},
+		"docs.upload_url": func() error {
+			version := int32(0)
+			_, err := web.MCPDocsUploadURL(ctx, w.deps, w.guest, w.game, web.DocsUploadURLInput{
+				Path: "lore/guest.md", ExpectedVersion: &version, SHA256: strings.Repeat("b", 64),
+			})
+			return err
+		},
 	}
 
 	swept := 0
@@ -877,7 +884,7 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 		}
 	}
 	assert.Must(t, swept == len(calls), "swept %d tools, the table has %d entries", swept, len(calls))
-	assert.Must(t, swept == 15, "swept %d tools; the fourteen docs.* plus search is 15", swept)
+	assert.Must(t, swept == 16, "swept %d tools; the fifteen docs.* plus search is 16", swept)
 
 	// The document is untouched by all of that: the sweep must not have
 	// been a sequence of refusals that nevertheless changed something.

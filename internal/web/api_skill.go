@@ -2,12 +2,8 @@ package web
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/neverbot/maestro/internal/skill"
@@ -22,28 +18,11 @@ const skillZipPath = "/skill.zip"
 // into a transcript is worthless by the time anybody reads it.
 const skillURLTTL = 5 * time.Minute
 
-// signDownloadURL returns the signature that admits a request to path
-// until exp. It signs the skill bundle's URL and an image's, which is
-// why it takes the path rather than knowing one.
-func signDownloadURL(key []byte, path string, exp int64) string {
-	mac := hmac.New(sha256.New, key)
-	// The separator is a byte that cannot occur in a URL path, so
-	// ("/skill.zip", 12) and ("/skill.zi", "p12") cannot produce one
-	// message. It is the same length-confusion this repository's bundle
-	// hash length-prefixes its entries to avoid.
-	mac.Write([]byte(path))
-	mac.Write([]byte{0})
-	mac.Write([]byte(strconv.FormatInt(exp, 10)))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// signedSkillURL builds the whole download URL: base (which may be empty,
-// giving a path-only URL the agent resolves against the server it is
-// already talking to) plus the path, the expiry and the signature.
+// signedSkillURL builds the whole download URL. The signing is
+// signed_url.go's, shared with the image download and the document
+// upload.
 func signedSkillURL(key []byte, base string, exp int64) string {
-	return strings.TrimSuffix(base, "/") + skillZipPath +
-		"?exp=" + strconv.FormatInt(exp, 10) +
-		"&sig=" + signDownloadURL(key, skillZipPath, exp)
+	return signedURL(key, base, skillZipPath, nil, time.Unix(exp, 0))
 }
 
 // handleSkillZip serves the embedded bundle to a caller holding a live
@@ -72,26 +51,6 @@ func (s *Server) handleSkillZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="maestro-skill.zip"`)
 	w.Header().Set("Content-Length", strconv.Itoa(len(archive)))
 	_, _ = w.Write(archive)
-}
-
-// signedURLIsLive reports whether this request carries a signature this
-// process minted, for this path, that has not expired. It guards the
-// skill bundle and the image download, which is why it reads the path
-// off the request rather than being told one.
-func (s *Server) signedURLIsLive(r *http.Request) bool {
-	exp, err := strconv.ParseInt(r.URL.Query().Get("exp"), 10, 64)
-	if err != nil {
-		return false
-	}
-	if time.Now().Unix() > exp {
-		return false
-	}
-	sig := r.URL.Query().Get("sig")
-	want := signDownloadURL(s.downloadURLKey, r.URL.Path, exp)
-	// Constant-time, over the hex text rather than the decoded bytes: a
-	// malformed hex signature is unequal either way, and this arm never
-	// has to decide what a decode error means.
-	return hmac.Equal([]byte(want), []byte(sig))
 }
 
 // externalBaseURL is the scheme and host an agent used to reach this

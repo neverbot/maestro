@@ -3,7 +3,6 @@ package web
 import (
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,10 +45,7 @@ const imageURLTTL = time.Hour
 // server it is already talking to) plus the path, the expiry and the
 // signature.
 func signedImageURL(key []byte, base string, projectID, id uuid.UUID, exp int64) string {
-	path := imagePath + projectID.String() + "/" + id.String()
-	return strings.TrimSuffix(base, "/") + path +
-		"?exp=" + strconv.FormatInt(exp, 10) +
-		"&sig=" + signDownloadURL(key, path, exp)
+	return signedURL(key, base, imagePath+projectID.String()+"/"+id.String(), nil, time.Unix(exp, 0))
 }
 
 // handleImageDownload serves one image's bytes to a caller holding a

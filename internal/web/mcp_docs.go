@@ -2,8 +2,11 @@ package web
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -997,7 +1000,7 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"content. %s",
 			markdown.MaxBodyBytes, markdown.MaxIndexedChars, markdown.MaxPathLen,
 			markdown.MaxPathSegments, markdown.MaxKindLen, markdown.MaxMessageLen,
-			markdown.MaxLinksPerWrite, markdown.MaxRoleLen, retryAdvice),
+			markdown.MaxLinksPerWrite, markdown.MaxRoleLen, retryAdvice+" "+uploadAdvice),
 		OutputSchema: documentOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteInput) (DocumentOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -1038,11 +1041,48 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"a batch carries **at most %d items** — over that is invalid_input at path "+
 				"`items` naming both numbers, the same ceiling entities.upsert and "+
 				"relations.upsert answer to. %s",
-			markdown.MaxBodyBytes, metamodel.MaxBulkItems, retryAdvice),
+			markdown.MaxBodyBytes, metamodel.MaxBulkItems,
+			retryAdvice+" "+uploadAdvice+" A batch of long documents is the worst case for that: "+
+				"every body in it is written out through this one call. Send the short ones here "+
+				"and the long ones one upload URL at a time."),
 		OutputSchema: docsWriteManyOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteManyInput) (DocsWriteManyOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPDocsWriteMany(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "docs.upload_url",
+		Description: fmt.Sprintf(
+			"Sign a URL that writes one document from a file on disk, **so its bytes never pass "+
+				"through your context**. This is how to write any document worth the name: "+
+				"docs.write takes the content as an argument and charges you every byte of it, "+
+				"twice if you read the document before rewriting it. "+
+				"sha256 is the hex SHA-256 of the exact bytes you will send, the whole file with "+
+				"its frontmatter — `shasum -a 256 <file>` — and the URL is signed over it, so it "+
+				"can write those bytes and no others. expected_version is required and means what "+
+				"it means on docs.write: 0 for a document that must not exist yet, or the version "+
+				"you read. kind and message are fixed now, not at upload time. "+
+				"Then send the file: `curl -fsS -X PUT --data-binary @<file> '<upload_url>'`. "+
+				"**Quote the URL — it contains `&` — and send no Authorization header**: the "+
+				"signature is the credential, and the token stays with you. "+
+				"The answer is the document's path, kind, title, new version and updated_at, and "+
+				"not the body you just sent. "+
+				"Good for %d seconds and for one write, on top of that exact version: the write "+
+				"that lands moves the document past it, so sending the same URL twice answers "+
+				"version_conflict the second time. "+
+				"Each refusal says what to do. 401: the URL expired or was edited — sign another. "+
+				"409 version_conflict: somebody wrote first — read the document again and decide. "+
+				"400: the bytes did not match sha256, or there were more than %d of them, and "+
+				"**nothing was written** either way.",
+			int(uploadURLTTL.Seconds()), markdown.MaxBodyBytes),
+		OutputSchema: docsUploadURLOutputSchema,
+		// Minting a URL writes nothing. The write happens when the file
+		// is sent, which is not a tool call at all.
+		Annotations: readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsUploadURLInput) (DocsUploadURLOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPDocsUploadURL(ctx, deps, caller, projectID, in)
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
@@ -1511,3 +1551,137 @@ var docsLinksOutputSchema = &jsonschema.Schema{
 		"truncated":   boolSchema(),
 	},
 }
+
+// uploadAdvice is what both writing tools say about size, in one place
+// so the two cannot come to disagree about where the line is.
+//
+// **It names a number rather than saying "large".** An agent has no way
+// to read "significant" and act on it, and the cost is not the server's
+// bound — a megabyte is generous — but the tokens the content costs to
+// emit through a tool call, twice over if the document was read before
+// being rewritten.
+var uploadAdvice = fmt.Sprintf(
+	"**This tool is for short prose: use it under about %d bytes and use docs.upload_url above "+
+		"that.** The content is an argument here, so every byte of it is written out through this "+
+		"call and charged to your context; an upload URL takes the file straight off disk and "+
+		"nothing passes through you. The hard ceiling is %d bytes either way, and hitting it is "+
+		"not the reason to switch — the reason is that a long document costs you the whole of its "+
+		"length to send.",
+	uploadAdviceBytes, markdown.MaxBodyBytes)
+
+// uploadAdviceBytes is where the advice puts the line. It is a
+// judgement and not a limit: nothing refuses a write above it.
+const uploadAdviceBytes = 16 << 10
+
+// --- The upload URL ---------------------------------------------------
+
+// DocsUploadURLInput is the argument shape of docs.upload_url.
+type DocsUploadURLInput struct {
+	ScopedArgs
+	Path            string  `json:"path"`
+	ExpectedVersion *int32  `json:"expected_version"`
+	SHA256          string  `json:"sha256"`
+	Kind            *string `json:"kind,omitempty"`
+	Message         string  `json:"message,omitempty"`
+}
+
+// DocsUploadURLOutput is the minted URL and when it stops working.
+type DocsUploadURLOutput struct {
+	UploadURL        string `json:"upload_url"`
+	ExpiresAt        string `json:"expires_at"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
+	MaxBytes         int    `json:"max_bytes"`
+}
+
+var docsUploadURLOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"upload_url", "expires_at", "expires_in_seconds", "max_bytes"},
+	Properties: map[string]*jsonschema.Schema{
+		"upload_url":         stringSchema(),
+		"expires_at":         stringSchema(),
+		"expires_in_seconds": {Type: "integer"},
+		"max_bytes":          {Type: "integer"},
+	},
+}
+
+// MCPDocsUploadURL implements docs.upload_url.
+func MCPDocsUploadURL(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	in DocsUploadURLInput) (DocsUploadURLOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return DocsUploadURLOutput{}, err
+	}
+	return docsUploadURL(ctx, deps, caller, projectID, in)
+}
+
+func docsUploadURL(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	in DocsUploadURLInput) (DocsUploadURLOutput, error) {
+	// **Every argument is checked here, where a refusal is a sentence an
+	// agent reads, rather than at the upload, where it would be an HTTP
+	// status arriving in a shell after the bytes went up the wire.**
+	if in.ExpectedVersion == nil {
+		return DocsUploadURLOutput{}, &metamodel.ValidationError{
+			Code: metamodel.CodeInvalidInput,
+			Fields: []metamodel.FieldError{{Path: "expected_version",
+				Message: "is required: pass 0 to create a document that must not exist yet, " +
+					"or the version you read to replace the one that is there"}},
+		}
+	}
+	if problems := uploadProblems(in); len(problems) > 0 {
+		return DocsUploadURLOutput{}, &metamodel.ValidationError{
+			Code: metamodel.CodeInvalidInput, Fields: problems,
+		}
+	}
+	// **A URL nothing can verify is not minted.** The signing key comes
+	// from the server through MCPDeps, and a caller that assembles deps
+	// by hand and forgets it would otherwise get a well-formed URL that
+	// answers 401 to every upload — which reads as "the signature is
+	// broken" and is really "there was no key". That happened twice on
+	// this surface before it was made to say so: once for the image
+	// download, found by a test, and once here.
+	if len(deps.DownloadURLKey) == 0 {
+		return DocsUploadURLOutput{}, errors.New(
+			"this server has no signing key, so it cannot mint an upload URL")
+	}
+	ticket := docUploadTicket{
+		Path:            in.Path,
+		ExpectedVersion: *in.ExpectedVersion,
+		SHA256:          strings.ToLower(strings.TrimSpace(in.SHA256)),
+		Message:         in.Message,
+		UserID:          caller.UserID,
+		TokenID:         caller.TokenID,
+	}
+	if in.Kind != nil {
+		ticket.Kind = *in.Kind
+	}
+	expiry := time.Now().Add(uploadURLTTL)
+	return DocsUploadURLOutput{
+		UploadURL: signedDocUploadURL(deps.DownloadURLKey, externalBaseURLFrom(ctx),
+			projectID, ticket, expiry),
+		ExpiresAt:        expiry.UTC().Format(time.RFC3339),
+		ExpiresInSeconds: int(uploadURLTTL.Seconds()),
+		MaxBytes:         markdown.MaxBodyBytes,
+	}, nil
+}
+
+// uploadProblems reads the two arguments the URL is signed over and
+// cannot be corrected afterwards.
+func uploadProblems(in DocsUploadURLInput) []metamodel.FieldError {
+	var out []metamodel.FieldError
+	if strings.TrimSpace(in.Path) == "" {
+		out = append(out, metamodel.FieldError{Path: "path", Message: "is required"})
+	}
+	sum := strings.ToLower(strings.TrimSpace(in.SHA256))
+	if len(sum) != sha256HexLen {
+		out = append(out, metamodel.FieldError{Path: "sha256",
+			Message: fmt.Sprintf("is the hex SHA-256 of the exact bytes you will send: %d characters, and this is %d",
+				sha256HexLen, len(sum))})
+		return out
+	}
+	if _, err := hex.DecodeString(sum); err != nil {
+		out = append(out, metamodel.FieldError{Path: "sha256", Message: "is not hexadecimal"})
+	}
+	return out
+}
+
+// sha256HexLen is how long a SHA-256 is written out.
+const sha256HexLen = 64

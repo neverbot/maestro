@@ -75,7 +75,7 @@ func newRESTFixture(t *testing.T) restFixture {
 // separates the two surfaces at this layer.
 func (f restFixture) deps() web.MCPDeps {
 	return web.MCPDeps{Identity: f.ids, Projects: f.proj, Metamodel: f.mm, Markdown: f.md,
-		Comments: f.log, Views: f.lib}
+		Comments: f.log, Views: f.lib, DownloadURLKey: f.srv.DownloadURLKeyForTest()}
 }
 
 func (f restFixture) caller() web.Caller { return f.agent }

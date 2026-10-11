@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -146,9 +148,17 @@ func (s *Server) SignedSkillURLForTest(base string, exp int64) string {
 // expiry, for the test that presents a signature minted for a different
 // path.
 func (s *Server) SkillURLSignatureForTest(path string, exp int64) string {
-	return signDownloadURL(s.downloadURLKey, path, exp)
+	args := url.Values{}
+	args.Set("exp", strconv.FormatInt(exp, 10))
+	return signatureOver(s.downloadURLKey, path, args)
 }
 
 // SkillZipPathForTest is the download route, so a test names it from the
 // same constant the handler and the signer do.
 func SkillZipPathForTest() string { return skillZipPath }
+
+// DownloadURLKeyForTest is this server's signing key, so a test that
+// assembles MCPDeps by hand signs with the key the handlers verify
+// against. Without it a minted URL is well formed and answers 401 to
+// everything, which looks like a broken signature and is an absent one.
+func (s *Server) DownloadURLKeyForTest() []byte { return s.downloadURLKey }

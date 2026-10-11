@@ -5,6 +5,43 @@ script, a zone's lore, the game bible. `docs.write` creates and rewrites
 one, `docs.read` reads it back, and `docs.write_many` does several in one
 call.
 
+## Send a long document, do not write it out
+
+**`docs.write` charges you the whole document.** Its content is a tool
+argument, so every byte is written out through the call and paid for in
+your context, and paid for twice when you read the document before
+rewriting it. A page of lore is nothing. A game bible is most of a
+session.
+
+So for anything of size, hand over a file instead:
+
+1. Write the document to a file.
+2. `shasum -a 256 <file>` — the hex digest, which is what the URL gets
+   signed over.
+3. `docs.upload_url` with the path, the `expected_version` you would
+   have passed to `docs.write`, and that digest.
+4. `curl -fsS -X PUT --data-binary @<file> '<upload_url>'` — quote it,
+   it has an `&` in it, and send **no** Authorization header. The
+   signature is the credential; your token stays with you.
+
+The answer names the new version and not the body you just sent.
+
+**Where the line sits**: under about sixteen kilobytes, `docs.write` is
+simpler and the difference does not matter. Above that, use the URL. The
+hard ceiling is a megabyte on both and is not the reason to choose —
+the reason is what the content costs you to emit.
+
+The URL is good for five minutes and for one write, on top of the exact
+version you named: the write that lands moves the document past it, so
+sending the same URL again answers `version_conflict`. Each refusal says
+what to do — `401` means it expired or was edited, so sign another;
+`409` means somebody wrote first, so read and decide again; `400` means
+the bytes did not match the digest, and nothing was written.
+
+`docs.write_many` is the worst case for all of this, since every body in
+the batch goes out through one call. Send the short ones there and the
+long ones one URL at a time.
+
 ## The line between a field and a document
 
 **Both are markdown and both are rendered, so the choice is never about

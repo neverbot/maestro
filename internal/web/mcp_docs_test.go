@@ -478,6 +478,19 @@ func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 			})
 			return err
 		},
+		// **Minting a URL for another game's document must be refused
+		// here, before anything is signed.** A signature is the whole
+		// authorisation at the other end, so a URL minted across the
+		// binding would be one an agent of this game could use to write
+		// into that one, with nothing left to check it.
+		"docs.upload_url": func() error {
+			version := int32(0)
+			_, err := web.MCPDocsUploadURL(ctx, f.deps, f.caller, f.other, web.DocsUploadURLInput{
+				Path: "lore/x.md", ExpectedVersion: &version,
+				SHA256: strings.Repeat("a", 64),
+			})
+			return err
+		},
 	}
 
 	registered := 0

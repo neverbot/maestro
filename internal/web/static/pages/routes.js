@@ -20,7 +20,9 @@ export const NOTE_ROUTES = t("routes.note");
 
 // The empty state's heading, and what its sentence is about.
 export const NO_ROUTES_HEADING = t("routes.none.heading");
-export const SAVES_ROUTES = t("routes.saves");
+// A key, for the reason doc.js's ATTACHES_IT gives: whoWrites is
+// handed one and looks up the half this reader needs.
+export const SAVES_ROUTES = "routes.saves";
 
 // The three, in the reader's words, keyed by the engine's own spellings.
 export const STATUS_WORDS = {

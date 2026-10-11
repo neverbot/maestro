@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -236,4 +237,100 @@ func TestNoModuleHardCodesASentence(t *testing.T) {
 	}
 	sort.Strings(found)
 	assert.Must(t, len(found) == 0, "a module says in English what the catalogue should say: %s", strings.Join(found, "; "))
+}
+
+// staticModules is every module this front end ships, vendored code
+// excepted.
+func staticModules(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir("static", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".js") {
+			return err
+		}
+		if strings.Contains(path, "vendor") {
+			return nil
+		}
+		out = append(out, path)
+		return nil
+	})
+	assert.NoErr(t, err, "walk static")
+	assert.Must(t, len(out) > 10, "found %d modules; this is reading the wrong tree", len(out))
+	return out
+}
+
+func readStatic(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	assert.NoErr(t, err, "read "+path)
+	return string(raw)
+}
+
+// **whoWrites takes a key, and two screens handed it a sentence.**
+// `whoWrites(role, k)` looks up `k + ".agent"` or `k + ".viewer"`, so a
+// caller that translated its key first asked the catalogue for
+// `lo pega a algo.agent` — which nothing has, and this product renders
+// a missing key as the key by design. A document with nothing attached
+// said "lo pega a algo.agent" on the page, and the routes list said the
+// same of itself; both had, for as long as they had the state at all.
+//
+// The mistake is invisible at the call site, where `whoWrites(role,
+// ATTACHES_IT)` reads exactly like the two that are right. So this
+// checks the constants: every argument resolves to a key with both
+// halves, and no such key also exists bare, since a bare entry is what
+// lets the mistake render something plausible instead of a key.
+func TestWhoWritesIsHandedAKeyAndNotASentence(t *testing.T) {
+	t.Parallel()
+	source := catalogue(t, sourceLocale)
+
+	// The exported constants of every module, as `name -> literal` when
+	// the literal is a bare string, and `name -> ""` when it is a call.
+	constant := regexp.MustCompile(`(?m)^export const (\w+) = (t\()?"([^"]*)"`)
+	literals := map[string]struct {
+		key        string
+		translated bool
+	}{}
+	for _, path := range staticModules(t) {
+		for _, m := range constant.FindAllStringSubmatch(readStatic(t, path), -1) {
+			literals[m[1]] = struct {
+				key        string
+				translated bool
+			}{m[3], m[2] != ""}
+		}
+	}
+
+	call := regexp.MustCompile(`whoWrites\(\s*[^,]+,\s*([A-Za-z_][\w.]*|"[^"]*")\s*\)`)
+	checked := 0
+	for _, path := range staticModules(t) {
+		for _, m := range call.FindAllStringSubmatch(readStatic(t, path), -1) {
+			arg := m[1]
+			var key string
+			switch {
+			case strings.HasPrefix(arg, `"`):
+				key = strings.Trim(arg, `"`)
+			default:
+				held, ok := literals[arg]
+				if !ok {
+					// A parameter being forwarded, which is whoWrites
+					// itself and the frame's own helper.
+					continue
+				}
+				assert.Should(t, !held.translated, "%s hands whoWrites %s, which is t(%q) — a sentence, not a key, "+
+					"so the lookup becomes %q and renders as itself", path, arg, held.key, held.key+".agent")
+				key = held.key
+			}
+			if key == "" {
+				continue
+			}
+			checked++
+			for _, half := range []string{".agent", ".viewer"} {
+				_, ok := source[key+half]
+				assert.Should(t, ok, "%s asks whoWrites for %q and the catalogue has no %q", path, key, key+half)
+			}
+			_, bare := source[key]
+			assert.Should(t, !bare, "%q exists bare as well as in halves: a caller that translates it first then "+
+				"renders a key, and the bare entry is what makes that look like prose", key)
+		}
+	}
+	assert.Must(t, checked >= 4, "checked %d whoWrites arguments; this guard is reading the wrong place", checked)
 }

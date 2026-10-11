@@ -28,7 +28,12 @@ import {
 
 // The empty state, in the page rather than in the shell.
 export const NOT_ATTACHED_HEADING = t("document.notAttached.heading");
-export const ATTACHES_IT = t("document.attachesIt");
+// **A key, not a sentence.** whoWrites appends `.agent` or `.viewer`
+// and looks the result up, so handing it a translated string asks the
+// catalogue for `lo pega a algo.agent` — which nothing has, and a
+// missing key renders as the key. That is what this page showed under
+// "Attached to nothing" for as long as it has had that state.
+export const ATTACHES_IT = "document.attachesIt";
 // A relative specifier, not "/static/app.js": the browser resolves it
 // against this module's own URL and gets the same file either way, and
 // Node — which internal/web/jstest drives this page with — can resolve

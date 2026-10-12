@@ -50,9 +50,11 @@ record of who wrote each one.
 
 Prose is not the only thing that belongs beside a thing. A map of the
 region a mission happens in, a reference picture of what a place is
-meant to feel like: choose a file on the thing's own page and it is
-there, with the rest of the game's images, from then on. Hovering a name
-shows the picture without leaving the page.
+meant to feel like: drop the files onto the thing's own page, or choose
+them, and they are there, with the rest of the game's images, from then
+on. Several at once, each one shown and weighed before it goes, and any
+one of them taken back out of the list before you send it. Hovering a
+name shows the picture without leaving the page.
 
 This is the one thing on this site an agent cannot do. A file arrives
 because a person chose it; an agent is told what is attached when it

@@ -747,5 +747,6 @@
   "entity.attachPartly": "{done} of {total} attached. The rest are still here, with what the server said about each.",
   "entity.attachProgress": "Sending",
   "unit.file": "file",
-  "unit.files": "files"
+  "unit.files": "files",
+  "entity.attachDropNow": "Drop them here to attach them."
 }

@@ -27,7 +27,7 @@ function check(what, got, want) {
   console.log("FAIL " + what + "\n  got  " + JSON.stringify(got) + "\n  want " + JSON.stringify(want));
 }
 
-const { entityBody, attachControl } = await import("../static/pages/entity.js");
+const { entityBody, attachControl, wireImageWrites } = await import("../static/pages/entity.js");
 const { weigh } = await import("../static/rows.js");
 const doc = dom.document;
 
@@ -154,11 +154,13 @@ function stub(options = {}) {
 }
 
 const partsOf = (control) => {
-  const form = control.children[1];
+  const form = control.children.find((child) => child.tagName === "form");
   const nodes = walk(form);
   return {
     form,
     open: control.children[0],
+    dropNote: control.children.find(
+      (child) => child.getAttribute && child.getAttribute("class") === "attach-drop-note"),
     file: nodes.find((el) => el.tagName === "input"),
     label: nodes.find((el) => el.tagName === "label"),
     bounds: nodes.find((el) => (el.getAttribute && el.getAttribute("class")) === "attach-bounds"),
@@ -199,6 +201,11 @@ const inRow = (row, className) =>
   check("and the form is closed until it is asked for", parts.form.hidden, true);
 
   check("the bounds are stated before anything is chosen", parts.bounds.textContent !== "", true);
+  // **The sentence that names the drop is outside the form.** Inside
+  // it, it would be readable only once the form is open — which is the
+  // one moment a person is not about to drag a file at a closed one.
+  check("and what a drop would do is said outside the form, which is shut",
+    parts.dropNote.textContent, "Drop them here to attach them.");
   check("the picker admits only what the server admits",
     parts.file.accept, "image/png,image/jpeg,image/webp");
   // **Several in one gesture.** A designer arrives having chosen the
@@ -413,12 +420,100 @@ const inRow = (row, className) =>
   const fresh = doc.createElement("section");
   fresh.className = "entity-images";
   control.dropOn(fresh);
-  await zone.dispatch("dragenter", carrying([]));
-  check("the section the redraw threw away no longer answers a drag",
-    zone.getAttribute("class"), "entity-images");
+  // **Asserted on the old node and not on the new one.** Watching the
+  // zone that was thrown away light up proves nothing: the handlers
+  // light whichever zone the control is pointed at, so a stale listener
+  // on the discarded section would have lit the visible one and this
+  // check would have passed with the listeners still attached.
+  check("the section the redraw threw away is not listening at all",
+    Object.entries(zone.listeners).map(([kind, handlers]) => [kind, handlers.length]),
+    [["dragenter", 0], ["dragover", 0], ["dragleave", 0], ["drop", 0]]);
+  await zone.dispatch("drop", carrying([fileOf("stale.png", 128)]));
+  check("so a drag over it does nothing to the form",
+    queueRows(parts).map((row) => inRow(row, "attach-name").textContent), ["dropped.png"]);
   await fresh.dispatch("drop", carrying([fileOf("second.png", 128)]));
   check("and the one a person can see does",
     queueRows(parts).map((row) => inRow(row, "attach-name").textContent), ["dropped.png", "second.png"]);
+}
+
+// --- The knot the whole section hangs from ------------------------------
+//
+// **Driven through the function the page calls, not through the control
+// alone.** The control hands the focus back to the word that opened its
+// form and the page then *replaces* that word, so a test that only ever
+// drives the control sees a focus that the product loses — which is what
+// happened, and what a browser showed.
+
+{
+  const attached = [];
+  const detached = [];
+  let listing = [IMAGE];
+  const opened = {
+    client: {
+      uploadAsset: async () => ({ ok: true, result: { id: "a9" } }),
+      attachEntityImage: async (typeKey, key, id) => {
+        attached.push(id);
+        listing = [...listing, { ...IMAGE, id, filename: "second.png" }];
+        return { ok: true, result: { items: listing } };
+      },
+      detachEntityImage: async (typeKey, key, id) => {
+        detached.push(id);
+        listing = listing.filter((item) => item.id !== id);
+        return { ok: true, result: { items: listing } };
+      },
+    },
+  };
+  const model = { ...MODEL, images: listing };
+  const body = entityBody(doc, "azeroth", model);
+  const errors = doc.createElement("p");
+  doc.activeElement = null;
+
+  const section = wireImageWrites(doc, body, opened, model, errors);
+  check("the writes are wired onto the section the page already drew",
+    [section.getAttribute("class"), !!section.children.find((c) => (c.getAttribute && c.getAttribute("class")) === "attach")],
+    ["entity-images", true]);
+  check("and nothing is focused by a page merely loading", doc.activeElement, null);
+
+  // The section is the drop zone, which is the whole reason the control
+  // is told which element it is in.
+  const control = section.children.find((c) => (c.getAttribute && c.getAttribute("class")) === "attach");
+  await section.dispatch("dragenter", { preventDefault() {}, dataTransfer: { types: ["Files"] } });
+  check("the section the page drew is the thing a file is dropped on",
+    section.getAttribute("class"), "entity-images dropping");
+  await section.dispatch("dragleave", {});
+
+  // --- An attach that lands --------------------------------------------
+  const parts = partsOf(control);
+  await parts.open.dispatch("click");
+  parts.file.files = [fileOf("second.png", 64)];
+  await parts.file.dispatch("change");
+  await parts.form.dispatch("submit", { preventDefault() {} });
+
+  const after = body.querySelector(".entity-images");
+  check("the image that landed is a row in the redrawn section",
+    walk(after).filter((el) => el.tagName === "li").length, 2);
+  const freshControl = after.children.find((c) => (c.getAttribute && c.getAttribute("class")) === "attach");
+  check("the redrawn section carries a control again", !!freshControl, true);
+  // **The control that had the focus was thrown away by this redraw.**
+  // Handing it back is the page's job, because the page is what threw
+  // it away.
+  check("and the focus is on its word, not lost with the one that was replaced",
+    doc.activeElement === freshControl.children[0], true);
+  check("which is the word that opens the form", freshControl.children[0].textContent, "Attach an image");
+  // The gesture follows the section that replaced the one it was on.
+  await after.dispatch("dragenter", { preventDefault() {}, dataTransfer: { types: ["Files"] } });
+  check("and a drop still works on the section a person can now see",
+    after.getAttribute("class"), "entity-images dropping");
+  await after.dispatch("dragleave", {});
+
+  // --- A detach ---------------------------------------------------------
+  const off = walk(after).find((el) => (el.getAttribute && el.getAttribute("class")) === "quiet image-detach");
+  await off.dispatch("click");
+  check("the row a person took off is gone", detached, ["a1"]);
+  const last = body.querySelector(".entity-images");
+  check("and the focus did not go with the button that vanished with its row",
+    doc.activeElement === last.children.find((c) => (c.getAttribute && c.getAttribute("class")) === "attach").children[0],
+    true);
 }
 
 // --- What the library weighs -------------------------------------------

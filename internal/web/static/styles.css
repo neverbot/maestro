@@ -3243,8 +3243,14 @@ pre.document {
   margin-top: var(--s3);
 }
 
+/* **The measure is stated and was inherited.** With only
+   `justify-items: start`, the one column sized itself to the widest
+   thing in it — which was the bounds sentence — so the queue's rows
+   were as wide as a sentence happened to be and would have changed
+   width in the next language. */
 .attach-form {
   display: grid;
+  grid-template-columns: minmax(0, 34rem);
   gap: var(--s2);
   justify-items: start;
   margin-top: var(--s2);
@@ -3264,12 +3270,22 @@ pre.document {
   color: var(--muted);
 }
 
-/* The chosen file, before it is sent. Same box as the row's thumbnail,
-   because it is about to become one, and a little taller because this
-   is where somebody checks they picked the right map. */
+/* The chosen file, before it is sent: taller than the row's own
+   thumbnail, because this is where somebody checks they picked the
+   right map.
+ *
+   **A fixed box, and that is the whole point of it.** Sized to its own
+   aspect it was 63px wide beside a 40px one, so the filenames started
+   at two different places and the list had no column to read down.
+   `contain` rather than the row thumbnail's `cover`: these are maps and
+   diagrams, and a crop of a map is a different map. */
 .attach-thumb {
+  width: 3.5rem;
   height: 2.5rem;
-  max-width: 5rem;
+  max-width: none;
+  object-fit: contain;
+  background: var(--paper);
+  flex: none;
 }
 
 /* --- What is about to be sent ----------------------------------------
@@ -3356,6 +3372,21 @@ pre.document {
 
 .attach-progress::-moz-progress-bar {
   background: var(--focus);
+}
+
+/* The sentence that says what the lit box is for. It is in the markup
+   from the start and shown only under a drag, because the policy admits
+   no inline style and nothing could have added it at the moment it is
+   needed. */
+.attach-drop-note {
+  display: none;
+  margin: var(--s2) 0 0;
+  color: var(--focus);
+  font-size: 0.8rem;
+}
+
+.entity-images.dropping .attach-drop-note {
+  display: block;
 }
 
 /* --- The drop --------------------------------------------------------

@@ -683,12 +683,70 @@ function imageSection(doc, model, detach) {
   return section;
 }
 
+// wireImageWrites is the knot the images section hangs from: the attach,
+// the detach, and the redraw both of them end in.
+//
+// **It is a function because it was eight lines inside the page.** The
+// three are one mechanism — each write redraws the section, and the
+// fresh section needs the other two again — and while they sat inside
+// `entityPage` nothing could drive them without a whole shell, which is
+// precisely how the focus below came to be dropped: the control put it
+// back on its own word and the redraw then threw that word away.
+export function wireImageWrites(doc, body, opened, model, errorEl) {
+  const { type_key: typeKey, key } = model.entity;
+
+  // `keep` is a control that must survive the redraw, with its form
+  // open on files that failed. `settle` says the redraw followed
+  // something a person did, so the focus they lost is handed back.
+  const wire = (items, keep, settle) => {
+    const fresh = redrawImages(doc, body, model, items, detach);
+    if (keep) {
+      fresh.append(keep);
+      // The section that carried the drop has just been replaced, so
+      // the gesture is pointed at the one a person can now see.
+      if (typeof keep.dropOn === "function") keep.dropOn(fresh);
+      return fresh;
+    }
+    const control = attachControl(doc, opened, typeKey, key, afterAttach, fresh);
+    fresh.append(control);
+    if (settle && typeof control.focusOpener === "function") control.focusOpener();
+    return fresh;
+  };
+
+  // What an attach ends in. It is a wrapper and not `wire` itself
+  // because the two callers differ in exactly one thing: a person
+  // attached these, so the focus their closing form gave up is handed
+  // to the control that replaces it. The build below is not a person
+  // doing anything, and a page that moves the focus on load moves it
+  // away from wherever a reader meant to be.
+  const afterAttach = (items, keep) => wire(items, keep, true);
+
+  const detach = async (image, button) => {
+    button.disabled = true;
+    const gone = await opened.client.detachEntityImage(typeKey, key, image.id);
+    if (!gone.ok) {
+      button.disabled = false;
+      say(errorEl, gone.error.message);
+      return;
+    }
+    // The row this button was in is about to stop existing, and with it
+    // the focus.
+    wire(gone.result.items, null, true);
+  };
+
+  // The section was built before the writes existed, so it is rebuilt
+  // once with them rather than patched. Nothing is focused here: a page
+  // that moves the focus on load moves it away from wherever a reader
+  // meant to be.
+  return wire(model.images);
+}
+
 // redrawImages replaces one entity's image section in place, from the
 // listing an attach or a detach answered with. **Not a page reload**:
 // the reader is looking at the thing they just changed.
 function redrawImages(doc, root, model, images, detach) {
   const fresh = imageSection(doc, { ...model, images }, detach);
-  const current = root.querySelector("section.entity-images");
+  const current = root.querySelector(".entity-images");
   if (current) current.replaceWith(fresh);
   return fresh;
 }
@@ -804,7 +862,18 @@ export function attachControl(doc, opened, typeKey, key, onDone, zone) {
   actions.append(send, cancel);
 
   form.append(pick, bounds, queueList, actions, error);
-  holder.append(open, form);
+
+  // **What the lit zone means, in words, while it is lit.** The dashed
+  // box alone announces the gesture only to somebody who already knew
+  // it was there, and the sentence that names it lives inside the form
+  // — which is closed, which is exactly when a person is most likely to
+  // be dragging a file at this page. It is outside the form for that
+  // reason, and the stylesheet shows it only under a drag.
+  const dropNow = doc.createElement("p");
+  dropNow.className = "attach-drop-note";
+  dropNow.textContent = t("entity.attachDropNow");
+
+  holder.append(open, dropNow, form);
 
   // The queue: one entry per file a person has chosen or dropped, in the
   // order they arrived. `note` is whatever was said about this one,
@@ -1021,6 +1090,15 @@ export function attachControl(doc, opened, typeKey, key, onDone, zone) {
     return zoned;
   };
   holder.dropOn(zone || holder);
+
+  // **Where the focus goes when this control is replaced.** `close`
+  // puts it back on the word that opened the form, and that word is
+  // then thrown away by the redraw the attach asks for — so the page
+  // that does the throwing is the only thing that can finish the job,
+  // and this is what it calls.
+  holder.focusOpener = () => {
+    if (typeof open.focus === "function") open.focus();
+  };
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1709,43 +1787,7 @@ export async function entityPage(opened) {
     // only for a person who may write, like every other control here,
     // and the section redraws itself from the answer rather than
     // reloading a page the reader is in the middle of.
-    if (mayWrite) {
-      const { type_key: typeKey, key } = model.entity;
-      // The two writes and the redraw are one knot: detaching redraws
-      // the section, and the fresh section needs both of them again.
-      //
-      // **A control that is handed back is moved, not rebuilt.** An
-      // attach that landed for two files out of three redraws the list
-      // and keeps its form open on the third, so the element the person
-      // is reading is re-parented into the fresh section rather than
-      // replaced by a new empty one. The section is also the drop zone,
-      // which is why the control is told which one it is now in.
-      const wire = (items, keep) => {
-        const fresh = redrawImages(doc, body, model, items, detach);
-        if (keep) {
-          fresh.append(keep);
-          if (typeof keep.dropOn === "function") keep.dropOn(fresh);
-        } else {
-          fresh.append(attachControl(doc, opened, typeKey, key, wire, fresh));
-        }
-      };
-      const detach = async (image, button) => {
-        button.disabled = true;
-        const gone = await opened.client.detachEntityImage(typeKey, key, image.id);
-        if (!gone.ok) {
-          button.disabled = false;
-          say(errorEl, gone.error.message);
-          return;
-        }
-        wire(gone.result.items);
-      };
-      const images = body.querySelector("section.entity-images");
-      if (images) {
-        // The section was built before the writes existed, so it is
-        // rebuilt once with them rather than patched.
-        wire(model.images);
-      }
-    }
+    if (mayWrite) wireImageWrites(doc, body, opened, model, errorEl);
     const band = await attachLog(doc, opened, {
       on: "entity", typeKey: model.entity.type_key, key: model.entity.key,
     }, mayWrite, role.ok ? role.result.role : "");

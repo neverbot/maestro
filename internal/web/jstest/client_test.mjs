@@ -765,6 +765,105 @@ check("aRenameOverTheWireReadsTheRowAndDoesNotRunTheQuery", async () => {
   assertDeepEqual(h.client.state.views.world.row, { key: "world" }, "and the row the server sent is what landed");
 });
 
+// --- The upload, which is the one request that is not a fetch --------
+
+// A stand-in for XMLHttpRequest: it records what it was opened with and
+// lets the test play the upload's own events back in order.
+function fakeXHR(plan) {
+  const sent = [];
+  function XHR() {
+    this.upload = {};
+    sent.push(this);
+  }
+  XHR.prototype.open = function open(method, path) {
+    this.method = method;
+    this.path = path;
+  };
+  XHR.prototype.send = function send(body) {
+    this.body = body;
+    // The browser reports the body going out, then the answer. Both are
+    // synchronous here; the client awaits a promise either way.
+    for (const event of plan.progress || []) {
+      if (this.upload.onprogress) this.upload.onprogress(event);
+    }
+    if (plan.fail) {
+      this.onerror();
+      return;
+    }
+    this.status = plan.status;
+    this.responseText = plan.body;
+    this.onload();
+  };
+  return { XHR, sent };
+}
+
+check("an upload asked for progress goes out over XHR and reports its fraction", async () => {
+  const { XHR, sent } = fakeXHR({
+    status: 200,
+    body: JSON.stringify({ id: "a1" }),
+    progress: [
+      { lengthComputable: true, loaded: 512, total: 2048 },
+      { lengthComputable: true, loaded: 2048, total: 2048 },
+      // Not computable: a bar drawn from this would be inventing its own
+      // denominator, so nothing is reported for it.
+      { lengthComputable: false, loaded: 4096, total: 0 },
+    ],
+  });
+  const server = stubServer();
+  const c = client({ slug: "azeroth", fetchImpl: server.fetchImpl, xhrImpl: XHR });
+  const seen = [];
+  const answer = await c.uploadAsset("bytes", "map.png", (fraction) => seen.push(fraction));
+  assertEqual(answer.ok, true, "the upload landed");
+  assertDeepEqual(answer.result, { id: "a1" }, "and the answer is the server's own body");
+  assertDeepEqual(seen, [0.25, 1, 1], "the fractions reported are the computable ones, then the whole");
+  assertEqual(sent.length, 1, "one request went out");
+  assertEqual(sent[0].method, "POST", "as a POST");
+  assertEqual(sent[0].path, "/api/games/azeroth/assets?filename=map.png", "to the assets route, naming the file");
+  assertEqual(server.calls.length, 0, "and no fetch was made at all");
+});
+
+check("an upload with nowhere to report to is the fetch every other call uses", async () => {
+  const server = stubServer();
+  server.answer("/assets", jsonResponse(200, { id: "a2" }));
+  const { XHR, sent } = fakeXHR({ status: 200, body: "{}" });
+  const c = client({ slug: "azeroth", fetchImpl: server.fetchImpl, xhrImpl: XHR });
+  const answer = await c.uploadAsset("bytes", "map.png");
+  assertEqual(answer.ok, true, "it landed");
+  assertEqual(sent.length, 0, "over no XHR");
+  assertEqual(server.calls.length, 1, "and one fetch");
+});
+
+check("a browser with no XHR still uploads, and simply reports nothing", async () => {
+  const server = stubServer();
+  server.answer("/assets", jsonResponse(200, { id: "a3" }));
+  const c = client({ slug: "azeroth", fetchImpl: server.fetchImpl, xhrImpl: undefined });
+  const seen = [];
+  const answer = await c.uploadAsset("bytes", "map.png", (fraction) => seen.push(fraction));
+  assertEqual(answer.ok, true, "the upload is not lost with the progress");
+  assertDeepEqual(seen, [], "nothing was reported");
+  assertEqual(server.calls.length, 1, "the fetch carried it");
+});
+
+check("an upload refused over XHR carries the server's own code and sentence", async () => {
+  const { XHR } = fakeXHR({
+    status: 413,
+    body: JSON.stringify({ error: "invalid_input", message: "content: holds at most 8388608 bytes" }),
+  });
+  const c = client({ slug: "azeroth", fetchImpl: stubServer().fetchImpl, xhrImpl: XHR });
+  const answer = await c.uploadAsset("bytes", "huge.png", () => {});
+  assertEqual(answer.ok, false, "it was refused");
+  assertEqual(answer.error.code, "invalid_input", "with the server's code");
+  assertEqual(answer.error.message, "content: holds at most 8388608 bytes", "and the server's words, unmodified");
+});
+
+check("a transport failure over XHR is the same empty refusal a failed fetch gives", async () => {
+  const { XHR } = fakeXHR({ fail: true });
+  const c = client({ slug: "azeroth", fetchImpl: stubServer().fetchImpl, xhrImpl: XHR });
+  const answer = await c.uploadAsset("bytes", "map.png", () => {});
+  assertDeepEqual([answer.ok, answer.error.code, answer.error.message, answer.error.status],
+    [false, "", "", 0], "the two transports cannot be told apart by a refusal");
+});
+
 // --- Run -------------------------------------------------------------
 
 for (const [name, fn] of pending) {

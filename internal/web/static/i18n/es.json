@@ -615,8 +615,7 @@
   "entity.attach": "Adjuntar una imagen",
   "entity.attachDo": "Adjuntar",
   "entity.attaching": "Adjuntando…",
-  "entity.attachBounds": "PNG, JPEG o WebP, hasta 8 MB.",
-  "entity.chooseFile": "Elegir un archivo",
+  "entity.attachBounds": "PNG, JPEG o WebP, hasta 8 MB cada uno. También puedes soltar archivos aquí.",
   "entity.noFileChosen": "Ningún archivo elegido",
   "entity.attachTooBig": "Ese archivo pasa de 8 MB. No se ha enviado nada.",
   "entity.attachLanded": "Aun así, el archivo está en las imágenes del juego.",
@@ -741,5 +740,12 @@
   "entity.info": "Información",
   "error.content-the-upload-ended-before-the-body-did": "La subida ha terminado antes que el cuerpo.",
   "error.content-these-bytes-are-not-the-ones-this-url-was-signed-for-and-nothing": "Estos bytes no son para los que se firmó la URL, y no se ha escrito nada.",
-  "error.version-not-a-number": "La versión no es un número."
+  "error.version-not-a-number": "La versión no es un número.",
+  "entity.chooseFiles": "Elegir archivos",
+  "entity.attachNotAnImage": "Este juego admite PNG, JPEG y WebP. No se ha enviado nada.",
+  "entity.attachDiscard": "Descartar",
+  "entity.attachPartly": "Se han adjuntado {done} de {total}. El resto sigue aquí, con lo que ha dicho el servidor de cada uno.",
+  "entity.attachProgress": "Enviando",
+  "unit.file": "archivo",
+  "unit.files": "archivos"
 }

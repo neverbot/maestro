@@ -3265,11 +3265,113 @@ pre.document {
 }
 
 /* The chosen file, before it is sent. Same box as the row's thumbnail,
-   because it is about to become one. */
+   because it is about to become one, and a little taller because this
+   is where somebody checks they picked the right map. */
 .attach-thumb {
-  display: block;
-  height: 4rem;
-  max-width: 12rem;
+  height: 2.5rem;
+  max-width: 5rem;
+}
+
+/* --- What is about to be sent ----------------------------------------
+ *
+ * One row per file a person chose or dropped. It is the catalogue row's
+ * rhythm without the catalogue's grid: the number of columns here is
+ * four and fixed, and the widths are the content's.
+ */
+.attach-queue {
+  justify-self: stretch;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s1);
+}
+
+.attach-queue:empty {
+  display: none;
+}
+
+.attach-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--row-h);
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.attach-item:last-child {
+  border-bottom: 0;
+}
+
+.attach-name {
+  font-weight: 500;
+}
+
+/* The word that takes a file back out of the queue, and the bar that
+   says how much of one has gone, both sit at the end of the row. */
+.attach-discard,
+.attach-progress,
+.attach-note {
+  margin-left: auto;
+}
+
+/* A refused file keeps its row and states why. No stripe down the side
+   of it: the sentence is the signal and the colour is on the sentence. */
+.attach-note {
+  color: var(--danger);
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+/* **The one `<progress>` in this product, so this is the whole of what
+   it looks like.** Left to the browser it is a blue lozenge on macOS
+   and a grey slab elsewhere, which is the file picker's problem one
+   control along: an instance that looks different depending on whose
+   laptop is open. Both halves are named, because a bar with only its
+   track styled inherits the platform's fill. */
+.attach-progress {
+  appearance: none;
+  width: 8rem;
+  height: 4px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--line);
+  color: var(--focus);
+  overflow: hidden;
+}
+
+.attach-progress::-webkit-progress-bar {
+  background: var(--line);
+}
+
+.attach-progress::-webkit-progress-value {
+  background: var(--focus);
+  /* The value is a width this element sets itself from its own
+     attribute, so a transition on it is the browser's own animation and
+     not a layout property this stylesheet moves. */
+  transition: inline-size var(--dur-state) var(--ease);
+}
+
+.attach-progress::-moz-progress-bar {
+  background: var(--focus);
+}
+
+/* --- The drop --------------------------------------------------------
+ *
+ * **The whole section is the target, and it says so only while
+ * something is over it.** A dashed box drawn permanently would put a
+ * second frame around a list that is already inside the page's own
+ * rhythm, for a gesture most readers of this screen never use. The
+ * outline is an outline and not a border: a border would move every row
+ * under it by a pixel the moment a pointer entered.
+ */
+.entity-images.dropping {
+  outline: 1px dashed var(--focus);
+  outline-offset: var(--s2);
+  background: var(--raised);
+  transition: background var(--dur-state) var(--ease);
 }
 
 /* Taking an image off, in the row it is in. A word, like every other

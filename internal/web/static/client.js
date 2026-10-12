@@ -320,6 +320,13 @@ function parseJSON(text) {
 export function client({
   slug,
   fetchImpl = fetch,
+  // **The one request in this client that is not a fetch.** `fetch`
+  // reports nothing about a body on its way out, so an upload through it
+  // can only ever be drawn as "something is happening"; XHR's
+  // `upload.progress` is the only cross-browser account of how far a
+  // file has actually got. It is injected for the same reason fetchImpl
+  // is: a test drives this path without a browser.
+  xhrImpl = globalThis.XMLHttpRequest,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   random = Math.random,
@@ -566,9 +573,53 @@ export function client({
   }
 
   // uploadAsset sends the image's bytes.
-  async function uploadAsset(file, filename) {
+  //
+  // **`onProgress` decides which transport carries it.** Without one
+  // this is the fetch every other call uses; with one it is an XHR,
+  // because a fetch cannot say how much of a body has left. The answer
+  // is the same shape either way, so no caller has to know which
+  // happened — and a caller that asks for progress where there is no
+  // XHR gets the upload and no reports rather than no upload.
+  async function uploadAsset(file, filename, onProgress) {
     const path = base + "/assets?filename=" + encodeURIComponent(String(filename || ""));
+    if (typeof onProgress === "function" && typeof xhrImpl === "function") {
+      return counted(() => sendWithProgress(path, file, onProgress));
+    }
     return counted(() => request(path, { method: "POST", body: file }));
+  }
+
+  // sendWithProgress is uploadAsset's other half: one POST, reporting
+  // the fraction of the body that has gone, answering in `request`'s
+  // own shape.
+  function sendWithProgress(path, file, onProgress) {
+    return new Promise((resolve) => {
+      const xhr = new xhrImpl();
+      xhr.open("POST", path);
+      // **Only when the total is known.** A chunked body reports
+      // `lengthComputable: false`, and a bar drawn from a loaded count
+      // with no total is a bar that invents its own denominator.
+      if (xhr.upload) {
+        xhr.upload.onprogress = (event) => {
+          if (event && event.lengthComputable && event.total > 0) {
+            onProgress(event.loaded / event.total);
+          }
+        };
+      }
+      // A transport failure is the same empty error a failed fetch
+      // gives, so the two paths cannot be told apart by a refusal.
+      xhr.onerror = () => resolve({ ok: false, error: emptyError(0) });
+      xhr.onabort = () => resolve({ ok: false, error: emptyError(0) });
+      xhr.onload = () => {
+        const payload = parseJSON(String(xhr.responseText || ""));
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress(1);
+          resolve({ ok: true, result: payload });
+          return;
+        }
+        resolve({ ok: false, error: errorFrom(xhr.status, payload) });
+      };
+      xhr.send(file);
+    });
   }
 
   // listAssets pages this game's uploaded images, the way every other

@@ -28,7 +28,7 @@ function check(what, got, want) {
 }
 
 const { entityBody, attachControl } = await import("../static/pages/entity.js");
-const { weigh } = await import("../static/pages/assets.js");
+const { weigh } = await import("../static/rows.js");
 const doc = dom.document;
 
 const MODEL = {
@@ -56,6 +56,13 @@ function walk(node, found = []) {
 }
 
 const classesIn = (node) => walk(node).map((el) => (el.getAttribute ? el.getAttribute("class") : "") || "");
+
+// **Real files, because a browser hands this control real ones.** A
+// plain object would have let the queue carry something no object URL
+// can be made for, and the preview is half of what this form is for.
+function fileOf(name, bytes, type = "image/png") {
+  return new File([new Uint8Array(bytes)], name, { type });
+}
 
 // --- The section -------------------------------------------------------
 
@@ -113,102 +120,305 @@ const IMAGE = {
 
 // --- The one write a person makes --------------------------------------
 
-{
-  const uploads = [];
-  const attaches = [];
-  const opened = {
-    client: {
-      uploadAsset: async (file, name) => {
-        uploads.push(name);
-        return { ok: true, result: { id: "a9" } };
-      },
-      attachEntityImage: async (typeKey, key, id) => {
-        attaches.push([typeKey, key, id]);
-        return { ok: true, result: { items: [{ ...IMAGE, id }] } };
-      },
+// A stub for the two calls the control makes, recording what it was
+// given and answering the way the server does.
+function stub(options = {}) {
+  const calls = { uploads: [], attaches: [], progress: [] };
+  const refuse = options.refuse || {};
+  const client = {
+    uploadAsset: async (file, name, onProgress) => {
+      calls.uploads.push(name);
+      if (typeof onProgress === "function") {
+        // The client reports a fraction as the bytes go. **The bar is
+        // read from inside the tick**, because that is the only moment
+        // it exists: the row carries a progress element while its file
+        // is in flight and a word to discard it when it is not.
+        onProgress(0.5);
+        calls.progress.push([name, 0.5]);
+        if (typeof options.onTick === "function") options.onTick(name);
+      }
+      if (refuse.upload && refuse.upload[name]) {
+        return { ok: false, error: { message: refuse.upload[name] } };
+      }
+      return { ok: true, result: { id: "u-" + name } };
+    },
+    attachEntityImage: async (typeKey, key, id) => {
+      calls.attaches.push([typeKey, key, id]);
+      if (refuse.attach && refuse.attach[id]) {
+        return { ok: false, error: { message: refuse.attach[id] } };
+      }
+      return { ok: true, result: { items: [{ ...IMAGE, id }] } };
     },
   };
+  return { calls, opened: { client } };
+}
+
+const partsOf = (control) => {
+  const form = control.children[1];
+  const nodes = walk(form);
+  return {
+    form,
+    open: control.children[0],
+    file: nodes.find((el) => el.tagName === "input"),
+    label: nodes.find((el) => el.tagName === "label"),
+    bounds: nodes.find((el) => (el.getAttribute && el.getAttribute("class")) === "attach-bounds"),
+    count: nodes.find((el) => (el.getAttribute && el.getAttribute("class")) === "catalogue-count"),
+    queue: nodes.find((el) => (el.getAttribute && el.getAttribute("class")) === "attach-queue"),
+    error: nodes.find((el) => (el.getAttribute && el.getAttribute("class")) === "error"),
+  };
+};
+
+const queueRows = (parts) => parts.queue.children;
+const inRow = (row, className) =>
+  walk(row).find((el) => (el.getAttribute && el.getAttribute("class")) === className);
+
+{
+  const bars = [];
+  let parts = null;
+  const { calls, opened } = stub({
+    onTick: () => {
+      const row = queueRows(parts)[0];
+      const bar = inRow(row, "attach-progress");
+      bars.push(bar ? [bar.tagName, bar.max, bar.value, bar.getAttribute("aria-label")] : null);
+      check("while a file is in flight its row offers no way to discard it",
+        inRow(row, "quiet attach-discard"), undefined);
+    },
+  });
   let handed = null;
-  const control = attachControl(doc, opened, "quest", "first-steps", (items) => { handed = items; });
+  let keptOpen;
+  const control = attachControl(doc, opened, "quest", "first-steps", (items, keep) => {
+    handed = items;
+    keptOpen = keep;
+  });
+  parts = partsOf(control);
 
   // **A word, not a filled button.** This page is read; the way in to
   // its most secondary act costs it a word, which is the shape the
   // comment composer beside it already uses.
-  const open = control.children[0];
-  check("the way in is a quiet word", open.getAttribute("class"), "quiet attach-open");
-  const form = control.children[1];
-  check("and the form is closed until it is asked for", form.hidden, true);
+  check("the way in is a quiet word", parts.open.getAttribute("class"), "quiet attach-open");
+  check("and the form is closed until it is asked for", parts.form.hidden, true);
 
-  const bounds = walk(form).find((el) => el.getAttribute && el.getAttribute("class") === "attach-bounds");
-  check("the bounds are stated before anything is chosen", bounds.textContent !== "", true);
-
-  const file = walk(form).find((el) => el.tagName === "input");
+  check("the bounds are stated before anything is chosen", parts.bounds.textContent !== "", true);
   check("the picker admits only what the server admits",
-    file.accept, "image/png,image/jpeg,image/webp");
+    parts.file.accept, "image/png,image/jpeg,image/webp");
+  // **Several in one gesture.** A designer arrives having chosen the
+  // three maps of a zone together, in whatever folder they live in.
+  check("and takes more than one file at a time", parts.file.multiple, true);
   // **The words on the picker are this product's.** A bare file input
   // wears the browser's own label, in the browser's own language, and
   // ::file-selector-button cannot rename it.
-  const label = walk(form).find((el) => el.tagName === "label");
   check("the picker wears a word from the catalogue, tied to the real control",
-    [label.textContent, label.getAttribute("for"), file.id],
-    ["Choose a file", "attach-file", "attach-file"]);
+    [parts.label.textContent, parts.label.getAttribute("for"), parts.file.id],
+    ["Choose files", "attach-file", "attach-file"]);
   check("and says, in the same words, that nothing is chosen yet",
-    walk(form).find((el) => (el.getAttribute && el.getAttribute("class")) === "catalogue-count").textContent,
-    "No file chosen");
+    parts.count.textContent, "No file chosen");
   // The bounds are the field's own description, not a sentence further
   // down the page.
-  check("the bounds are tied to the field", file.getAttribute("aria-describedby"), bounds.id);
-
-  const error = walk(form).find((el) => (el.getAttribute && el.getAttribute("class")) === "error");
+  check("the bounds are tied to the field", parts.file.getAttribute("aria-describedby"), parts.bounds.id);
   check("a refusal here is announced, as the rename's on this page is",
-    [error.getAttribute("role"), error.getAttribute("aria-live")], ["alert", "assertive"]);
+    [parts.error.getAttribute("role"), parts.error.getAttribute("aria-live")], ["alert", "assertive"]);
 
-  await open.dispatch("click");
-  check("the word opens the form and takes itself away", [form.hidden, open.hidden], [false, true]);
+  await parts.open.dispatch("click");
+  check("the word opens the form and takes itself away",
+    [parts.form.hidden, parts.open.hidden], [false, true]);
 
+  // --- The queue -------------------------------------------------------
+  parts.file.files = [fileOf("map.png", 2048), fileOf("sketch.png", 4096)];
+  await parts.file.dispatch("change");
+  check("every file chosen is a row of its own", queueRows(parts).length, 2);
+  check("and the count is said in the reader's own words, not the browser's",
+    parts.count.textContent, "2 files");
+  check("a row names its file and weighs it",
+    [inRow(queueRows(parts)[0], "attach-name").textContent,
+      inRow(queueRows(parts)[0], "catalogue-count").textContent],
+    ["map.png", weigh(2048)]);
+  check("and shows it, because a form that takes an image and draws only its name hides it",
+    inRow(queueRows(parts)[0], "asset-thumb attach-thumb").getAttribute("src").startsWith("blob:"), true);
+
+  // **The input's own list cannot have one taken out of it.** Picking
+  // again used to replace the lot, so a person who chose four files and
+  // meant three had no way back.
+  const discard = inRow(queueRows(parts)[1], "quiet attach-discard");
+  check("each row carries the word that takes it back out, named for its file",
+    discard.getAttribute("aria-label"), "Discard sketch.png");
+  await discard.dispatch("click");
+  check("discarding one leaves the other where it was",
+    [queueRows(parts).length, inRow(queueRows(parts)[0], "attach-name").textContent, parts.count.textContent],
+    [1, "map.png", "1 file"]);
+
+  // A second gesture adds to the queue instead of replacing it.
+  parts.file.files = [fileOf("legend.webp", 512, "image/webp")];
+  await parts.file.dispatch("change");
+  check("a second gesture adds to what was already chosen",
+    queueRows(parts).map((row) => inRow(row, "attach-name").textContent),
+    ["map.png", "legend.webp"]);
+
+  // --- Sending ---------------------------------------------------------
+  await parts.form.dispatch("submit", { preventDefault() {} });
+  check("every queued file is uploaded to the library first", calls.uploads, ["map.png", "legend.webp"]);
+  check("then attached to this entity by the id each upload answered with",
+    calls.attaches, [["quest", "first-steps", "u-map.png"], ["quest", "first-steps", "u-legend.webp"]]);
+  check("and progress is asked for, so a slow link says how far it has got",
+    calls.progress, [["map.png", 0.5], ["legend.webp", 0.5]]);
+  // The bar is a real `<progress>` carrying the fraction, named for the
+  // file it is about: "Sending" eight times over is eight bars a screen
+  // reader cannot tell apart.
+  check("and the fraction is drawn, in the row of the file it is about",
+    bars, [["progress", 1, 0.5, "Sending map.png"], ["progress", 1, 0.5, "Sending legend.webp"]]);
+  check("the section is handed the last whole listing back, so nothing reloads",
+    handed.map((item) => item.id), ["u-legend.webp"]);
+  check("with nothing to keep open, everything having landed", keptOpen, undefined);
+  check("the form closes itself once the images are there",
+    [parts.form.hidden, parts.open.hidden, parts.count.textContent],
+    [true, false, "No file chosen"]);
+  // Hiding the control somebody is standing on leaves the focus
+  // nowhere, and a keyboard starts again from the top of the document.
+  check("and hands focus back to the word that opened it", doc.activeElement === parts.open, true);
+}
+
+// --- What the form refuses on its own ----------------------------------
+
+{
   // **The bound is the form's, not only the server's.** The sentence
   // above the field promises 8 MB; sending the bytes anyway makes a
   // person wait out an upload to be told what the form already knew.
-  file.files = [{ name: "huge.png", size: 9 * 1024 * 1024 }];
-  await form.dispatch("submit", { preventDefault() {} });
-  check("a file over the bound is refused without being sent",
-    [uploads.length, error.textContent],
-    [0, "That file is over 8 MB. Nothing was sent."]);
+  // And it is **per file**: three good maps and one stray should attach
+  // three maps.
+  const { calls, opened } = stub();
+  const control = attachControl(doc, opened, "quest", "first-steps", () => {});
+  const parts = partsOf(control);
+  await parts.open.dispatch("click");
+  parts.file.files = [fileOf("huge.png", 9 * 1024 * 1024), fileOf("notes.txt", 10, "text/plain"), fileOf("map.png", 64)];
+  await parts.file.dispatch("change");
+  check("a file over the bound is refused in its own row",
+    inRow(queueRows(parts)[0], "attach-note").textContent, "That file is over 8 MB. Nothing was sent.");
+  check("and so is something that is not an image at all",
+    inRow(queueRows(parts)[1], "attach-note").textContent,
+    "This game takes PNG, JPEG and WebP. Nothing was sent.");
+  check("a refused row says so with a class and not only a colour",
+    queueRows(parts)[0].getAttribute("class"), "attach-item attach-refused");
+  check("and carries no thumbnail, nothing having been made for it",
+    inRow(queueRows(parts)[0], "asset-thumb attach-thumb"), undefined);
 
-  // **Two calls in one order**: the file becomes an image in the game's
-  // library, then the image is hung on this entity.
-  file.files = [{ name: "map.png", size: 2048 }];
-  await form.dispatch("submit", { preventDefault() {} });
-  check("the file is uploaded to the library first", uploads, ["map.png"]);
-  check("then attached to this entity by the id the upload answered with",
-    attaches, [["quest", "first-steps", "a9"]]);
-  check("and the section is handed the whole listing back, so nothing reloads",
-    handed.map((item) => item.id), ["a9"]);
-  check("the form closes itself once the image is there", [form.hidden, open.hidden], [true, false]);
-  // Hiding the control somebody is standing on leaves the focus
-  // nowhere, and a keyboard starts again from the top of the document.
-  check("and hands focus back to the word that opened it", doc.activeElement === open, true);
+  await parts.form.dispatch("submit", { preventDefault() {} });
+  check("only what this game takes is sent", calls.uploads, ["map.png"]);
+  check("the two refusals stay on screen with the form open",
+    [queueRows(parts).length, parts.form.hidden], [2, false]);
+  check("and the line above them says how the gesture went",
+    parts.error.textContent, "1 of 1 attached. The rest are still here, with what the server said about each.");
 }
 
 {
-  // A refusal is shown where the control is, and the form stays open on
-  // the file that caused it.
-  const opened = {
-    client: {
-      uploadAsset: async () => ({ ok: false, error: { message: "that is not an image this game admits" } }),
-      attachEntityImage: async () => ({ ok: true, result: { items: [] } }),
-    },
-  };
+  // A refusal from the server is its own sentence, in the row it is
+  // about, and the ones that landed leave the queue.
+  const { opened } = stub({ refuse: { upload: { "notes.png": "that is not an image this game admits" } } });
+  let handed = null;
+  let keptOpen = null;
+  const control = attachControl(doc, opened, "quest", "first-steps", (items, keep) => {
+    handed = items;
+    keptOpen = keep;
+  });
+  const parts = partsOf(control);
+  await parts.open.dispatch("click");
+  parts.file.files = [fileOf("map.png", 64), fileOf("notes.png", 64)];
+  await parts.file.dispatch("change");
+  await parts.form.dispatch("submit", { preventDefault() {} });
+  check("the one the server refused keeps its row and the server's words",
+    [queueRows(parts).length, inRow(queueRows(parts)[0], "attach-note").textContent],
+    [1, "that is not an image this game admits"]);
+  check("the one that landed is gone from the queue and in the listing handed up",
+    handed.map((item) => item.id), ["u-map.png"]);
+  // **The control is handed up with the listing.** Redrawing the
+  // section replaces it, and a person reading a refusal cannot read it
+  // in a form that was torn out from under them.
+  check("and the control itself goes up too, to be moved rather than replaced",
+    keptOpen === control, true);
+  check("the form stays open on the file that caused it", parts.form.hidden, false);
+}
+
+{
+  // An upload that landed and an attach that did not is the one state a
+  // reader cannot deduce from the screen.
+  const { opened } = stub({ refuse: { attach: { "u-map.png": "that image is attached already" } } });
   const control = attachControl(doc, opened, "quest", "first-steps", () => {});
-  const form = control.children[1];
-  const file = walk(form).find((el) => el.tagName === "input");
-  await control.children[0].dispatch("click");
-  file.files = [{ name: "notes.txt", size: 10 }];
-  await form.dispatch("submit", { preventDefault() {} });
-  const error = walk(form).find((el) => (el.getAttribute && el.getAttribute("class")) === "error");
-  check("a refusal is the server's own sentence, under the control",
-    error.textContent, "that is not an image this game admits");
-  check("and the form stays open on the file that caused it", form.hidden, false);
+  const parts = partsOf(control);
+  await parts.open.dispatch("click");
+  parts.file.files = [fileOf("map.png", 64)];
+  await parts.file.dispatch("change");
+  await parts.form.dispatch("submit", { preventDefault() {} });
+  check("the row says both halves: what failed and what happened anyway",
+    inRow(queueRows(parts)[0], "attach-note").textContent,
+    "that image is attached already The file is in this game's images even so.");
+}
+
+// --- The drop ----------------------------------------------------------
+
+{
+  const { opened } = stub();
+  const zone = doc.createElement("section");
+  zone.className = "entity-images";
+  const control = attachControl(doc, opened, "quest", "first-steps", () => {}, zone);
+  const parts = partsOf(control);
+
+  const carrying = (files) => ({
+    preventDefault() {},
+    dataTransfer: { types: ["Files"], files },
+  });
+
+  await zone.dispatch("dragenter", carrying([]));
+  check("the whole section lights up while files are over it",
+    zone.getAttribute("class"), "entity-images dropping");
+  // dragleave fires on every child crossing, so the zone counts enters
+  // and leaves rather than unlighting on the first one.
+  await zone.dispatch("dragenter", carrying([]));
+  await zone.dispatch("dragleave", {});
+  check("and stays lit while the pointer is still somewhere inside it",
+    zone.getAttribute("class"), "entity-images dropping");
+  await zone.dispatch("dragleave", {});
+  check("going out again puts it back", zone.getAttribute("class"), "entity-images");
+
+  // A drag carrying anything else is not this control's business: a
+  // zone that swallowed a dragged link would break the page's own
+  // selection.
+  await zone.dispatch("dragenter", { preventDefault() {}, dataTransfer: { types: ["text/plain"] } });
+  check("a drag carrying no files is left alone", zone.getAttribute("class"), "entity-images");
+
+  // **The default on a dragover is navigation.** A page that opens a
+  // dropped PNG in place of itself is what a browser does unless every
+  // dragover refuses it, and the refusal is not visible anywhere else:
+  // the zone would light up, the drop would never arrive, and the page
+  // would be gone.
+  {
+    let refused = 0;
+    const effect = { types: ["Files"], dropEffect: "" };
+    await zone.dispatch("dragover", { preventDefault() { refused += 1; }, dataTransfer: effect });
+    check("a dragover refuses the browser's own default, which is to navigate to the file",
+      [refused, effect.dropEffect], [1, "copy"]);
+    let ignored = 0;
+    await zone.dispatch("dragover", { preventDefault() { ignored += 1; }, dataTransfer: { types: ["text/plain"] } });
+    check("and leaves a drag carrying something else to the page", ignored, 0);
+  }
+
+  await zone.dispatch("drop", carrying([fileOf("dropped.png", 128)]));
+  check("a drop opens the form, which was never pressed open",
+    [parts.form.hidden, parts.open.hidden], [false, true]);
+  check("and queues what was dropped",
+    queueRows(parts).map((row) => inRow(row, "attach-name").textContent), ["dropped.png"]);
+  check("the zone is dark again once the files are in the form",
+    zone.getAttribute("class"), "entity-images");
+
+  // **The section is replaced on every redraw.** Listeners left on the
+  // old element are listeners on a node nothing can drop onto, so the
+  // gesture would work once and then go quiet.
+  const fresh = doc.createElement("section");
+  fresh.className = "entity-images";
+  control.dropOn(fresh);
+  await zone.dispatch("dragenter", carrying([]));
+  check("the section the redraw threw away no longer answers a drag",
+    zone.getAttribute("class"), "entity-images");
+  await fresh.dispatch("drop", carrying([fileOf("second.png", 128)]));
+  check("and the one a person can see does",
+    queueRows(parts).map((row) => inRow(row, "attach-name").textContent), ["dropped.png", "second.png"]);
 }
 
 // --- What the library weighs -------------------------------------------
@@ -218,7 +428,7 @@ const IMAGE = {
 // decimal comma and a decimal point are not the same number.
 check("a library's weight is the shortest honest line about it",
   ["", weigh(0), weigh(900), weigh(33_000), weigh(12_300_000), weigh(4_100_000_000)].slice(1),
-  ["", "900 B", "33 kB", "12.3 MB", "4.1 GB"]);
+  ["", "900\u00a0B", "33\u00a0kB", "12.3\u00a0MB", "4.1\u00a0GB"]);
 check("and nothing at all is said about a count that is not one", weigh("many"), "");
 
 // --- Taking one off ----------------------------------------------------

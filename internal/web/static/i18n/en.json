@@ -615,8 +615,7 @@
   "entity.attach": "Attach an image",
   "entity.attachDo": "Attach",
   "entity.attaching": "Attaching…",
-  "entity.attachBounds": "PNG, JPEG or WebP, up to 8 MB.",
-  "entity.chooseFile": "Choose a file",
+  "entity.attachBounds": "PNG, JPEG or WebP, up to 8 MB each. You can drop files here too.",
   "entity.noFileChosen": "No file chosen",
   "entity.attachTooBig": "That file is over 8 MB. Nothing was sent.",
   "entity.attachLanded": "The file is in this game's images even so.",
@@ -741,5 +740,12 @@
   "entity.info": "Information",
   "error.content-the-upload-ended-before-the-body-did": "content: the upload ended before the body did",
   "error.content-these-bytes-are-not-the-ones-this-url-was-signed-for-and-nothing": "content: these bytes are not the ones this URL was signed for, and nothing was written",
-  "error.version-not-a-number": "version: not a number"
+  "error.version-not-a-number": "version: not a number",
+  "entity.chooseFiles": "Choose files",
+  "entity.attachNotAnImage": "This game takes PNG, JPEG and WebP. Nothing was sent.",
+  "entity.attachDiscard": "Discard",
+  "entity.attachPartly": "{done} of {total} attached. The rest are still here, with what the server said about each.",
+  "entity.attachProgress": "Sending",
+  "unit.file": "file",
+  "unit.files": "files"
 }

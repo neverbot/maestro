@@ -3,7 +3,7 @@
 
 import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
 import { t } from "../i18n.js";
-import { ABSENT_MARK, boolMark, imageRow } from "../rows.js";
+import { ABSENT_MARK, boolMark, imageRow, weigh } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
   ROLE_VIEWER,
@@ -698,29 +698,45 @@ function redrawImages(doc, root, model, images, detach) {
 const ACCEPTED_IMAGES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
+// The class the drop zone wears while a drag carrying files is over it.
+// A class and not a style attribute: the policy admits no inline style,
+// so a zone that painted itself from script would be a zone that never
+// lit up.
+const DROPPING = "dropping";
+
 // attachControl is the one write a person makes here that no agent can:
-// choose a file, see what was chosen, and commit it.
+// choose files, see what was chosen, and commit them.
 //
 // **Quiet, like the log's.** Reading is what this page is for, so the
 // way in is a word and the control appears when it is reached for. The
 // form's own submit is ink, legitimately: once the form is open,
-// attaching the file is what the screen is for.
+// attaching the files is what the screen is for.
 //
 // **The picker is worn rather than painted.** A bare file input renders
 // the browser's own button, in the browser's own language: a Spanish
 // instance on an English browser says "Choose file", and
 // `::file-selector-button` cannot rename it, since the pseudo-element
 // admits no `content` and the "no file chosen" half is not inside it at
-// all. So the input is clipped where it keeps focus and the keyboard,
-// a label carries the word, and the chosen file is drawn here where it
-// can be translated and, being an image, seen.
+// all. So the input is clipped where it keeps focus and the keyboard, a
+// label carries the word, and the chosen files are drawn here where
+// they can be translated and, being images, seen.
 //
-// **Two calls, in this order**: the file becomes an image in the game's
-// library, then the image is hung on this entity. If the second fails
-// the first still happened, and the form says so rather than leaving a
-// person to wonder, because an upload that landed and did not attach is
-// the one state a reader cannot deduce from the screen.
-export function attachControl(doc, opened, typeKey, key, onDone) {
+// **The queue is this control's and not the input's.** A `FileList` is
+// read-only, so a person who picked four files and meant three had no
+// way to take one out: picking again replaced the lot. The queue is an
+// array here, both gestures add to it, and each row can leave it.
+//
+// **Two calls per file, in this order**: the file becomes an image in
+// the game's library, then the image is hung on this entity. If the
+// second fails the first still happened, and the row says so rather
+// than leaving a person to wonder, because an upload that landed and
+// did not attach is the one state a reader cannot deduce from the
+// screen.
+//
+// `zone` is what a file may be dropped on, and the page hands it the
+// whole images section: a drop target the size of the word that opens
+// the form is a target nobody hits. It defaults to this control.
+export function attachControl(doc, opened, typeKey, key, onDone, zone) {
   const holder = doc.createElement("div");
   holder.className = "attach";
 
@@ -739,20 +755,24 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
   file.type = "file";
   file.id = "attach-file";
   file.accept = ACCEPTED_IMAGES.join(",");
+  // Several in one gesture, which is how a designer arrives: the three
+  // maps of a zone were chosen together in whatever folder they live in.
+  file.multiple = true;
   const label = doc.createElement("label");
   label.setAttribute("for", "attach-file");
-  label.textContent = t("entity.chooseFile");
-  // The chosen file, in words this product owns. It is the Named
-  // Absence rule in the one place the browser was satisfying it by
-  // accident and in the wrong language.
+  label.textContent = t("entity.chooseFiles");
+  // What is queued, in words this product owns. It is the Named Absence
+  // rule in the one place the browser was satisfying it by accident and
+  // in the wrong language.
   const chosenName = doc.createElement("span");
   chosenName.className = "catalogue-count";
-  chosenName.textContent = t("entity.noFileChosen");
   pick.append(file, label, chosenName);
 
   // The bounds, before a file is chosen rather than after one is
   // refused, and tied to the field so a screen reader reads them as
-  // part of it rather than as a sentence further down the page.
+  // part of it rather than as a sentence further down the page. They
+  // name the drop too: a gesture nothing announces is a gesture only
+  // somebody who already knew would try.
   const bounds = doc.createElement("p");
   bounds.className = "attach-bounds";
   bounds.id = "attach-bounds";
@@ -760,12 +780,10 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
   file.setAttribute("aria-describedby", "attach-bounds");
 
   // **What is about to be attached, shown.** This section argues that a
-  // list of filenames hides what it lists; a form that takes an image
-  // and shows only its name makes the same mistake one step earlier.
-  const chosenThumb = doc.createElement("img");
-  chosenThumb.className = "asset-thumb attach-thumb";
-  chosenThumb.alt = "";
-  chosenThumb.hidden = true;
+  // list of filenames hides what it lists; a form that takes images and
+  // shows only their names makes the same mistake one step earlier.
+  const queueList = doc.createElement("ul");
+  queueList.className = "attach-queue";
 
   const error = doc.createElement("p");
   error.className = "error";
@@ -785,27 +803,123 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
   actions.className = "form-actions";
   actions.append(send, cancel);
 
-  form.append(pick, chosenThumb, bounds, actions, error);
+  form.append(pick, bounds, queueList, actions, error);
   holder.append(open, form);
 
-  // The object URL of whatever is being previewed, so it can be handed
-  // back: a blob URL held after its image is gone is a leak nothing
-  // collects.
-  let preview = "";
-  const forget = () => {
-    if (preview !== "" && globalThis.URL && typeof globalThis.URL.revokeObjectURL === "function") {
-      globalThis.URL.revokeObjectURL(preview);
+  // The queue: one entry per file a person has chosen or dropped, in the
+  // order they arrived. `note` is whatever was said about this one,
+  // `fraction` how much of it has gone.
+  let queue = [];
+
+  // Every object URL this control minted is handed back: a blob URL
+  // held after its image is gone is a leak nothing collects.
+  const forget = (entry) => {
+    if (entry.preview !== "" && globalThis.URL && typeof globalThis.URL.revokeObjectURL === "function") {
+      globalThis.URL.revokeObjectURL(entry.preview);
     }
-    preview = "";
+    entry.preview = "";
   };
+  const forgetAll = () => {
+    for (const entry of queue) forget(entry);
+  };
+
+  // enqueue adds files from either gesture and refuses, **per file**,
+  // what this game does not take: three good maps and a stray text file
+  // is a gesture that should attach three maps.
+  const enqueue = (files) => {
+    for (const chosen of [...(files || [])]) {
+      const kind = String(chosen.type || "");
+      const note = !ACCEPTED_IMAGES.includes(kind)
+        ? t("entity.attachNotAnImage")
+        : Number.isFinite(chosen.size) && chosen.size > MAX_IMAGE_BYTES
+          ? t("entity.attachTooBig")
+          : "";
+      const entry = { file: chosen, note, fraction: null, sending: false, preview: "" };
+      if (note === "" && globalThis.URL && typeof globalThis.URL.createObjectURL === "function") {
+        entry.preview = globalThis.URL.createObjectURL(chosen);
+      }
+      queue.push(entry);
+    }
+    drawQueue();
+  };
+
+  // drawQueue paints the queue. It redraws the whole list rather than
+  // patching it: the list is as long as a person's gesture was, and a
+  // diff over four rows buys nothing a reader can see.
+  const drawQueue = () => {
+    chosenName.textContent = queue.length === 0
+      ? t("entity.noFileChosen")
+      : countLabel(queue.length, t("unit.file"), t("unit.files"));
+    queueList.replaceChildren();
+    for (const entry of queue) {
+      const row = doc.createElement("li");
+      row.className = entry.note === "" ? "attach-item" : "attach-item attach-refused";
+
+      if (entry.preview !== "") {
+        const thumb = doc.createElement("img");
+        thumb.className = "asset-thumb attach-thumb";
+        thumb.alt = "";
+        thumb.src = entry.preview;
+        row.append(thumb);
+      }
+
+      const name = doc.createElement("span");
+      name.className = "attach-name";
+      name.textContent = String(entry.file.name || "");
+      row.append(name);
+
+      const size = doc.createElement("span");
+      size.className = "catalogue-count";
+      size.textContent = weigh(entry.file.size);
+      row.append(size);
+
+      if (entry.note !== "") {
+        const note = doc.createElement("span");
+        note.className = "attach-note";
+        note.textContent = entry.note;
+        row.append(note);
+      } else if (entry.sending) {
+        // **A bar with no value where there is no number.** An XHR
+        // reports how much of a body has gone and a fetch reports
+        // nothing, so a browser without the first gets an indeterminate
+        // bar: honest about not knowing, rather than a bar inventing its
+        // own denominator.
+        const bar = doc.createElement("progress");
+        bar.className = "attach-progress";
+        bar.max = 1;
+        if (Number.isFinite(entry.fraction)) bar.value = entry.fraction;
+        bar.setAttribute("aria-label", t("entity.attachProgress") + " " + String(entry.file.name || ""));
+        row.append(bar);
+      } else {
+        // The word that takes one back out, which a FileList cannot do.
+        const drop = doc.createElement("button");
+        drop.type = "button";
+        drop.className = "quiet attach-discard";
+        drop.textContent = t("entity.attachDiscard");
+        drop.setAttribute("aria-label", t("entity.attachDiscard") + " " + String(entry.file.name || ""));
+        drop.addEventListener("click", () => {
+          forget(entry);
+          queue = queue.filter((other) => other !== entry);
+          drawQueue();
+          // Focus does not vanish with the row it was on: the picker is
+          // where the next gesture starts.
+          if (typeof file.focus === "function") file.focus();
+        });
+        row.append(drop);
+      }
+
+      queueList.append(row);
+    }
+  };
+  drawQueue();
 
   const close = () => {
     form.hidden = true;
     open.hidden = false;
     error.textContent = "";
-    chosenName.textContent = t("entity.noFileChosen");
-    chosenThumb.hidden = true;
-    forget();
+    forgetAll();
+    queue = [];
+    drawQueue();
     form.reset();
     // **Focus goes back to the word that opened the form.** Hiding the
     // control a person is standing on leaves the focus nowhere, and a
@@ -813,61 +927,160 @@ export function attachControl(doc, opened, typeKey, key, onDone) {
     open.focus();
   };
 
-  open.addEventListener("click", () => {
+  const reveal = () => {
     open.hidden = true;
     form.hidden = false;
+  };
+
+  open.addEventListener("click", () => {
+    reveal();
     file.focus();
   });
   cancel.addEventListener("click", close);
 
   file.addEventListener("change", () => {
-    const chosen = file.files && file.files[0];
     error.textContent = "";
-    forget();
-    if (!chosen) {
-      chosenName.textContent = t("entity.noFileChosen");
-      chosenThumb.hidden = true;
-      return;
-    }
-    chosenName.textContent = chosen.name;
-    if (globalThis.URL && typeof globalThis.URL.createObjectURL === "function") {
-      preview = globalThis.URL.createObjectURL(chosen);
-      chosenThumb.src = preview;
-      chosenThumb.hidden = false;
-    }
+    enqueue(file.files);
+    // The input has handed its files over and the queue owns them now.
+    // Clearing it is what lets the same file be picked twice, which a
+    // person who discarded one by mistake will do.
+    form.reset();
   });
+
+  // --- The drop ------------------------------------------------------
+  //
+  // **Four listeners and a depth count.** `dragleave` fires every time
+  // the pointer crosses into a child, so a zone that unlit on the first
+  // one flickers its way down a list of rows; counting enters and leaves
+  // is what makes "the pointer is somewhere inside" a fact this code
+  // holds rather than guesses.
+  let depth = 0;
+  const carriesFiles = (event) => {
+    const transfer = event && event.dataTransfer;
+    const kinds = transfer && transfer.types ? [...transfer.types] : [];
+    return kinds.includes("Files");
+  };
+  const lit = (node, on) => {
+    if (!node || !node.classList) return;
+    if (on && typeof node.classList.add === "function") node.classList.add(DROPPING);
+    if (!on && typeof node.classList.remove === "function") node.classList.remove(DROPPING);
+  };
+  const drops = {
+    dragenter: (event) => {
+      if (!carriesFiles(event)) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      depth += 1;
+      lit(zoned, true);
+    },
+    dragover: (event) => {
+      if (!carriesFiles(event)) return;
+      // **Without this the browser navigates to the file.** A page that
+      // opens a dropped PNG in place of itself is the default, and the
+      // only way out of it is to refuse the default on every dragover.
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    },
+    dragleave: () => {
+      depth -= 1;
+      if (depth <= 0) {
+        depth = 0;
+        lit(zoned, false);
+      }
+    },
+    drop: (event) => {
+      if (!carriesFiles(event)) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      depth = 0;
+      lit(zoned, false);
+      error.textContent = "";
+      // A drop is also a way in: the form opens on the files rather than
+      // asking a person who has just handed them over to press a word
+      // first.
+      reveal();
+      enqueue(event.dataTransfer ? event.dataTransfer.files : []);
+      if (typeof file.focus === "function") file.focus();
+    },
+  };
+
+  // **The zone is re-pointed and not re-registered.** The section this
+  // control hangs in is *replaced* every time the list is redrawn, so
+  // listeners left on the old element are listeners on a node nothing
+  // can drop onto any more: the gesture would work once and then go
+  // quiet, which is a shape of defect this file has met before.
+  let zoned = null;
+  holder.dropOn = (node) => {
+    if (zoned && typeof zoned.removeEventListener === "function") {
+      for (const [kind, handler] of Object.entries(drops)) zoned.removeEventListener(kind, handler);
+      lit(zoned, false);
+    }
+    depth = 0;
+    zoned = node || null;
+    if (zoned && typeof zoned.addEventListener === "function") {
+      for (const [kind, handler] of Object.entries(drops)) zoned.addEventListener(kind, handler);
+    }
+    return zoned;
+  };
+  holder.dropOn(zone || holder);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const chosen = file.files && file.files[0];
-    if (!chosen) return;
-    // **The bound is checked here and not only at the server.** The
-    // sentence above the field promises it, and promising a limit while
-    // sending the bytes anyway makes a person wait out an upload to be
-    // told what the form already knew.
-    if (Number.isFinite(chosen.size) && chosen.size > MAX_IMAGE_BYTES) {
-      error.textContent = t("entity.attachTooBig");
-      return;
-    }
+    // Only what this game will take. A row already carrying a refusal
+    // stays where it is and is not sent again.
+    const sending = queue.filter((entry) => entry.note === "");
+    if (sending.length === 0) return;
     error.textContent = "";
     setFormBusy(form, true, t("entity.attaching"));
-    const uploaded = await opened.client.uploadAsset(chosen, chosen.name);
-    if (!uploaded.ok) {
-      setFormBusy(form, false);
-      error.textContent = uploaded.error.message;
-      return;
+
+    let items = null;
+    let landed = 0;
+    for (const entry of sending) {
+      entry.sending = true;
+      entry.fraction = null;
+      drawQueue();
+      const uploaded = await opened.client.uploadAsset(entry.file, entry.file.name, (fraction) => {
+        entry.fraction = fraction;
+        drawQueue();
+      });
+      if (!uploaded.ok) {
+        entry.sending = false;
+        entry.note = uploaded.error.message;
+        drawQueue();
+        continue;
+      }
+      const attached = await opened.client.attachEntityImage(typeKey, key, uploaded.result.id);
+      entry.sending = false;
+      if (!attached.ok) {
+        // The upload landed and the attach did not, which is the one
+        // state a reader cannot deduce from the screen: the file is in
+        // the game's library and on nothing.
+        entry.note = attached.error.message + " " + t("entity.attachLanded");
+        drawQueue();
+        continue;
+      }
+      // The listing every attach answers with. The last one is the whole
+      // truth about this entity, so it is what the section is redrawn
+      // from.
+      items = attached.result.items;
+      landed += 1;
+      forget(entry);
+      queue = queue.filter((other) => other !== entry);
+      drawQueue();
     }
-    const attached = await opened.client.attachEntityImage(typeKey, key, uploaded.result.id);
     setFormBusy(form, false);
-    if (!attached.ok) {
-      // The upload landed and the attach did not, which is the one
-      // state a reader cannot deduce from the screen: the file is in
-      // the game's library and on nothing.
-      error.textContent = attached.error.message + " " + t("entity.attachLanded");
+
+    if (queue.length === 0) {
+      close();
+      if (typeof onDone === "function" && items !== null) onDone(items);
       return;
     }
-    close();
-    if (typeof onDone === "function") onDone(attached.result.items);
+    // Some landed and some did not. The form stays open on exactly the
+    // files that failed, each with its own sentence, and the section
+    // behind it is redrawn **around** this control rather than replacing
+    // it: a person who has to read four refusals cannot read them in a
+    // form that was torn out from under them.
+    error.textContent = t("entity.attachPartly", { done: landed, total: sending.length });
+    if (typeof onDone === "function" && items !== null) onDone(items, holder);
+    if (typeof file.focus === "function") file.focus();
   });
 
   return holder;
@@ -1500,9 +1713,21 @@ export async function entityPage(opened) {
       const { type_key: typeKey, key } = model.entity;
       // The two writes and the redraw are one knot: detaching redraws
       // the section, and the fresh section needs both of them again.
-      const wire = (items) => {
+      //
+      // **A control that is handed back is moved, not rebuilt.** An
+      // attach that landed for two files out of three redraws the list
+      // and keeps its form open on the third, so the element the person
+      // is reading is re-parented into the fresh section rather than
+      // replaced by a new empty one. The section is also the drop zone,
+      // which is why the control is told which one it is now in.
+      const wire = (items, keep) => {
         const fresh = redrawImages(doc, body, model, items, detach);
-        fresh.append(attachControl(doc, opened, typeKey, key, wire));
+        if (keep) {
+          fresh.append(keep);
+          if (typeof keep.dropOn === "function") keep.dropOn(fresh);
+        } else {
+          fresh.append(attachControl(doc, opened, typeKey, key, wire, fresh));
+        }
       };
       const detach = async (image, button) => {
         button.disabled = true;

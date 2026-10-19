@@ -96,23 +96,65 @@ func TestBandsAreSeparatedByARule(t *testing.T) {
 // exists for.** Two sibling grids share nothing: side by side, the two
 // catalogues had their counts 44px apart and their share bars 45px
 // apart, so "47% here against 43% there" could not be read across the
-// gap. The override declares every track after the name, and it declares
-// as many tracks as a row appends cells.
+// gap.
+//
+// **And the columns are stated once.** The override used to restate all
+// eight tracks, and the restatement is where they went wrong: it sized
+// the content cells `max-content`, which cannot shrink, so a relation
+// whose endpoints named eight types took 444px of a 676px lane, pushed
+// the row past the list's own border and left the name track nothing —
+// every relation type on a game's home rendered with no name at all. The
+// shape lives in `ul.catalogue` and a layout turns the named knobs, so
+// this guard reads the knobs rather than counting tracks twice.
 func TestThePairedCataloguesShareOneMeasurement(t *testing.T) {
 	t.Parallel()
 	styles := homeStyles(t)
-	paired := regexp.MustCompile(`(?s)\.lanes\.pair \.lane-paired ul\.catalogue \{.*?grid-template-columns:\s*([^;]+);`).FindStringSubmatch(styles)
-	assert.Must(t, paired != nil, "the pair declares no shared grid, so its two halves size independently")
-
-	tracks := strings.Fields(strings.Join(strings.Fields(paired[1]), " "))
-	// The list's own template is the count this has to match: a row's
-	// cells sit in the list's tracks through `subgrid`, so a template one
-	// track short moves every column after it.
 	base := regexp.MustCompile(`(?ms)^ul\.catalogue \{.*?grid-template-columns:\s*([^;]+);`).FindStringSubmatch(styles)
 	assert.Must(t, base != nil, "the catalogue declares no grid at all; this guard is reading the wrong place")
-	want := len(strings.Fields(regexp.MustCompile(`\(\s*[^)]*\s*\)`).ReplaceAllString(base[1], "()")))
-	got := len(strings.Fields(regexp.MustCompile(`\(\s*[^)]*\s*\)`).ReplaceAllString(strings.Join(tracks, " "), "()")))
-	assert.Must(t, got == want, "the pair declares %d tracks and a catalogue row sits in %d", got, want)
+
+	paired := regexp.MustCompile(`(?s)\.lanes\.pair \.lane-paired ul\.catalogue \{(.*?)\}`).FindStringSubmatch(styles)
+	assert.Must(t, paired != nil, "the pair declares nothing, so its two halves size independently")
+	assert.Must(t, !strings.Contains(paired[1], "grid-template-columns"),
+		"the pair restates the whole template; it sets the named knobs instead")
+
+	knobs := regexp.MustCompile(`var\((--catalogue-[a-z]+)\)`).FindAllStringSubmatch(base[1], -1)
+	assert.Must(t, len(knobs) > 0, "the catalogue's template reads no knob, so a layout has nothing to turn")
+	for _, knob := range knobs {
+		assert.Must(t, strings.Contains(paired[1], knob[1]+":"),
+			"the template reads %s and the pair never sets it, so that column is the one the pair does not share", knob[1])
+	}
+
+	// **The name takes the slack, and a floor is what it gets when there
+	// is none.** `1fr` is zero width on the half whose endpoints column
+	// is wider than the lane, which is how a list of relation types came
+	// to show no relation type.
+	name := regexp.MustCompile(`--catalogue-name:\s*minmax\(\s*([^,]+?)\s*,`).FindStringSubmatch(paired[1])
+	assert.Must(t, name != nil, "the pair's name column states no minimum, so it is zero when the row is full")
+	assert.Must(t, !strings.HasPrefix(name[1], "0"), "the pair's name column floors at %s, which is no floor", name[1])
+}
+
+// **A content track yields, and a row stays one line.** The two halves
+// of the defect above: the track that holds a declared value asked for
+// its whole max-content and could not be talked down, and the cell
+// inside it wrapped when it finally was — 36px of row became 43px on a
+// list whose whole claim is that a row is one line you compare with the
+// row under it.
+func TestACatalogueContentCellYieldsRatherThanWraps(t *testing.T) {
+	t.Parallel()
+	styles := homeStyles(t)
+	base := regexp.MustCompile(`(?ms)^ul\.catalogue \{.*?grid-template-columns:\s*([^;]+);`).FindStringSubmatch(styles)
+	assert.Must(t, base != nil, "the catalogue declares no grid at all; this guard is reading the wrong place")
+	// The three tracks between the key and the count are the ones a row
+	// fills with the values a type declares, and each one has to be able
+	// to give its width back.
+	yielding := strings.Count(base[1], "minmax(0, max-content)")
+	assert.Must(t, yielding == 3, "the catalogue has %d content tracks that can shrink and it draws three", yielding)
+
+	cell := regexp.MustCompile(`(?ms)^\.catalogue-cell \{(.*?)\}`).FindStringSubmatch(styles)
+	assert.Must(t, cell != nil, "the stylesheet no longer declares .catalogue-cell; this guard is reading the wrong place")
+	for _, decl := range []string{"white-space: nowrap", "overflow: hidden", "text-overflow: ellipsis"} {
+		assert.Must(t, strings.Contains(cell[1], decl), "a catalogue cell does not declare %s, so a long value takes the row with it", decl)
+	}
 }
 
 // **The page has a vertical rhythm, and a component can still override

@@ -1602,7 +1602,25 @@ ul.catalogue {
   /* Eight tracks now: the seventh is the share bar, between the count it
      restates and the spacer that eats the slack. A row that draws no
      share leaves it empty and an empty `auto` track collapses. */
-  grid-template-columns: fit-content(44rem) auto auto auto auto auto auto minmax(0, 1fr);
+  /* **The shape is stated once and the layouts turn four knobs.** The
+     paired lane restated all eight tracks in a media query, and the
+     restatement is where the columns went wrong: a `max-content` content
+     track cannot shrink, so a relation type naming four source types and
+     four target ones took 444px of a 676px lane, pushed the row 21px
+     past the list's own border, and left the name track nothing — every
+     relation type on that game's home rendered with no name at all, and
+     the two column headings came out as `TypeBetween`.
+     A content track is `minmax(0, max-content)` for that reason: it asks
+     for its content and yields when there is not room, which is what the
+     ellipsis below is for. */
+  --catalogue-name: fit-content(44rem);
+  --catalogue-count: auto;
+  --catalogue-share: auto;
+  --catalogue-slack: minmax(0, 1fr);
+  grid-template-columns:
+    var(--catalogue-name) auto
+    minmax(0, max-content) minmax(0, max-content) minmax(0, max-content)
+    var(--catalogue-count) var(--catalogue-share) var(--catalogue-slack);
   gap: 0;
   min-width: 0;
   background: var(--paper);
@@ -1802,8 +1820,17 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* A declared field's value, in the tool's voice: it is data about the
    game's thing, not one of the game's own words. */
+/* **One line, like every other cell in the row.** The label has kept its
+   line since the rule was written and the content cells never did: a
+   cell with room for 296px of a 424px sentence wrapped to two and took
+   the row from 36px to 43px, which is the invariant this list is built
+   on. The track yields, the text is clipped, and the ellipsis says there
+   is more of it. */
 .catalogue-cell {
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* **A cell with nothing in it takes no width.** `min-width: 4ch` made the
@@ -1828,16 +1855,13 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* **In a row, prose is a lead-in and not the text.** A longtext column
    held six hundred characters that wrapped to five lines and took the
    36-pixel row with it, on a list whose whole claim is that a row is one
-   line you can compare with the row under it. One line, clipped, and the
-   whole of it is on the entity's own page, which is where a value this
-   long is read. The cap is what bounds the track: the three content
-   tracks are `auto`, so without it the cell's own max-content is the
-   column width. */
+   line you can compare with the row under it. Every cell keeps its line
+   now, so what this class still does is bound the *track*: a content
+   track asks for its max-content, and six hundred characters of it is a
+   column no other column can live beside. The whole of the value is on
+   the entity's own page, which is where a value this long is read. */
 .catalogue-cell.oneline {
   max-width: 28rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* **A drawn yes or no.** The mark is the whole cell, so it sits on the
@@ -1879,8 +1903,9 @@ dl.fields dd.field-value.marked {
 
 /* **How much of this game one row is.** The catalogue answered "how
    many" and never "how much", and the order answered "which is biggest"
-   without saying by how much: `worships` is 45 of 95, half of
-   RL-Aeternum's connections, and nothing on the page said so.
+   without saying by how much: a verb at the top of the list can be 45 of
+   95, half of everything that game connects, and nothing on the page
+   said so.
    Drawn in a data hue by decision (design.md §Data): the eight were a
    diagram's vocabulary and one of them is now a catalogue's too, for
    this one meaning and no other. */
@@ -1931,9 +1956,16 @@ dl.fields dd.field-value.marked {
        cult…", and the bar is the one thing on the row that reads at any
        length. 7rem of bar, the percentage's 2.5rem and 0.6rem between
        them, plus the cell's own 0.75rem margin. */
-    grid-template-columns:
-      minmax(0, 1fr) max-content max-content max-content max-content
-      5.5ch 10.85rem 0;
+    /* **A floor under the name, because this is the half that runs out
+       of room.** The name takes the slack through `1fr`, and `1fr` is
+       zero when there is no slack: the endpoints column is wider than
+       the lane on a game with four source types and four target ones.
+       8rem holds the longest relation verb this product has been shown
+       and still leaves the endpoints two thirds of the row. */
+    --catalogue-name: minmax(8rem, 1fr);
+    --catalogue-count: 5.5ch;
+    --catalogue-share: 10.85rem;
+    --catalogue-slack: 0;
   }
 }
 

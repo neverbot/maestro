@@ -1982,20 +1982,19 @@ dl.fields dd.field-value.marked {
   font-size: 0.85rem;
 }
 
-/* **The two halves of a thing's connections.** One band names what it
-   holds and each half says which way the arrow runs, so the heading
-   inside it is the Title role and not a second Headline: a band has one
-   Headline, and two of them under one heading would read as four bands
-   where there are two halves of one. */
-.related-half h3 {
-  font-family: var(--sans);
-  font-size: 1.125rem;
-  line-height: 1.35;
-  font-weight: 600;
-  color: var(--ink);
-  margin: var(--s5) 0 var(--s3);
-}
-.related-half:first-of-type h3 { margin-top: var(--s4); }
+/* **The two halves of a thing's connections, and neither is headed.**
+   They carried a Title each — "Pointing here", "Pointed at from here" —
+   which named the metamodel's directions rather than the reader's
+   question, and every table inside them now opens with the sentence it
+   is a list of. What is left is the space between them: a band has one
+   Headline and the halves are not two bands.
+   A heading rule with no heading left to dress is a lie this file would
+   go on telling, so there is none.
+   The step up is what is left to say where one half ends: measured at
+   `--s5` it was 24px, exactly the gap between two tables *inside* a
+   half, and three tables in a row read as one list of three rather than
+   as two and one. */
+.related-half + .related-half { margin-top: var(--s7); }
 
 /* **A relation type's edges, as a table.** The column set belongs to the
    type — `grants` declares five fields and `open_to` two — so there is no
@@ -2059,6 +2058,25 @@ caption.edge-head > div {
 }
 /* The key an agent addresses this connection by, beside the word the
    game gave it. */
+/* **One sentence, two owners.** The caption says what this table is a
+   list of, and the words in it come from two places: the game wrote the
+   relation and the name, Maestro wrote the rest. The face is what tells
+   them apart, which is the split the whole design system rests on, so
+   the sentence is set in the sans and the game's own words are lifted
+   out of it. */
+.edge-label {
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.edge-word {
+  font-family: var(--serif);
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .edge-key {
   font-family: var(--mono);
   font-size: 0.8125rem;

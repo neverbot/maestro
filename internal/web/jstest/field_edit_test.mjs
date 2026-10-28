@@ -183,16 +183,25 @@ function stage(script) {
   ], "in", new Map([["grants", "otorga"]]));
   check("a group's columns are every key its edges carry, sorted", groups[0].columns, ["notes", "tier"]);
 
-  const painted = relationList(doc, "azeroth", groups);
+  const painted = relationList(doc, "azeroth", groups, "Invocar");
   const table = painted.children[0].children[0];
   // **The table names itself, and the caption is its first child.** A
   // caption laid out as a flex box loses its table-caption role and
   // renders inside the table's own flow, under the column headings it is
   // supposed to sit above.
   check("the table is captioned", [table.tagName, table.children[0].tagName], ["table", "caption"]);
-  check("and the caption carries the type, its key and the count",
+  // **The caption is the sentence this table is a list of**, and these
+  // edges point *at* the thing whose page this is: what the reader must
+  // not read is "Invocar otorga", which is the other direction.
+  check("and the caption carries the sentence, the key and the count",
     table.children[0].children[0].children.map((part) => part.textContent),
-    ["otorga", "grants", "2 relations"]);
+    ["what otorga Invocar", "grants", "2 relations"]);
+  // The game's two words are lifted out of Maestro's sentence, because
+  // the two owners are told apart by their face.
+  check("with the game's own words marked inside it",
+    table.children[0].children[0].children[0].children
+      .map((piece) => piece.className + ":" + piece.textContent),
+    [":what ", "edge-word:otorga", ": ", "edge-word:Invocar"]);
   const header = table.children[1].children[0];
   check("the header names them, after the two every edge has",
     header.children.map((cell) => cell.textContent),

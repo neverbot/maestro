@@ -115,6 +115,31 @@ export function t(key, vars) {
   );
 }
 
+// **A catalogue sentence with a game's own words inside it, in pieces.**
+// `t` answers a string, and a string carries one face: the design system
+// sets every game-owned word in the serif and every tool-owned word in
+// the sans, and these sentences hold both. The pieces come from the
+// *translated* line, so where each word falls is the catalogue's
+// decision — English puts the subject first and Spanish does not — and
+// never an order this module chose. A piece that filled a placeholder
+// says which one, and the caller dresses it.
+export function pieces(key, vars) {
+  const line = Object.prototype.hasOwnProperty.call(messages, key) ? messages[key] : key;
+  const out = [];
+  let last = 0;
+  for (const found of line.matchAll(/\{(\w+)\}/g)) {
+    const at = found.index;
+    if (at > last) out.push({ text: line.slice(last, at) });
+    const name = found[1];
+    out.push(Object.prototype.hasOwnProperty.call(vars || {}, name)
+      ? { slot: name, text: String(vars[name]) }
+      : { text: found[0] });
+    last = at + found[0].length;
+  }
+  if (last < line.length) out.push({ text: line.slice(last) });
+  return out;
+}
+
 // has answers whether a key is in the catalogue at all, which is how a
 // caller translates something the server named — an error code — without
 // inventing a sentence for a code it has never seen.

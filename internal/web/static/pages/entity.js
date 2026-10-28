@@ -2,7 +2,7 @@
 // of it, and the prose attached to it.
 
 import { presentCell } from "../render/twin.js";
-import { t } from "../i18n.js";
+import { pieces, t } from "../i18n.js";
 import { absentValue, boolMark, emptyValue, imageRow, weigh } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
@@ -336,7 +336,7 @@ export function fieldList(doc, rows) {
 // catalogue, and the browser sizes columns from the content for free.
 // `mst-twin` and `mst-table` already hold the same shape from the same
 // tokens; the row height and the rules are theirs.
-export function relationList(doc, slug, groups) {
+export function relationList(doc, slug, groups, name) {
   const holder = doc.createElement("div");
   holder.className = "edge-groups";
   for (const group of groups) {
@@ -358,9 +358,28 @@ export function relationList(doc, slug, groups) {
     // of the table rendered under its column headings.
     const line = doc.createElement("div");
     head.append(line);
+    // **The caption is the whole sentence, and the thing's own name is
+    // in it.** It was the relation type's verb alone, and a reader
+    // standing on an entity's page finishes that sentence with the page
+    // they are on as the subject: right for the half that leads out of
+    // here and backwards for the half that points at it, where those
+    // rows are what answers to this and not what this answers to.
+    // The incoming line is "what {relation} {name}" and never a plural,
+    // because the verb is the game's word exactly as it was declared and
+    // nothing here may conjugate it.
     const label = doc.createElement("span");
     label.className = "edge-label";
-    label.textContent = group.label || group.type;
+    for (const piece of pieces(
+      group.direction === DIRECTION_OUT ? "entity.relation.out" : "entity.relation.in",
+      { name: String(name ?? ""), relation: group.label || group.type },
+    )) {
+      const part = doc.createElement("span");
+      // A game's own word in the serif, Maestro's in the sans: one
+      // sentence, two owners, and the face is what says which is which.
+      if (piece.slot) part.className = "edge-word";
+      part.textContent = piece.text;
+      label.append(part);
+    }
     line.append(label);
     const key = doc.createElement("code");
     key.className = "edge-key";
@@ -558,22 +577,26 @@ export function entityBody(doc, slug, model) {
   // Incoming first: what points at a thing is what a designer opens its
   // page to find — which guild grants this ability, which quest needs
   // this item — and the other half is one click away on each row.
-  for (const [direction, heading, relations, absent] of [
-    [DIRECTION_IN, t("entity.pointingHere"), model.in,
+  // **No heading over either half.** They were "Pointing here" and
+  // "Pointed at from here", which name the metamodel's own directions
+  // and leave a reader working out which end they are standing on. Every
+  // table under them now states its direction in a sentence, so a second
+  // statement of it would be the same fact twice, in worse words. The
+  // halves stay: they are what groups the tables and what carries the
+  // two empty states, which say the direction in words of their own.
+  for (const [direction, relations, absent] of [
+    [DIRECTION_IN, model.in,
       { heading: t("entity.nothingIn.heading"), sentence: t("entity.nothingIn.sentence") }],
-    [DIRECTION_OUT, t("entity.pointedFromHere"), model.out,
+    [DIRECTION_OUT, model.out,
       { heading: t("entity.nothingOut.heading"), sentence: t("entity.nothingOut.sentence") }],
   ]) {
     const half = doc.createElement("section");
     half.className = "related-half";
-    const title = doc.createElement("h3");
-    title.textContent = heading;
-    half.append(title);
     const groups = relationGroups(relations, direction, model.relationLabels);
     if (groups.length === 0) {
       half.append(negativeState(doc, { kind: STATE_EMPTY, ...absent }));
     } else {
-      half.append(relationList(doc, slug, groups));
+      half.append(relationList(doc, slug, groups, model.entity.name || model.entity.key));
     }
     related.append(half);
   }

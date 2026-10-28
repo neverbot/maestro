@@ -1241,12 +1241,16 @@ check("bothDirectionsOfARelationAreListedSeparately", async () => {
   });
   await load("entity");
   const rendered = text(dom.elements["entity-content"]);
-  // One band, two halves, and each half says which way the arrow runs
-  // from where the reader is standing. **Incoming first**: what points at
-  // a thing is what a designer opens its page to find.
+  // One band, two halves, and **the direction is in each table's own
+  // sentence** rather than in a heading over the half: standing on
+  // Hogger's page, "what requires Hogger" are the quests that need it and
+  // "Hogger rewards" is what it gives out. The halves used to be headed
+  // "Pointing here" and "Pointed at from here", which named the
+  // metamodel and left the verb under them to be misread as this
+  // entity's own.
   const band = rendered.indexOf("Related entities");
-  const into = rendered.indexOf("Pointing here");
-  const out = rendered.indexOf("Pointed at from here");
+  const into = rendered.indexOf("what requires Hogger");
+  const out = rendered.indexOf("Hogger rewards");
   assert(band > -1 && into > band && out > into, "the two halves are not inside one band in order");
   assert(rendered.indexOf("Wanted") > into && rendered.indexOf("Wanted") < out, "the incoming edge is in the wrong half");
   assert(rendered.indexOf("Cudgel") > out, "the outgoing edge is in the wrong half");

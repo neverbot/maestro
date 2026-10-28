@@ -20,7 +20,7 @@ import {
   setReadOnly,
   typesURL,
 } from "./page.js";
-import { ABSENT_MARK, nextCursorOf } from "../rows.js";
+import { absentValue, emptyValue, nextCursorOf } from "../rows.js";
 import { t } from "../i18n.js";
 import { headerRow, row } from "../rows.js";
 import { BOOL_FALSE, BOOL_TRUE, FIELD_BOOL, FIELD_LONGTEXT, formatValue } from "./entity.js";
@@ -180,12 +180,10 @@ export async function cataloguePage(opened) {
       // A dash under a heading that already names the field; the words
       // go to the accessible name. It printed "no Offerings it accepts"
       // on every row that had none.
-      if (value === undefined || value === null) {
-        return { text: ABSENT_MARK, absent: true, name: t("value.absent", { field: name }) };
-      }
+      if (value === undefined || value === null) return absentValue(name);
       // Empty and absent are different facts and never look alike:
       // design.md's Named Absence Rule.
-      if (value === "") return { text: t("value.empty"), absent: true, name: t("value.empty.name", { field: name }) };
+      if (value === "") return emptyValue(name);
       // **The same words the entity page uses**, which is the whole
       // reason this calls a shared function rather than `String(value)`.
       // A quest with `repeatable: false` read "false" in this table and

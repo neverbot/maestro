@@ -199,6 +199,16 @@ function text(node) {
   return own + node.children.map(text).join(" ");
 }
 
+// collect walks a subtree and returns every node a predicate admits. The
+// stub's querySelector understands one class and nothing more, and an
+// assertion about two cells among twenty needs to find them by shape.
+function collect(node, admits, found = []) {
+  if (!node) return found;
+  if (admits(node)) found.push(node);
+  for (const child of node.children) collect(child, admits, found);
+  return found;
+}
+
 // links collects every anchor in a subtree, so an assertion about
 // addressing reads what a designer would click.
 function links(node, found = []) {
@@ -1150,24 +1160,29 @@ check("theEntityShowsDeclaredButUnsetFields", async () => {
     pathname: "/g/azeroth/e/quest/hogger",
     routes: entityRoutes({ type_key: "quest", key: "hogger", name: "Wanted: Hogger", fields: { level: 11 } }),
   });
-  const { absentTextFor } = await import("../static/render/twin.js");
   await load("entity");
   const rendered = text(dom.elements["entity-content"]);
   for (const field of QUEST_SCHEMA) {
     assert(rendered.includes(field.label), `the declared field ${field.key} is missing from the page`);
   }
   assert(rendered.includes("11"), "the field the entity carries is missing its value");
-  // Two absences, each **named** — "no repeatable", "no summary" — because
-  // the entity carries one of three declared fields. The mark used to be
-  // an em dash for all of them, which is the one spelling of the Named
-  // Absence Rule this product had that was not a word.
-  for (const field of QUEST_SCHEMA) {
-    if (field.key === "level") continue;
-    assert(
-      rendered.includes(absentTextFor(field.key)),
-      `the declared-and-unset field ${field.key} is not named as absent`,
-    );
+  // Two absences, because the entity carries one of three declared
+  // fields. **The mark is what is drawn and the words are the cell's
+  // accessible name**, which is the spelling the catalogue has always
+  // used: the page used to print `"no " + key` as the visible value, an
+  // English word spliced onto an address nobody wrote.
+  const empties = collect(dom.elements["entity-content"], (node) => node.className === "field-value absent");
+  assertEqual(empties.length, 2, "the two declared-and-unset fields are not drawn as absences");
+  for (const cell of empties) {
+    assertEqual(cell.textContent, "\u2014", "an absent value is drawn as something other than the mark");
   }
+  assertEqual(
+    empties.map((cell) => cell.attributes.get("aria-label")).sort().join("|"),
+    // The field's **label** and not its key: `repeatable` is Maestro's
+    // address for the field and `Repeatable` is the word on the screen.
+    "no Repeatable|no Summary",
+    "the mark does not say in words which field is missing",
+  );
 });
 
 check("theEntityShowsDeclaredFieldsInDeclaredOrder", async () => {

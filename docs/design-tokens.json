@@ -504,7 +504,7 @@
       },
       {
         "name": "The Named Absence Rule",
-        "body": "Nothing is blank because a value is missing. Absent gets a word, empty gets a different word.",
+        "body": "Nothing is blank because a value is missing, and absent and empty never look alike. Where the field is already named — a column under its heading, a row beside its label — the absence is the em dash and its words are the cell's accessible name. Where it stands alone, in a sentence or a question, it is the words themselves.",
         "section": "components"
       },
       {

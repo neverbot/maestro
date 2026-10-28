@@ -686,8 +686,14 @@ missing.
 ### Named Rules
 
 **The Named Absence Rule.** Nothing on screen is blank because a value
-is missing. Absent gets a word, empty gets a different word, and the two
-never look alike.
+is missing, and absent and empty never look alike. **Where the field is
+already named** — a column under its heading, a row beside its label —
+the absence is the em dash, and its words are the cell's accessible
+name: a visible "no summary" restates the heading above it for every
+sighted reader, and it was spliced from an English word and a game's
+own, so a Spanish screen read `no original_muds`. **Where it stands
+alone**, in a sentence or in a question about what to keep, it is the
+words, because there is no label beside a dash to make it mean anything.
 
 **The Shadow Boundary Rule.** An element selector in the global
 stylesheet does not reach inside a component's shadow root, and custom

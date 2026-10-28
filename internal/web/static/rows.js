@@ -7,6 +7,24 @@ export const CATALOGUE_CELLS = 3;
 // that is a *fact* — "no default", "no role" — says so in words.
 export const ABSENT_MARK = "\u2014";
 
+// **A value that is not there, decided once.** The mark is what a reader
+// sees wherever the field is already named — a column under its heading,
+// a row beside its label — and the words go to the accessible name,
+// which is also what keeps them translated. The catalogue has done this
+// since the rule was written and the entity's own page never did: it
+// spliced `"no " + key` and rendered `no original_muds` on a screen in
+// Spanish, an English word in front of a word belonging to the game.
+export function absentValue(field) {
+  return { text: ABSENT_MARK, absent: true, name: t("value.absent", { field }) };
+}
+
+// Empty is a different fact from absent and never looks like it
+// (design.md, Named Absence): a field somebody cleared is not a field
+// nobody filled.
+export function emptyValue(field) {
+  return { text: t("value.empty"), absent: true, name: t("value.empty.name", { field }) };
+}
+
 // The namespace an SVG element has to be created in; a createElement
 // gives an HTMLUnknownElement that renders nothing.
 export const SVG_NS = "http://www.w3.org/2000/svg";

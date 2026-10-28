@@ -353,7 +353,11 @@ function actionOf(list, index) {
   wired[1].form.children[0].value = "";
   await wired[1].form.dispatch("submit", { preventDefault() {} });
   check("the key is gone from the row", Object.keys(opened.client.calls[0].fields).sort(), ["faction", "min_level", "tags"]);
-  check("and the cell says the absence in words", cellOf(list, 1).children[0].textContent, "no summary");
+  // The mark is what a reader sees, under a label that already names the
+  // field; the words are the cell's accessible name and they are the
+  // catalogue's, so one absence is spelled one way in this product.
+  check("and the cell draws the absence", cellOf(list, 1).children[0].textContent, "\u2014");
+  check("saying in words what the mark stands for", cellOf(list, 1).getAttribute("aria-label"), "no summary");
   check("wearing the class that carries it beside the word", cellOf(list, 1).className, "field-value absent");
 }
 

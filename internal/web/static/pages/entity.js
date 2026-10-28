@@ -1,9 +1,9 @@
 // One entity: its name, its address, its fields, the edges either side
 // of it, and the prose attached to it.
 
-import { absentCell, absentTextFor, presentCell } from "../render/twin.js";
+import { presentCell } from "../render/twin.js";
 import { t } from "../i18n.js";
-import { ABSENT_MARK, boolMark, imageRow, weigh } from "../rows.js";
+import { absentValue, boolMark, emptyValue, imageRow, weigh } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
   ROLE_VIEWER,
@@ -93,6 +93,18 @@ export function formatValue(type, value) {
   }
 }
 
+// valueCell is a declared field's value, and the three facts it can be:
+// a value, an absence, or a field somebody emptied. The two that are not
+// values draw the mark and carry their words in the accessible name,
+// which is where the field's own label belongs — the key is Maestro's
+// address for it and not a word anybody wrote.
+function valueCell(field, value, has) {
+  const label = field.label || field.key;
+  if (!has) return { column: field.key, value: undefined, outside: false, note: "", ...absentValue(label) };
+  if (value === "") return { column: field.key, value: "", outside: false, note: "", ...emptyValue(label) };
+  return presentCell(field.key, formatValue(field.type, value), value);
+}
+
 // fieldRows is the fields of one entity, **in the order its type
 // declares them**, with every declared field present as a row.
 export function fieldRows(schema, entity) {
@@ -107,9 +119,7 @@ export function fieldRows(schema, entity) {
     .map((field) => {
       seen.add(field.key);
       const has = Object.prototype.hasOwnProperty.call(values, field.key) && values[field.key] !== null;
-      const cell = has
-        ? presentCell(field.key, formatValue(field.type, values[field.key]), values[field.key])
-        : absentCell(field.key);
+      const cell = valueCell(field, has ? values[field.key] : undefined, has);
       // The rendering the browser's own route sent for this value. It is
       // read by key and not decided by type a second time: the server
       // renders exactly the longtext fields a row has a value for, and a
@@ -282,6 +292,9 @@ export function fieldList(doc, rows) {
       value.setAttribute("aria-label", field.cell.name || field.cell.text);
       value.append(boolMark(doc, field.cell.mark));
     } else {
+      // A mark is not a word: what the dash stands for is said here, or
+      // a reader who does not see it is told nothing at all.
+      if (field.cell.name) value.setAttribute("aria-label", field.cell.name);
       value.textContent = field.cell.text;
     }
     line.append(value);
@@ -411,8 +424,10 @@ export function relationList(doc, slug, groups) {
           // An edge of this type that carries no value for this field.
           // The mark, not a blank: a reader has to be able to tell an
           // empty column from one that simply was not filled in here.
+          const nothing = absentValue(column);
           cell.className = "absent";
-          cell.textContent = ABSENT_MARK;
+          cell.textContent = nothing.text;
+          cell.setAttribute("aria-label", nothing.name);
         } else {
           cell.textContent = value.text;
         }
@@ -1359,7 +1374,9 @@ function editable(doc, opened, cell, action, field, hooks) {
     }
     const base = holds ? "field-value field-prose" : mark ? "field-value marked" : "field-value";
     cell.className = absent ? base + " absent" : base;
-    if (mark) cell.setAttribute("aria-label", name || value);
+    // The mark and the dash both need their words; a value speaks for
+    // itself and keeps no label from the state before it.
+    if (mark || name) cell.setAttribute("aria-label", name || value);
     else if (cell.removeAttribute) cell.removeAttribute("aria-label");
     cell.replaceChildren(shown, form, error);
     action.replaceChildren(open);
@@ -1445,10 +1462,14 @@ function editable(doc, opened, cell, action, field, hooks) {
             const values = next.fields || {};
             const has = Object.prototype.hasOwnProperty.call(values, field.key) && values[field.key] !== null;
             const current = values[field.key];
+            // The same three arms the page drew on load, so a value that
+            // lands here looks like a value that was here already.
+            const now = valueCell(field, current, has);
             const marked = has && field.type === FIELD_BOOL && typeof current === "boolean";
-            draw(has ? formatValue(field.type, current) : absentTextFor(field.label || field.key), !has,
-              isProse && has ? await renderedFor(opened, next, field.key) : "",
-              marked ? (current ? "yes" : "no") : "", marked ? (current ? BOOL_TRUE : BOOL_FALSE) : "");
+            draw(now.text, now.absent === true,
+              isProse && now.absent !== true ? await renderedFor(opened, next, field.key) : "",
+              marked ? (current ? "yes" : "no") : "",
+              marked ? (current ? BOOL_TRUE : BOOL_FALSE) : now.name || "");
             close();
           },
         });
@@ -1466,11 +1487,11 @@ function editable(doc, opened, cell, action, field, hooks) {
     };
     hooks.settled(next);
     const drawnNow = read.absent !== true && field.type === FIELD_BOOL && typeof read.value === "boolean";
-    draw(read.absent === true
-      ? absentTextFor(field.label || field.key)
-      : formatValue(field.type, read.value), read.absent === true,
-    isProse && read.absent !== true ? await renderedFor(opened, next, field.key) : "",
-    drawnNow ? (read.value ? "yes" : "no") : "", drawnNow ? (read.value ? BOOL_TRUE : BOOL_FALSE) : "");
+    const now = valueCell(field, read.absent === true ? undefined : read.value, read.absent !== true);
+    draw(now.text, now.absent === true,
+      isProse && now.absent !== true ? await renderedFor(opened, next, field.key) : "",
+      drawnNow ? (read.value ? "yes" : "no") : "",
+      drawnNow ? (read.value ? BOOL_TRUE : BOOL_FALSE) : now.name || "");
     close();
   });
 
@@ -1503,12 +1524,12 @@ async function resolveFieldConflict(doc, opened, spec) {
   }
   const values = current.result.fields && typeof current.result.fields === "object" ? current.result.fields : {};
   const has = Object.prototype.hasOwnProperty.call(values, spec.field.key) && values[spec.field.key] !== null;
-  const theirs = has
-    ? formatValue(spec.field.type, values[spec.field.key])
-    : absentTextFor(spec.field.label || spec.field.key);
-  const yours = spec.read.absent === true
-    ? absentTextFor(spec.field.label || spec.field.key)
-    : formatValue(spec.field.type, spec.read.value);
+  // **Words here and a mark in the list**, which is the rule and not an
+  // inconsistency: a cell sits under the label that names its field and
+  // these two sit alone in a question about what to keep.
+  const nothing = t("value.absent", { field: spec.field.label || spec.field.key });
+  const theirs = has ? formatValue(spec.field.type, values[spec.field.key]) : nothing;
+  const yours = spec.read.absent === true ? nothing : formatValue(spec.field.type, spec.read.value);
 
   // The other writer wrote the same value: the person's intent already
   // holds and a refusal with nothing to decide is noise.

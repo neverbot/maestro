@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"sync"
 	"testing"
 	"time"
@@ -254,48 +255,59 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 		_, _ = io.Copy(io.Discard, sseResp.Body)
 	}()
 
-	// Measure one login's real latency on this machine, right now, rather
-	// than assuming a fixed number: argon2's cost is deliberately
-	// noticeable (tens of milliseconds on a fast machine) but the actual
-	// figure moves with CPU speed and, more importantly, with whatever
-	// else is contending for it — a `go test ./...` run sharing the
-	// machine with every other package's own tests is measurably slower
-	// than this test running alone, which a fixed sleep tuned on a quiet
-	// machine cannot account for. warmupLatency calibrates the settle
-	// delay below to this run's own conditions instead.
+	// **The requests below dial their own connections rather than reusing
+	// the pool's.** The requests above leave idle keep-alive connections
+	// in http.DefaultClient, and Shutdown closes an idle connection at
+	// once: a goroutine that took one a microsecond earlier reads EOF with
+	// its request already written, and the transport cannot replay it.
+	// That is a client-side keep-alive race no server can avoid, and it
+	// looks exactly like the drain bug under test.
+	fresh := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	defer fresh.CloseIdleConnections()
+
 	warmupStart := time.Now()
 	warmupBody, err := json.Marshal(map[string]string{
 		"email":    "admin@example.test",
 		"password": "password12345",
 	})
 	assert.Must(t, err == nil, "marshal warm-up login body: %v", err)
-	warmupResp, err := http.Post(base+"/api/auth/login", "application/json", bytes.NewReader(warmupBody))
+	warmupResp, err := fresh.Post(base+"/api/auth/login", "application/json", bytes.NewReader(warmupBody))
 	assert.Must(t, err == nil, "warm-up login: %v", err)
 	_ = warmupResp.Body.Close()
 	warmupLatency := time.Since(warmupStart)
 
-	// Fire a burst of concurrent logins against the bootstrapped admin's
-	// own credentials and cancel the server's context essentially
-	// concurrently with launching them, so several are still mid-request
-	// — inside Authenticate's own argon2 password verification, which
-	// takes tens of milliseconds by design (Config.Argon2), long enough
-	// to guarantee real overlap with the shutdown that follows a few
-	// microseconds later — when shutdown begins. Login, not a cheap
-	// bearer-token lookup, is deliberately the request under test here:
-	// this is the same slow-request-plus-concurrent-shutdown shape the
-	// review that found this bug used (forty concurrent logins,
-	// SIGTERM at 300ms), and a fast handler leaves too small a window to
-	// reliably catch the race this test exists to catch. The burst stays
-	// at 8, under loginLimiter's ten-per-minute-per-email budget
-	// (server.go), so every one of them is expected to succeed with 200
-	// rather than 429 — a rate-limited response would still be a
-	// well-formed one, but asserting exactly 200 keeps this test from
-	// quietly accepting "some requests got a low-effort answer instead of
-	// being served" as a pass.
-	const burst = 8
+	// Fire a small burst of concurrent logins against the bootstrapped
+	// admin's own credentials and cancel the server's context while they
+	// are still mid-request — inside Authenticate's own argon2 password
+	// verification, which takes tens of milliseconds by design
+	// (Config.Argon2: time 3, 64 MiB, two threads). Login, not a cheap
+	// bearer-token lookup, is deliberately the request under test: this
+	// is the same slow-request-plus-concurrent-shutdown shape the review
+	// that found this bug used, and a fast handler leaves too small a
+	// window to catch it.
+	//
+	// **Two, not eight, because the burst was contending with itself.**
+	// Eight concurrent logins ask for sixteen argon2 threads and half a
+	// gigabyte on a runner with four cores, so several of them had not
+	// been *read* yet when shutdown began: a connection whose request
+	// bytes the server has not picked up is idle as far as net/http is
+	// concerned, and Shutdown closes an idle connection at once, which
+	// reaches the client as EOF on a request it had already written. That
+	// is not the drain bug and no server can avoid it; it failed one or
+	// two of the eight on a contended machine and failed CI on run
+	// 40727081972. The property under test needs one request genuinely in
+	// flight, not a crowd.
+	const burst = 2
 	var wg sync.WaitGroup
 	statuses := make([]int, burst)
 	errs := make([]error, burst)
+	// Closed by each goroutine once its request is fully on the wire, so
+	// the wait below is on an observed fact rather than on the hope that
+	// the goroutines got scheduled.
+	wrote := make([]chan struct{}, burst)
+	for i := range wrote {
+		wrote[i] = make(chan struct{})
+	}
 	wg.Add(burst)
 	for i := 0; i < burst; i++ {
 		go func(i int) {
@@ -306,9 +318,30 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 			})
 			if err != nil {
 				errs[i] = err
+				close(wrote[i])
 				return
 			}
-			resp, err := http.Post(base+"/api/auth/login", "application/json", bytes.NewReader(body))
+			req, err := http.NewRequest(http.MethodPost, base+"/api/auth/login", bytes.NewReader(body))
+			if err != nil {
+				errs[i] = err
+				close(wrote[i])
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			signalled := false
+			req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+				WroteRequest: func(httptrace.WroteRequestInfo) {
+					if !signalled {
+						signalled = true
+						close(wrote[i])
+					}
+				},
+			}))
+			resp, err := fresh.Do(req)
+			if !signalled {
+				signalled = true
+				close(wrote[i])
+			}
 			if err != nil {
 				errs[i] = err
 				return
@@ -318,18 +351,23 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 			statuses[i] = resp.StatusCode
 		}(i)
 	}
-	// Waiting a fraction of the warm-up login's own latency before
-	// cancelling gives every goroutine above time to dial, send its
-	// request and have the server start verifying its password —
-	// genuinely inside Authenticate, not merely queued to connect —
-	// before shutdown begins, without waiting long enough for any of
-	// them to finish first. Without this, cancel() fired essentially at
-	// t=0 mostly raced dialing itself: most goroutines had not yet
-	// reached the server when the listener closed, so the failures
-	// observed were "connection refused" on requests that never really
-	// started, not the pool-closed-under-an-active-handler bug this test
-	// exists to catch. A floor of 10ms keeps this meaningful even if
-	// warmupLatency comes back implausibly small.
+	// Every request is on the wire before the clock below starts, so the
+	// delay is spent waiting for the handlers to reach argon2 rather than
+	// for goroutines to be scheduled and connections to be dialled.
+	for i := range wrote {
+		select {
+		case <-wrote[i]:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("login %d did not write its request within 10s", i)
+		}
+	}
+	// Waiting a fraction of the warm-up login's own latency leaves the
+	// handlers inside Authenticate without giving any of them time to
+	// finish first. The fraction is of a latency measured on this machine
+	// under this run's own load: argon2's cost moves with the CPU and with
+	// whatever else contends for it, so a fixed sleep tuned on a quiet
+	// machine cannot account for a `go test ./...` run. The floor keeps
+	// this meaningful if the measurement comes back implausibly small.
 	settle := warmupLatency / 3
 	if settle < 10*time.Millisecond {
 		settle = 10 * time.Millisecond
